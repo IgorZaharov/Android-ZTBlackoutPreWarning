@@ -33,6 +33,7 @@ import ua.blackout.prewarning.data.model.SlotStatus
 import ua.blackout.prewarning.data.repository.ScheduleRepository
 import ua.blackout.prewarning.data.repository.SettingsRepository
 import java.time.LocalTime
+import java.time.ZoneId
 
 class BlackoutGlanceWidget : GlanceAppWidget() {
 
@@ -47,8 +48,10 @@ class BlackoutGlanceWidget : GlanceAppWidget() {
         val settingsRepo = SettingsRepository(context)
         val scheduleRepo = ScheduleRepository(context)
         val settings = settingsRepo.getSettings()
+
+        // Always use Today's schedule for the widget
+        val slots = scheduleRepo.getTodaySlots(settings.queue)
         val info = scheduleRepo.getCurrentStatusAndCountdown(settings.queue)
-        val slots = scheduleRepo.getSlots(settings.queue)
         val intervals = scheduleRepo.getIntervals(slots)
 
         provideContent {
@@ -163,7 +166,8 @@ class BlackoutGlanceWidget : GlanceAppWidget() {
 
                             Spacer(modifier = GlanceModifier.height(8.dp))
 
-                            // 24-Hour Visual Schedule Bar matching main screen (red & gray)
+                            // 24-Hour Visual Schedule Bar matching main screen chart logic exactly:
+                            // 24 hours, each hour composed of two 30-min vertical rectangles (half 1 and half 2)
                             Row(
                                 modifier = GlanceModifier
                                     .fillMaxWidth()
@@ -174,22 +178,62 @@ class BlackoutGlanceWidget : GlanceAppWidget() {
                                     .clickable(actionStartActivity<MainActivity>()),
                                 verticalAlignment = Alignment.Vertical.CenterVertically
                             ) {
-                                val currentH = LocalTime.now().hour
-                                slots.forEach { slot ->
-                                    val isOff = slot.status == SlotStatus.POWER_OFF
-                                    val isCurrent = slot.startHour == currentH
-                                    Box(
-                                        modifier = GlanceModifier
-                                            .defaultWeight()
-                                            .height(16.dp)
-                                            .background(
-                                                ColorProvider(
-                                                    if (isCurrent) Color.White
-                                                    else if (isOff) Color(0xFFDC3C32)
-                                                    else Color(0xFF373737)
+                                val now = LocalTime.now(ZoneId.of("Europe/Kyiv"))
+                                val currentH = now.hour
+                                val currentM = now.minute
+                                val is48 = slots.size >= 48
+
+                                (0 until 24).forEach { hour ->
+                                    val isCurrentH = hour == currentH
+                                    val half1Off = if (is48) {
+                                        slots.getOrNull(hour * 2)?.status == SlotStatus.POWER_OFF
+                                    } else {
+                                        slots.getOrNull(hour)?.status == SlotStatus.POWER_OFF
+                                    }
+                                    val half2Off = if (is48) {
+                                        slots.getOrNull(hour * 2 + 1)?.status == SlotStatus.POWER_OFF
+                                    } else {
+                                        slots.getOrNull(hour)?.status == SlotStatus.POWER_OFF
+                                    }
+
+                                    // Each hour column with two 30-min blocks
+                                    Row(
+                                        modifier = GlanceModifier.defaultWeight().height(16.dp),
+                                        verticalAlignment = Alignment.Vertical.CenterVertically
+                                    ) {
+                                        // Half 1
+                                        Box(
+                                            modifier = GlanceModifier
+                                                .defaultWeight()
+                                                .height(16.dp)
+                                                .cornerRadius(1.dp)
+                                                .background(
+                                                    ColorProvider(
+                                                        if (isCurrentH && currentM < 30) Color.White
+                                                        else if (half1Off) Color(0xFFDC3C32)
+                                                        else Color(0xFF373737)
+                                                    )
                                                 )
-                                            )
-                                    ) {}
+                                        ) {}
+                                        Spacer(modifier = GlanceModifier.width(1.dp))
+                                        // Half 2
+                                        Box(
+                                            modifier = GlanceModifier
+                                                .defaultWeight()
+                                                .height(16.dp)
+                                                .cornerRadius(1.dp)
+                                                .background(
+                                                    ColorProvider(
+                                                        if (isCurrentH && currentM >= 30) Color.White
+                                                        else if (half2Off) Color(0xFFDC3C32)
+                                                        else Color(0xFF373737)
+                                                    )
+                                                )
+                                        ) {}
+                                    }
+                                    if (hour < 23) {
+                                        Spacer(modifier = GlanceModifier.width(2.dp))
+                                    }
                                 }
                             }
 
@@ -221,7 +265,7 @@ class BlackoutGlanceWidget : GlanceAppWidget() {
                                         .cornerRadius(8.dp)
                                         .background(ColorProvider(Color(0x26000000)))
                                         .padding(horizontal = 8.dp, vertical = 3.dp)
-                                        .clickable(actionStartActivity<MainActivity>()),
+                                    .clickable(actionStartActivity<MainActivity>()),
                                     verticalAlignment = Alignment.Vertical.CenterVertically
                                 ) {
                                     Text(
@@ -337,6 +381,9 @@ class ToggleAlertsActionCallback : ActionCallback {
         val current = settingsRepo.getSettings()
         val newState = !current.notificationsEnabled
         settingsRepo.updateNotificationsEnabled(newState)
-        BlackoutGlanceWidget().updateAll(context)
+        try {
+            BlackoutGlanceWidget().update(context, glanceId)
+            BlackoutGlanceWidget().updateAll(context)
+        } catch (_: Exception) {}
     }
 }

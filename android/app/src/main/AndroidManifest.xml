@@ -57,6 +57,16 @@
             </intent-filter>
         </receiver>
 
+        <!-- Widget Toggle Action BroadcastReceiver -->
+        <receiver
+            android:name=".widget.WidgetToggleReceiver"
+            android:enabled="true"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="ua.blackout.prewarning.ACTION_TOGGLE_WIDGET_NOTIFICATIONS" />
+            </intent-filter>
+        </receiver>
+
         <!-- Glance Home Screen AppWidget Receiver -->
         <receiver
             android:name=".widget.BlackoutWidgetReceiver"

@@ -30,50 +30,40 @@ class ScheduleSyncWorker(
                 return Result.success()
             }
 
-            val today = LocalDate.now()
+            val today = LocalDate.now(ZoneId.of("Europe/Kyiv"))
+            val scheduleRepo = ScheduleRepository(context)
             val slots = ZtoeParser.fetchAndParse(settings.cityUrl, settings.queue, today)
             val alertRegistry = AlertRegistry(context)
+
+            // Cache schedule and update widget
+            scheduleRepo.saveSchedule(settings.queue, slots, null)
+            try {
+                ua.blackout.prewarning.widget.BlackoutGlanceWidget().updateAll(context)
+            } catch (_: Exception) {}
 
             val now = LocalDateTime.now()
             val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
 
-            // Battery & UX Optimization: Group consecutive blackout slots into continuous blocks.
-            // Only 1 alarm is scheduled per blackout block, preventing multiple wakeups/alerts!
-            val intervals = mutableListOf<Pair<Int, Int>>() // list of Pair(startHour, endHour)
-            var inBlock = false
-            var blockStart = 0
-            for (i in 0 until 24) {
-                val isOff = slots.getOrNull(i)?.status == ua.blackout.prewarning.data.model.SlotStatus.POWER_OFF
-                if (isOff && !inBlock) {
-                    inBlock = true
-                    blockStart = i
-                } else if (!isOff && inBlock) {
-                    inBlock = false
-                    intervals.add(Pair(blockStart, i))
-                }
-            }
-            if (inBlock) {
-                intervals.add(Pair(blockStart, 24))
-            }
+            // Battery & UX Optimization: Group consecutive blackout slots into continuous blocks
+            val intervals = scheduleRepo.getDetailedIntervals(slots)
 
             // Schedule single exact alarm for each upcoming blackout block
             for (block in intervals) {
-                val startHour = block.first
-                val endHour = block.second
-                val startStr = String.format("%02d:00", startHour)
-                val endStr = String.format("%02d:00", endHour)
-                val blockId = "block_${today}_${startStr}_${endStr}_Q${settings.queue}"
+                val startParts = block.startStr.split(":")
+                val startH = startParts[0].toInt()
+                val startM = startParts[1].toInt()
+                val blockId = "block_${today}_${block.startStr}_${block.endStr}_Q${settings.queue}"
 
                 if (alertRegistry.hasNotified(blockId)) {
                     continue // Block already alerted
                 }
 
-                val blockStartTime = LocalDateTime.of(today, LocalTime.of(startHour, 0))
+                val blockStartTime = LocalDateTime.of(today, LocalTime.of(startH, startM))
                 val alertTime = blockStartTime.minusMinutes(settings.advanceNoticeMinutes.toLong())
 
                 if (alertTime.isAfter(now)) {
                     val epochMillis = alertTime.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
-                    val timeSpan = if (endHour - startHour > 1) "$startStr–$endStr" else startStr
+                    val timeSpan = "${block.startStr}–${block.endStr}"
                     val intent = Intent(context, AlarmReceiver::class.java).apply {
                         action = "ua.blackout.prewarning.ACTION_TRIGGER_BLACKOUT_ALERT"
                         putExtra("EXTRA_SLOT_ID", blockId)

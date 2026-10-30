@@ -134,13 +134,34 @@ object NotificationHelper {
             builder.setSound(soundUri)
         } else {
             builder.setSound(null)
-            builder.setSilent(true)
         }
 
         if (settings.vibrationEnabled) {
             builder.setVibrate(longArrayOf(0, 400, 200, 400))
+            builder.setDefaults(0)
+            // Trigger hardware vibrator directly to ensure vibration even if sound is off or OS channel is cached
+            try {
+                val vibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                    val vm = context.getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as? android.os.VibratorManager
+                    vm?.defaultVibrator
+                } else {
+                    @Suppress("DEPRECATION")
+                    context.getSystemService(Context.VIBRATOR_SERVICE) as? android.os.Vibrator
+                }
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    vibrator?.vibrate(android.os.VibrationEffect.createWaveform(longArrayOf(0, 400, 200, 400), -1))
+                } else {
+                    @Suppress("DEPRECATION")
+                    vibrator?.vibrate(longArrayOf(0, 400, 200, 400), -1)
+                }
+            } catch (_: Exception) {}
         } else {
             builder.setVibrate(longArrayOf(0))
+        }
+
+        // Only mark silent if BOTH sound AND vibration are disabled
+        if (!settings.soundEnabled && !settings.vibrationEnabled) {
+            builder.setSilent(true)
         }
 
         val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager

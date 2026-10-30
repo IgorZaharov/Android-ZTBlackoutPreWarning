@@ -403,15 +403,23 @@ fun SettingsScreen(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(AppStrings.sound(lang), fontSize = 13.sp, color = Color.White)
+                    Text(
+                        text = AppStrings.sound(lang),
+                        fontSize = 13.sp,
+                        color = if (notificationsEnabled) Color.White else Color(0x66FFFFFF)
+                    )
                     Switch(
-                        checked = soundEnabled,
+                        checked = notificationsEnabled && soundEnabled,
                         onCheckedChange = onToggleSound,
+                        enabled = notificationsEnabled,
                         colors = SwitchDefaults.colors(
                             checkedThumbColor = Color.White,
                             checkedTrackColor = Color(0xFFFF5E3A),
                             uncheckedThumbColor = Color.LightGray,
-                            uncheckedTrackColor = Color(0x33FFFFFF)
+                            uncheckedTrackColor = Color(0x33FFFFFF),
+                            disabledCheckedTrackColor = Color(0x33FF5E3A),
+                            disabledUncheckedTrackColor = Color(0x1AFFFFFF),
+                            disabledUncheckedThumbColor = Color(0x4DFFFFFF)
                         )
                     )
                 }
@@ -423,15 +431,23 @@ fun SettingsScreen(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(AppStrings.vibration(lang), fontSize = 13.sp, color = Color.White)
+                    Text(
+                        text = AppStrings.vibration(lang),
+                        fontSize = 13.sp,
+                        color = if (notificationsEnabled) Color.White else Color(0x66FFFFFF)
+                    )
                     Switch(
-                        checked = vibrationEnabled,
+                        checked = notificationsEnabled && vibrationEnabled,
                         onCheckedChange = onToggleVibration,
+                        enabled = notificationsEnabled,
                         colors = SwitchDefaults.colors(
                             checkedThumbColor = Color.White,
                             checkedTrackColor = Color(0xFFFF5E3A),
                             uncheckedThumbColor = Color.LightGray,
-                            uncheckedTrackColor = Color(0x33FFFFFF)
+                            uncheckedTrackColor = Color(0x33FFFFFF),
+                            disabledCheckedTrackColor = Color(0x33FF5E3A),
+                            disabledUncheckedTrackColor = Color(0x1AFFFFFF),
+                            disabledUncheckedThumbColor = Color(0x4DFFFFFF)
                         )
                     )
                 }

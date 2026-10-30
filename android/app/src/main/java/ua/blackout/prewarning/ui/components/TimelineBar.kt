@@ -12,7 +12,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import ua.blackout.prewarning.data.model.BlackoutSlot
@@ -22,11 +21,11 @@ import java.time.LocalDate
 
 @Composable
 fun TimelineBar(
-    slots: List<BlackoutSlot> = remember { ZtoeParser.generateFallbackSchedule("2.1", LocalDate.now().toString()) },
+    slots: List<BlackoutSlot> = remember { ZtoeParser.generateFallbackSchedule("1.1", LocalDate.now().toString()) },
     currentHour: Int = 12,
     currentMinute: Int = 0,
     modifier: Modifier = Modifier,
-    onHourClick: (BlackoutSlot) -> Unit = {}
+    onHourClick: (Int) -> Unit = {}
 ) {
     Box(
         modifier = modifier
@@ -37,19 +36,30 @@ fun TimelineBar(
     ) {
         Column(modifier = Modifier.fillMaxWidth()) {
             // 24 Hours, each containing two 30-min vertical rectangular blocks
+            // Less pixel spacing (1dp) between halves of one hour and bigger spacing (3dp) between hours
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(3.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                slots.forEach { slot ->
-                    val isOff = slot.status == SlotStatus.POWER_OFF
-                    val isCurrentHour = slot.startHour == currentHour
+                val is48Slots = slots.size >= 48
+                (0 until 24).forEach { hour ->
+                    val isCurrentHour = hour == currentHour
+                    val half1Off = if (is48Slots) {
+                        slots.getOrNull(hour * 2)?.status == SlotStatus.POWER_OFF
+                    } else {
+                        slots.getOrNull(hour)?.status == SlotStatus.POWER_OFF
+                    }
+                    val half2Off = if (is48Slots) {
+                        slots.getOrNull(hour * 2 + 1)?.status == SlotStatus.POWER_OFF
+                    } else {
+                        slots.getOrNull(hour)?.status == SlotStatus.POWER_OFF
+                    }
 
                     Box(
                         modifier = Modifier
                             .weight(1f)
-                            .clickable { onHourClick(slot) }
+                            .clickable { onHourClick(hour) }
                     ) {
                         // Two 30-min blocks for this hour
                         Row(
@@ -63,7 +73,7 @@ fun TimelineBar(
                                     .weight(1f)
                                     .height(32.dp)
                                     .clip(RoundedCornerShape(1.dp))
-                                    .background(if (isOff) Color(0xFFDC3C32) else Color(0xFF373737))
+                                    .background(if (half1Off) Color(0xFFDC3C32) else Color(0xFF373737))
                             )
                             // Half 2: XX:30 - (XX+1):00
                             Box(
@@ -71,7 +81,7 @@ fun TimelineBar(
                                     .weight(1f)
                                     .height(32.dp)
                                     .clip(RoundedCornerShape(1.dp))
-                                    .background(if (isOff) Color(0xFFDC3C32) else Color(0xFF373737))
+                                    .background(if (half2Off) Color(0xFFDC3C32) else Color(0xFF373737))
                             )
                         }
 

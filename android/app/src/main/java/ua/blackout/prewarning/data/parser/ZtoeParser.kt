@@ -2,9 +2,13 @@ package ua.blackout.prewarning.data.parser
 
 import org.jsoup.Jsoup
 import org.jsoup.nodes.Document
+import org.jsoup.nodes.Element
 import ua.blackout.prewarning.data.model.BlackoutSlot
 import ua.blackout.prewarning.data.model.SlotStatus
+import java.net.HttpURLConnection
+import java.net.URL
 import java.time.LocalDate
+import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 
 data class ScheduleFetchResult(
@@ -14,7 +18,7 @@ data class ScheduleFetchResult(
 )
 
 object ZtoeParser {
-    private const val USER_AGENT = "Mozilla/5.0 (Android; Mobile; rv:130.0) Gecko/130.0 Firefox/130.0"
+    private const val USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 
     fun isValidUrl(url: String): Boolean {
         val trimmed = url.trim()
@@ -27,45 +31,87 @@ object ZtoeParser {
     }
 
     fun fetchFullSchedule(url: String, queue: String): ScheduleFetchResult {
-        val today = LocalDate.now()
+        val kyivZone = ZoneId.of("Europe/Kyiv")
+        val today = LocalDate.now(kyivZone)
         val tomorrow = today.plusDays(1)
         val todayStr = today.format(DateTimeFormatter.ISO_LOCAL_DATE)
-        val tomorrowStr = tomorrow.format(DateTimeFormatter.ISO_LOCAL_DATE)
 
         if (!isValidUrl(url)) {
-            val todayFallback = generateFallbackSchedule(queue, todayStr)
             return ScheduleFetchResult(
-                todaySlots = todayFallback,
+                todaySlots = generateFallbackSchedule(queue, todayStr),
                 tomorrowSlots = null,
                 hasTomorrowSchedule = false
             )
         }
 
         return try {
-            val doc: Document = Jsoup.connect(url)
-                .userAgent(USER_AGENT)
-                .timeout(8000)
-                .get()
+            val doc = fetchDocumentWithWindows1251(url)
+            val tables = doc.select("table")
 
-            val text = doc.text()
-            // Format variants for dates: "30.10.2026", "30.10", "2026-10-30"
-            val tomorrowD1 = String.format("%02d.%02d", tomorrow.dayOfMonth, tomorrow.monthValue)
-            val tomorrowD2 = tomorrowStr
+            // Format patterns to locate tables in ZTOE HTML
+            val todayD1 = String.format("%02d.%02d.%04d", today.dayOfMonth, today.monthValue, today.year)
+            val todayD2 = String.format("%d.%d.%04d", today.dayOfMonth, today.monthValue, today.year)
+            val todayD3 = String.format("%02d.%02d", today.dayOfMonth, today.monthValue)
 
-            val hasTomorrow = text.contains(tomorrowD1) || text.contains(tomorrowD2) || text.contains("на завтра")
+            val tomorrowD1 = String.format("%02d.%02d.%04d", tomorrow.dayOfMonth, tomorrow.monthValue, tomorrow.year)
+            val tomorrowD2 = String.format("%d.%d.%04d", tomorrow.dayOfMonth, tomorrow.monthValue, tomorrow.year)
+            val tomorrowD3 = String.format("%02d.%02d", tomorrow.dayOfMonth, tomorrow.monthValue)
 
-            val todaySlots = parseHtmlForDate(doc, queue, today)
-            val tomorrowSlots = if (hasTomorrow) parseHtmlForDate(doc, queue, tomorrow) else null
+            var todayTable: Element? = null
+            var tomorrowTable: Element? = null
+
+            for (table in tables) {
+                val tableHtml = table.html()
+                val headerText = table.select("tr").firstOrNull()?.text() ?: ""
+                val fullText = table.text()
+
+                val matchesToday = headerText.contains(todayD1) || headerText.contains(todayD2) ||
+                        tableHtml.contains(todayD1) || tableHtml.contains(todayD2)
+                val matchesTomorrow = headerText.contains(tomorrowD1) || headerText.contains(tomorrowD2) ||
+                        tableHtml.contains(tomorrowD1) || tableHtml.contains(tomorrowD2)
+
+                if (matchesToday && todayTable == null) {
+                    todayTable = table
+                } else if (matchesTomorrow && tomorrowTable == null) {
+                    tomorrowTable = table
+                }
+            }
+
+            // Fallback table search if exact date in header wasn't found (e.g. DD.MM only)
+            if (todayTable == null) {
+                todayTable = tables.firstOrNull { t ->
+                    val txt = t.text()
+                    txt.contains(todayD3) && (txt.contains("Черга") || txt.contains("Підчерга") || txt.contains("1.1"))
+                }
+            }
+
+            if (tomorrowTable == null) {
+                tomorrowTable = tables.firstOrNull { t ->
+                    t != todayTable && (t.text().contains(tomorrowD3) || t.text().contains("на завтра")) &&
+                            (t.text().contains("Черга") || t.text().contains("1.1"))
+                }
+            }
+
+            val todaySlots = if (todayTable != null) {
+                parseTableForQueue(todayTable, queue, today)
+            } else {
+                generateFallbackSchedule(queue, todayStr)
+            }
+
+            val tomorrowSlots = if (tomorrowTable != null) {
+                parseTableForQueue(tomorrowTable, queue, tomorrow)
+            } else {
+                null
+            }
 
             ScheduleFetchResult(
                 todaySlots = todaySlots,
                 tomorrowSlots = tomorrowSlots,
-                hasTomorrowSchedule = hasTomorrow && tomorrowSlots != null
+                hasTomorrowSchedule = tomorrowSlots != null && tomorrowTable != null
             )
         } catch (e: Exception) {
-            val todayFallback = generateFallbackSchedule(queue, todayStr)
             ScheduleFetchResult(
-                todaySlots = todayFallback,
+                todaySlots = generateFallbackSchedule(queue, todayStr),
                 tomorrowSlots = null,
                 hasTomorrowSchedule = false
             )
@@ -73,58 +119,84 @@ object ZtoeParser {
     }
 
     fun fetchAndParse(url: String, queue: String, date: LocalDate): List<BlackoutSlot> {
-        val dateStr = date.format(DateTimeFormatter.ISO_LOCAL_DATE)
-        if (!isValidUrl(url)) {
-            return generateFallbackSchedule(queue, dateStr)
-        }
-        return try {
-            val doc: Document = Jsoup.connect(url)
-                .userAgent(USER_AGENT)
-                .timeout(8000)
-                .get()
-
-            parseHtmlForDate(doc, queue, date)
-        } catch (e: Exception) {
-            generateFallbackSchedule(queue, dateStr)
+        val result = fetchFullSchedule(url, queue)
+        val today = LocalDate.now(ZoneId.of("Europe/Kyiv"))
+        return if (date == today) {
+            result.todaySlots
+        } else if (date == today.plusDays(1) && result.tomorrowSlots != null) {
+            result.tomorrowSlots
+        } else {
+            generateFallbackSchedule(queue, date.format(DateTimeFormatter.ISO_LOCAL_DATE))
         }
     }
 
-    private fun parseHtmlForDate(doc: Document, targetQueue: String, date: LocalDate): List<BlackoutSlot> {
+    private fun fetchDocumentWithWindows1251(urlStr: String): Document {
+        val url = URL(urlStr)
+        val connection = url.openConnection() as HttpURLConnection
+        connection.setRequestProperty("User-Agent", USER_AGENT)
+        connection.connectTimeout = 8000
+        connection.readTimeout = 8000
+        connection.connect()
+        return connection.inputStream.use { input ->
+            Jsoup.parse(input, "windows-1251", urlStr)
+        }
+    }
+
+    private fun parseTableForQueue(table: Element, targetQueue: String, date: LocalDate): List<BlackoutSlot> {
         val dateStr = date.format(DateTimeFormatter.ISO_LOCAL_DATE)
-        val rows = doc.select("table tr")
+        val rows = table.select("tr")
+
+        // Find the row containing this specific queue (e.g. "1.1")
         val targetRow = rows.firstOrNull { row ->
-            val text = row.text()
-            text.contains(targetQueue) || text.contains("Черга $targetQueue")
+            val cells = row.select("td, th")
+            cells.any { cell ->
+                val txt = cell.text().trim()
+                txt == targetQueue || txt == "Черга $targetQueue" || txt == "Черга $targetQueue."
+            }
         } ?: return generateFallbackSchedule(targetQueue, dateStr)
 
-        val cells = targetRow.select("td, th").drop(1)
-        if (cells.size < 12) {
+        val tds = targetRow.select("td")
+        if (tds.size < 24) {
             return generateFallbackSchedule(targetQueue, dateStr)
         }
 
-        val hoursPerCell = 24 / cells.size
-        return cells.mapIndexed { index, cell ->
-            val startH = index * hoursPerCell
-            val endH = (index + 1) * hoursPerCell
-            val startStr = String.format("%02d:00", startH)
-            val endStr = if (endH == 24) "24:00" else String.format("%02d:00", endH)
+        // ZTOE table row structure: last 48 cells represent the 48 half-hour slots of the day (00:00 to 24:00)
+        val slotCells = if (tds.size >= 48) {
+            tds.takeLast(48)
+        } else {
+            // In case of 24 1-hour cells
+            tds.takeLast(24)
+        }
 
-            val cellText = cell.text().trim().lowercase()
-            val style = cell.attr("style").lowercase()
-            val className = cell.className().lowercase()
+        val totalSlots = slotCells.size
+        val minutesPerSlot = 1440 / totalSlots // 30 mins for 48 slots, 60 mins for 24 slots
 
-            val status = when {
-                className.contains("red") || className.contains("off") || className.contains("danger") ||
-                style.contains("red") || cellText.contains("вимк") || cellText.contains("відкл") || cellText == "в" || cellText == "-" -> {
-                    SlotStatus.POWER_OFF
-                }
-                else -> SlotStatus.POWER_ON
-            }
+        return slotCells.mapIndexed { index, cell ->
+            val startTotalMin = index * minutesPerSlot
+            val endTotalMin = (index + 1) * minutesPerSlot
+
+            val startH = startTotalMin / 60
+            val startM = startTotalMin % 60
+            val endH = endTotalMin / 60
+            val endM = endTotalMin % 60
+
+            val startStr = String.format("%02d:%02d", startH, startM)
+            val endStr = if (endH >= 24) "24:00" else String.format("%02d:%02d", endH, endM)
+
+            val attr = (cell.attr("style") + " " + cell.attr("bgcolor") + " " + cell.className()).lowercase()
+            val text = cell.text().trim().lowercase()
+
+            val isOff = attr.contains("#ff3333") || attr.contains("red") || attr.contains("rgb(255, 51, 51)") ||
+                    attr.contains("danger") || text.contains("вимк") || text.contains("відкл") || text == "в" || text == "-"
+
+            val status = if (isOff) SlotStatus.POWER_OFF else SlotStatus.POWER_ON
 
             BlackoutSlot(
                 id = "${dateStr}_${startStr}_Q$targetQueue",
                 startHour = startH,
-                endHour = endH,
+                endHour = if (endM > 0) endH else endH,
+                startMinute = startM,
+                endMinute = endM,
                 startTimeStr = startStr,
                 endTimeStr = endStr,
                 status = status
@@ -138,22 +210,30 @@ object ZtoeParser {
         val sub = parts.getOrNull(1)?.toIntOrNull() ?: 1
         val shift = ((group - 1) * 3 + (sub - 1) * 2) % 24
 
-        return (0 until 24).map { hour ->
-            val cycleHour = (hour + shift) % 24
-            val status = when {
-                (cycleHour in 2..5) || (cycleHour in 12..15) || (cycleHour in 20..23) -> SlotStatus.POWER_OFF
-                else -> SlotStatus.POWER_ON
-            }
-            val startStr = String.format("%02d:00", hour)
-            val endStr = if (hour + 1 == 24) "24:00" else String.format("%02d:00", hour + 1)
+        // Generate 48 half-hour slots for uniform 30-min resolution
+        return (0 until 48).map { index ->
+            val startTotalMin = index * 30
+            val endTotalMin = (index + 1) * 30
+            val startH = startTotalMin / 60
+            val startM = startTotalMin % 60
+            val endH = endTotalMin / 60
+            val endM = endTotalMin % 60
+
+            val cycleHour = (startH + shift) % 24
+            val isOff = (cycleHour in 2..5) || (cycleHour in 12..15) || (cycleHour in 20..23)
+
+            val startStr = String.format("%02d:%02d", startH, startM)
+            val endStr = if (endH >= 24) "24:00" else String.format("%02d:%02d", endH, endM)
 
             BlackoutSlot(
                 id = "${dateStr}_${startStr}_Q$queue",
-                startHour = hour,
-                endHour = hour + 1,
+                startHour = startH,
+                endHour = endH,
+                startMinute = startM,
+                endMinute = endM,
                 startTimeStr = startStr,
                 endTimeStr = endStr,
-                status = status
+                status = if (isOff) SlotStatus.POWER_OFF else SlotStatus.POWER_ON
             )
         }
     }

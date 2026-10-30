@@ -29,6 +29,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import ua.blackout.prewarning.data.model.BlackoutSlot
 import ua.blackout.prewarning.data.model.SlotStatus
+import ua.blackout.prewarning.data.repository.ScheduleRepository
 import ua.blackout.prewarning.ui.AppStrings
 import ua.blackout.prewarning.ui.components.TimelineBar
 import java.time.LocalTime
@@ -54,28 +55,9 @@ fun MainScreen(
     var selectedDayTab by remember { mutableStateOf("today") }
     val activeSlots = if (selectedDayTab == "today") slots else (tomorrowSlots ?: slots)
 
-    // Compute continuous blackout intervals
+    // Compute continuous blackout intervals with exact 30-min resolution using ScheduleRepository
     val intervals = remember(activeSlots) {
-        val list = mutableListOf<Triple<String, String, Int>>()
-        var inBlock = false
-        var startH = 0
-        for (i in 0 until 24) {
-            val isOff = activeSlots.getOrNull(i)?.status == SlotStatus.POWER_OFF
-            if (isOff && !inBlock) {
-                inBlock = true
-                startH = i
-            } else if (!isOff && inBlock) {
-                inBlock = false
-                val sStr = String.format("%02d:00", startH)
-                val eStr = String.format("%02d:00", i)
-                list.add(Triple(sStr, eStr, i - startH))
-            }
-        }
-        if (inBlock) {
-            val sStr = String.format("%02d:00", startH)
-            list.add(Triple(sStr, "24:00", 24 - startH))
-        }
-        list
+        ScheduleRepository(context).getDetailedIntervals(activeSlots)
     }
 
     // Pulse animation for status dot
@@ -354,7 +336,11 @@ fun MainScreen(
                     )
 
                     if (intervals.isNotEmpty()) {
-                        intervals.forEach { (start, end, duration) ->
+                        intervals.forEach { interval ->
+                            val start = interval.startStr
+                            val end = interval.endStr
+                            val dur = interval.durationHours
+                            val durStr = if (dur % 1.0 == 0.0) "${dur.toInt()} ${AppStrings.hourShort(lang)}" else "${String.format(java.util.Locale.US, "%.1f", dur)} ${AppStrings.hourShort(lang)}"
                             Row(
                                 modifier = Modifier
                                     .fillMaxWidth()
@@ -390,7 +376,7 @@ fun MainScreen(
                                         .padding(horizontal = 8.dp, vertical = 3.dp)
                                 ) {
                                     Text(
-                                        text = "$duration ${AppStrings.hourShort(lang)}",
+                                        text = durStr,
                                         fontSize = 11.sp,
                                         fontWeight = FontWeight.Bold,
                                         fontFamily = FontFamily.Monospace,

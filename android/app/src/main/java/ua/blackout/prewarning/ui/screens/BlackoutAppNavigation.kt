@@ -28,6 +28,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import ua.blackout.prewarning.data.model.BlackoutSlot
 import ua.blackout.prewarning.data.parser.ZtoeParser
+import ua.blackout.prewarning.data.repository.ScheduleRepository
 import ua.blackout.prewarning.data.repository.SettingsRepository
 import ua.blackout.prewarning.notification.NotificationHelper
 import ua.blackout.prewarning.ui.AppStrings
@@ -43,6 +44,7 @@ fun BlackoutAppNavigation(
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
     val settingsRepo = remember { SettingsRepository(context) }
+    val scheduleRepo = remember { ScheduleRepository(context) }
     val initialSettings = remember { settingsRepo.getSettings() }
 
     var queue by remember { mutableStateOf(initialSettings.queue) }
@@ -66,14 +68,28 @@ fun BlackoutAppNavigation(
         mutableStateOf(nowTime.plusMinutes(refreshMinutes.toLong()).format(DateTimeFormatter.ofPattern("HH:mm")))
     }
 
-    // Slots for Today and Tomorrow with header detection
+    // Slots for Today and Tomorrow from ScheduleRepository
     var slots by remember {
-        mutableStateOf(ZtoeParser.generateFallbackSchedule(queue, LocalDate.now().toString()))
+        mutableStateOf(scheduleRepo.getTodaySlots(queue))
     }
     var tomorrowSlots by remember {
-        mutableStateOf<List<BlackoutSlot>?>(null)
+        mutableStateOf(scheduleRepo.getTomorrowSlots(queue))
     }
-    var hasTomorrowSchedule by remember { mutableStateOf(false) }
+    var hasTomorrowSchedule by remember {
+        mutableStateOf(scheduleRepo.hasTomorrowSchedule(queue))
+    }
+
+    // Dynamic real-time countdown info updated every second
+    var statusInfo by remember {
+        mutableStateOf(scheduleRepo.getCurrentStatusAndCountdown(queue))
+    }
+
+    LaunchedEffect(slots, queue) {
+        while (true) {
+            statusInfo = scheduleRepo.getCurrentStatusAndCountdown(queue)
+            kotlinx.coroutines.delay(1000L)
+        }
+    }
 
     // Fetch initial schedule in background
     LaunchedEffect(queue) {
@@ -82,7 +98,11 @@ fun BlackoutAppNavigation(
             slots = res.todaySlots
             tomorrowSlots = res.tomorrowSlots
             hasTomorrowSchedule = res.hasTomorrowSchedule
-            BlackoutGlanceWidget().updateAll(context)
+            scheduleRepo.saveSchedule(queue, res.todaySlots, res.tomorrowSlots)
+            statusInfo = scheduleRepo.getCurrentStatusAndCountdown(queue)
+            try {
+                BlackoutGlanceWidget().updateAll(context)
+            } catch (_: Exception) {}
         }
     }
 
@@ -129,9 +149,9 @@ fun BlackoutAppNavigation(
                 0 -> {
                     MainScreen(
                         queue = queue,
-                        isBlackoutNow = false,
-                        countdownText = "01:35:12",
-                        slotTimeText = "14:00 – 18:00",
+                        isBlackoutNow = statusInfo.isBlackoutNow,
+                        countdownText = statusInfo.countdownText,
+                        slotTimeText = statusInfo.nextSlotTime,
                         slots = slots,
                         tomorrowSlots = tomorrowSlots,
                         hasTomorrowSchedule = hasTomorrowSchedule,
@@ -143,7 +163,9 @@ fun BlackoutAppNavigation(
                             notificationsEnabled = !notificationsEnabled
                             settingsRepo.updateNotificationsEnabled(notificationsEnabled)
                             coroutineScope.launch {
-                                BlackoutGlanceWidget().updateAll(context)
+                                try {
+                                    BlackoutGlanceWidget().updateAll(context)
+                                } catch (_: Exception) {}
                             }
                         },
                         onRefresh = {
@@ -157,7 +179,11 @@ fun BlackoutAppNavigation(
                                 slots = res.todaySlots
                                 tomorrowSlots = res.tomorrowSlots
                                 hasTomorrowSchedule = res.hasTomorrowSchedule
-                                BlackoutGlanceWidget().updateAll(context)
+                                scheduleRepo.saveSchedule(queue, res.todaySlots, res.tomorrowSlots)
+                                statusInfo = scheduleRepo.getCurrentStatusAndCountdown(queue)
+                                try {
+                                    BlackoutGlanceWidget().updateAll(context)
+                                } catch (_: Exception) {}
                             }
                         }
                     )
@@ -182,7 +208,11 @@ fun BlackoutAppNavigation(
                                 slots = res.todaySlots
                                 tomorrowSlots = res.tomorrowSlots
                                 hasTomorrowSchedule = res.hasTomorrowSchedule
-                                BlackoutGlanceWidget().updateAll(context)
+                                scheduleRepo.saveSchedule(newQueue, res.todaySlots, res.tomorrowSlots)
+                                statusInfo = scheduleRepo.getCurrentStatusAndCountdown(newQueue)
+                                try {
+                                    BlackoutGlanceWidget().updateAll(context)
+                                } catch (_: Exception) {}
                             }
                         },
                         onAdvanceMinutesChanged = {
@@ -243,7 +273,11 @@ fun BlackoutAppNavigation(
                                 slots = res.todaySlots
                                 tomorrowSlots = res.tomorrowSlots
                                 hasTomorrowSchedule = res.hasTomorrowSchedule
-                                BlackoutGlanceWidget().updateAll(context)
+                                scheduleRepo.saveSchedule(queue, res.todaySlots, res.tomorrowSlots)
+                                statusInfo = scheduleRepo.getCurrentStatusAndCountdown(queue)
+                                try {
+                                    BlackoutGlanceWidget().updateAll(context)
+                                } catch (_: Exception) {}
                             }
                         },
                         onResetDefaults = {
