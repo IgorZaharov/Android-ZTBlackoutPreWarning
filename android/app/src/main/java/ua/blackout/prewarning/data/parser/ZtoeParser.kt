@@ -10,8 +10,21 @@ import java.time.format.DateTimeFormatter
 object ZtoeParser {
     private const val USER_AGENT = "Mozilla/5.0 (Android; Mobile; rv:130.0) Gecko/130.0 Firefox/130.0"
 
+    fun isValidUrl(url: String): Boolean {
+        val trimmed = url.trim()
+        if (!trimmed.startsWith("http://") && !trimmed.startsWith("https://")) return false
+        val uri = try { java.net.URI(trimmed) } catch (e: Exception) { return false }
+        val host = uri.host?.lowercase() ?: return false
+        if (host != "www.ztoe.com.ua" && host != "ztoe.com.ua") return false
+        val path = uri.path ?: ""
+        return path == "/unhooking-search.php" || path == "/" || path.isEmpty()
+    }
+
     fun fetchAndParse(url: String, queue: String, date: LocalDate): List<BlackoutSlot> {
         val dateStr = date.format(DateTimeFormatter.ISO_LOCAL_DATE)
+        if (!isValidUrl(url)) {
+            return generateFallbackSchedule(queue, dateStr)
+        }
         return try {
             val doc: Document = Jsoup.connect(url)
                 .userAgent(USER_AGENT)

@@ -22,7 +22,7 @@ class AlarmReceiver : BroadcastReceiver() {
         // Mark as notified immediately
         alertRegistry.markNotified(slotId)
 
-        val title = "⚡ Попередження: відключення світла"
+        val title = "Попередження: відключення світла"
         val body = "Черга $queue: відключення розпочнеться о $timeStr (через $minutes хв)."
 
         val notificationId = slotId.hashCode()

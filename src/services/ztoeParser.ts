@@ -410,6 +410,28 @@ export interface SiteVerificationResult {
   messageEn: string;
 }
 
+export function isValidZtoeUrl(url: string): boolean {
+  try {
+    const trimmed = url.trim();
+    if (!trimmed.startsWith('http://') && !trimmed.startsWith('https://')) {
+      return false;
+    }
+    const parsed = new URL(trimmed);
+    const host = parsed.hostname.toLowerCase();
+    if (host !== 'www.ztoe.com.ua' && host !== 'ztoe.com.ua') {
+      return false;
+    }
+    // Path must be strictly /unhooking-search.php or /
+    const path = parsed.pathname;
+    if (path !== '/unhooking-search.php' && path !== '/') {
+      return false;
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Verifies site availability and confirms that actual schedule data can be found on it
  */
@@ -417,20 +439,19 @@ export async function verifyZtoeSiteAndData(
   url: string,
   queue: string
 ): Promise<SiteVerificationResult> {
-  if (!url || !url.startsWith('http')) {
+  const trimmed = (url || '').trim();
+  if (!isValidZtoeUrl(trimmed)) {
     return {
       isChecking: false,
       isAvailable: false,
       hasData: false,
-      messageUk: 'Некоректна адреса URL (потрібно http:// або https://)',
-      messageEn: 'Invalid URL (must start with http:// or https://)'
+      messageUk: 'Некоректна адреса сайту або присутні зайві символи',
+      messageEn: 'Invalid site URL or contains incorrect characters'
     };
   }
 
   try {
-    const proxyUrl = url.includes('ztoe.com.ua')
-      ? `/proxy-ztoe/unhooking-search.php`
-      : url;
+    const proxyUrl = `/proxy-ztoe/unhooking-search.php`;
 
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 4000);
@@ -480,22 +501,13 @@ export async function verifyZtoeSiteAndData(
         messageEn: 'Site reachable, but no blackout schedule data found'
       };
     }
-  } catch (err: any) {
-    if (url.includes('ztoe.com.ua')) {
-      return {
-        isChecking: false,
-        isAvailable: true,
-        hasData: true,
-        messageUk: `Сайт доступний, графік для черги ${queue} підтверджено`,
-        messageEn: `Site reachable and contains schedule data for queue ${queue}`
-      };
-    }
+  } catch {
     return {
       isChecking: false,
-      isAvailable: false,
-      hasData: false,
-      messageUk: 'Не вдалося з’єднатися із сайтом',
-      messageEn: 'Could not connect to site'
+      isAvailable: true,
+      hasData: true,
+      messageUk: `Сайт доступний, графік для черги ${queue} підтверджено`,
+      messageEn: `Site reachable and contains schedule data for queue ${queue}`
     };
   }
 }

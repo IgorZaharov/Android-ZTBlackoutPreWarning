@@ -1,10 +1,11 @@
 package ua.blackout.prewarning.ui.screens
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -12,104 +13,151 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import ua.blackout.prewarning.data.parser.ZtoeParser
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(
-    currentQueue: String = "2.1",
+    currentQueue: String = "1.1",
     advanceMinutes: Int = 30,
-    refreshMinutes: Int = 30,
+    refreshMinutes: Int = 15,
     notificationsEnabled: Boolean = true,
     soundEnabled: Boolean = true,
     vibrationEnabled: Boolean = true,
+    currentLanguage: String = "SYSTEM",
     onQueueSelected: (String) -> Unit = {},
     onAdvanceMinutesChanged: (Int) -> Unit = {},
     onRefreshMinutesChanged: (Int) -> Unit = {},
     onToggleNotifications: (Boolean) -> Unit = {},
     onToggleSound: (Boolean) -> Unit = {},
     onToggleVibration: (Boolean) -> Unit = {},
+    onLanguageSelected: (String) -> Unit = {},
+    onSendTestAlert: () -> Unit = {},
+    onForceRefresh: () -> Unit = {},
     onResetDefaults: () -> Unit = {}
 ) {
     var showQueueHelpDialog by remember { mutableStateOf(false) }
     var showResetConfirmDialog by remember { mutableStateOf(false) }
-    var dropdownExpanded by remember { mutableStateOf(false) }
+    var queueDropdownExpanded by remember { mutableStateOf(false) }
+    var advanceDropdownExpanded by remember { mutableStateOf(false) }
+    var refreshDropdownExpanded by remember { mutableStateOf(false) }
+
     val queues = listOf(
         "1.1", "1.2", "2.1", "2.2", "3.1", "3.2",
         "4.1", "4.2", "5.1", "5.2", "6.1", "6.2"
     )
+    val timerOptions = listOf(5, 10, 15, 20, 30, 45, 60, 90, 120, 180, 240)
+
+    var siteUrl by remember { mutableStateOf("https://www.ztoe.com.ua/unhooking-search.php") }
+    val isUrlStrictlyValid = remember(siteUrl) { ZtoeParser.isValidUrl(siteUrl) }
 
     Column(
         modifier = Modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState())
-            .padding(16.dp),
+            .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        // 1. Queue Selection with ? help button
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(16.dp)
+        // Header
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            Column(modifier = Modifier.padding(16.dp)) {
+            Icon(
+                Icons.Default.Tune,
+                contentDescription = null,
+                tint = Color(0xFFFF5E3A),
+                modifier = Modifier.size(24.dp)
+            )
+            Text(
+                text = "Налаштування",
+                fontSize = 22.sp,
+                fontWeight = FontWeight.Bold,
+                color = Color.White
+            )
+        }
+
+        // 1. Queue Selection Card (Frosted Glass)
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(24.dp))
+                .background(Color(0xBF141A29))
+                .padding(18.dp)
+        ) {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
                         Text(
-                            text = "Черга відключення",
+                            text = "ЧЕРГА ВІДКЛЮЧЕННЯ",
+                            fontSize = 11.sp,
                             fontWeight = FontWeight.Bold,
-                            fontSize = 15.sp
+                            color = Color.White
                         )
-                        IconButton(
-                            onClick = { showQueueHelpDialog = true },
-                            modifier = Modifier.size(28.dp)
+                        Box(
+                            modifier = Modifier
+                                .size(22.dp)
+                                .clip(CircleShape)
+                                .background(Color(0x26FFFFFF))
+                                .clickable { showQueueHelpDialog = true },
+                            contentAlignment = Alignment.Center
                         ) {
-                            Icon(
-                                Icons.Default.HelpOutline,
-                                contentDescription = "Як дізнатися свою чергу",
-                                tint = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(18.dp)
-                            )
+                            Text("?", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.White)
                         }
                     }
                 }
                 Text(
                     text = "Оберіть підчергу за вашою адресою",
-                    fontSize = 12.sp,
-                    color = MaterialTheme.colorScheme.outline
+                    fontSize = 11.sp,
+                    color = Color(0xB3BAE6FD)
                 )
-                Spacer(modifier = Modifier.height(10.dp))
 
-                // Dropdown menu
+                // Clean Native Exposed Dropdown Menu
                 ExposedDropdownMenuBox(
-                    expanded = dropdownExpanded,
-                    onExpandedChange = { dropdownExpanded = it }
+                    expanded = queueDropdownExpanded,
+                    onExpandedChange = { queueDropdownExpanded = it }
                 ) {
                     OutlinedTextField(
                         value = "Черга $currentQueue",
                         onValueChange = {},
                         readOnly = true,
-                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = dropdownExpanded) },
+                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = queueDropdownExpanded) },
                         modifier = Modifier.menuAnchor().fillMaxWidth(),
-                        shape = RoundedCornerShape(12.dp)
+                        shape = RoundedCornerShape(16.dp),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = Color.White,
+                            unfocusedTextColor = Color.White,
+                            focusedBorderColor = Color(0xFFFF5E3A),
+                            unfocusedBorderColor = Color(0x33FFFFFF),
+                            focusedContainerColor = Color(0x1AFFFFFF),
+                            unfocusedContainerColor = Color(0x14FFFFFF)
+                        )
                     )
                     ExposedDropdownMenu(
-                        expanded = dropdownExpanded,
-                        onDismissRequest = { dropdownExpanded = false }
+                        expanded = queueDropdownExpanded,
+                        onDismissRequest = { queueDropdownExpanded = false },
+                        modifier = Modifier.background(Color(0xFF141A29))
                     ) {
                         queues.forEach { q ->
                             DropdownMenuItem(
-                                text = { Text("Черга $q", fontWeight = FontWeight.Bold) },
+                                text = { Text("Черга $q", fontWeight = FontWeight.Bold, color = Color.White) },
                                 onClick = {
                                     onQueueSelected(q)
-                                    dropdownExpanded = false
+                                    queueDropdownExpanded = false
                                 }
                             )
                         }
@@ -118,226 +166,425 @@ fun SettingsScreen(
             }
         }
 
-        // 2. Site Address with Reachability Verification Glyph
-        var siteUrl by remember { mutableStateOf("https://www.ztoe.com.ua/unhooking-search.php") }
-        val isUrlReachable = remember(siteUrl) { siteUrl.startsWith("http://") || siteUrl.startsWith("https://") }
-
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(16.dp)
+        // 2. Site Address with Strict Verification Glyph
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(24.dp))
+                .background(Color(0xBF141A29))
+                .padding(18.dp)
         ) {
-            Column(
-                modifier = Modifier.padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text("Адреса сайту", fontWeight = FontWeight.Bold, fontSize = 15.sp)
-                    // Green V in circle reachability glyph
-                    Surface(
-                        color = if (isUrlReachable) Color(0xFF10B981).copy(alpha = 0.2f) else MaterialTheme.colorScheme.errorContainer,
-                        shape = RoundedCornerShape(12.dp)
+                    Text(
+                        text = "АДРЕСА САЙТУ",
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White
+                    )
+
+                    // Verification Glyph
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(if (isUrlStrictlyValid) Color(0x3310B981) else Color(0x33EF4444))
+                            .padding(horizontal = 8.dp, vertical = 3.dp)
                     ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                            verticalAlignment = Alignment.CenterVertically
+                        Text(
+                            text = if (isUrlStrictlyValid) "✓ Доступний" else "⚠ Некоректна адреса",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = if (isUrlStrictlyValid) Color(0xFF34D399) else Color(0xFFF87171)
+                        )
+                    }
+                }
+
+                Text(
+                    text = "Адреса графіка відключень, зазвичай не потрібно змінювати",
+                    fontSize = 11.sp,
+                    color = Color(0xB3BAE6FD)
+                )
+
+                OutlinedTextField(
+                    value = siteUrl,
+                    onValueChange = { siteUrl = it },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(16.dp),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = Color.White,
+                        unfocusedTextColor = Color.White,
+                        focusedBorderColor = if (isUrlStrictlyValid) Color(0xFFFF5E3A) else Color(0xFFEF4444),
+                        unfocusedBorderColor = if (isUrlStrictlyValid) Color(0x33FFFFFF) else Color(0x66EF4444),
+                        focusedContainerColor = Color(0x1AFFFFFF),
+                        unfocusedContainerColor = Color(0x14FFFFFF)
+                    )
+                )
+
+                if (!isUrlStrictlyValid) {
+                    Text(
+                        text = "Адреса має бути: https://www.ztoe.com.ua/unhooking-search.php",
+                        fontSize = 10.sp,
+                        color = Color(0xFFF87171)
+                    )
+                }
+            }
+        }
+
+        // 3. Timers: Native Android Spinners restricted to 1..240 (No Edit Boxes!)
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(24.dp))
+                .background(Color(0xBF141A29))
+                .padding(18.dp)
+        ) {
+            Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                // Spinner 1: Advance Warning Notice
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "ПОПЕРЕДЖАТИ ЗАЗДАЛЕГІДЬ",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White
+                        )
+                        Text(
+                            text = "1–240 хв",
+                            fontSize = 10.sp,
+                            color = Color(0x99BAE6FD)
+                        )
+                    }
+
+                    ExposedDropdownMenuBox(
+                        expanded = advanceDropdownExpanded,
+                        onExpandedChange = { advanceDropdownExpanded = it }
+                    ) {
+                        OutlinedTextField(
+                            value = "$advanceMinutes хв",
+                            onValueChange = {},
+                            readOnly = true,
+                            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = advanceDropdownExpanded) },
+                            modifier = Modifier.menuAnchor().fillMaxWidth(),
+                            shape = RoundedCornerShape(16.dp),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedTextColor = Color.White,
+                                unfocusedTextColor = Color.White,
+                                focusedBorderColor = Color(0xFFFF5E3A),
+                                unfocusedBorderColor = Color(0x33FFFFFF),
+                                focusedContainerColor = Color(0x1AFFFFFF),
+                                unfocusedContainerColor = Color(0x14FFFFFF)
+                            )
+                        )
+                        ExposedDropdownMenu(
+                            expanded = advanceDropdownExpanded,
+                            onDismissRequest = { advanceDropdownExpanded = false },
+                            modifier = Modifier.background(Color(0xFF141A29))
+                        ) {
+                            timerOptions.forEach { mins ->
+                                DropdownMenuItem(
+                                    text = { Text("$mins хв", fontWeight = FontWeight.Bold, color = Color.White) },
+                                    onClick = {
+                                        onAdvanceMinutesChanged(mins)
+                                        advanceDropdownExpanded = false
+                                    }
+                                )
+                            }
+                        }
+                    }
+                }
+
+                Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(Color(0x1AFFFFFF)))
+
+                // Spinner 2: Site Refresh Interval
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "ІНТЕРВАЛ ПЕРЕВІРКИ САЙТУ",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White
+                        )
+                        Text(
+                            text = "1–240 хв",
+                            fontSize = 10.sp,
+                            color = Color(0x99BAE6FD)
+                        )
+                    }
+
+                    ExposedDropdownMenuBox(
+                        expanded = refreshDropdownExpanded,
+                        onExpandedChange = { refreshDropdownExpanded = it }
+                    ) {
+                        OutlinedTextField(
+                            value = "$refreshMinutes хв",
+                            onValueChange = {},
+                            readOnly = true,
+                            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = refreshDropdownExpanded) },
+                            modifier = Modifier.menuAnchor().fillMaxWidth(),
+                            shape = RoundedCornerShape(16.dp),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedTextColor = Color.White,
+                                unfocusedTextColor = Color.White,
+                                focusedBorderColor = Color(0xFFFF5E3A),
+                                unfocusedBorderColor = Color(0x33FFFFFF),
+                                focusedContainerColor = Color(0x1AFFFFFF),
+                                unfocusedContainerColor = Color(0x14FFFFFF)
+                            )
+                        )
+                        ExposedDropdownMenu(
+                            expanded = refreshDropdownExpanded,
+                            onDismissRequest = { refreshDropdownExpanded = false },
+                            modifier = Modifier.background(Color(0xFF141A29))
+                        ) {
+                            timerOptions.forEach { mins ->
+                                DropdownMenuItem(
+                                    text = { Text("$mins хв", fontWeight = FontWeight.Bold, color = Color.White) },
+                                    onClick = {
+                                        onRefreshMinutesChanged(mins)
+                                        refreshDropdownExpanded = false
+                                    }
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // 4. Notification Toggles
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(24.dp))
+                .background(Color(0xBF141A29))
+                .padding(18.dp)
+        ) {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("Увімкнути сповіщення", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                    Switch(
+                        checked = notificationsEnabled,
+                        onCheckedChange = onToggleNotifications,
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = Color.White,
+                            checkedTrackColor = Color(0xFFFF5E3A),
+                            uncheckedThumbColor = Color.LightGray,
+                            uncheckedTrackColor = Color(0x33FFFFFF)
+                        )
+                    )
+                }
+
+                Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(Color(0x1AFFFFFF)))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("Звуковий сигнал", fontSize = 13.sp, color = Color.White)
+                    Switch(
+                        checked = soundEnabled,
+                        onCheckedChange = onToggleSound,
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = Color.White,
+                            checkedTrackColor = Color(0xFFFF5E3A),
+                            uncheckedThumbColor = Color.LightGray,
+                            uncheckedTrackColor = Color(0x33FFFFFF)
+                        )
+                    )
+                }
+
+                Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(Color(0x1AFFFFFF)))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text("Вібрація", fontSize = 13.sp, color = Color.White)
+                    Switch(
+                        checked = vibrationEnabled,
+                        onCheckedChange = onToggleVibration,
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = Color.White,
+                            checkedTrackColor = Color(0xFFFF5E3A),
+                            uncheckedThumbColor = Color.LightGray,
+                            uncheckedTrackColor = Color(0x33FFFFFF)
+                        )
+                    )
+                }
+            }
+        }
+
+        // 5. Language Selection Card
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(24.dp))
+                .background(Color(0xBF141A29))
+                .padding(18.dp)
+        ) {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(
+                    text = "МОВА ІНТЕРФЕЙСУ",
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White
+                )
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    listOf("SYSTEM" to "Системна", "uk" to "Українська", "en" to "English").forEach { (code, label) ->
+                        val isSelected = currentLanguage == code
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .clip(RoundedCornerShape(14.dp))
+                                .background(if (isSelected) Color.White else Color(0x1AFFFFFF))
+                                .clickable { onLanguageSelected(code) }
+                                .padding(vertical = 10.dp),
+                            contentAlignment = Alignment.Center
                         ) {
                             Text(
-                                text = if (isUrlReachable) "✓ Доступний" else "⚠ Недоступний",
-                                fontSize = 11.sp,
+                                text = label,
+                                fontSize = 12.sp,
                                 fontWeight = FontWeight.Bold,
-                                color = if (isUrlReachable) Color(0xFF10B981) else MaterialTheme.colorScheme.error
+                                color = if (isSelected) Color.Black else Color(0xB3BAE6FD)
                             )
                         }
                     }
                 }
-                Text(
-                    "Адреса графіка відключень, зазвичай не потрібно змінювати",
-                    fontSize = 12.sp,
-                    color = MaterialTheme.colorScheme.outline
-                )
-                OutlinedTextField(
-                    value = siteUrl,
-                    onValueChange = { siteUrl = it },
+            }
+        }
+
+        // 6. Diagnostics & Actions Card
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(24.dp))
+                .background(Color(0xBF141A29))
+                .padding(18.dp)
+        ) {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Row(
                     modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(12.dp),
-                    trailingIcon = {
-                        if (isUrlReachable) {
-                            Icon(Icons.Default.CheckCircle, contentDescription = "Доступний", tint = Color(0xFF10B981))
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    // Send Test Alert Button (Moved from main screen!)
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(Color(0xFFFF5E3A))
+                            .clickable { onSendTestAlert() }
+                            .padding(vertical = 12.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Icon(Icons.Default.Send, contentDescription = null, tint = Color.White, modifier = Modifier.size(14.dp))
+                            Text("Тест сповіщення", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.White)
                         }
                     }
-                )
-            }
-        }
 
-        // 3. Timers: Clean Edit Boxes strictly restricted to 1..240 (No sliders or extra buttons)
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(16.dp)
-        ) {
-            Column(
-                modifier = Modifier.padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(14.dp)
-            ) {
-                // Advance warning (1..240 min)
-                Column {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
+                    // Refresh Button
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(Color(0x26FFFFFF))
+                            .clickable { onForceRefresh() }
+                            .padding(vertical = 12.dp),
+                        contentAlignment = Alignment.Center
                     ) {
-                        Text("Попереджати заздалегідь (хв)", fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                        Text("1–240 хв", fontSize = 11.sp, color = MaterialTheme.colorScheme.outline)
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Icon(Icons.Default.Refresh, contentDescription = null, tint = Color.White, modifier = Modifier.size(14.dp))
+                            Text("Оновити дані", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                        }
                     }
-                    Spacer(modifier = Modifier.height(6.dp))
-                    OutlinedTextField(
-                        value = advanceMinutes.toString(),
-                        onValueChange = { str ->
-                            val num = str.filter { it.isDigit() }.toIntOrNull()
-                            if (num != null) {
-                                onAdvanceMinutesChanged(num.coerceIn(1, 240))
-                            }
-                        },
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(12.dp)
-                    )
                 }
 
-                HorizontalDivider()
-
-                // Refresh interval (1..240 min)
-                Column {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text("Інтервал перевірки сайту (хв)", fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                        Text("1–240 хв", fontSize = 11.sp, color = MaterialTheme.colorScheme.outline)
-                    }
-                    Spacer(modifier = Modifier.height(6.dp))
-                    OutlinedTextField(
-                        value = refreshMinutes.toString(),
-                        onValueChange = { str ->
-                            val num = str.filter { it.isDigit() }.toIntOrNull()
-                            if (num != null) {
-                                onRefreshMinutesChanged(num.coerceIn(1, 240))
-                            }
-                        },
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(12.dp)
-                    )
+                // Reset to Defaults
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(14.dp))
+                        .clickable { showResetConfirmDialog = true }
+                        .padding(vertical = 8.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text("Скинути налаштування", fontSize = 12.sp, color = Color(0x99BAE6FD))
                 }
             }
         }
 
-        // 3. Notification switches
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(16.dp)
-        ) {
-            Column(
-                modifier = Modifier.padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text("Увімкнути сповіщення", fontWeight = FontWeight.Bold)
-                    Switch(
-                        checked = notificationsEnabled,
-                        onCheckedChange = onToggleNotifications
-                    )
-                }
-                Divider()
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text("Звук сповіщення")
-                    Switch(checked = soundEnabled, onCheckedChange = onToggleSound)
-                }
-                Divider()
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text("Вібрація")
-                    Switch(checked = vibrationEnabled, onCheckedChange = onToggleVibration)
-                }
-            }
-        }
-
-        // 4. Reset to defaults
-        OutlinedButton(
-            onClick = { showResetConfirmDialog = true },
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(12.dp)
-        ) {
-            Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
-            Spacer(modifier = Modifier.width(8.dp))
-            Text("Скинути налаштування")
-        }
+        Spacer(modifier = Modifier.height(48.dp))
     }
 
-    // Modal Help Dialog for Queue Finding
+    // Queue Help Dialog
     if (showQueueHelpDialog) {
         AlertDialog(
             onDismissRequest = { showQueueHelpDialog = false },
-            icon = {
-                Icon(Icons.Default.HelpOutline, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-            },
-            title = {
-                Text("Як дізнатися свою чергу", fontWeight = FontWeight.Bold)
-            },
+            title = { Text("Як дізнатися свою чергу", fontWeight = FontWeight.Bold, color = Color.White) },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text("1. Відкрийте сторінку пошуку черги на сайті ztoe.com.ua.")
-                    Text("2. Оберіть свій РЕМ, населений пункт і вулицю.")
-                    Text("3. У таблиці знайдіть свій будинок і подивіться стовпці «Черга» і «Підчерга». Наприклад, черга 5 і підчерга 2 - це 5.2.")
-                    Text("4. Виберіть це значення у полі «Черга» у вікні налаштувань (кнопка ⚙).")
-                }
+                Text(
+                    "Черга та підчерга (1.1–6.2) закріплені за вашою адресою на офіційному сайті АТ «Житомиробленерго» (ztoe.com.ua) в розділі відключень.",
+                    color = Color.LightGray
+                )
             },
             confirmButton = {
-                Button(onClick = { showQueueHelpDialog = false }) {
-                    Text("Зрозуміло")
+                TextButton(onClick = { showQueueHelpDialog = false }) {
+                    Text("Зрозуміло", color = Color(0xFFFF5E3A), fontWeight = FontWeight.Bold)
                 }
-            }
+            },
+            containerColor = Color(0xFF141A29)
         )
     }
 
-    // Reset confirmation dialog
+    // Reset Confirm Dialog
     if (showResetConfirmDialog) {
         AlertDialog(
             onDismissRequest = { showResetConfirmDialog = false },
-            icon = { Icon(Icons.Default.Warning, contentDescription = null, tint = MaterialTheme.colorScheme.error) },
-            title = { Text("Підтвердження скидання") },
-            text = { Text("Скинути всі налаштування до початкових значень?") },
+            title = { Text("Скинути налаштування?", fontWeight = FontWeight.Bold, color = Color.White) },
+            text = { Text("Усі параметри повернуться до початкових значень (черга 1.1, таймери 30/15 хв).", color = Color.LightGray) },
             confirmButton = {
-                Button(
-                    onClick = {
-                        onResetDefaults()
-                        showResetConfirmDialog = false
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
-                ) {
-                    Text("Скинути")
+                TextButton(onClick = {
+                    onResetDefaults()
+                    showResetConfirmDialog = false
+                }) {
+                    Text("Скинути", color = Color(0xFFFF5E3A), fontWeight = FontWeight.Bold)
                 }
             },
             dismissButton = {
-                OutlinedButton(onClick = { showResetConfirmDialog = false }) {
-                    Text("Скасувати")
+                TextButton(onClick = { showResetConfirmDialog = false }) {
+                    Text("Скасувати", color = Color.White)
                 }
-            }
+            },
+            containerColor = Color(0xFF141A29)
         )
     }
 }

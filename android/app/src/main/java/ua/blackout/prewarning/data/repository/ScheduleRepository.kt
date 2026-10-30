@@ -49,4 +49,32 @@ class ScheduleRepository(private val context: Context) {
             nextSlotTime = nextSlotTime
         )
     }
+
+    fun getSlots(queue: String): List<BlackoutSlot> {
+        val today = LocalDate.now()
+        return ZtoeParser.generateFallbackSchedule(queue, today.toString())
+    }
+
+    fun getIntervals(slots: List<BlackoutSlot>): List<Pair<String, String>> {
+        val list = mutableListOf<Pair<String, String>>()
+        var inBlock = false
+        var startH = 0
+        for (i in 0 until 24) {
+            val isOff = slots.getOrNull(i)?.status == SlotStatus.POWER_OFF
+            if (isOff && !inBlock) {
+                inBlock = true
+                startH = i
+            } else if (!isOff && inBlock) {
+                inBlock = false
+                val sStr = String.format("%02d:00", startH)
+                val eStr = String.format("%02d:00", i)
+                list.add(Pair(sStr, eStr))
+            }
+        }
+        if (inBlock) {
+            val sStr = String.format("%02d:00", startH)
+            list.add(Pair(sStr, "24:00"))
+        }
+        return list
+    }
 }

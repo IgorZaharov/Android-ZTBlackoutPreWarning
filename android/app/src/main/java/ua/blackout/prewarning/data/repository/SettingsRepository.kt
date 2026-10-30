@@ -11,7 +11,7 @@ class SettingsRepository(context: Context) {
     fun getSettings(): UserSettings {
         return UserSettings(
             cityUrl = prefs.getString("city_url", "https://www.ztoe.com.ua/unhooking-search.php") ?: "https://www.ztoe.com.ua/unhooking-search.php",
-            queue = prefs.getString("queue", "2.1") ?: "2.1",
+            queue = prefs.getString("queue", "1.1") ?: "1.1",
             refreshIntervalMinutes = prefs.getLong("refresh_minutes", 15L),
             advanceNoticeMinutes = prefs.getInt("advance_minutes", 30),
             notificationsEnabled = prefs.getBoolean("notifications_enabled", true),
@@ -37,6 +37,6 @@ class SettingsRepository(context: Context) {
     }
 
     fun updateNotificationsEnabled(enabled: Boolean) {
-        prefs.edit().putBoolean("notifications_enabled", enabled).apply()
+        prefs.edit().putBoolean("notifications_enabled", enabled).commit()
     }
 }

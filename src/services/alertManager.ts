@@ -14,7 +14,7 @@ const ALERT_LOG_KEY = 'zt_blackout_alert_log_v1';
 export const DEFAULT_SETTINGS: UserSettings = {
   city: 'Житомир (ZTOE)',
   url: DEFAULT_ZTOE_URL,
-  queue: '2.1',
+  queue: '1.1',
   refreshIntervalMinutes: 15,
   advanceNoticeMinutes: 30,
   notificationsEnabled: true,
