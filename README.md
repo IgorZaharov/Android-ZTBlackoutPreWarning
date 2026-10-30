@@ -1,121 +1,81 @@
-# ⚡ ZT Blackout Pre-Warning (Android)
+# Світло в Житомирі
 
-[![Android CI/CD](https://github.com/IgorZaharov/Android-ZTBlackoutPreWarning/actions/workflows/build-apk.yml/badge.svg)](https://github.com/IgorZaharov/Android-ZTBlackoutPreWarning/actions)
-[![Android](https://img.shields.io/badge/Platform-Android%208.0%2B-green.svg)](https://developer.android.com)
-[![Jetpack Compose](https://img.shields.io/badge/UI-Jetpack%20Compose%20M3-blue.svg)](https://developer.android.com/jetpack/compose)
-[![License: Apache-2.0](https://img.shields.io/badge/License-Apache%202.0-yellow.svg)](LICENSE)
+Android-застосунок, який стежить за графіком погодинних відключень електроенергії від **АТ «Житомиробленерго»** і попереджає про відключення заздалегідь. Показує, скільки лишилося до відключення (або до повернення світла), малює 24-годинну шкалу дня й має віджет для робочого столу.
 
-Мобільний застосунок для Android для своєчасного автоматичного інформування про планові та аварійні графіки погодинних відключень електроенергії (ГПВ) в мережах **АТ «Житомиробленерго»** ([ztoe.com.ua/unhooking-search.php](https://www.ztoe.com.ua/unhooking-search.php)). 
+Дані береться зі сторінки [ztoe.com.ua/unhooking-search.php](https://www.ztoe.com.ua/unhooking-search.php). Це неофіційний застосунок і він не пов'язаний із «Житомиробленерго».
 
-Створений на базі оригінального Windows Desktop додатку [UABlackoutPreWarning](https://github.com/IgorZaharov/UABlackoutPreWarning).
+Продовження десктопного проєкту [UABlackoutPreWarning](https://github.com/IgorZaharov/UABlackoutPreWarning).
 
----
+<!--
+Скріншоти: додайте файли в docs/screenshots/ і розкоментуйте таблицю.
 
-## 📱 Google Play Store
+| Головний екран | Налаштування | Віджет |
+|:---:|:---:|:---:|
+| <img src="docs/screenshots/main.png" width="240"> | <img src="docs/screenshots/settings.png" width="240"> | <img src="docs/screenshots/widget.png" width="240"> |
+-->
 
-> 🚀 **Незабаром у Google Play:**  
-> [Завантажити в Google Play Store](https://play.google.com/store/apps/details?id=ua.blackout.prewarning) *(посилання буде активовано після публікації)*.  
-> Готові тестові APK та AAB бандли доступні в розділі [Releases](https://github.com/IgorZaharov/Android-ZTBlackoutPreWarning/releases) та в артефактах GitHub Actions.
+## Можливості
 
----
+- **Графік для вашої черги.** Застосунок завантажує таблицю відключень, знаходить рядок вибраної черги (1.1–6.2) і виділяє періоди без світла на сьогодні та, коли він опублікований, на завтра.
+- **Зворотний відлік.** Великий таймер до найближчого відключення або до відновлення живлення, плюс шкала доби з маркером поточного часу.
+- **Попередження заздалегідь.** Сповіщення за 5–240 хвилин до відключення, з точним спрацюванням через `AlarmManager`. На кожен слот приходить не більше одного сповіщення, навіть після оновлення даних чи перезапуску. Звук і вібрацію можна вимкнути окремо.
+- **Віджет Glance.** Показує чергу, статус і таймер, має кнопку вмикання/вимкнення сповіщень, а дотик відкриває застосунок. Розмір від 2×1 і більше.
+- **Фонове оновлення.** `WorkManager` періодично перевіряє сайт (мінімум раз на 15 хвилин, інтервал у застосунку налаштовується), а після перезавантаження телефона розклад і сигнали відновлюються.
+- **Вигляд.** Material 3, світла/темна/системна тема, українська й англійська мови (за замовчуванням мова системи).
 
-## ✨ Основні можливості (Features)
+## Вимоги
 
-1. **Автоматичний парсинг офіційних графіків:**
-   - Регулярна перевірка та аналіз офіційної таблиці погодинних відключень `ztoe.com.ua`.
-   - Пошук рядка вибраної черги (1.1–6.2) та точне виділення періодів відключень (24 години).
-2. **Точний зворотний відлік:**
-   - Великий інформативний таймер із часом, що залишився до найближчого відключення або до відновлення електропостачання.
-   - Чіткий 24-годинний графік із покажчиком поточного часу та бінарним статусом (світло є / відключення) для вибраної черги.
-3. **Надійні завчасні сповіщення (Strict Single-Alert Rule):**
-   - Налаштування власного часу попередження у хвилинах до настання відключення.
-   - **Правило 1 сповіщення на слот:** система дедуплікації гарантує, що сповіщення надсилається **лише один раз** на кожен конкретний слот відключення.
-   - Зручний перемикач увімкнення/вимкнення тривог безпосередньо на головному екрані.
-4. **Довідка «Як дізнатися свою чергу»:**
-   - Вбудована покрокова інструкція в налаштуваннях черги з прямим посиланням на офіційну сторінку пошуку адреси.
-5. **Інтерактивний віджет робочого столу Android (Jetpack Glance):**
-   - **Компактний розмір 2x1:** відображає чергу, статус, таймер до найближчого відключення та **окрему кнопку зупинки/відновлення сповіщень** безпосередньо з віджета!
-   - **Розширений розмір 3x2 / 4x2:** повний зворотний відлік, діапазон годин, міні-шкала 24h та кнопка сповіщень.
-   - **Клік по тілу віджета:** миттєво відкриває додаток.
-6. **Дизайн Google Material 3 та теми:**
-   - Повна підтримка світлої, темної (OLED економія батареї) та системної теми.
-   - Двомовний інтерфейс: Українська та English (з автоматичним визначенням мови системи або ручним перемикачем).
-7. **Повна автономність та CI/CD:**
-   - Усі збірки APK та AAB формуються через GitHub Actions у хмарі.
+- Android 8.0+ (API 26)
+- Доступ до інтернету. Дозвіл на сповіщення (Android 13+) і точні будильники потрібні для попереджень.
 
----
+## Збірка
 
-## 🖼️ Скріншоти інтерфейсу (Screenshots)
+Потрібні JDK 17 та Android SDK (compileSdk 35). Найпростіше відкрити папку `android/` в Android Studio.
 
-```
-┌───────────────────────────────┐     ┌───────────────────────────────┐
-│  ⚡ ZT Blackout Pre-Warning   │     │  📱 Android Glance Widget     │
-│  Черга 2.1 · ztoe.com.ua      │     │                               │
-│                               │     │  ┌─────────────────────────┐  │
-│  ┌─────────────────────────┐  │     │  │ Ч 2.1 · Через 1г 35хв   │  │
-│  │ ДО ВІДКЛЮЧЕННЯ:         │  │     │  │ [🔕 Зупинити сповіщення]│  │
-│  │       01 : 35 : 12      │  │     │  └─────────────────────────┘  │
-│  │ Слот: 14:00 – 18:00     │  │     │                               │
-│  └─────────────────────────┘  │     │  Натискання відкриває додаток │
-│  [24-ГОДИННА ШКАЛА ЧАСУ]      │     └───────────────────────────────┘
-│  [🔄 Оновити]  [🔔 Увімкнено] │
-└───────────────────────────────┘
-```
-
----
-
-## 🏗️ Технічний стек (Architecture)
-
-- **Мова:** Kotlin 2.0+
-- **UI:** Jetpack Compose (Material 3)
-- **AppWidget:** AndroidX Glance AppWidget 1.1.1
-- **Фонова робота:** AndroidX WorkManager (CoroutineWorker)
-- **Точні сигнали:** Android AlarmManager (`SCHEDULE_EXACT_ALARM`)
-- **Парсинг:** Jsoup HTML Parser 1.18+
-- **Збереження даних:** Jetpack DataStore Preferences
-
----
-
-## 🚀 Збірка проекту (Building from Source)
-
-Для збірки проекту через Gradle:
+З командного рядка:
 
 ```bash
-# Клонувати репозиторій
 git clone https://github.com/IgorZaharov/Android-ZTBlackoutPreWarning.git
-cd Android-ZTBlackoutPreWarning
+cd Android-ZTBlackoutPreWarning/android
 
-# Збірка Debug APK
-./gradlew assembleDebug
-
-# Збірка Release App Bundle (AAB) для Google Play
-./gradlew bundleRelease
+gradle assembleDebug     # app/build/outputs/apk/debug/app-debug-*.apk
+gradle bundleRelease     # app/build/outputs/bundle/release/app-release.aab
 ```
 
-Згенерований APK знаходитиметься за шляхом:  
-`app/build/outputs/apk/debug/app-debug.apk`
+У репозиторії немає `gradle-wrapper.jar`, тому `./gradlew` не запрацює без нього. Використовуйте встановлений Gradle 8.11.1 (як у CI) або згенеруйте wrapper командою `gradle wrapper`.
 
----
+Release-збірка поки підписується debug-ключем (`app/build.gradle.kts`). Для публікації в Google Play підставте власний keystore.
 
-## 📋 Журнал змін (Changelog)
+GitHub Actions ([`.github/workflows/build-apk.yml`](.github/workflows/build-apk.yml)) збирає debug APK та release AAB при кожному push і pull request у `main` і зберігає їх як артефакти запуску.
 
-### Версія 1.0.0 (Поточний реліз)
-- ✅ Початковий реліз нативного Android додатку з Jetpack Compose та Material 3.
-- ✅ Модуль парсингу офіційних таблиць `https://www.ztoe.com.ua/unhooking-search.php`.
-- ✅ Підтримка черг 1.1–6.2 та налаштування власної URL адреси.
-- ✅ Точний 24-годинний графік із покажчиком поточного часу та таймером відліку.
-- ✅ Механізм завчасного попередження з гарантією «1 сповіщення на слот».
-- ✅ Віджети Glance (2x1 та 3x2) з кнопкою керування сповіщеннями та відкриттям додатку по кліку.
-- ✅ Автоматичний CI/CD пайплайн на базі GitHub Actions для збірки APK/AAB.
-- ✅ Двомовна локалізація (Українська / English) та підтримка системної темної теми.
+## Як це працює
 
----
+1. `ScheduleSyncWorker` через `ZtoeParser` (Jsoup) завантажує сторінку й отримує слоти `POWER_ON` / `POWER_OFF` для черги. Дозволені лише адреси `ztoe.com.ua`.
+2. Для кожного майбутнього відключення плануються точні сигнали (`AlarmReceiver`), а `AlertRegistry` запам'ятовує, про які слоти вже сповіщено.
+3. Головний екран і віджет рахують таймер і шкалу з тих самих даних, тому показують однакові значення.
+4. Налаштування зберігаються локально в `SharedPreferences`. Застосунок не збирає й нікуди не відправляє особисті дані.
 
-## 👤 Автор та контакти
+## Структура репозиторію
 
-- **Розробник:** Ігор Захаров ([@IgorZaharov](https://github.com/IgorZaharov))
-- **Повідомити про помилку / Пропозиції:** [GitHub Issues](https://github.com/IgorZaharov/Android-ZTBlackoutPreWarning/issues)
-- **Оригінальний Desktop проект:** [UABlackoutPreWarning](https://github.com/IgorZaharov/UABlackoutPreWarning)
+```
+android/                     Android-проєкт (Kotlin, Jetpack Compose)
+  app/src/main/java/ua/blackout/prewarning/
+    data/                    модель, парсер ztoe.com.ua, репозиторії
+    notification/            AlarmReceiver, канали сповіщень
+    worker/                  фонова синхронізація, відновлення після перезавантаження
+    widget/                  віджет Glance і кнопка перемикання
+    ui/                      екрани, компоненти, теми, локалізація
+src/, index.html, vite.config.ts
+                             веб-симулятор інтерфейсу (React + Vite), згенерований у AI Studio
+scripts/                     допоміжні скрипти
+```
 
----
-*Додаток використовує відкриті публічні дані сайту ztoe.com.ua. Не є офіційним продуктом АТ «Житомиробленерго».*
+Веб-симулятор потрібен лише для перегляду дизайну, у збірці застосунку він не бере участі. Запуск: `bun install && bun run dev`.
+
+## Стек
+
+Kotlin 2.0, Jetpack Compose + Material 3, Glance 1.1, WorkManager 2.10, Jsoup 1.18, Navigation Compose, Kotlin Coroutines. Збірка на AGP 8.7.
+
+## Автор
+
+Ігор Захаров ([@IgorZaharov](https://github.com/IgorZaharov)). Помилки й пропозиції надсилайте в [Issues](https://github.com/IgorZaharov/Android-ZTBlackoutPreWarning/issues).
