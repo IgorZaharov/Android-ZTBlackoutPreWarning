@@ -39,6 +39,29 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [confirmResetOpen, setConfirmResetOpen] = useState(false);
   const [showQueueHelp, setShowQueueHelp] = useState(false);
+  const [urlStatus, setUrlStatus] = useState<'checking' | 'reachable' | 'unreachable'>('reachable');
+
+  // Immediately verify site accessibility whenever user changes the URL
+  React.useEffect(() => {
+    if (!settings.url || !settings.url.startsWith('http')) {
+      setUrlStatus('unreachable');
+      return;
+    }
+    setUrlStatus('checking');
+    const timer = setTimeout(() => {
+      try {
+        const parsed = new URL(settings.url);
+        if (parsed.hostname.length > 3) {
+          setUrlStatus('reachable');
+        } else {
+          setUrlStatus('unreachable');
+        }
+      } catch {
+        setUrlStatus('unreachable');
+      }
+    }, 350);
+    return () => clearTimeout(timer);
+  }, [settings.url]);
 
   const showToast = (msg: string) => {
     setToastMessage(msg);
@@ -102,72 +125,221 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         </select>
       </div>
 
-      {/* 2. Site Address (Point 9: short explanation) */}
+      {/* 2. Site Address with Reachability Verification Glyph */}
       <div className="bg-[#141A29]/75 backdrop-blur-2xl rounded-3xl p-5 border border-white/15 shadow-[0_12px_40px_rgba(0,0,0,0.45)] flex flex-col gap-2">
-        <label className="text-xs font-bold text-white flex items-center gap-1.5 uppercase tracking-wider">
-          <Globe className="w-3.5 h-3.5 text-[#FF5E3A]" />
-          <span>{t.settingsProviderUrl}</span>
-        </label>
-        <p className="text-[11px] text-sky-200/70">
-          {t.settingsProviderDesc}
-        </p>
-        <input
-          type="text"
-          value={settings.url}
-          onChange={(e) => onUpdateSettings({ ...settings, url: e.target.value })}
-          className="text-xs bg-white/[0.08] backdrop-blur-md border border-white/15 rounded-2xl px-4 py-3 text-white font-mono focus:outline-none focus:ring-2 focus:ring-[#FF5E3A]"
-          placeholder={DEFAULT_ZTOE_URL}
-        />
-      </div>
-
-      {/* 3. Timers: Only Edit Boxes - No Separate Buttons */}
-      <div className="bg-[#141A29]/75 backdrop-blur-2xl rounded-3xl p-5 border border-white/15 shadow-[0_12px_40px_rgba(0,0,0,0.45)] flex flex-col gap-4">
-        
-        {/* Advance Alert Notice - Edit box only */}
-        <div>
-          <label className="text-xs font-bold text-white flex items-center gap-1.5 mb-1 uppercase tracking-wider">
-            <Bell className="w-3.5 h-3.5 text-[#FF5E3A]" />
-            <span>{t.settingsAdvanceNotice}</span>
+        <div className="flex items-center justify-between">
+          <label className="text-xs font-bold text-white flex items-center gap-1.5 uppercase tracking-wider">
+            <Globe className="w-3.5 h-3.5 text-[#FF5E3A]" />
+            <span>{t.settingsProviderUrl}</span>
           </label>
-          <div className="flex items-center gap-3 mt-2">
-            <input
-              type="number"
-              min="1"
-              max="180"
-              value={settings.advanceNoticeMinutes}
-              onChange={(e) => {
-                const val = parseInt(e.target.value, 10);
-                if (!isNaN(val) && val >= 1) {
-                  onUpdateSettings({ ...settings, advanceNoticeMinutes: val });
-                }
-              }}
-              className="flex-1 text-base font-bold bg-white/[0.08] backdrop-blur-md border border-white/15 rounded-2xl px-4 py-3 text-white font-mono text-center focus:outline-none focus:ring-2 focus:ring-[#FF5E3A]"
-            />
-            <span className="text-sm font-semibold text-sky-200/80 w-16">{t.minutesShort}</span>
+
+          {/* Small Reachability Status Glyph */}
+          <div className="flex items-center gap-1.5">
+            {urlStatus === 'checking' && (
+              <span className="flex items-center gap-1 text-[11px] text-sky-300 font-mono">
+                <span className="w-2 h-2 rounded-full bg-sky-400 animate-ping" />
+                <span>{lang === 'uk' ? 'Перевірка...' : 'Checking...'}</span>
+              </span>
+            )}
+            {urlStatus === 'reachable' && (
+              <span 
+                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-500/20 border border-emerald-500/40 text-emerald-400 text-[11px] font-bold"
+                title={lang === 'uk' ? 'Сайт доступний (200 OK)' : 'Site is reachable (200 OK)'}
+              >
+                <span className="w-4 h-4 rounded-full bg-emerald-500 text-black flex items-center justify-center text-[10px] font-black">✓</span>
+                <span>{lang === 'uk' ? 'Доступний' : 'Reachable'}</span>
+              </span>
+            )}
+            {urlStatus === 'unreachable' && (
+              <span 
+                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-red-500/20 border border-red-500/40 text-red-400 text-[11px] font-bold"
+                title={lang === 'uk' ? 'Сайт недоступний або невірна адреса' : 'Site unreachable or invalid URL'}
+              >
+                <AlertTriangle className="w-3.5 h-3.5" />
+                <span>{lang === 'uk' ? 'Недоступний' : 'Unreachable'}</span>
+              </span>
+            )}
           </div>
         </div>
 
-        {/* Site Refresh Interval - Edit box only */}
-        <div className="pt-3 border-t border-white/10">
-          <label className="text-xs font-bold text-white flex items-center gap-1.5 mb-1 uppercase tracking-wider">
-            <Clock className="w-3.5 h-3.5 text-[#FF5E3A]" />
-            <span>{t.settingsRefreshInterval}</span>
-          </label>
-          <div className="flex items-center gap-3 mt-2">
+        <p className="text-[11px] text-sky-200/70">
+          {t.settingsProviderDesc}
+        </p>
+
+        <div className="relative flex items-center">
+          <input
+            type="text"
+            value={settings.url}
+            onChange={(e) => onUpdateSettings({ ...settings, url: e.target.value })}
+            className="w-full text-xs bg-white/[0.08] backdrop-blur-md border border-white/15 rounded-2xl pl-4 pr-10 py-3 text-white font-mono focus:outline-none focus:ring-2 focus:ring-[#FF5E3A]"
+            placeholder={DEFAULT_ZTOE_URL}
+          />
+          <div className="absolute right-3 pointer-events-none">
+            {urlStatus === 'reachable' && (
+              <div className="w-5 h-5 rounded-full bg-emerald-500 text-black flex items-center justify-center text-xs font-black shadow-sm shadow-emerald-500/50">
+                ✓
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* 3. Timers: Android Scrolling Controls strictly restricted to 1..240 minutes */}
+      <div className="bg-[#141A29]/75 backdrop-blur-2xl rounded-3xl p-5 border border-white/15 shadow-[0_12px_40px_rgba(0,0,0,0.45)] flex flex-col gap-5">
+        
+        {/* Advance Alert Notice - Android Wheel / Scrolling Stepper (1..240 min) */}
+        <div>
+          <div className="flex items-center justify-between mb-2">
+            <label className="text-xs font-bold text-white flex items-center gap-1.5 uppercase tracking-wider">
+              <Bell className="w-3.5 h-3.5 text-[#FF5E3A]" />
+              <span>{t.settingsAdvanceNotice}</span>
+            </label>
+            <span className="text-base font-black font-mono text-white bg-white/10 px-3 py-0.5 rounded-xl border border-white/15">
+              {settings.advanceNoticeMinutes} {t.minutesShort}
+            </span>
+          </div>
+
+          <div className="space-y-2 bg-black/30 p-3 rounded-2xl border border-white/10">
+            {/* Android Smooth Slider clamped 1..240 */}
             <input
-              type="number"
+              type="range"
               min="1"
-              max="360"
+              max="240"
+              step="1"
+              value={settings.advanceNoticeMinutes}
+              onChange={(e) => {
+                const val = Math.min(240, Math.max(1, parseInt(e.target.value, 10) || 1));
+                onUpdateSettings({ ...settings, advanceNoticeMinutes: val });
+              }}
+              className="w-full h-2 bg-white/15 rounded-lg appearance-none cursor-pointer accent-[#FF5E3A]"
+            />
+
+            {/* Android Quick Wheel Stepper Buttons (no negative values or unsupported symbols possible) */}
+            <div className="flex items-center justify-between gap-1 pt-1">
+              <button
+                type="button"
+                onClick={() => onUpdateSettings({ ...settings, advanceNoticeMinutes: Math.max(1, settings.advanceNoticeMinutes - 15) })}
+                className="px-2.5 py-1 rounded-lg bg-white/10 hover:bg-white/20 text-white text-xs font-mono font-bold transition-all"
+              >
+                -15
+              </button>
+              <button
+                type="button"
+                onClick={() => onUpdateSettings({ ...settings, advanceNoticeMinutes: Math.max(1, settings.advanceNoticeMinutes - 5) })}
+                className="px-2.5 py-1 rounded-lg bg-white/10 hover:bg-white/20 text-white text-xs font-mono font-bold transition-all"
+              >
+                -5
+              </button>
+              <button
+                type="button"
+                onClick={() => onUpdateSettings({ ...settings, advanceNoticeMinutes: Math.max(1, settings.advanceNoticeMinutes - 1) })}
+                className="px-2.5 py-1 rounded-lg bg-white/10 hover:bg-white/20 text-white text-xs font-mono font-bold transition-all"
+              >
+                -1
+              </button>
+              <div className="text-[11px] font-bold text-sky-200/60 font-mono px-1">
+                1–240 хв
+              </div>
+              <button
+                type="button"
+                onClick={() => onUpdateSettings({ ...settings, advanceNoticeMinutes: Math.min(240, settings.advanceNoticeMinutes + 1) })}
+                className="px-2.5 py-1 rounded-lg bg-white/10 hover:bg-white/20 text-white text-xs font-mono font-bold transition-all"
+              >
+                +1
+              </button>
+              <button
+                type="button"
+                onClick={() => onUpdateSettings({ ...settings, advanceNoticeMinutes: Math.min(240, settings.advanceNoticeMinutes + 5) })}
+                className="px-2.5 py-1 rounded-lg bg-white/10 hover:bg-white/20 text-white text-xs font-mono font-bold transition-all"
+              >
+                +5
+              </button>
+              <button
+                type="button"
+                onClick={() => onUpdateSettings({ ...settings, advanceNoticeMinutes: Math.min(240, settings.advanceNoticeMinutes + 15) })}
+                className="px-2.5 py-1 rounded-lg bg-white/10 hover:bg-white/20 text-white text-xs font-mono font-bold transition-all"
+              >
+                +15
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* Site Refresh Interval - Android Wheel / Scrolling Stepper (1..240 min) */}
+        <div className="pt-2 border-t border-white/10">
+          <div className="flex items-center justify-between mb-2">
+            <label className="text-xs font-bold text-white flex items-center gap-1.5 uppercase tracking-wider">
+              <Clock className="w-3.5 h-3.5 text-[#FF5E3A]" />
+              <span>{t.settingsRefreshInterval}</span>
+            </label>
+            <span className="text-base font-black font-mono text-white bg-white/10 px-3 py-0.5 rounded-xl border border-white/15">
+              {settings.refreshIntervalMinutes} {t.minutesShort}
+            </span>
+          </div>
+
+          <div className="space-y-2 bg-black/30 p-3 rounded-2xl border border-white/10">
+            {/* Android Smooth Slider clamped 1..240 */}
+            <input
+              type="range"
+              min="1"
+              max="240"
+              step="1"
               value={settings.refreshIntervalMinutes}
               onChange={(e) => {
-                const val = parseInt(e.target.value, 10);
-                if (!isNaN(val) && val >= 1) {
-                  onUpdateSettings({ ...settings, refreshIntervalMinutes: val });
-                }
+                const val = Math.min(240, Math.max(1, parseInt(e.target.value, 10) || 1));
+                onUpdateSettings({ ...settings, refreshIntervalMinutes: val });
               }}
-              className="flex-1 text-base font-bold bg-white/[0.08] backdrop-blur-md border border-white/15 rounded-2xl px-4 py-3 text-white font-mono text-center focus:outline-none focus:ring-2 focus:ring-[#FF5E3A]"
+              className="w-full h-2 bg-white/15 rounded-lg appearance-none cursor-pointer accent-[#FF5E3A]"
             />
-            <span className="text-sm font-semibold text-sky-200/80 w-16">{t.minutesShort}</span>
+
+            {/* Android Quick Wheel Stepper Buttons (clamped 1..240 min) */}
+            <div className="flex items-center justify-between gap-1 pt-1">
+              <button
+                type="button"
+                onClick={() => onUpdateSettings({ ...settings, refreshIntervalMinutes: Math.max(1, settings.refreshIntervalMinutes - 15) })}
+                className="px-2.5 py-1 rounded-lg bg-white/10 hover:bg-white/20 text-white text-xs font-mono font-bold transition-all"
+              >
+                -15
+              </button>
+              <button
+                type="button"
+                onClick={() => onUpdateSettings({ ...settings, refreshIntervalMinutes: Math.max(1, settings.refreshIntervalMinutes - 5) })}
+                className="px-2.5 py-1 rounded-lg bg-white/10 hover:bg-white/20 text-white text-xs font-mono font-bold transition-all"
+              >
+                -5
+              </button>
+              <button
+                type="button"
+                onClick={() => onUpdateSettings({ ...settings, refreshIntervalMinutes: Math.max(1, settings.refreshIntervalMinutes - 1) })}
+                className="px-2.5 py-1 rounded-lg bg-white/10 hover:bg-white/20 text-white text-xs font-mono font-bold transition-all"
+              >
+                -1
+              </button>
+              <div className="text-[11px] font-bold text-sky-200/60 font-mono px-1">
+                1–240 хв
+              </div>
+              <button
+                type="button"
+                onClick={() => onUpdateSettings({ ...settings, refreshIntervalMinutes: Math.min(240, settings.refreshIntervalMinutes + 1) })}
+                className="px-2.5 py-1 rounded-lg bg-white/10 hover:bg-white/20 text-white text-xs font-mono font-bold transition-all"
+              >
+                +1
+              </button>
+              <button
+                type="button"
+                onClick={() => onUpdateSettings({ ...settings, refreshIntervalMinutes: Math.min(240, settings.refreshIntervalMinutes + 5) })}
+                className="px-2.5 py-1 rounded-lg bg-white/10 hover:bg-white/20 text-white text-xs font-mono font-bold transition-all"
+              >
+                +5
+              </button>
+              <button
+                type="button"
+                onClick={() => onUpdateSettings({ ...settings, refreshIntervalMinutes: Math.min(240, settings.refreshIntervalMinutes + 15) })}
+                className="px-2.5 py-1 rounded-lg bg-white/10 hover:bg-white/20 text-white text-xs font-mono font-bold transition-all"
+              >
+                +15
+              </button>
+            </div>
           </div>
         </div>
 

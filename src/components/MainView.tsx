@@ -198,7 +198,7 @@ export const MainView: React.FC<MainViewProps> = ({
         </button>
       </div>
 
-      {/* Schedule Card (Point 4: NO "24-hour schedule" text heading) */}
+      {/* Schedule Card */}
       <div className="bg-[#141A29]/75 backdrop-blur-2xl rounded-3xl p-5 border border-white/15 shadow-[0_12px_40px_rgba(0,0,0,0.45)] flex flex-col gap-4">
         
         {/* Pillar Chart Canvas */}
@@ -206,7 +206,7 @@ export const MainView: React.FC<MainViewProps> = ({
           {/* Current time floating needle indicator */}
           {selectedDayTab === 'today' && (
             <div
-              className="absolute top-0 bottom-0 z-20 flex flex-col items-center pointer-events-none transition-all duration-500"
+              className="absolute top-0 bottom-6 z-20 flex flex-col items-center pointer-events-none transition-all duration-500"
               style={{ left: `${Math.min(97, Math.max(3, timePercent))}%` }}
             >
               <div className="bg-white text-black text-[9px] font-bold px-1.5 py-0.5 rounded-full shadow-lg -translate-y-1">
@@ -216,8 +216,8 @@ export const MainView: React.FC<MainViewProps> = ({
             </div>
           )}
 
-          {/* 24 Rounded Vertical Pillars */}
-          <div className="flex items-end justify-between gap-1 h-20 px-1.5 bg-black/35 backdrop-blur-md rounded-2xl p-2 border border-white/10">
+          {/* 24 Hour Columns with 2 sub-blocks per hour closer together and bigger spacing between hours */}
+          <div className="flex items-end justify-between gap-1.5 sm:gap-2 h-20 px-2 bg-black/40 backdrop-blur-md rounded-2xl p-2 border border-white/10 overflow-x-auto">
             {activeSchedule.slots.map((slot, sIdx) => {
               const isOff = slot.status === 'POWER_OFF';
               const isCurrent = selectedDayTab === 'today' && currentHour === slot.startHour;
@@ -225,23 +225,49 @@ export const MainView: React.FC<MainViewProps> = ({
               return (
                 <div
                   key={`${selectedDayTab}_${slot.id}_${slot.startHour}_${sIdx}`}
-                  className="flex-1 flex flex-col items-center justify-end h-full"
+                  className={`flex-1 flex flex-col items-center justify-end h-full group cursor-pointer ${
+                    isCurrent ? 'relative' : ''
+                  }`}
                   title={`${slot.startTimeStr} - ${slot.endTimeStr}: ${isOff ? 'Немає світла' : 'Світло є'}`}
                 >
-                  <div
-                    className={`w-full rounded-md transition-all ${
-                      isOff
-                        ? 'h-[85%] bg-[#FF5E3A] shadow-md shadow-[#FF5E3A]/40'
-                        : 'h-[35%] bg-white/15 hover:bg-white/25'
-                    } ${isCurrent ? 'ring-2 ring-white scale-105' : ''}`}
-                  />
+                  {/* Two sub-blocks representing this one hour, closely grouped together */}
+                  <div className={`w-full flex items-end gap-[1.5px] h-full ${isCurrent ? 'ring-1 ring-white/80 rounded-md p-0.5 bg-white/10' : ''}`}>
+                    {/* First 30 min block */}
+                    <div
+                      className={`flex-1 rounded-[3px] transition-all ${
+                        isOff
+                          ? 'h-[85%] bg-[#FF5E3A] shadow-sm shadow-[#FF5E3A]/40'
+                          : 'h-[32%] bg-white/20 group-hover:bg-white/35'
+                      }`}
+                    />
+                    {/* Second 30 min block */}
+                    <div
+                      className={`flex-1 rounded-[3px] transition-all ${
+                        isOff
+                          ? 'h-[85%] bg-[#FF5E3A] shadow-sm shadow-[#FF5E3A]/40'
+                          : 'h-[32%] bg-white/20 group-hover:bg-white/35'
+                      }`}
+                    />
+                  </div>
+
+                  {/* Micro hour indicator for 0, 3, 6, 9, 12, 15, 18, 21 */}
+                  {slot.startHour % 3 === 0 && (
+                    <div className="text-[9px] font-mono font-bold text-sky-200/50 mt-1 select-none">
+                      {slot.startHour.toString().padStart(2, '0')}
+                    </div>
+                  )}
+                  {slot.startHour % 3 !== 0 && (
+                    <div className="text-[9px] font-mono text-transparent mt-1 select-none">
+                      --
+                    </div>
+                  )}
                 </div>
               );
             })}
           </div>
 
           {/* Clean 24-Hour Markers */}
-          <div className="flex justify-between text-xs font-mono text-sky-200/70 mt-2.5 px-1 font-semibold">
+          <div className="flex justify-between text-xs font-mono text-sky-200/70 mt-1 px-1 font-semibold">
             <span>00:00</span>
             <span>06:00</span>
             <span>12:00</span>

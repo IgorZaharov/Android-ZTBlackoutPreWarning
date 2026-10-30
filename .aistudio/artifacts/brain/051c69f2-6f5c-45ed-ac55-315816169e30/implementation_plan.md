@@ -17,7 +17,7 @@ A native Android mobile application with Jetpack Compose, Material 3, and WorkMa
 - **Confirmed Alert Engine**: **WorkManager Periodic Worker** (15-min background fetch) combined with Android **AlarmManager exact alarms** for precise advance notifications (e.g. 15, 30, or 60 minutes before scheduled power cut) and **NotificationManager** channels.
 - **Confirmed Parser Architecture**: **Zhytomyroblenergo (`ztoe.com.ua`) primary parser** built on an extensible provider interface (`OblenergoProvider`) so additional regional oblenergos (DTEK, Lvivoblenergo, etc.) can be seamlessly added later.
 - **Dual Delivery Strategy**:
-  1. Complete native Android project structure with Kotlin/Compose source files, Glance Widget, AndroidManifest, Gradle setup, and GitHub Actions CI workflow to build unsigned and release APK/AAB artifacts directly in your repository (`https://github.com/IgorZaharov/Android-ZTBlackoutPreWarning`).
+  1. Complete native Android project structure with Kotlin/Compose source files, Glance Widget, AndroidManifest, Gradle setup, and GitHub Actions CI workflow to build unsigned and release APK/AAB artifacts directly in your repository (`https://github.com/IgorZaharov/Android-ZTBlackoutPreWarning`). **[STATUS: Successfully pushed to branch `main` on GitHub; GitHub Actions APK build running]**
   2. A fully interactive, high-fidelity web prototype and visual simulator running right here in AI Studio, allowing you to preview the Android mobile UI (with Android status bar, gesture navigation, simulated widget, light/dark modes, Ukrainian/English localization, and live table parser inspection).
 
 ---

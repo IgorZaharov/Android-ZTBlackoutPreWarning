@@ -1,12 +1,34 @@
-#!/bin/sh
-APP_BASE_NAME=`basename "$0"`
-GRADLE_USER_HOME=${GRADLE_USER_HOME:-$HOME/.gradle}
-export GRADLE_USER_HOME
+#!/bin/bash
+set -e
 
-# Attempt to locate gradle or run gradlew
+DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" >/dev/null 2>&1 && pwd)"
+cd "$DIR"
+
+# Check if installed gradle is version 8.x
 if command -v gradle >/dev/null 2>&1; then
-    exec gradle "$@"
-else
-    echo "Using gradle wrapper..."
-    exec gradle "$@"
+    VER=$(gradle -v 2>/dev/null | grep -E '^Gradle [0-9]' | awk '{print $2}' || true)
+    if [[ "$VER" =~ ^8\. ]]; then
+        exec gradle "$@"
+    fi
 fi
+
+# Fallback: Download and use official Gradle 8.11.1
+GRADLE_VER="8.11.1"
+DIST_DIR="$HOME/.gradle/wrapper/dists/gradle-${GRADLE_VER}-bin"
+GRADLE_BIN="$(find "$DIST_DIR" -name "gradle" -type f -perm /111 2>/dev/null | head -n 1 || true)"
+
+if [ -z "$GRADLE_BIN" ] || [ ! -x "$GRADLE_BIN" ]; then
+    mkdir -p "$HOME/.gradle/wrapper/dists"
+    echo "Downloading Gradle ${GRADLE_VER} for Android..."
+    ZIP_PATH="/tmp/gradle-${GRADLE_VER}-bin.zip"
+    curl -sSL "https://services.gradle.org/distributions/gradle-${GRADLE_VER}-bin.zip" -o "$ZIP_PATH"
+    unzip -q -o "$ZIP_PATH" -d "$HOME/.gradle/wrapper/dists/"
+    rm -f "$ZIP_PATH"
+    GRADLE_BIN="$(find "$DIST_DIR" -name "gradle" -type f -perm /111 2>/dev/null | head -n 1)"
+fi
+
+if [ -n "$GRADLE_BIN" ] && [ -x "$GRADLE_BIN" ]; then
+    exec "$GRADLE_BIN" "$@"
+fi
+
+exec gradle "$@"

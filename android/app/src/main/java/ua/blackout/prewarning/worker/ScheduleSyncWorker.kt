@@ -62,7 +62,7 @@ class ScheduleSyncWorker(
                 val endHour = block.second
                 val startStr = String.format("%02d:00", startHour)
                 val endStr = String.format("%02d:00", endHour)
-                val blockId = "block_\${today}_\${startStr}_\${endStr}_Q\${settings.queue}"
+                val blockId = "block_${today}_${startStr}_${endStr}_Q${settings.queue}"
 
                 if (alertRegistry.hasNotified(blockId)) {
                     continue // Block already alerted
@@ -101,5 +101,9 @@ class ScheduleSyncWorker(
         } catch (e: Exception) {
             Result.retry()
         }
+    }
+
+    companion object {
+        const val WORK_NAME = "ScheduleSyncWorker"
     }
 }

@@ -52,7 +52,7 @@ class BlackoutGlanceWidget : GlanceAppWidget() {
                             verticalAlignment = Alignment.Vertical.CenterVertically
                         ) {
                             Text(
-                                text = "⚡ Черга \${settings.queue}",
+                                text = "⚡ Черга ${settings.queue}",
                                 style = TextStyle(
                                     fontWeight = FontWeight.Bold,
                                     fontSize = 14.sp,

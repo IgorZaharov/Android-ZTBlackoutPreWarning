@@ -21,7 +21,11 @@ jobs:
         with:
           java-version: '17'
           distribution: 'temurin'
-          cache: 'gradle'
+
+      - name: Set up Gradle 8.11.1
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
 
       - name: Grant Execute Permission for Gradlew
         run: |
@@ -30,22 +34,17 @@ jobs:
 
       - name: Build Debug APK
         run: |
-          if [ -f gradlew ]; then
-            ./gradlew assembleDebug --stacktrace
-          elif [ -f android/gradlew ]; then
-            cd android && ./gradlew assembleDebug --stacktrace
-          else
-            echo "Installing gradle to build project..."
-            gradle assembleDebug --stacktrace
+          if [ -d android ]; then
+            cd android
           fi
+          gradle assembleDebug --stacktrace
 
       - name: Build Release Bundle (AAB) for Google Play
         run: |
-          if [ -f gradlew ]; then
-            ./gradlew bundleRelease --stacktrace || true
-          elif [ -f android/gradlew ]; then
-            cd android && ./gradlew bundleRelease --stacktrace || true
+          if [ -d android ]; then
+            cd android
           fi
+          gradle bundleRelease --stacktrace || true
 
       - name: Upload Debug APK
         uses: actions/upload-artifact@v4
