@@ -19,6 +19,10 @@ object NotificationHelper {
     const val CHANNEL_VIBE_ONLY = "zt_blackout_vibe_only"
     const val CHANNEL_SILENT = "zt_blackout_silent"
 
+    fun createNotificationChannel(context: Context) {
+        createNotificationChannels(context)
+    }
+
     fun createNotificationChannels(context: Context) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager

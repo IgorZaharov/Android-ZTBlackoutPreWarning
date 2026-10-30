@@ -14,7 +14,7 @@ class BlackoutApp : Application() {
         super.onCreate()
         
         // Setup high-priority Notification Channels
-        NotificationHelper.createNotificationChannel(this)
+        NotificationHelper.createNotificationChannels(this)
 
         // Schedule periodic 15-minute background check with WorkManager
         schedulePeriodicSync()
