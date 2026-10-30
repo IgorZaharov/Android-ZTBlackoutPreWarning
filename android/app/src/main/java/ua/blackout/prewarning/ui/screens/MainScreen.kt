@@ -125,7 +125,10 @@ fun MainScreen(
 
             // 24-Hour Visual Schedule Timeline
             Text("Графік на сьогодні (24 години)", fontWeight = FontWeight.Bold, fontSize = 16.sp)
-            TimelineBar()
+            TimelineBar(
+                currentHour = java.time.LocalTime.now().hour,
+                currentMinute = java.time.LocalTime.now().minute
+            )
 
             // Quick actions
             Row(

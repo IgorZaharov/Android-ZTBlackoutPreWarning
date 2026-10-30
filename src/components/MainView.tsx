@@ -201,78 +201,80 @@ export const MainView: React.FC<MainViewProps> = ({
       {/* Schedule Card with 24h Timeline matching user screenshot */}
       <div className="bg-[#141A29]/75 backdrop-blur-2xl rounded-3xl p-5 border border-white/15 shadow-[0_12px_40px_rgba(0,0,0,0.45)] flex flex-col gap-4">
         
-        {/* Timeline Canvas Container - No horizontal scroll, fits width seamlessly */}
-        <div className="relative pt-3 pb-2 select-none">
+        {/* Dark container for 24h timeline bar matching reference screenshot */}
+        <div className="bg-[#18181A] rounded-2xl p-3 select-none flex flex-col">
           
-          {/* Blocks container */}
-          <div className="relative">
-            {/* Current time vertical needle indicator (exact line as in screenshot) */}
-            {selectedDayTab === 'today' && (
-              <div
-                className="absolute -top-1 bottom-0 z-20 pointer-events-none transition-all duration-500 flex flex-col items-center"
-                style={{ left: `${Math.min(99.5, Math.max(0.5, timePercent))}%` }}
-              >
-                <div className="w-[2px] h-[34px] bg-white shadow-[0_0_6px_rgba(255,255,255,0.9)] rounded-full -translate-x-1/2" />
-              </div>
-            )}
-
-            {/* 24 Hours, each containing two 30-min vertical rectangular blocks */}
-            <div className="flex w-full items-center justify-between gap-[3px] sm:gap-[5px] p-2 bg-[#101319] rounded-xl border border-white/10">
+          {/* 24-hour block row with embedded tick marks */}
+          <div className="relative w-full pb-6">
+            
+            {/* The 24 hours */}
+            <div className="flex w-full items-center justify-between gap-[3px]">
               {activeSchedule.slots.map((slot) => {
+                const h = slot.startHour;
                 const isOff = slot.status === 'POWER_OFF';
-                const hStr = slot.startHour.toString().padStart(2, '0');
-                const nextHStr = (slot.startHour + 1 === 24 ? 24 : slot.startHour + 1).toString().padStart(2, '0');
+                const hStr = h.toString().padStart(2, '0');
+                const nextHStr = (h + 1 === 24 ? 24 : h + 1).toString().padStart(2, '0');
+                const isCurrentHour = selectedDayTab === 'today' && h === currentHour;
 
                 return (
                   <div
-                    key={`${selectedDayTab}_${slot.id}_${slot.startHour}`}
-                    className="flex-1 flex items-center gap-[1px]"
+                    key={`${selectedDayTab}_${slot.id}_${h}`}
+                    className="relative flex-1"
                   >
-                    {/* First half-hour: XX:00 - XX:30 */}
-                    <div
-                      className={`flex-1 h-7 rounded-[1px] transition-colors cursor-pointer ${
-                        isOff 
-                          ? 'bg-[#E53E3E] hover:bg-[#F54949]' 
-                          : 'bg-[#33373E] hover:bg-[#3D424A]'
-                      }`}
-                      title={`${hStr}:00 – ${hStr}:30: ${isOff ? 'Немає світла (відключення)' : 'Світло є'}`}
-                    />
-                    {/* Second half-hour: XX:30 - (XX+1):00 */}
-                    <div
-                      className={`flex-1 h-7 rounded-[1px] transition-colors cursor-pointer ${
-                        isOff 
-                          ? 'bg-[#E53E3E] hover:bg-[#F54949]' 
-                          : 'bg-[#33373E] hover:bg-[#3D424A]'
-                      }`}
-                      title={`${hStr}:30 – ${nextHStr}:00: ${isOff ? 'Немає світла (відключення)' : 'Світло є'}`}
-                    />
+                    {/* Two 30-min vertical rectangular blocks */}
+                    <div className="flex w-full items-center gap-[1px]">
+                      {/* 00 - 30 */}
+                      <div
+                        className={`flex-1 h-8 rounded-[1px] transition-colors cursor-pointer ${
+                          isOff 
+                            ? 'bg-[#DC3C32] hover:bg-[#E84A40]' 
+                            : 'bg-[#373737] hover:bg-[#454545]'
+                        }`}
+                        title={`${hStr}:00 – ${hStr}:30: ${isOff ? 'Немає світла (відключення)' : 'Світло є'}`}
+                      />
+                      {/* 30 - 60 */}
+                      <div
+                        className={`flex-1 h-8 rounded-[1px] transition-colors cursor-pointer ${
+                          isOff 
+                            ? 'bg-[#DC3C32] hover:bg-[#E84A40]' 
+                            : 'bg-[#373737] hover:bg-[#454545]'
+                        }`}
+                        title={`${hStr}:30 – ${nextHStr}:00: ${isOff ? 'Немає світла (відключення)' : 'Світло є'}`}
+                      />
+                    </div>
+
+                    {/* Exact Current Time Needle (solid 2px white line cutting through the blocks) */}
+                    {isCurrentHour && (
+                      <div
+                        className="absolute top-0 bottom-0 w-[2px] bg-white pointer-events-none z-20 -translate-x-1/2"
+                        style={{ left: `${(currentMinute / 60) * 100}%` }}
+                      />
+                    )}
+
+                    {/* Tick mark and hour label at the left boundary of every even hour (00, 02..22) */}
+                    {h % 2 === 0 && (
+                      <div className="absolute top-9 left-0 -translate-x-1/2 flex flex-col items-center pointer-events-none z-10">
+                        <div className="w-[1px] h-[5px] bg-[#707070]" />
+                        <span className="text-[10px] sm:text-[11px] font-mono text-[#CCCCCC] mt-0.5 leading-none">
+                          {hStr}
+                        </span>
+                      </div>
+                    )}
+
+                    {/* Tick mark and label 24 at the right boundary of hour 23 */}
+                    {h === 23 && (
+                      <div className="absolute top-9 right-0 translate-x-1/2 flex flex-col items-center pointer-events-none z-10">
+                        <div className="w-[1px] h-[5px] bg-[#707070]" />
+                        <span className="text-[10px] sm:text-[11px] font-mono text-[#CCCCCC] mt-0.5 leading-none">
+                          24
+                        </span>
+                      </div>
+                    )}
                   </div>
                 );
               })}
             </div>
           </div>
-
-          {/* Clean 2-Hour Tick Marks and Labels: 00, 02, 04, 06, 08, 10, 12, 14, 16, 18, 20, 22, 24 */}
-          <div className="relative w-full h-8 mt-1 px-2">
-            {[0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24].map((hour) => {
-              const leftPercent = (hour / 24) * 100;
-              return (
-                <div
-                  key={hour}
-                  className="absolute flex flex-col items-center -translate-x-1/2"
-                  style={{ left: `${leftPercent}%` }}
-                >
-                  {/* Vertical tick mark */}
-                  <div className="w-[1px] h-1.5 bg-white/40" />
-                  {/* Two-digit hour label */}
-                  <span className="text-[10px] font-mono font-medium text-sky-200/80 mt-0.5">
-                    {hour.toString().padStart(2, '0')}
-                  </span>
-                </div>
-              );
-            })}
-          </div>
-
         </div>
 
         {/* Clear List of Outage Hours for this day */}
