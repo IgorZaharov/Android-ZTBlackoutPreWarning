@@ -1,0 +1,6 @@
+{
+  "summary":  "Revised implementation plan incorporating user feedback: notifications are sent strictly once per blackout slot, tapping the widget launches the app, and the 2x1 widget features an integrated quick-toggle button to enable/disable notifications.",
+  "updatedAt":  "2026-10-30T17:22:19.315890618Z",
+  "requestFeedback":  true,
+  "userFacing":  true
+}

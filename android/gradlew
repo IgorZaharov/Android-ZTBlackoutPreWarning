@@ -1,0 +1,12 @@
+#!/bin/sh
+APP_BASE_NAME=`basename "$0"`
+GRADLE_USER_HOME=${GRADLE_USER_HOME:-$HOME/.gradle}
+export GRADLE_USER_HOME
+
+# Attempt to locate gradle or run gradlew
+if command -v gradle >/dev/null 2>&1; then
+    exec gradle "$@"
+else
+    echo "Using gradle wrapper..."
+    exec gradle "$@"
+fi
