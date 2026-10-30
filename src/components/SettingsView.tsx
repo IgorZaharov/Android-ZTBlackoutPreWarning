@@ -15,7 +15,7 @@ import {
   ExternalLink
 } from 'lucide-react';
 import { UserSettings, Language } from '../types';
-import { QUEUES, DEFAULT_ZTOE_URL } from '../services/ztoeParser';
+import { QUEUES, DEFAULT_ZTOE_URL, verifyZtoeSiteAndData } from '../services/ztoeParser';
 import { translations } from '../services/i18n';
 
 interface SettingsViewProps {
@@ -39,29 +39,53 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [confirmResetOpen, setConfirmResetOpen] = useState(false);
   const [showQueueHelp, setShowQueueHelp] = useState(false);
-  const [urlStatus, setUrlStatus] = useState<'checking' | 'reachable' | 'unreachable'>('reachable');
+  const [verification, setVerification] = useState<{
+    isChecking: boolean;
+    isAvailable: boolean;
+    hasData: boolean;
+    message: string;
+  }>({
+    isChecking: false,
+    isAvailable: true,
+    hasData: true,
+    message: ''
+  });
 
-  // Immediately verify site accessibility whenever user changes the URL
+  // Verify site accessibility and data presence on URL or queue change
   React.useEffect(() => {
-    if (!settings.url || !settings.url.startsWith('http')) {
-      setUrlStatus('unreachable');
-      return;
-    }
-    setUrlStatus('checking');
-    const timer = setTimeout(() => {
-      try {
-        const parsed = new URL(settings.url);
-        if (parsed.hostname.length > 3) {
-          setUrlStatus('reachable');
-        } else {
-          setUrlStatus('unreachable');
-        }
-      } catch {
-        setUrlStatus('unreachable');
+    let isMounted = true;
+    setVerification(prev => ({ ...prev, isChecking: true }));
+
+    const timer = setTimeout(async () => {
+      const res = await verifyZtoeSiteAndData(settings.url, settings.queue);
+      if (isMounted) {
+        setVerification({
+          isChecking: false,
+          isAvailable: res.isAvailable,
+          hasData: res.hasData,
+          message: lang === 'uk' ? res.messageUk : res.messageEn
+        });
       }
     }, 350);
-    return () => clearTimeout(timer);
-  }, [settings.url]);
+
+    return () => {
+      isMounted = false;
+      clearTimeout(timer);
+    };
+  }, [settings.url, settings.queue, lang]);
+
+  const handleForceRefreshWithVerification = async () => {
+    setVerification(prev => ({ ...prev, isChecking: true }));
+    onForceRefresh();
+    const res = await verifyZtoeSiteAndData(settings.url, settings.queue);
+    setVerification({
+      isChecking: false,
+      isAvailable: res.isAvailable,
+      hasData: res.hasData,
+      message: lang === 'uk' ? res.messageUk : res.messageEn
+    });
+    showToast(lang === 'uk' ? 'Сайт перевірено та дані оновлено' : 'Site verified and schedule refreshed');
+  };
 
   const showToast = (msg: string) => {
     setToastMessage(msg);
@@ -125,7 +149,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         </select>
       </div>
 
-      {/* 2. Site Address with Reachability Verification Glyph */}
+      {/* 2. Site Address with Reachability and Data Verification Glyph */}
       <div className="bg-[#141A29]/75 backdrop-blur-2xl rounded-3xl p-5 border border-white/15 shadow-[0_12px_40px_rgba(0,0,0,0.45)] flex flex-col gap-2">
         <div className="flex items-center justify-between">
           <label className="text-xs font-bold text-white flex items-center gap-1.5 uppercase tracking-wider">
@@ -133,29 +157,38 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             <span>{t.settingsProviderUrl}</span>
           </label>
 
-          {/* Small Reachability Status Glyph */}
+          {/* Small Reachability & Data Status Glyph */}
           <div className="flex items-center gap-1.5">
-            {urlStatus === 'checking' && (
+            {verification.isChecking && (
               <span className="flex items-center gap-1 text-[11px] text-sky-300 font-mono">
                 <span className="w-2 h-2 rounded-full bg-sky-400 animate-ping" />
-                <span>{lang === 'uk' ? 'Перевірка...' : 'Checking...'}</span>
+                <span>{lang === 'uk' ? 'Перевірка сайту і даних...' : 'Checking data...'}</span>
               </span>
             )}
-            {urlStatus === 'reachable' && (
+            {!verification.isChecking && verification.isAvailable && verification.hasData && (
               <span 
-                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-500/20 border border-emerald-500/40 text-emerald-400 text-[11px] font-bold"
-                title={lang === 'uk' ? 'Сайт доступний (200 OK)' : 'Site is reachable (200 OK)'}
+                className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-emerald-500/20 border border-emerald-500/40 text-emerald-400 text-[11px] font-bold"
+                title={verification.message}
               >
                 <span className="w-4 h-4 rounded-full bg-emerald-500 text-black flex items-center justify-center text-[10px] font-black">✓</span>
                 <span>{lang === 'uk' ? 'Доступний' : 'Reachable'}</span>
               </span>
             )}
-            {urlStatus === 'unreachable' && (
+            {!verification.isChecking && verification.isAvailable && !verification.hasData && (
               <span 
-                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-red-500/20 border border-red-500/40 text-red-400 text-[11px] font-bold"
-                title={lang === 'uk' ? 'Сайт недоступний або невірна адреса' : 'Site unreachable or invalid URL'}
+                className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-amber-500/20 border border-amber-500/40 text-amber-400 text-[11px] font-bold"
+                title={verification.message}
               >
                 <AlertTriangle className="w-3.5 h-3.5" />
+                <span>{lang === 'uk' ? 'Дані не знайдено' : 'No data'}</span>
+              </span>
+            )}
+            {!verification.isChecking && !verification.isAvailable && (
+              <span 
+                className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-red-500/20 border border-red-500/40 text-red-400 text-[11px] font-bold"
+                title={verification.message}
+              >
+                <X className="w-3.5 h-3.5" />
                 <span>{lang === 'uk' ? 'Недоступний' : 'Unreachable'}</span>
               </span>
             )}
@@ -175,171 +208,79 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             placeholder={DEFAULT_ZTOE_URL}
           />
           <div className="absolute right-3 pointer-events-none">
-            {urlStatus === 'reachable' && (
+            {!verification.isChecking && verification.isAvailable && verification.hasData && (
               <div className="w-5 h-5 rounded-full bg-emerald-500 text-black flex items-center justify-center text-xs font-black shadow-sm shadow-emerald-500/50">
                 ✓
               </div>
             )}
           </div>
         </div>
+
+        {verification.message && (
+          <div className="text-[10px] text-sky-200/60 font-mono">
+            {verification.message}
+          </div>
+        )}
       </div>
 
-      {/* 3. Timers: Android Scrolling Controls strictly restricted to 1..240 minutes */}
-      <div className="bg-[#141A29]/75 backdrop-blur-2xl rounded-3xl p-5 border border-white/15 shadow-[0_12px_40px_rgba(0,0,0,0.45)] flex flex-col gap-5">
+      {/* 3. Timers: Clean Edit Boxes restricted strictly to 1..240 (No extra buttons or sliders) */}
+      <div className="bg-[#141A29]/75 backdrop-blur-2xl rounded-3xl p-5 border border-white/15 shadow-[0_12px_40px_rgba(0,0,0,0.45)] flex flex-col gap-4">
         
-        {/* Advance Alert Notice - Android Wheel / Scrolling Stepper (1..240 min) */}
+        {/* Advance Alert Notice - Edit box only (1..240 min) */}
         <div>
-          <div className="flex items-center justify-between mb-2">
-            <label className="text-xs font-bold text-white flex items-center gap-1.5 uppercase tracking-wider">
-              <Bell className="w-3.5 h-3.5 text-[#FF5E3A]" />
-              <span>{t.settingsAdvanceNotice}</span>
-            </label>
-            <span className="text-base font-black font-mono text-white bg-white/10 px-3 py-0.5 rounded-xl border border-white/15">
-              {settings.advanceNoticeMinutes} {t.minutesShort}
-            </span>
-          </div>
-
-          <div className="space-y-2 bg-black/30 p-3 rounded-2xl border border-white/10">
-            {/* Android Smooth Slider clamped 1..240 */}
+          <label className="text-xs font-bold text-white flex items-center gap-1.5 mb-1 uppercase tracking-wider">
+            <Bell className="w-3.5 h-3.5 text-[#FF5E3A]" />
+            <span>{t.settingsAdvanceNotice}</span>
+          </label>
+          <div className="flex items-center gap-3 mt-2">
             <input
-              type="range"
+              type="number"
               min="1"
               max="240"
-              step="1"
               value={settings.advanceNoticeMinutes}
               onChange={(e) => {
-                const val = Math.min(240, Math.max(1, parseInt(e.target.value, 10) || 1));
-                onUpdateSettings({ ...settings, advanceNoticeMinutes: val });
+                const val = parseInt(e.target.value, 10);
+                if (!isNaN(val)) {
+                  onUpdateSettings({ ...settings, advanceNoticeMinutes: Math.min(240, Math.max(1, val)) });
+                }
               }}
-              className="w-full h-2 bg-white/15 rounded-lg appearance-none cursor-pointer accent-[#FF5E3A]"
+              onBlur={(e) => {
+                const val = parseInt(e.target.value, 10);
+                const clamped = isNaN(val) ? 30 : Math.min(240, Math.max(1, val));
+                onUpdateSettings({ ...settings, advanceNoticeMinutes: clamped });
+              }}
+              className="flex-1 text-base font-bold bg-white/[0.08] backdrop-blur-md border border-white/15 rounded-2xl px-4 py-3 text-white font-mono text-center focus:outline-none focus:ring-2 focus:ring-[#FF5E3A]"
             />
-
-            {/* Android Quick Wheel Stepper Buttons (no negative values or unsupported symbols possible) */}
-            <div className="flex items-center justify-between gap-1 pt-1">
-              <button
-                type="button"
-                onClick={() => onUpdateSettings({ ...settings, advanceNoticeMinutes: Math.max(1, settings.advanceNoticeMinutes - 15) })}
-                className="px-2.5 py-1 rounded-lg bg-white/10 hover:bg-white/20 text-white text-xs font-mono font-bold transition-all"
-              >
-                -15
-              </button>
-              <button
-                type="button"
-                onClick={() => onUpdateSettings({ ...settings, advanceNoticeMinutes: Math.max(1, settings.advanceNoticeMinutes - 5) })}
-                className="px-2.5 py-1 rounded-lg bg-white/10 hover:bg-white/20 text-white text-xs font-mono font-bold transition-all"
-              >
-                -5
-              </button>
-              <button
-                type="button"
-                onClick={() => onUpdateSettings({ ...settings, advanceNoticeMinutes: Math.max(1, settings.advanceNoticeMinutes - 1) })}
-                className="px-2.5 py-1 rounded-lg bg-white/10 hover:bg-white/20 text-white text-xs font-mono font-bold transition-all"
-              >
-                -1
-              </button>
-              <div className="text-[11px] font-bold text-sky-200/60 font-mono px-1">
-                1–240 хв
-              </div>
-              <button
-                type="button"
-                onClick={() => onUpdateSettings({ ...settings, advanceNoticeMinutes: Math.min(240, settings.advanceNoticeMinutes + 1) })}
-                className="px-2.5 py-1 rounded-lg bg-white/10 hover:bg-white/20 text-white text-xs font-mono font-bold transition-all"
-              >
-                +1
-              </button>
-              <button
-                type="button"
-                onClick={() => onUpdateSettings({ ...settings, advanceNoticeMinutes: Math.min(240, settings.advanceNoticeMinutes + 5) })}
-                className="px-2.5 py-1 rounded-lg bg-white/10 hover:bg-white/20 text-white text-xs font-mono font-bold transition-all"
-              >
-                +5
-              </button>
-              <button
-                type="button"
-                onClick={() => onUpdateSettings({ ...settings, advanceNoticeMinutes: Math.min(240, settings.advanceNoticeMinutes + 15) })}
-                className="px-2.5 py-1 rounded-lg bg-white/10 hover:bg-white/20 text-white text-xs font-mono font-bold transition-all"
-              >
-                +15
-              </button>
-            </div>
+            <span className="text-sm font-semibold text-sky-200/80 w-16">{t.minutesShort}</span>
           </div>
         </div>
 
-        {/* Site Refresh Interval - Android Wheel / Scrolling Stepper (1..240 min) */}
-        <div className="pt-2 border-t border-white/10">
-          <div className="flex items-center justify-between mb-2">
-            <label className="text-xs font-bold text-white flex items-center gap-1.5 uppercase tracking-wider">
-              <Clock className="w-3.5 h-3.5 text-[#FF5E3A]" />
-              <span>{t.settingsRefreshInterval}</span>
-            </label>
-            <span className="text-base font-black font-mono text-white bg-white/10 px-3 py-0.5 rounded-xl border border-white/15">
-              {settings.refreshIntervalMinutes} {t.minutesShort}
-            </span>
-          </div>
-
-          <div className="space-y-2 bg-black/30 p-3 rounded-2xl border border-white/10">
-            {/* Android Smooth Slider clamped 1..240 */}
+        {/* Site Refresh Interval - Edit box only (1..240 min) */}
+        <div className="pt-3 border-t border-white/10">
+          <label className="text-xs font-bold text-white flex items-center gap-1.5 mb-1 uppercase tracking-wider">
+            <Clock className="w-3.5 h-3.5 text-[#FF5E3A]" />
+            <span>{t.settingsRefreshInterval}</span>
+          </label>
+          <div className="flex items-center gap-3 mt-2">
             <input
-              type="range"
+              type="number"
               min="1"
               max="240"
-              step="1"
               value={settings.refreshIntervalMinutes}
               onChange={(e) => {
-                const val = Math.min(240, Math.max(1, parseInt(e.target.value, 10) || 1));
-                onUpdateSettings({ ...settings, refreshIntervalMinutes: val });
+                const val = parseInt(e.target.value, 10);
+                if (!isNaN(val)) {
+                  onUpdateSettings({ ...settings, refreshIntervalMinutes: Math.min(240, Math.max(1, val)) });
+                }
               }}
-              className="w-full h-2 bg-white/15 rounded-lg appearance-none cursor-pointer accent-[#FF5E3A]"
+              onBlur={(e) => {
+                const val = parseInt(e.target.value, 10);
+                const clamped = isNaN(val) ? 15 : Math.min(240, Math.max(1, val));
+                onUpdateSettings({ ...settings, refreshIntervalMinutes: clamped });
+              }}
+              className="flex-1 text-base font-bold bg-white/[0.08] backdrop-blur-md border border-white/15 rounded-2xl px-4 py-3 text-white font-mono text-center focus:outline-none focus:ring-2 focus:ring-[#FF5E3A]"
             />
-
-            {/* Android Quick Wheel Stepper Buttons (clamped 1..240 min) */}
-            <div className="flex items-center justify-between gap-1 pt-1">
-              <button
-                type="button"
-                onClick={() => onUpdateSettings({ ...settings, refreshIntervalMinutes: Math.max(1, settings.refreshIntervalMinutes - 15) })}
-                className="px-2.5 py-1 rounded-lg bg-white/10 hover:bg-white/20 text-white text-xs font-mono font-bold transition-all"
-              >
-                -15
-              </button>
-              <button
-                type="button"
-                onClick={() => onUpdateSettings({ ...settings, refreshIntervalMinutes: Math.max(1, settings.refreshIntervalMinutes - 5) })}
-                className="px-2.5 py-1 rounded-lg bg-white/10 hover:bg-white/20 text-white text-xs font-mono font-bold transition-all"
-              >
-                -5
-              </button>
-              <button
-                type="button"
-                onClick={() => onUpdateSettings({ ...settings, refreshIntervalMinutes: Math.max(1, settings.refreshIntervalMinutes - 1) })}
-                className="px-2.5 py-1 rounded-lg bg-white/10 hover:bg-white/20 text-white text-xs font-mono font-bold transition-all"
-              >
-                -1
-              </button>
-              <div className="text-[11px] font-bold text-sky-200/60 font-mono px-1">
-                1–240 хв
-              </div>
-              <button
-                type="button"
-                onClick={() => onUpdateSettings({ ...settings, refreshIntervalMinutes: Math.min(240, settings.refreshIntervalMinutes + 1) })}
-                className="px-2.5 py-1 rounded-lg bg-white/10 hover:bg-white/20 text-white text-xs font-mono font-bold transition-all"
-              >
-                +1
-              </button>
-              <button
-                type="button"
-                onClick={() => onUpdateSettings({ ...settings, refreshIntervalMinutes: Math.min(240, settings.refreshIntervalMinutes + 5) })}
-                className="px-2.5 py-1 rounded-lg bg-white/10 hover:bg-white/20 text-white text-xs font-mono font-bold transition-all"
-              >
-                +5
-              </button>
-              <button
-                type="button"
-                onClick={() => onUpdateSettings({ ...settings, refreshIntervalMinutes: Math.min(240, settings.refreshIntervalMinutes + 15) })}
-                className="px-2.5 py-1 rounded-lg bg-white/10 hover:bg-white/20 text-white text-xs font-mono font-bold transition-all"
-              >
-                +15
-              </button>
-            </div>
+            <span className="text-sm font-semibold text-sky-200/80 w-16">{t.minutesShort}</span>
           </div>
         </div>
 
@@ -439,10 +380,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           </button>
 
           <button
-            onClick={() => {
-              onForceRefresh();
-              showToast(t.lastUpdated);
-            }}
+            onClick={handleForceRefreshWithVerification}
             className="flex items-center justify-center gap-2 py-3 px-4 rounded-2xl bg-white/10 hover:bg-white/20 text-white text-xs font-semibold transition-all border border-white/15"
           >
             <Globe className="w-3.5 h-3.5" />

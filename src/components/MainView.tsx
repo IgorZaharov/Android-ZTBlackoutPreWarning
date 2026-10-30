@@ -198,82 +198,81 @@ export const MainView: React.FC<MainViewProps> = ({
         </button>
       </div>
 
-      {/* Schedule Card */}
+      {/* Schedule Card with 24h Timeline matching user screenshot */}
       <div className="bg-[#141A29]/75 backdrop-blur-2xl rounded-3xl p-5 border border-white/15 shadow-[0_12px_40px_rgba(0,0,0,0.45)] flex flex-col gap-4">
         
-        {/* Pillar Chart Canvas */}
-        <div className="relative pt-6 pb-2">
-          {/* Current time floating needle indicator */}
-          {selectedDayTab === 'today' && (
-            <div
-              className="absolute top-0 bottom-6 z-20 flex flex-col items-center pointer-events-none transition-all duration-500"
-              style={{ left: `${Math.min(97, Math.max(3, timePercent))}%` }}
-            >
-              <div className="bg-white text-black text-[9px] font-bold px-1.5 py-0.5 rounded-full shadow-lg -translate-y-1">
-                {format24Time(now)}
+        {/* Timeline Canvas Container - No horizontal scroll, fits width seamlessly */}
+        <div className="relative pt-3 pb-2 select-none">
+          
+          {/* Blocks container */}
+          <div className="relative">
+            {/* Current time vertical needle indicator (exact line as in screenshot) */}
+            {selectedDayTab === 'today' && (
+              <div
+                className="absolute -top-1 bottom-0 z-20 pointer-events-none transition-all duration-500 flex flex-col items-center"
+                style={{ left: `${Math.min(99.5, Math.max(0.5, timePercent))}%` }}
+              >
+                <div className="w-[2px] h-[34px] bg-white shadow-[0_0_6px_rgba(255,255,255,0.9)] rounded-full -translate-x-1/2" />
               </div>
-              <div className="w-0.5 flex-1 bg-white" />
-            </div>
-          )}
+            )}
 
-          {/* 24 Hour Columns with 2 sub-blocks per hour closer together and bigger spacing between hours */}
-          <div className="flex items-end justify-between gap-1.5 sm:gap-2 h-20 px-2 bg-black/40 backdrop-blur-md rounded-2xl p-2 border border-white/10 overflow-x-auto">
-            {activeSchedule.slots.map((slot, sIdx) => {
-              const isOff = slot.status === 'POWER_OFF';
-              const isCurrent = selectedDayTab === 'today' && currentHour === slot.startHour;
-              
-              return (
-                <div
-                  key={`${selectedDayTab}_${slot.id}_${slot.startHour}_${sIdx}`}
-                  className={`flex-1 flex flex-col items-center justify-end h-full group cursor-pointer ${
-                    isCurrent ? 'relative' : ''
-                  }`}
-                  title={`${slot.startTimeStr} - ${slot.endTimeStr}: ${isOff ? 'Немає світла' : 'Світло є'}`}
-                >
-                  {/* Two sub-blocks representing this one hour, closely grouped together */}
-                  <div className={`w-full flex items-end gap-[1.5px] h-full ${isCurrent ? 'ring-1 ring-white/80 rounded-md p-0.5 bg-white/10' : ''}`}>
-                    {/* First 30 min block */}
+            {/* 24 Hours, each containing two 30-min vertical rectangular blocks */}
+            <div className="flex w-full items-center justify-between gap-[3px] sm:gap-[5px] p-2 bg-[#101319] rounded-xl border border-white/10">
+              {activeSchedule.slots.map((slot) => {
+                const isOff = slot.status === 'POWER_OFF';
+                const hStr = slot.startHour.toString().padStart(2, '0');
+                const nextHStr = (slot.startHour + 1 === 24 ? 24 : slot.startHour + 1).toString().padStart(2, '0');
+
+                return (
+                  <div
+                    key={`${selectedDayTab}_${slot.id}_${slot.startHour}`}
+                    className="flex-1 flex items-center gap-[1px]"
+                  >
+                    {/* First half-hour: XX:00 - XX:30 */}
                     <div
-                      className={`flex-1 rounded-[3px] transition-all ${
-                        isOff
-                          ? 'h-[85%] bg-[#FF5E3A] shadow-sm shadow-[#FF5E3A]/40'
-                          : 'h-[32%] bg-white/20 group-hover:bg-white/35'
+                      className={`flex-1 h-7 rounded-[1px] transition-colors cursor-pointer ${
+                        isOff 
+                          ? 'bg-[#E53E3E] hover:bg-[#F54949]' 
+                          : 'bg-[#33373E] hover:bg-[#3D424A]'
                       }`}
+                      title={`${hStr}:00 – ${hStr}:30: ${isOff ? 'Немає світла (відключення)' : 'Світло є'}`}
                     />
-                    {/* Second 30 min block */}
+                    {/* Second half-hour: XX:30 - (XX+1):00 */}
                     <div
-                      className={`flex-1 rounded-[3px] transition-all ${
-                        isOff
-                          ? 'h-[85%] bg-[#FF5E3A] shadow-sm shadow-[#FF5E3A]/40'
-                          : 'h-[32%] bg-white/20 group-hover:bg-white/35'
+                      className={`flex-1 h-7 rounded-[1px] transition-colors cursor-pointer ${
+                        isOff 
+                          ? 'bg-[#E53E3E] hover:bg-[#F54949]' 
+                          : 'bg-[#33373E] hover:bg-[#3D424A]'
                       }`}
+                      title={`${hStr}:30 – ${nextHStr}:00: ${isOff ? 'Немає світла (відключення)' : 'Світло є'}`}
                     />
                   </div>
+                );
+              })}
+            </div>
+          </div>
 
-                  {/* Micro hour indicator for 0, 3, 6, 9, 12, 15, 18, 21 */}
-                  {slot.startHour % 3 === 0 && (
-                    <div className="text-[9px] font-mono font-bold text-sky-200/50 mt-1 select-none">
-                      {slot.startHour.toString().padStart(2, '0')}
-                    </div>
-                  )}
-                  {slot.startHour % 3 !== 0 && (
-                    <div className="text-[9px] font-mono text-transparent mt-1 select-none">
-                      --
-                    </div>
-                  )}
+          {/* Clean 2-Hour Tick Marks and Labels: 00, 02, 04, 06, 08, 10, 12, 14, 16, 18, 20, 22, 24 */}
+          <div className="relative w-full h-8 mt-1 px-2">
+            {[0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24].map((hour) => {
+              const leftPercent = (hour / 24) * 100;
+              return (
+                <div
+                  key={hour}
+                  className="absolute flex flex-col items-center -translate-x-1/2"
+                  style={{ left: `${leftPercent}%` }}
+                >
+                  {/* Vertical tick mark */}
+                  <div className="w-[1px] h-1.5 bg-white/40" />
+                  {/* Two-digit hour label */}
+                  <span className="text-[10px] font-mono font-medium text-sky-200/80 mt-0.5">
+                    {hour.toString().padStart(2, '0')}
+                  </span>
                 </div>
               );
             })}
           </div>
 
-          {/* Clean 24-Hour Markers */}
-          <div className="flex justify-between text-xs font-mono text-sky-200/70 mt-1 px-1 font-semibold">
-            <span>00:00</span>
-            <span>06:00</span>
-            <span>12:00</span>
-            <span>18:00</span>
-            <span>24:00</span>
-          </div>
         </div>
 
         {/* Clear List of Outage Hours for this day */}

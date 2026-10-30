@@ -173,133 +173,65 @@ fun SettingsScreen(
             }
         }
 
-        // 3. Timers (Restricted to 1..240 minutes with Android Slider / Stepper controls)
+        // 3. Timers: Clean Edit Boxes strictly restricted to 1..240 (No sliders or extra buttons)
         Card(
             modifier = Modifier.fillMaxWidth(),
             shape = RoundedCornerShape(16.dp)
         ) {
             Column(
                 modifier = Modifier.padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(16.dp)
+                verticalArrangement = Arrangement.spacedBy(14.dp)
             ) {
-                // Advance warning slider & stepper (1..240 min)
+                // Advance warning (1..240 min)
                 Column {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text("Попереджати заздалегідь", fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                        Surface(
-                            color = MaterialTheme.colorScheme.secondaryContainer,
-                            shape = RoundedCornerShape(8.dp)
-                        ) {
-                            Text(
-                                text = "$advanceMinutes хв",
-                                fontWeight = FontWeight.Black,
-                                fontSize = 13.sp,
-                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
-                            )
-                        }
+                        Text("Попереджати заздалегідь (хв)", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                        Text("1–240 хв", fontSize = 11.sp, color = MaterialTheme.colorScheme.outline)
                     }
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text("Діапазон від 1 до 240 хвилин", fontSize = 11.sp, color = MaterialTheme.colorScheme.outline)
-                    Slider(
-                        value = advanceMinutes.coerceIn(1, 240).toFloat(),
-                        onValueChange = { onAdvanceMinutesChanged(it.toInt().coerceIn(1, 240)) },
-                        valueRange = 1f..240f,
-                        steps = 238
-                    )
-                    Row(
+                    Spacer(modifier = Modifier.height(6.dp))
+                    OutlinedTextField(
+                        value = advanceMinutes.toString(),
+                        onValueChange = { str ->
+                            val num = str.filter { it.isDigit() }.toIntOrNull()
+                            if (num != null) {
+                                onAdvanceMinutesChanged(num.coerceIn(1, 240))
+                            }
+                        },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        FilledTonalButton(
-                            onClick = { onAdvanceMinutesChanged((advanceMinutes - 15).coerceAtLeast(1)) },
-                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
-                        ) {
-                            Text("-15")
-                        }
-                        FilledTonalButton(
-                            onClick = { onAdvanceMinutesChanged((advanceMinutes - 5).coerceAtLeast(1)) },
-                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
-                        ) {
-                            Text("-5")
-                        }
-                        FilledTonalButton(
-                            onClick = { onAdvanceMinutesChanged((advanceMinutes + 5).coerceAtMost(240)) },
-                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
-                        ) {
-                            Text("+5")
-                        }
-                        FilledTonalButton(
-                            onClick = { onAdvanceMinutesChanged((advanceMinutes + 15).coerceAtMost(240)) },
-                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
-                        ) {
-                            Text("+15")
-                        }
-                    }
+                        shape = RoundedCornerShape(12.dp)
+                    )
                 }
 
                 HorizontalDivider()
 
-                // Refresh interval slider & stepper (1..240 min)
+                // Refresh interval (1..240 min)
                 Column {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Text("Інтервал автоперевірки сайту", fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                        Surface(
-                            color = MaterialTheme.colorScheme.secondaryContainer,
-                            shape = RoundedCornerShape(8.dp)
-                        ) {
-                            Text(
-                                text = "$refreshMinutes хв",
-                                fontWeight = FontWeight.Black,
-                                fontSize = 13.sp,
-                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
-                            )
-                        }
+                        Text("Інтервал перевірки сайту (хв)", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                        Text("1–240 хв", fontSize = 11.sp, color = MaterialTheme.colorScheme.outline)
                     }
-                    Spacer(modifier = Modifier.height(4.dp))
-                    Text("Діапазон від 1 до 240 хвилин", fontSize = 11.sp, color = MaterialTheme.colorScheme.outline)
-                    Slider(
-                        value = refreshMinutes.coerceIn(1, 240).toFloat(),
-                        onValueChange = { onRefreshMinutesChanged(it.toInt().coerceIn(1, 240)) },
-                        valueRange = 1f..240f,
-                        steps = 238
-                    )
-                    Row(
+                    Spacer(modifier = Modifier.height(6.dp))
+                    OutlinedTextField(
+                        value = refreshMinutes.toString(),
+                        onValueChange = { str ->
+                            val num = str.filter { it.isDigit() }.toIntOrNull()
+                            if (num != null) {
+                                onRefreshMinutesChanged(num.coerceIn(1, 240))
+                            }
+                        },
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        FilledTonalButton(
-                            onClick = { onRefreshMinutesChanged((refreshMinutes - 15).coerceAtLeast(1)) },
-                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
-                        ) {
-                            Text("-15")
-                        }
-                        FilledTonalButton(
-                            onClick = { onRefreshMinutesChanged((refreshMinutes - 5).coerceAtLeast(1)) },
-                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
-                        ) {
-                            Text("-5")
-                        }
-                        FilledTonalButton(
-                            onClick = { onRefreshMinutesChanged((refreshMinutes + 5).coerceAtMost(240)) },
-                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
-                        ) {
-                            Text("+5")
-                        }
-                        FilledTonalButton(
-                            onClick = { onRefreshMinutesChanged((refreshMinutes + 15).coerceAtMost(240)) },
-                            contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
-                        ) {
-                            Text("+15")
-                        }
-                    }
+                        shape = RoundedCornerShape(12.dp)
+                    )
                 }
             }
         }

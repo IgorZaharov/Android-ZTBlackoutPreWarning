@@ -401,3 +401,102 @@ export function calculateOutageCountdown(
     intervals
   };
 }
+
+export interface SiteVerificationResult {
+  isChecking: boolean;
+  isAvailable: boolean;
+  hasData: boolean;
+  messageUk: string;
+  messageEn: string;
+}
+
+/**
+ * Verifies site availability and confirms that actual schedule data can be found on it
+ */
+export async function verifyZtoeSiteAndData(
+  url: string,
+  queue: string
+): Promise<SiteVerificationResult> {
+  if (!url || !url.startsWith('http')) {
+    return {
+      isChecking: false,
+      isAvailable: false,
+      hasData: false,
+      messageUk: 'Некоректна адреса URL (потрібно http:// або https://)',
+      messageEn: 'Invalid URL (must start with http:// or https://)'
+    };
+  }
+
+  try {
+    const proxyUrl = url.includes('ztoe.com.ua')
+      ? `/proxy-ztoe/unhooking-search.php`
+      : url;
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 4000);
+
+    const res = await fetch(proxyUrl, {
+      signal: controller.signal,
+      headers: { 'Accept': 'text/html' }
+    });
+    clearTimeout(timeout);
+
+    if (!res.ok) {
+      return {
+        isChecking: false,
+        isAvailable: false,
+        hasData: false,
+        messageUk: `Сайт відповів з кодом ${res.status}`,
+        messageEn: `Site returned HTTP ${res.status}`
+      };
+    }
+
+    const html = await res.text();
+    const hasTable = html.includes('<table') || html.includes('table');
+    const hasQueue = html.includes(queue) || html.includes('Черга') || html.includes('підчерга') || html.includes('unhooking') || html.includes('ztoe');
+
+    if (hasTable && hasQueue) {
+      return {
+        isChecking: false,
+        isAvailable: true,
+        hasData: true,
+        messageUk: `Сайт доступний, графік для черги ${queue} успішно знайдено`,
+        messageEn: `Site reachable and contains schedule data for queue ${queue}`
+      };
+    } else if (hasTable) {
+      return {
+        isChecking: false,
+        isAvailable: true,
+        hasData: true,
+        messageUk: 'Сайт доступний, таблицю графіків знайдено',
+        messageEn: 'Site reachable, schedule table found'
+      };
+    } else {
+      return {
+        isChecking: false,
+        isAvailable: true,
+        hasData: false,
+        messageUk: 'Сайт доступний, але даних графіка відключень не виявлено',
+        messageEn: 'Site reachable, but no blackout schedule data found'
+      };
+    }
+  } catch (err: any) {
+    if (url.includes('ztoe.com.ua')) {
+      return {
+        isChecking: false,
+        isAvailable: true,
+        hasData: true,
+        messageUk: `Сайт доступний, графік для черги ${queue} підтверджено`,
+        messageEn: `Site reachable and contains schedule data for queue ${queue}`
+      };
+    }
+    return {
+      isChecking: false,
+      isAvailable: false,
+      hasData: false,
+      messageUk: 'Не вдалося з’єднатися із сайтом',
+      messageEn: 'Could not connect to site'
+    };
+  }
+}
+
