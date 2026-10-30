@@ -1,12 +1,12 @@
 package ua.blackout.prewarning.ui.screens
 
+import android.content.Context
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.pager.HorizontalPager
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Info
@@ -15,16 +15,26 @@ import androidx.compose.material3.Icon
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.glance.appwidget.updateAll
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import ua.blackout.prewarning.data.model.BlackoutSlot
 import ua.blackout.prewarning.data.parser.ZtoeParser
 import ua.blackout.prewarning.data.repository.SettingsRepository
 import ua.blackout.prewarning.notification.NotificationHelper
+import ua.blackout.prewarning.ui.AppStrings
+import ua.blackout.prewarning.widget.BlackoutGlanceWidget
 import java.time.LocalDate
+import java.time.LocalTime
+import java.time.format.DateTimeFormatter
 
 @Composable
 fun BlackoutAppNavigation(
@@ -43,12 +53,37 @@ fun BlackoutAppNavigation(
     var vibrationEnabled by remember { mutableStateOf(initialSettings.vibrationEnabled) }
     var currentLanguage by remember { mutableStateOf(initialSettings.language) }
 
-    // Slots for Today and Tomorrow
+    val resolvedLang = remember(currentLanguage) {
+        AppStrings.resolveLang(currentLanguage)
+    }
+
+    // Dynamic Last Updated & Next Update Timers
+    val nowTime = remember { LocalTime.now() }
+    var lastUpdated by remember {
+        mutableStateOf(nowTime.format(DateTimeFormatter.ofPattern("HH:mm")))
+    }
+    var nextUpdated by remember {
+        mutableStateOf(nowTime.plusMinutes(refreshMinutes.toLong()).format(DateTimeFormatter.ofPattern("HH:mm")))
+    }
+
+    // Slots for Today and Tomorrow with header detection
     var slots by remember {
         mutableStateOf(ZtoeParser.generateFallbackSchedule(queue, LocalDate.now().toString()))
     }
     var tomorrowSlots by remember {
-        mutableStateOf(ZtoeParser.generateFallbackSchedule(queue, LocalDate.now().plusDays(1).toString()))
+        mutableStateOf<List<BlackoutSlot>?>(null)
+    }
+    var hasTomorrowSchedule by remember { mutableStateOf(false) }
+
+    // Fetch initial schedule in background
+    LaunchedEffect(queue) {
+        withContext(Dispatchers.IO) {
+            val res = ZtoeParser.fetchFullSchedule(initialSettings.cityUrl, queue)
+            slots = res.todaySlots
+            tomorrowSlots = res.tomorrowSlots
+            hasTomorrowSchedule = res.hasTomorrowSchedule
+            BlackoutGlanceWidget().updateAll(context)
+        }
     }
 
     // Pager for swipe left/right between windows
@@ -58,23 +93,33 @@ fun BlackoutAppNavigation(
         modifier = Modifier
             .fillMaxSize()
             .background(Color(0xFF0C1019))
+            .drawBehind {
+                // Smooth top-right blue radial glow (zero clipping or rectangular artifacts!)
+                drawCircle(
+                    brush = Brush.radialGradient(
+                        colors = listOf(Color(0x552563EB), Color(0x222563EB), Color.Transparent),
+                        center = Offset(size.width * 0.95f, size.height * 0.12f),
+                        radius = size.width * 0.85f
+                    )
+                )
+                // Smooth bottom-left sky radial glow
+                drawCircle(
+                    brush = Brush.radialGradient(
+                        colors = listOf(Color(0x400EA5E9), Color(0x180EA5E9), Color.Transparent),
+                        center = Offset(size.width * 0.05f, size.height * 0.65f),
+                        radius = size.width * 0.9f
+                    )
+                )
+                // Smooth bottom-right cyan glow
+                drawCircle(
+                    brush = Brush.radialGradient(
+                        colors = listOf(Color(0x3006B6D4), Color.Transparent),
+                        center = Offset(size.width * 0.85f, size.height * 0.88f),
+                        radius = size.width * 0.75f
+                    )
+                )
+            }
     ) {
-        // Windows 11 Blue Silk Wave atmosphere glow
-        Box(
-            modifier = Modifier
-                .size(260.dp)
-                .align(Alignment.TopEnd)
-                .blur(80.dp)
-                .background(Color(0x332563EB), CircleShape)
-        )
-        Box(
-            modifier = Modifier
-                .size(240.dp)
-                .align(Alignment.BottomStart)
-                .blur(70.dp)
-                .background(Color(0x260EA5E9), CircleShape)
-        )
-
         // Main swipeable screens
         HorizontalPager(
             state = pagerState,
@@ -89,16 +134,31 @@ fun BlackoutAppNavigation(
                         slotTimeText = "14:00 – 18:00",
                         slots = slots,
                         tomorrowSlots = tomorrowSlots,
+                        hasTomorrowSchedule = hasTomorrowSchedule,
                         notificationsEnabled = notificationsEnabled,
-                        lastUpdated = "19:27",
-                        nextUpdated = "19:42",
+                        lastUpdated = lastUpdated,
+                        nextUpdated = nextUpdated,
+                        lang = resolvedLang,
                         onToggleNotifications = {
                             notificationsEnabled = !notificationsEnabled
                             settingsRepo.updateNotificationsEnabled(notificationsEnabled)
+                            coroutineScope.launch {
+                                BlackoutGlanceWidget().updateAll(context)
+                            }
                         },
                         onRefresh = {
-                            slots = ZtoeParser.generateFallbackSchedule(queue, LocalDate.now().toString())
-                            tomorrowSlots = ZtoeParser.generateFallbackSchedule(queue, LocalDate.now().plusDays(1).toString())
+                            val now = LocalTime.now()
+                            lastUpdated = now.format(DateTimeFormatter.ofPattern("HH:mm"))
+                            nextUpdated = now.plusMinutes(refreshMinutes.toLong()).format(DateTimeFormatter.ofPattern("HH:mm"))
+
+                            coroutineScope.launch(Dispatchers.IO) {
+                                val currentSettings = settingsRepo.getSettings()
+                                val res = ZtoeParser.fetchFullSchedule(currentSettings.cityUrl, queue)
+                                slots = res.todaySlots
+                                tomorrowSlots = res.tomorrowSlots
+                                hasTomorrowSchedule = res.hasTomorrowSchedule
+                                BlackoutGlanceWidget().updateAll(context)
+                            }
                         }
                     )
                 }
@@ -111,12 +171,19 @@ fun BlackoutAppNavigation(
                         soundEnabled = soundEnabled,
                         vibrationEnabled = vibrationEnabled,
                         currentLanguage = currentLanguage,
-                        onQueueSelected = {
-                            queue = it
-                            slots = ZtoeParser.generateFallbackSchedule(queue, LocalDate.now().toString())
-                            tomorrowSlots = ZtoeParser.generateFallbackSchedule(queue, LocalDate.now().plusDays(1).toString())
+                        lang = resolvedLang,
+                        onQueueSelected = { newQueue ->
+                            queue = newQueue
                             val current = settingsRepo.getSettings()
-                            settingsRepo.saveSettings(current.copy(queue = it))
+                            settingsRepo.saveSettings(current.copy(queue = newQueue))
+
+                            coroutineScope.launch(Dispatchers.IO) {
+                                val res = ZtoeParser.fetchFullSchedule(current.cityUrl, newQueue)
+                                slots = res.todaySlots
+                                tomorrowSlots = res.tomorrowSlots
+                                hasTomorrowSchedule = res.hasTomorrowSchedule
+                                BlackoutGlanceWidget().updateAll(context)
+                            }
                         },
                         onAdvanceMinutesChanged = {
                             advanceMinutes = it
@@ -127,10 +194,15 @@ fun BlackoutAppNavigation(
                             refreshMinutes = it
                             val current = settingsRepo.getSettings()
                             settingsRepo.saveSettings(current.copy(refreshIntervalMinutes = it.toLong()))
+                            val now = LocalTime.now()
+                            nextUpdated = now.plusMinutes(it.toLong()).format(DateTimeFormatter.ofPattern("HH:mm"))
                         },
                         onToggleNotifications = {
                             notificationsEnabled = it
                             settingsRepo.updateNotificationsEnabled(it)
+                            coroutineScope.launch {
+                                BlackoutGlanceWidget().updateAll(context)
+                            }
                         },
                         onToggleSound = {
                             soundEnabled = it
@@ -148,17 +220,31 @@ fun BlackoutAppNavigation(
                             settingsRepo.saveSettings(current.copy(language = it))
                         },
                         onSendTestAlert = {
-                            // Test Notification without any lightning icon
+                            // Test notification strictly respects sound and vibration settings
                             NotificationHelper.showPreWarningNotification(
-                                context,
-                                9999,
-                                "Тестове попередження",
-                                "Черга $queue: відключення розпочнеться о 14:00 (через $advanceMinutes хв)."
+                                context = context,
+                                notificationId = 9999,
+                                title = if (resolvedLang == "uk") "Тестове попередження" else "Test notification",
+                                body = if (resolvedLang == "uk")
+                                    "Черга $queue: відключення розпочнеться о 14:00 (через $advanceMinutes хв)."
+                                else
+                                    "Queue $queue: blackout begins at 14:00 (in $advanceMinutes min).",
+                                isTest = true
                             )
                         },
                         onForceRefresh = {
-                            slots = ZtoeParser.generateFallbackSchedule(queue, LocalDate.now().toString())
-                            tomorrowSlots = ZtoeParser.generateFallbackSchedule(queue, LocalDate.now().plusDays(1).toString())
+                            val now = LocalTime.now()
+                            lastUpdated = now.format(DateTimeFormatter.ofPattern("HH:mm"))
+                            nextUpdated = now.plusMinutes(refreshMinutes.toLong()).format(DateTimeFormatter.ofPattern("HH:mm"))
+
+                            coroutineScope.launch(Dispatchers.IO) {
+                                val currentSettings = settingsRepo.getSettings()
+                                val res = ZtoeParser.fetchFullSchedule(currentSettings.cityUrl, queue)
+                                slots = res.todaySlots
+                                tomorrowSlots = res.tomorrowSlots
+                                hasTomorrowSchedule = res.hasTomorrowSchedule
+                                BlackoutGlanceWidget().updateAll(context)
+                            }
                         },
                         onResetDefaults = {
                             queue = "1.1"
@@ -168,6 +254,7 @@ fun BlackoutAppNavigation(
                             soundEnabled = true
                             vibrationEnabled = true
                             currentLanguage = "SYSTEM"
+
                             val current = settingsRepo.getSettings()
                             settingsRepo.saveSettings(
                                 current.copy(
@@ -180,12 +267,19 @@ fun BlackoutAppNavigation(
                                     language = "SYSTEM"
                                 )
                             )
-                            slots = ZtoeParser.generateFallbackSchedule(queue, LocalDate.now().toString())
+
+                            coroutineScope.launch(Dispatchers.IO) {
+                                val res = ZtoeParser.fetchFullSchedule(current.cityUrl, "1.1")
+                                slots = res.todaySlots
+                                tomorrowSlots = res.tomorrowSlots
+                                hasTomorrowSchedule = res.hasTomorrowSchedule
+                                BlackoutGlanceWidget().updateAll(context)
+                            }
                         }
                     )
                 }
                 2 -> {
-                    AboutScreen()
+                    AboutScreen(lang = resolvedLang)
                 }
             }
         }
@@ -194,6 +288,7 @@ fun BlackoutAppNavigation(
         Box(
             modifier = Modifier
                 .align(Alignment.BottomCenter)
+                .navigationBarsPadding()
                 .padding(bottom = 16.dp)
         ) {
             Box(

@@ -32,6 +32,7 @@ import ua.blackout.prewarning.R
 import ua.blackout.prewarning.data.model.SlotStatus
 import ua.blackout.prewarning.data.repository.ScheduleRepository
 import ua.blackout.prewarning.data.repository.SettingsRepository
+import java.time.LocalTime
 
 class BlackoutGlanceWidget : GlanceAppWidget() {
 
@@ -52,7 +53,10 @@ class BlackoutGlanceWidget : GlanceAppWidget() {
 
         provideContent {
             val size = LocalSize.current
-            val isBigWidget = size.height >= 120.dp || size.width >= 240.dp
+            val isBigWidget = size.height >= 115.dp || size.width >= 230.dp
+
+            val statusText = if (info.isBlackoutNow) "СВІТЛА НЕМАЄ" else "СВІТЛО Є"
+            val statusColor = if (info.isBlackoutNow) Color(0xFFFF5E3A) else Color(0xFF34D399)
 
             GlanceTheme {
                 Box(
@@ -61,7 +65,6 @@ class BlackoutGlanceWidget : GlanceAppWidget() {
                         .cornerRadius(20.dp)
                         .background(ColorProvider(Color(0xFF141A29)))
                         .padding(12.dp)
-                        .clickable(actionStartActivity<MainActivity>())
                 ) {
                     if (isBigWidget) {
                         // ----------------- 3x2 BIG WIDGET -----------------
@@ -74,7 +77,11 @@ class BlackoutGlanceWidget : GlanceAppWidget() {
                                 modifier = GlanceModifier.fillMaxWidth(),
                                 verticalAlignment = Alignment.Vertical.CenterVertically
                             ) {
-                                Column(modifier = GlanceModifier.defaultWeight()) {
+                                Column(
+                                    modifier = GlanceModifier
+                                        .defaultWeight()
+                                        .clickable(actionStartActivity<MainActivity>())
+                                ) {
                                     Text(
                                         text = "Черга ${settings.queue}",
                                         style = TextStyle(
@@ -84,16 +91,16 @@ class BlackoutGlanceWidget : GlanceAppWidget() {
                                         )
                                     )
                                     Text(
-                                        text = if (info.isBlackoutNow) "ЗНЕСТРУМЛЕНО" else "СВІТЛО Є",
+                                        text = statusText,
                                         style = TextStyle(
                                             fontWeight = FontWeight.Bold,
                                             fontSize = 11.sp,
-                                            color = ColorProvider(if (info.isBlackoutNow) Color(0xFFFF5E3A) else Color(0xFF34D399))
+                                            color = ColorProvider(statusColor)
                                         )
                                     )
                                 }
 
-                                // Clean Notification Bell Toggle (No text, no emoji!)
+                                // Dedicated toggle button (not inside clickable parent)
                                 Box(
                                     modifier = GlanceModifier
                                         .size(36.dp)
@@ -114,13 +121,14 @@ class BlackoutGlanceWidget : GlanceAppWidget() {
 
                             Spacer(modifier = GlanceModifier.height(8.dp))
 
-                            // Countdown Card Row
+                            // Countdown Card Row (clickable to open app)
                             Row(
                                 modifier = GlanceModifier
                                     .fillMaxWidth()
                                     .cornerRadius(12.dp)
                                     .background(ColorProvider(Color(0x33000000)))
-                                    .padding(horizontal = 10.dp, vertical = 6.dp),
+                                    .padding(horizontal = 10.dp, vertical = 6.dp)
+                                    .clickable(actionStartActivity<MainActivity>()),
                                 verticalAlignment = Alignment.Vertical.CenterVertically
                             ) {
                                 Column(modifier = GlanceModifier.defaultWeight()) {
@@ -155,24 +163,31 @@ class BlackoutGlanceWidget : GlanceAppWidget() {
 
                             Spacer(modifier = GlanceModifier.height(8.dp))
 
-                            // 24-Hour Visual Schedule Bar
+                            // 24-Hour Visual Schedule Bar matching main screen (red & gray)
                             Row(
                                 modifier = GlanceModifier
                                     .fillMaxWidth()
                                     .height(20.dp)
                                     .cornerRadius(6.dp)
-                                    .background(ColorProvider(Color(0x4D000000)))
-                                    .padding(2.dp),
+                                    .background(ColorProvider(Color(0xFF18181A)))
+                                    .padding(2.dp)
+                                    .clickable(actionStartActivity<MainActivity>()),
                                 verticalAlignment = Alignment.Vertical.CenterVertically
                             ) {
+                                val currentH = LocalTime.now().hour
                                 slots.forEach { slot ->
                                     val isOff = slot.status == SlotStatus.POWER_OFF
+                                    val isCurrent = slot.startHour == currentH
                                     Box(
                                         modifier = GlanceModifier
                                             .defaultWeight()
                                             .height(16.dp)
                                             .background(
-                                                ColorProvider(if (isOff) Color(0xFFDC3C32) else Color(0x33FFFFFF))
+                                                ColorProvider(
+                                                    if (isCurrent) Color.White
+                                                    else if (isOff) Color(0xFFDC3C32)
+                                                    else Color(0xFF373737)
+                                                )
                                             )
                                     ) {}
                                 }
@@ -205,7 +220,8 @@ class BlackoutGlanceWidget : GlanceAppWidget() {
                                         .fillMaxWidth()
                                         .cornerRadius(8.dp)
                                         .background(ColorProvider(Color(0x26000000)))
-                                        .padding(horizontal = 8.dp, vertical = 3.dp),
+                                        .padding(horizontal = 8.dp, vertical = 3.dp)
+                                        .clickable(actionStartActivity<MainActivity>()),
                                     verticalAlignment = Alignment.Vertical.CenterVertically
                                 ) {
                                     Text(
@@ -233,7 +249,7 @@ class BlackoutGlanceWidget : GlanceAppWidget() {
                             modifier = GlanceModifier.fillMaxSize(),
                             verticalAlignment = Alignment.Vertical.CenterVertically
                         ) {
-                            // Top Row: Queue + Status (No lightning ⚡!)
+                            // Top Row: Queue + Status
                             Row(
                                 modifier = GlanceModifier.fillMaxWidth(),
                                 verticalAlignment = Alignment.Vertical.CenterVertically
@@ -244,27 +260,33 @@ class BlackoutGlanceWidget : GlanceAppWidget() {
                                         fontWeight = FontWeight.Bold,
                                         fontSize = 14.sp,
                                         color = ColorProvider(Color.White)
-                                    )
+                                    ),
+                                    modifier = GlanceModifier.clickable(actionStartActivity<MainActivity>())
                                 )
                                 Spacer(modifier = GlanceModifier.defaultWeight())
                                 Text(
-                                    text = if (info.isBlackoutNow) "ЗНЕСТРУМЛЕНО" else "СВІТЛО Є",
+                                    text = statusText,
                                     style = TextStyle(
                                         fontWeight = FontWeight.Bold,
                                         fontSize = 10.sp,
-                                        color = ColorProvider(if (info.isBlackoutNow) Color(0xFFFF5E3A) else Color(0xFF34D399))
-                                    )
+                                        color = ColorProvider(statusColor)
+                                    ),
+                                    modifier = GlanceModifier.clickable(actionStartActivity<MainActivity>())
                                 )
                             }
 
                             Spacer(modifier = GlanceModifier.height(4.dp))
 
-                            // Bottom Row: Countdown + Toggle
+                            // Bottom Row: Countdown + Dedicated Toggle Button
                             Row(
                                 modifier = GlanceModifier.fillMaxWidth(),
                                 verticalAlignment = Alignment.Vertical.CenterVertically
                             ) {
-                                Column(modifier = GlanceModifier.defaultWeight()) {
+                                Column(
+                                    modifier = GlanceModifier
+                                        .defaultWeight()
+                                        .clickable(actionStartActivity<MainActivity>())
+                                ) {
                                     Text(
                                         text = if (info.isBlackoutNow) "До увімкнення:" else "До відключення:",
                                         style = TextStyle(fontSize = 10.sp, color = ColorProvider(Color(0xB3BAE6FD)))
@@ -279,7 +301,7 @@ class BlackoutGlanceWidget : GlanceAppWidget() {
                                     )
                                 }
 
-                                // Clean Notification Bell Toggle (No text, no emoji!)
+                                // Dedicated toggle button with direct click callback
                                 Box(
                                     modifier = GlanceModifier
                                         .size(34.dp)
@@ -313,7 +335,8 @@ class ToggleAlertsActionCallback : ActionCallback {
     ) {
         val settingsRepo = SettingsRepository(context)
         val current = settingsRepo.getSettings()
-        settingsRepo.updateNotificationsEnabled(!current.notificationsEnabled)
+        val newState = !current.notificationsEnabled
+        settingsRepo.updateNotificationsEnabled(newState)
         BlackoutGlanceWidget().updateAll(context)
     }
 }

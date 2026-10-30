@@ -22,14 +22,16 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import ua.blackout.prewarning.ui.AppStrings
 
 @Composable
-fun AboutScreen() {
+fun AboutScreen(lang: String = "uk") {
     val context = LocalContext.current
 
     Column(
         modifier = Modifier
             .fillMaxSize()
+            .statusBarsPadding()
             .verticalScroll(rememberScrollState())
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
@@ -64,7 +66,7 @@ fun AboutScreen() {
                 Spacer(modifier = Modifier.height(12.dp))
 
                 Text(
-                    text = "ZT Blackout Pre-Warning",
+                    text = AppStrings.aboutTitle(lang),
                     fontSize = 20.sp,
                     fontWeight = FontWeight.Bold,
                     color = Color.White
@@ -73,7 +75,7 @@ fun AboutScreen() {
                 Spacer(modifier = Modifier.height(4.dp))
 
                 Text(
-                    text = "Завчасне інформування про відключення світла в Житомирі та області",
+                    text = AppStrings.aboutSubtitle(lang),
                     fontSize = 12.sp,
                     color = Color(0xB3BAE6FD),
                     modifier = Modifier.padding(horizontal = 12.dp)
@@ -112,13 +114,13 @@ fun AboutScreen() {
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text(
-                    text = "ОПИС ЗАСТОСУНКУ",
+                    text = AppStrings.aboutDescTitle(lang),
                     fontSize = 11.sp,
                     fontWeight = FontWeight.Bold,
                     color = Color(0xB3BAE6FD)
                 )
                 Text(
-                    text = "Автоматичний моніторинг графіків відключень електроенергії з офіційного сайту АТ «Житомиробленерго» (ztoe.com.ua). Застосунок своєчасно попереджає про початок відключення за вибраний інтервал часу та об'єднує послідовні години без світла в одне сповіщення.",
+                    text = AppStrings.aboutDescText(lang),
                     fontSize = 12.sp,
                     lineHeight = 18.sp,
                     color = Color(0xFFE2E8F0)
@@ -132,7 +134,7 @@ fun AboutScreen() {
                         .padding(12.dp)
                 ) {
                     Text(
-                        text = "Застосунок є офіційною Android-версією проєкту UA Blackout Pre-Warning для ПК, оптимізований для автономної роботи у фоні з мінімальним споживанням батареї.",
+                        text = AppStrings.aboutDesktopNotice(lang),
                         fontSize = 11.sp,
                         lineHeight = 16.sp,
                         color = Color(0xB3BAE6FD)
@@ -151,7 +153,7 @@ fun AboutScreen() {
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text(
-                    text = "ПОСИЛАННЯ ТА РОЗРОБКА",
+                    text = AppStrings.aboutLinksTitle(lang),
                     fontSize = 11.sp,
                     fontWeight = FontWeight.Bold,
                     color = Color(0xB3BAE6FD)
@@ -185,7 +187,7 @@ fun AboutScreen() {
                             Icon(Icons.Default.Code, contentDescription = null, tint = Color.Black, modifier = Modifier.size(18.dp))
                         }
                         Column {
-                            Text("Профіль розробника", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                            Text(AppStrings.devProfile(lang), fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.White)
                             Text("github.com/IgorZaharov", fontSize = 10.sp, fontFamily = FontFamily.Monospace, color = Color(0x99BAE6FD))
                         }
                     }
@@ -220,7 +222,7 @@ fun AboutScreen() {
                             Icon(Icons.Default.BugReport, contentDescription = null, tint = Color.White, modifier = Modifier.size(18.dp))
                         }
                         Column {
-                            Text("Повідомити про проблему (Issues)", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                            Text(AppStrings.repoIssues(lang), fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.White)
                             Text("github.com/IgorZaharov/.../issues", fontSize = 10.sp, fontFamily = FontFamily.Monospace, color = Color(0x99BAE6FD))
                         }
                     }
@@ -255,7 +257,7 @@ fun AboutScreen() {
                             Icon(Icons.Default.Computer, contentDescription = null, tint = Color.White, modifier = Modifier.size(18.dp))
                         }
                         Column {
-                            Text("Оригінальний застосунок для Windows", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                            Text(AppStrings.desktopApp(lang), fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.White)
                             Text("github.com/IgorZaharov/UABlackoutPreWarning", fontSize = 10.sp, fontFamily = FontFamily.Monospace, color = Color(0x99BAE6FD))
                         }
                     }
@@ -286,7 +288,7 @@ fun AboutScreen() {
                     Icon(Icons.Default.Shield, contentDescription = null, tint = Color(0xFFFBBF24), modifier = Modifier.size(18.dp))
                 }
                 Text(
-                    text = "Дані про графіки завантажуються безпосередньо з сайту ztoe.com.ua. Застосунок не є офіційним сервісом АТ «Житомиробленерго» та не несе відповідальності за раптові зміни або аварійні відключення з боку НЕК «Укренерго».",
+                    text = AppStrings.disclaimerText(lang),
                     fontSize = 11.sp,
                     lineHeight = 16.sp,
                     color = Color(0xB3BAE6FD)
@@ -294,6 +296,6 @@ fun AboutScreen() {
             }
         }
 
-        Spacer(modifier = Modifier.height(48.dp))
+        Spacer(modifier = Modifier.height(96.dp))
     }
 }

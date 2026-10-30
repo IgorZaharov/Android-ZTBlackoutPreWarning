@@ -1,7 +1,7 @@
 package ua.blackout.prewarning.ui.screens
 
+import android.widget.Toast
 import androidx.compose.animation.core.*
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -22,12 +22,14 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import ua.blackout.prewarning.data.model.BlackoutSlot
 import ua.blackout.prewarning.data.model.SlotStatus
+import ua.blackout.prewarning.ui.AppStrings
 import ua.blackout.prewarning.ui.components.TimelineBar
 import java.time.LocalTime
 import java.time.format.DateTimeFormatter
@@ -39,15 +41,18 @@ fun MainScreen(
     countdownText: String = "01:35:12",
     slotTimeText: String = "14:00 – 18:00",
     slots: List<BlackoutSlot> = emptyList(),
-    tomorrowSlots: List<BlackoutSlot> = emptyList(),
+    tomorrowSlots: List<BlackoutSlot>? = null,
+    hasTomorrowSchedule: Boolean = false,
     notificationsEnabled: Boolean = true,
     lastUpdated: String = "19:27",
     nextUpdated: String = "19:42",
+    lang: String = "uk",
     onToggleNotifications: () -> Unit = {},
     onRefresh: () -> Unit = {}
 ) {
+    val context = LocalContext.current
     var selectedDayTab by remember { mutableStateOf("today") }
-    val activeSlots = if (selectedDayTab == "today") slots else (if (tomorrowSlots.isNotEmpty()) tomorrowSlots else slots)
+    val activeSlots = if (selectedDayTab == "today") slots else (tomorrowSlots ?: slots)
 
     // Compute continuous blackout intervals
     val intervals = remember(activeSlots) {
@@ -92,6 +97,7 @@ fun MainScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
+            .statusBarsPadding()
             .verticalScroll(rememberScrollState())
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
@@ -104,7 +110,7 @@ fun MainScreen(
         ) {
             Column {
                 Text(
-                    text = "Черга $queue",
+                    text = "${AppStrings.queue(lang)} $queue",
                     fontSize = 24.sp,
                     fontWeight = FontWeight.Bold,
                     color = Color.White
@@ -171,7 +177,7 @@ fun MainScreen(
                                 .background(if (isBlackoutNow) Color(0xFFFF5E3A) else Color(0xFF34D399))
                         )
                         Text(
-                            text = if (isBlackoutNow) "ЗАРАЗ НЕМАЄ СВІТЛА" else "ЗАРАЗ СВІТЛО Є",
+                            text = if (isBlackoutNow) AppStrings.powerOff(lang) else AppStrings.powerOn(lang),
                             fontSize = 13.sp,
                             fontWeight = FontWeight.Bold,
                             color = Color.White
@@ -206,7 +212,7 @@ fun MainScreen(
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
                     Text(
-                        text = if (isBlackoutNow) "Світло увімкнуть через:" else "До відключення залишилось:",
+                        text = if (isBlackoutNow) AppStrings.powerOnIn(lang) else AppStrings.powerOffIn(lang),
                         fontSize = 11.sp,
                         fontWeight = FontWeight.SemiBold,
                         color = Color(0xB3BAE6FD)
@@ -231,7 +237,7 @@ fun MainScreen(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            text = if (isBlackoutNow) "Період відключення:" else "Найближчий період:",
+                            text = if (isBlackoutNow) AppStrings.outagePeriod(lang) else AppStrings.nextPeriod(lang),
                             fontSize = 13.sp,
                             color = Color(0xB3BAE6FD)
                         )
@@ -254,45 +260,69 @@ fun MainScreen(
             }
         }
 
-        // 3. Day Selector (Today / Tomorrow Segmented Pill)
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clip(RoundedCornerShape(16.dp))
-                .background(Color(0x80141A29))
-                .padding(4.dp)
-        ) {
-            Box(
+        // 3. Day Selector (Today / Tomorrow)
+        // If tomorrow's table exists on site: show segmented selector. Otherwise: center single "Today" button!
+        if (hasTomorrowSchedule && tomorrowSlots != null) {
+            Row(
                 modifier = Modifier
-                    .weight(1f)
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(if (selectedDayTab == "today") Color(0x33FFFFFF) else Color.Transparent)
-                    .clickable { selectedDayTab = "today" }
-                    .padding(vertical = 10.dp),
-                contentAlignment = Alignment.Center
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(Color(0x80141A29))
+                    .padding(4.dp)
             ) {
-                Text(
-                    text = "Сьогодні",
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = if (selectedDayTab == "today") Color.White else Color(0x99BAE6FD)
-                )
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(if (selectedDayTab == "today") Color(0x33FFFFFF) else Color.Transparent)
+                        .clickable { selectedDayTab = "today" }
+                        .padding(vertical = 10.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = AppStrings.today(lang),
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = if (selectedDayTab == "today") Color.White else Color(0x99BAE6FD)
+                    )
+                }
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(if (selectedDayTab == "tomorrow") Color(0x33FFFFFF) else Color.Transparent)
+                        .clickable { selectedDayTab = "tomorrow" }
+                        .padding(vertical = 10.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = AppStrings.tomorrow(lang),
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = if (selectedDayTab == "tomorrow") Color.White else Color(0x99BAE6FD)
+                    )
+                }
             }
+        } else {
+            // Centered "Today" button
             Box(
                 modifier = Modifier
-                    .weight(1f)
-                    .clip(RoundedCornerShape(12.dp))
-                    .background(if (selectedDayTab == "tomorrow") Color(0x33FFFFFF) else Color.Transparent)
-                    .clickable { selectedDayTab = "tomorrow" }
-                    .padding(vertical = 10.dp),
+                    .fillMaxWidth(),
                 contentAlignment = Alignment.Center
             ) {
-                Text(
-                    text = "Завтра",
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = if (selectedDayTab == "tomorrow") Color.White else Color(0x99BAE6FD)
-                )
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(Color(0x80141A29))
+                        .padding(horizontal = 24.dp, vertical = 10.dp)
+                ) {
+                    Text(
+                        text = AppStrings.today(lang),
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White
+                    )
+                }
             }
         }
 
@@ -317,7 +347,7 @@ fun MainScreen(
 
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(
-                        text = "ГОДИНИ БЕЗ СВІТЛА НА ЦЕЙ ДЕНЬ:",
+                        text = AppStrings.blackoutHoursHeader(lang),
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,
                         color = Color(0xB3BAE6FD)
@@ -360,7 +390,7 @@ fun MainScreen(
                                         .padding(horizontal = 8.dp, vertical = 3.dp)
                                 ) {
                                     Text(
-                                        text = "$duration год",
+                                        text = "$duration ${AppStrings.hourShort(lang)}",
                                         fontSize = 11.sp,
                                         fontWeight = FontWeight.Bold,
                                         fontFamily = FontFamily.Monospace,
@@ -379,7 +409,7 @@ fun MainScreen(
                             contentAlignment = Alignment.Center
                         ) {
                             Text(
-                                text = "Відключень не заплановано",
+                                text = AppStrings.noBlackoutsScheduled(lang),
                                 fontSize = 13.sp,
                                 color = Color(0xB3BAE6FD)
                             )
@@ -404,22 +434,25 @@ fun MainScreen(
             ) {
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Text("Останнє оновлення:", fontSize = 11.sp, color = Color(0x99BAE6FD))
+                        Text(AppStrings.lastUpdated(lang), fontSize = 11.sp, color = Color(0x99BAE6FD))
                         Text(lastUpdated, fontSize = 11.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace, color = Color.White)
                     }
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Text("Наступне оновлення:", fontSize = 11.sp, color = Color(0x99BAE6FD))
+                        Text(AppStrings.nextUpdated(lang), fontSize = 11.sp, color = Color(0x99BAE6FD))
                         Text(nextUpdated, fontSize = 11.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace, color = Color.White)
                     }
                 }
 
-                // Circular white refresh button
+                // Circular white refresh button with feedback
                 Box(
                     modifier = Modifier
                         .size(42.dp)
                         .clip(CircleShape)
                         .background(Color.White)
-                        .clickable { onRefresh() },
+                        .clickable {
+                            onRefresh()
+                            Toast.makeText(context, AppStrings.refreshSuccessToast(lang), Toast.LENGTH_SHORT).show()
+                        },
                     contentAlignment = Alignment.Center
                 ) {
                     Icon(
@@ -432,6 +465,7 @@ fun MainScreen(
             }
         }
 
-        Spacer(modifier = Modifier.height(48.dp))
+        // Extra spacing so floating navigation dock does not overlap bottom card
+        Spacer(modifier = Modifier.height(96.dp))
     }
 }

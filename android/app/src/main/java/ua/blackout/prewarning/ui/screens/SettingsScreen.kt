@@ -1,5 +1,6 @@
 package ua.blackout.prewarning.ui.screens
 
+import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -15,11 +16,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import ua.blackout.prewarning.data.parser.ZtoeParser
+import ua.blackout.prewarning.ui.AppStrings
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -31,6 +33,7 @@ fun SettingsScreen(
     soundEnabled: Boolean = true,
     vibrationEnabled: Boolean = true,
     currentLanguage: String = "SYSTEM",
+    lang: String = "uk",
     onQueueSelected: (String) -> Unit = {},
     onAdvanceMinutesChanged: (Int) -> Unit = {},
     onRefreshMinutesChanged: (Int) -> Unit = {},
@@ -42,6 +45,7 @@ fun SettingsScreen(
     onForceRefresh: () -> Unit = {},
     onResetDefaults: () -> Unit = {}
 ) {
+    val context = LocalContext.current
     var showQueueHelpDialog by remember { mutableStateOf(false) }
     var showResetConfirmDialog by remember { mutableStateOf(false) }
     var queueDropdownExpanded by remember { mutableStateOf(false) }
@@ -60,6 +64,7 @@ fun SettingsScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
+            .statusBarsPadding()
             .verticalScroll(rememberScrollState())
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
@@ -77,7 +82,7 @@ fun SettingsScreen(
                 modifier = Modifier.size(24.dp)
             )
             Text(
-                text = "Налаштування",
+                text = AppStrings.settingsTitle(lang),
                 fontSize = 22.sp,
                 fontWeight = FontWeight.Bold,
                 color = Color.White
@@ -103,7 +108,7 @@ fun SettingsScreen(
                         horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
                         Text(
-                            text = "ЧЕРГА ВІДКЛЮЧЕННЯ",
+                            text = AppStrings.queueTitle(lang),
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold,
                             color = Color.White
@@ -121,7 +126,7 @@ fun SettingsScreen(
                     }
                 }
                 Text(
-                    text = "Оберіть підчергу за вашою адресою",
+                    text = AppStrings.queueDesc(lang),
                     fontSize = 11.sp,
                     color = Color(0xB3BAE6FD)
                 )
@@ -132,7 +137,7 @@ fun SettingsScreen(
                     onExpandedChange = { queueDropdownExpanded = it }
                 ) {
                     OutlinedTextField(
-                        value = "Черга $currentQueue",
+                        value = "${AppStrings.queue(lang)} $currentQueue",
                         onValueChange = {},
                         readOnly = true,
                         trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = queueDropdownExpanded) },
@@ -154,7 +159,7 @@ fun SettingsScreen(
                     ) {
                         queues.forEach { q ->
                             DropdownMenuItem(
-                                text = { Text("Черга $q", fontWeight = FontWeight.Bold, color = Color.White) },
+                                text = { Text("${AppStrings.queue(lang)} $q", fontWeight = FontWeight.Bold, color = Color.White) },
                                 onClick = {
                                     onQueueSelected(q)
                                     queueDropdownExpanded = false
@@ -181,7 +186,7 @@ fun SettingsScreen(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        text = "АДРЕСА САЙТУ",
+                        text = AppStrings.siteAddressTitle(lang),
                         fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,
                         color = Color.White
@@ -195,7 +200,7 @@ fun SettingsScreen(
                             .padding(horizontal = 8.dp, vertical = 3.dp)
                     ) {
                         Text(
-                            text = if (isUrlStrictlyValid) "✓ Доступний" else "⚠ Некоректна адреса",
+                            text = if (isUrlStrictlyValid) AppStrings.siteReachable(lang) else AppStrings.siteInvalid(lang),
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold,
                             color = if (isUrlStrictlyValid) Color(0xFF34D399) else Color(0xFFF87171)
@@ -204,7 +209,7 @@ fun SettingsScreen(
                 }
 
                 Text(
-                    text = "Адреса графіка відключень, зазвичай не потрібно змінювати",
+                    text = AppStrings.siteAddressDesc(lang),
                     fontSize = 11.sp,
                     color = Color(0xB3BAE6FD)
                 )
@@ -252,13 +257,13 @@ fun SettingsScreen(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            text = "ПОПЕРЕДЖАТИ ЗАЗДАЛЕГІДЬ",
+                            text = AppStrings.advanceNoticeTitle(lang),
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold,
                             color = Color.White
                         )
                         Text(
-                            text = "1–240 хв",
+                            text = "1–240 ${AppStrings.minShort(lang)}",
                             fontSize = 10.sp,
                             color = Color(0x99BAE6FD)
                         )
@@ -269,7 +274,7 @@ fun SettingsScreen(
                         onExpandedChange = { advanceDropdownExpanded = it }
                     ) {
                         OutlinedTextField(
-                            value = "$advanceMinutes хв",
+                            value = "$advanceMinutes ${AppStrings.minShort(lang)}",
                             onValueChange = {},
                             readOnly = true,
                             trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = advanceDropdownExpanded) },
@@ -291,7 +296,7 @@ fun SettingsScreen(
                         ) {
                             timerOptions.forEach { mins ->
                                 DropdownMenuItem(
-                                    text = { Text("$mins хв", fontWeight = FontWeight.Bold, color = Color.White) },
+                                    text = { Text("$mins ${AppStrings.minShort(lang)}", fontWeight = FontWeight.Bold, color = Color.White) },
                                     onClick = {
                                         onAdvanceMinutesChanged(mins)
                                         advanceDropdownExpanded = false
@@ -312,13 +317,13 @@ fun SettingsScreen(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            text = "ІНТЕРВАЛ ПЕРЕВІРКИ САЙТУ",
+                            text = AppStrings.refreshIntervalTitle(lang),
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold,
                             color = Color.White
                         )
                         Text(
-                            text = "1–240 хв",
+                            text = "1–240 ${AppStrings.minShort(lang)}",
                             fontSize = 10.sp,
                             color = Color(0x99BAE6FD)
                         )
@@ -329,7 +334,7 @@ fun SettingsScreen(
                         onExpandedChange = { refreshDropdownExpanded = it }
                     ) {
                         OutlinedTextField(
-                            value = "$refreshMinutes хв",
+                            value = "$refreshMinutes ${AppStrings.minShort(lang)}",
                             onValueChange = {},
                             readOnly = true,
                             trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = refreshDropdownExpanded) },
@@ -351,7 +356,7 @@ fun SettingsScreen(
                         ) {
                             timerOptions.forEach { mins ->
                                 DropdownMenuItem(
-                                    text = { Text("$mins хв", fontWeight = FontWeight.Bold, color = Color.White) },
+                                    text = { Text("$mins ${AppStrings.minShort(lang)}", fontWeight = FontWeight.Bold, color = Color.White) },
                                     onClick = {
                                         onRefreshMinutesChanged(mins)
                                         refreshDropdownExpanded = false
@@ -364,7 +369,7 @@ fun SettingsScreen(
             }
         }
 
-        // 4. Notification Toggles
+        // 4. Notification Toggles (All synchronized)
         Box(
             modifier = Modifier
                 .fillMaxWidth()
@@ -378,7 +383,7 @@ fun SettingsScreen(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text("Увімкнути сповіщення", fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                    Text(AppStrings.notifications(lang), fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color.White)
                     Switch(
                         checked = notificationsEnabled,
                         onCheckedChange = onToggleNotifications,
@@ -398,7 +403,7 @@ fun SettingsScreen(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text("Звуковий сигнал", fontSize = 13.sp, color = Color.White)
+                    Text(AppStrings.sound(lang), fontSize = 13.sp, color = Color.White)
                     Switch(
                         checked = soundEnabled,
                         onCheckedChange = onToggleSound,
@@ -418,7 +423,7 @@ fun SettingsScreen(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text("Вібрація", fontSize = 13.sp, color = Color.White)
+                    Text(AppStrings.vibration(lang), fontSize = 13.sp, color = Color.White)
                     Switch(
                         checked = vibrationEnabled,
                         onCheckedChange = onToggleVibration,
@@ -433,7 +438,7 @@ fun SettingsScreen(
             }
         }
 
-        // 5. Language Selection Card
+        // 5. Language Selection Card (Dynamic Localization!)
         Box(
             modifier = Modifier
                 .fillMaxWidth()
@@ -443,7 +448,7 @@ fun SettingsScreen(
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text(
-                    text = "МОВА ІНТЕРФЕЙСУ",
+                    text = AppStrings.languageTitle(lang),
                     fontSize = 11.sp,
                     fontWeight = FontWeight.Bold,
                     color = Color.White
@@ -453,7 +458,7 @@ fun SettingsScreen(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    listOf("SYSTEM" to "Системна", "uk" to "Українська", "en" to "English").forEach { (code, label) ->
+                    listOf("SYSTEM" to (if (lang == "uk") "Системна" else "System"), "uk" to "Українська", "en" to "English").forEach { (code, label) ->
                         val isSelected = currentLanguage == code
                         Box(
                             modifier = Modifier
@@ -489,13 +494,16 @@ fun SettingsScreen(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    // Send Test Alert Button (Moved from main screen!)
+                    // Send Test Alert Button (Respects Sound & Vibration)
                     Box(
                         modifier = Modifier
                             .weight(1f)
                             .clip(RoundedCornerShape(16.dp))
                             .background(Color(0xFFFF5E3A))
-                            .clickable { onSendTestAlert() }
+                            .clickable {
+                                onSendTestAlert()
+                                Toast.makeText(context, if (lang == "uk") "Тестове сповіщення надіслано" else "Test alert dispatched", Toast.LENGTH_SHORT).show()
+                            }
                             .padding(vertical = 12.dp),
                         contentAlignment = Alignment.Center
                     ) {
@@ -504,17 +512,20 @@ fun SettingsScreen(
                             horizontalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
                             Icon(Icons.Default.Send, contentDescription = null, tint = Color.White, modifier = Modifier.size(14.dp))
-                            Text("Тест сповіщення", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                            Text(AppStrings.testAlertBtn(lang), fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.White)
                         }
                     }
 
-                    // Refresh Button
+                    // Refresh Button with Notification Toast
                     Box(
                         modifier = Modifier
                             .weight(1f)
                             .clip(RoundedCornerShape(16.dp))
                             .background(Color(0x26FFFFFF))
-                            .clickable { onForceRefresh() }
+                            .clickable {
+                                onForceRefresh()
+                                Toast.makeText(context, AppStrings.refreshSuccessToast(lang), Toast.LENGTH_SHORT).show()
+                            }
                             .padding(vertical = 12.dp),
                         contentAlignment = Alignment.Center
                     ) {
@@ -523,7 +534,7 @@ fun SettingsScreen(
                             horizontalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
                             Icon(Icons.Default.Refresh, contentDescription = null, tint = Color.White, modifier = Modifier.size(14.dp))
-                            Text("Оновити дані", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                            Text(AppStrings.refreshBtn(lang), fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.White)
                         }
                     }
                 }
@@ -537,28 +548,23 @@ fun SettingsScreen(
                         .padding(vertical = 8.dp),
                     contentAlignment = Alignment.Center
                 ) {
-                    Text("Скинути налаштування", fontSize = 12.sp, color = Color(0x99BAE6FD))
+                    Text(AppStrings.resetDefaultsBtn(lang), fontSize = 12.sp, color = Color(0x99BAE6FD))
                 }
             }
         }
 
-        Spacer(modifier = Modifier.height(48.dp))
+        Spacer(modifier = Modifier.height(96.dp))
     }
 
     // Queue Help Dialog
     if (showQueueHelpDialog) {
         AlertDialog(
             onDismissRequest = { showQueueHelpDialog = false },
-            title = { Text("Як дізнатися свою чергу", fontWeight = FontWeight.Bold, color = Color.White) },
-            text = {
-                Text(
-                    "Черга та підчерга (1.1–6.2) закріплені за вашою адресою на офіційному сайті АТ «Житомиробленерго» (ztoe.com.ua) в розділі відключень.",
-                    color = Color.LightGray
-                )
-            },
+            title = { Text(AppStrings.queueHelpTitle(lang), fontWeight = FontWeight.Bold, color = Color.White) },
+            text = { Text(AppStrings.queueHelpDesc(lang), color = Color.LightGray) },
             confirmButton = {
                 TextButton(onClick = { showQueueHelpDialog = false }) {
-                    Text("Зрозуміло", color = Color(0xFFFF5E3A), fontWeight = FontWeight.Bold)
+                    Text("OK", color = Color(0xFFFF5E3A), fontWeight = FontWeight.Bold)
                 }
             },
             containerColor = Color(0xFF141A29)
@@ -569,19 +575,20 @@ fun SettingsScreen(
     if (showResetConfirmDialog) {
         AlertDialog(
             onDismissRequest = { showResetConfirmDialog = false },
-            title = { Text("Скинути налаштування?", fontWeight = FontWeight.Bold, color = Color.White) },
-            text = { Text("Усі параметри повернуться до початкових значень (черга 1.1, таймери 30/15 хв).", color = Color.LightGray) },
+            title = { Text(AppStrings.resetConfirmTitle(lang), fontWeight = FontWeight.Bold, color = Color.White) },
+            text = { Text(AppStrings.resetConfirmDesc(lang), color = Color.LightGray) },
             confirmButton = {
                 TextButton(onClick = {
                     onResetDefaults()
                     showResetConfirmDialog = false
+                    Toast.makeText(context, if (lang == "uk") "Налаштування скинуто" else "Settings reset", Toast.LENGTH_SHORT).show()
                 }) {
-                    Text("Скинути", color = Color(0xFFFF5E3A), fontWeight = FontWeight.Bold)
+                    Text(AppStrings.resetYes(lang), color = Color(0xFFFF5E3A), fontWeight = FontWeight.Bold)
                 }
             },
             dismissButton = {
                 TextButton(onClick = { showResetConfirmDialog = false }) {
-                    Text("Скасувати", color = Color.White)
+                    Text(AppStrings.cancel(lang), color = Color.White)
                 }
             },
             containerColor = Color(0xFF141A29)

@@ -7,6 +7,12 @@ import ua.blackout.prewarning.data.model.SlotStatus
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 
+data class ScheduleFetchResult(
+    val todaySlots: List<BlackoutSlot>,
+    val tomorrowSlots: List<BlackoutSlot>?,
+    val hasTomorrowSchedule: Boolean
+)
+
 object ZtoeParser {
     private const val USER_AGENT = "Mozilla/5.0 (Android; Mobile; rv:130.0) Gecko/130.0 Firefox/130.0"
 
@@ -20,6 +26,52 @@ object ZtoeParser {
         return path == "/unhooking-search.php" || path == "/" || path.isEmpty()
     }
 
+    fun fetchFullSchedule(url: String, queue: String): ScheduleFetchResult {
+        val today = LocalDate.now()
+        val tomorrow = today.plusDays(1)
+        val todayStr = today.format(DateTimeFormatter.ISO_LOCAL_DATE)
+        val tomorrowStr = tomorrow.format(DateTimeFormatter.ISO_LOCAL_DATE)
+
+        if (!isValidUrl(url)) {
+            val todayFallback = generateFallbackSchedule(queue, todayStr)
+            return ScheduleFetchResult(
+                todaySlots = todayFallback,
+                tomorrowSlots = null,
+                hasTomorrowSchedule = false
+            )
+        }
+
+        return try {
+            val doc: Document = Jsoup.connect(url)
+                .userAgent(USER_AGENT)
+                .timeout(8000)
+                .get()
+
+            val text = doc.text()
+            // Format variants for dates: "30.10.2026", "30.10", "2026-10-30"
+            val tomorrowD1 = String.format("%02d.%02d", tomorrow.dayOfMonth, tomorrow.monthValue)
+            val tomorrowD2 = tomorrowStr
+
+            val hasTomorrow = text.contains(tomorrowD1) || text.contains(tomorrowD2) || text.contains("на завтра")
+
+            val todaySlots = parseHtmlForDate(doc, queue, today)
+            val tomorrowSlots = if (hasTomorrow) parseHtmlForDate(doc, queue, tomorrow) else null
+
+            ScheduleFetchResult(
+                todaySlots = todaySlots,
+                tomorrowSlots = tomorrowSlots,
+                hasTomorrowSchedule = hasTomorrow && tomorrowSlots != null
+            )
+        } catch (e: Exception) {
+            val todayFallback = generateFallbackSchedule(queue, todayStr)
+            ScheduleFetchResult(
+                todaySlots = todayFallback,
+                tomorrowSlots = null,
+                hasTomorrowSchedule = false
+            )
+        }
+    }
+
     fun fetchAndParse(url: String, queue: String, date: LocalDate): List<BlackoutSlot> {
         val dateStr = date.format(DateTimeFormatter.ISO_LOCAL_DATE)
         if (!isValidUrl(url)) {
@@ -28,26 +80,22 @@ object ZtoeParser {
         return try {
             val doc: Document = Jsoup.connect(url)
                 .userAgent(USER_AGENT)
-                .timeout(10000)
+                .timeout(8000)
                 .get()
 
-            parseHtml(doc, queue, dateStr)
+            parseHtmlForDate(doc, queue, date)
         } catch (e: Exception) {
-            // Fallback to standard rotation schedule if site is offline or changing layout
             generateFallbackSchedule(queue, dateStr)
         }
     }
 
-    fun parseHtml(doc: Document, targetQueue: String, dateStr: String): List<BlackoutSlot> {
+    private fun parseHtmlForDate(doc: Document, targetQueue: String, date: LocalDate): List<BlackoutSlot> {
+        val dateStr = date.format(DateTimeFormatter.ISO_LOCAL_DATE)
         val rows = doc.select("table tr")
-        var targetRow = rows.firstOrNull { row ->
+        val targetRow = rows.firstOrNull { row ->
             val text = row.text()
             text.contains(targetQueue) || text.contains("Черга $targetQueue")
-        }
-
-        if (targetRow == null) {
-            return generateFallbackSchedule(targetQueue, dateStr)
-        }
+        } ?: return generateFallbackSchedule(targetQueue, dateStr)
 
         val cells = targetRow.select("td, th").drop(1)
         if (cells.size < 12) {
@@ -61,13 +109,13 @@ object ZtoeParser {
             val startStr = String.format("%02d:00", startH)
             val endStr = if (endH == 24) "24:00" else String.format("%02d:00", endH)
 
-            val text = cell.text().trim().lowercase()
+            val cellText = cell.text().trim().lowercase()
             val style = cell.attr("style").lowercase()
             val className = cell.className().lowercase()
 
             val status = when {
                 className.contains("red") || className.contains("off") || className.contains("danger") ||
-                style.contains("red") || text.contains("вимк") || text.contains("відкл") || text == "в" || text == "-" -> {
+                style.contains("red") || cellText.contains("вимк") || cellText.contains("відкл") || cellText == "в" || cellText == "-" -> {
                     SlotStatus.POWER_OFF
                 }
                 else -> SlotStatus.POWER_ON
