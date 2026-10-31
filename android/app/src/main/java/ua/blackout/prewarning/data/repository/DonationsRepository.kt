@@ -75,11 +75,13 @@ object DonationsRepository {
             return cached
         }
 
-        val conn = URL(GITHUB_DONATIONS_URL).openConnection() as HttpURLConnection
+        var conn: HttpURLConnection? = null
         return try {
-            conn.connectTimeout = 6000
-            conn.readTimeout = 6000
-            conn.requestMethod = "GET"
+            conn = (URL(GITHUB_DONATIONS_URL).openConnection() as HttpURLConnection).apply {
+                connectTimeout = 6000
+                readTimeout = 6000
+                requestMethod = "GET"
+            }
             if (conn.responseCode in 200..299) {
                 val responseText = conn.inputStream.bufferedReader().use { it.readText() }
                 val parsed = parseDonationsJson(responseText)
@@ -95,7 +97,7 @@ object DonationsRepository {
         } catch (_: Exception) {
             cached
         } finally {
-            conn.disconnect()
+            conn?.disconnect()
         }
     }
 }
