@@ -30,6 +30,10 @@ object AppStrings {
     fun lastUpdated(lang: String) = if (lang == "uk") "Останнє оновлення:" else "Last updated:"
     fun nextUpdated(lang: String) = if (lang == "uk") "Наступне оновлення:" else "Next update:"
     fun refreshSuccessToast(lang: String) = if (lang == "uk") "Сайт доступний, графік оновлено" else "Site reachable, schedule updated"
+    fun errorNoInternet(lang: String) = if (lang == "uk") "Немає доступу до Інтернету" else "No Internet access"
+    fun errorNoQueuesFound(lang: String) = if (lang == "uk") "На сайті не знайдено черг" else "No queues found on site"
+    fun emergencyOutagesLabel(lang: String) = if (lang == "uk") "Інформація про аварійні відключення:" else "Emergency outages info:"
+    const val EMERGENCY_OUTAGES_URL = "https://www.facebook.com/ztoe.com.ua"
 
     // Settings Screen Texts
     fun settingsTitle(lang: String) = if (lang == "uk") "Налаштування" else "Settings"
@@ -50,19 +54,45 @@ object AppStrings {
     fun refreshBtn(lang: String) = if (lang == "uk") "Оновити дані" else "Refresh data"
     fun resetDefaultsBtn(lang: String) = if (lang == "uk") "Скинути налаштування" else "Reset to defaults"
     fun resetConfirmTitle(lang: String) = if (lang == "uk") "Скинути налаштування?" else "Reset all settings?"
-    fun resetConfirmDesc(lang: String) = if (lang == "uk") "Усі параметри повернуться до початкових значень (черга 1.1, таймери 30/15 хв)." else "All parameters will revert to defaults (queue 1.1, timers 30/15 min)."
+    // CRITICAL CONSTANTS — Default timers are 15 min (advance) and 30 min (refresh). Never modify on your own.
+    fun resetConfirmDesc(lang: String) = if (lang == "uk") "Усі параметри повернуться до початкових значень (черга 1.1, таймери 15/30 хв)." else "All parameters will revert to defaults (queue 1.1, timers 15/30 min)."
     fun resetYes(lang: String) = if (lang == "uk") "Скинути" else "Reset"
     fun cancel(lang: String) = if (lang == "uk") "Скасувати" else "Cancel"
+
+    // =========================================================================================
+    // CRITICAL TEXT — DO NOT MODIFY UNLESS EXPLICITLY REQUESTED
+    // Numbered instruction for Users on how to find their queue ("?" Help popup in Settings)
+    // =========================================================================================
     fun queueHelpTitle(lang: String) = if (lang == "uk") "Як дізнатися свою чергу" else "How to find your queue"
-    fun queueHelpDesc(lang: String) = if (lang == "uk") "Черга та підчерга (1.1–6.2) закріплені за вашою адресою на офіційному сайті АТ «Житомиробленерго» (ztoe.com.ua) в розділі відключень." else "Queue and sub-queue (1.1–6.2) are assigned to your address on ztoe.com.ua."
+    fun queueHelpSteps(lang: String): List<String> = if (lang == "uk") {
+        listOf(
+            "1. Відкрийте сторінку пошуку черги на сайті ztoe.com.ua.",
+            "2. Оберіть свій РЕМ, населений пункт і вулицю.",
+            "3. У таблиці знайдіть свій будинок і подивіться стовпці «Черга» і «Підчерга». Наприклад, черга 5 і підчерга 2 - це 5.2.",
+            "4. Виберіть це значення у полі «Черга» у вікні налаштувань (кнопка ⚙)."
+        )
+    } else {
+        listOf(
+            "1. Open the queue lookup page on ztoe.com.ua.",
+            "2. Select your distribution district (РЕМ), settlement, and street.",
+            "3. In the table, find your building and check the «Queue» and «Subqueue» columns. For example, queue 5 and subqueue 2 is 5.2.",
+            "4. Select this value in the «Queue» field in the Settings window (⚙ button)."
+        )
+    }
+    fun queueHelpDesc(lang: String) = queueHelpSteps(lang).joinToString("\n\n")
+    fun queueHelpGotIt(lang: String) = if (lang == "uk") "Зрозуміло" else "Got it"
+    // =========================================================================================
+    // END OF CRITICAL TEXT
+    // =========================================================================================
 
     // About Screen Texts
-    fun aboutTitle(lang: String) = "ZT Blackout Pre-Warning"
+    fun aboutTitle(lang: String) = "Світло в Житомирі"
     fun aboutSubtitle(lang: String) = if (lang == "uk") "Завчасне інформування про відключення світла в Житомирі та області" else "Advance blackout alerts for Zhytomyr and region"
     fun aboutDescTitle(lang: String) = if (lang == "uk") "ОПИС ЗАСТОСУНКУ" else "APP DESCRIPTION"
     fun aboutDescText(lang: String) = if (lang == "uk") "Автоматичний моніторинг графіків відключень електроенергії з офіційного сайту АТ «Житомиробленерго» (ztoe.com.ua). Застосунок своєчасно попереджає про початок відключення за вибраний інтервал часу та об'єднує послідовні години без світла в одне сповіщення." else "Automatic monitoring of blackout schedules from ztoe.com.ua. Alerts in advance before outages and merges consecutive slots into single notification."
     fun aboutDesktopNotice(lang: String) = if (lang == "uk") "Застосунок є офіційною Android-версією проєкту UA Blackout Pre-Warning для ПК, оптимізований для автономної роботи у фоні з мінімальним споживанням батареї." else "Official Android version of the desktop UA Blackout Pre-Warning project, optimized for background operation with minimal battery drain."
     fun aboutLinksTitle(lang: String) = if (lang == "uk") "ПОСИЛАННЯ ТА РОЗРОБКА" else "LINKS & DEVELOPMENT"
+    fun aboutDonationsTitle(lang: String) = "Donations / Благодійність і Пожертви"
     fun devProfile(lang: String) = if (lang == "uk") "Профіль розробника" else "Developer profile"
     fun repoIssues(lang: String) = if (lang == "uk") "Повідомити про проблему (Issues)" else "Report an issue (Issues)"
     fun desktopApp(lang: String) = if (lang == "uk") "Оригінальний застосунок для Windows" else "Original Windows desktop app"

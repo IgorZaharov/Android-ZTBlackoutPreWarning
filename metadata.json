@@ -1,5 +1,5 @@
 {
-  "name": "ZT Blackout Pre-Warning",
+  "name": "Світло в Житомирі",
   "description": "Android native blackout schedule tracker and pre-warning application for Zhytomyroblenergo (ztoe.com.ua) with Jetpack Compose, home screen widget, and real-time advance outage alerts.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]

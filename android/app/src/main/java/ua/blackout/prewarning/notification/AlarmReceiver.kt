@@ -8,9 +8,9 @@ import ua.blackout.prewarning.data.repository.AlertRegistry
 class AlarmReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         val slotId = intent.getStringExtra("EXTRA_SLOT_ID") ?: return
-        val queue = intent.getStringExtra("EXTRA_QUEUE") ?: "2.1"
+        val queue = intent.getStringExtra("EXTRA_QUEUE") ?: "1.1"
         val timeStr = intent.getStringExtra("EXTRA_TIME") ?: "14:00"
-        val minutes = intent.getIntExtra("EXTRA_MINUTES", 30)
+        val minutes = intent.getIntExtra("EXTRA_MINUTES", 15)
 
         val alertRegistry = AlertRegistry(context)
 

@@ -12,7 +12,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
-import androidx.compose.runtime.Composable
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -22,11 +22,25 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import ua.blackout.prewarning.data.repository.DonationsRepository
 import ua.blackout.prewarning.ui.AppStrings
 
 @Composable
 fun AboutScreen(lang: String = "uk") {
     val context = LocalContext.current
+    val appContext = remember { context.applicationContext }
+    var donationLinks by remember {
+        mutableStateOf(DonationsRepository.getCachedDonations(appContext))
+    }
+
+    LaunchedEffect(Unit) {
+        val refreshed = withContext(Dispatchers.IO) {
+            DonationsRepository.getDonationsWithDailyRefresh(appContext)
+        }
+        donationLinks = refreshed
+    }
 
     Column(
         modifier = Modifier
@@ -266,7 +280,74 @@ fun AboutScreen(lang: String = "uk") {
             }
         }
 
-        // 4. Disclaimer Card about ztoe.com.ua
+        // 4. Donations / Благодійність і Пожертви Card (loaded from GitHub donations.json once per day)
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(24.dp))
+                .background(Color(0xBF141A29))
+                .padding(18.dp)
+        ) {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(
+                    text = AppStrings.aboutDonationsTitle(lang),
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color(0xB3BAE6FD)
+                )
+
+                donationLinks.forEachIndexed { index, item ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(14.dp))
+                            .background(Color(0x14FFFFFF))
+                            .clickable {
+                                try {
+                                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse(item.url))
+                                    context.startActivity(intent)
+                                } catch (_: Exception) {}
+                            }
+                            .padding(12.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(36.dp)
+                                    .clip(RoundedCornerShape(10.dp))
+                                    .background(if (index % 2 == 0) Color(0xFF10B981) else Color(0xFFF59E0B)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = if (index % 2 == 0) Icons.Default.Favorite else Icons.Default.Language,
+                                    contentDescription = null,
+                                    tint = if (index % 2 == 0) Color.White else Color.Black,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                            Column {
+                                Text(item.title, fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                                Text(
+                                    text = item.url.replaceFirst(Regex("^https?://"), ""),
+                                    fontSize = 10.sp,
+                                    fontFamily = FontFamily.Monospace,
+                                    color = Color(0x99BAE6FD)
+                                )
+                            }
+                        }
+                        Icon(Icons.Default.OpenInNew, contentDescription = null, tint = Color(0x99BAE6FD), modifier = Modifier.size(16.dp))
+                    }
+                }
+            }
+        }
+
+        // 5. Disclaimer Card about ztoe.com.ua
         Box(
             modifier = Modifier
                 .fillMaxWidth()

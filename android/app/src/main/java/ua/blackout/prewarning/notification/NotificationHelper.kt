@@ -8,16 +8,22 @@ import android.content.Intent
 import android.media.AudioAttributes
 import android.media.RingtoneManager
 import android.os.Build
+import android.os.VibrationAttributes
+import android.os.VibrationEffect
+import android.os.Vibrator
+import android.os.VibratorManager
 import androidx.core.app.NotificationCompat
 import ua.blackout.prewarning.MainActivity
 import ua.blackout.prewarning.R
 import ua.blackout.prewarning.data.repository.SettingsRepository
 
 object NotificationHelper {
-    const val CHANNEL_SOUND_VIBE = "zt_blackout_sound_vibe"
-    const val CHANNEL_SOUND_ONLY = "zt_blackout_sound_only"
-    const val CHANNEL_VIBE_ONLY = "zt_blackout_vibe_only"
-    const val CHANNEL_SILENT = "zt_blackout_silent"
+    const val CHANNEL_SOUND_VIBE = "zt_blackout_sound_vibe_v2"
+    const val CHANNEL_SOUND_ONLY = "zt_blackout_sound_only_v2"
+    const val CHANNEL_VIBE_ONLY = "zt_blackout_vibe_only_v2"
+    const val CHANNEL_SILENT = "zt_blackout_silent_v2"
+
+    private val VIBRATION_PATTERN = longArrayOf(0, 400, 200, 400)
 
     fun createNotificationChannel(context: Context) {
         createNotificationChannels(context)
@@ -40,7 +46,7 @@ object NotificationHelper {
             ).apply {
                 description = "Сповіщення про відключення зі звуком та вібрацією"
                 enableVibration(true)
-                vibrationPattern = longArrayOf(0, 400, 200, 400)
+                vibrationPattern = VIBRATION_PATTERN
                 setSound(soundUri, audioAttributes)
             }
 
@@ -56,15 +62,15 @@ object NotificationHelper {
                 setSound(soundUri, audioAttributes)
             }
 
-            // 3. Vibration Only
+            // 3. Vibration Only (Sound OFF, Vibration ON)
             val ch3 = NotificationChannel(
                 CHANNEL_VIBE_ONLY,
                 "Сповіщення (Тільки вібрація)",
                 NotificationManager.IMPORTANCE_HIGH
             ).apply {
-                description = "Сповіщення про відключення тільки з вібрацією"
+                description = "Сповіщення про відключення тільки з вібрацією (без звуку)"
                 enableVibration(true)
-                vibrationPattern = longArrayOf(0, 400, 200, 400)
+                vibrationPattern = VIBRATION_PATTERN
                 setSound(null, null)
             }
 
@@ -76,11 +82,45 @@ object NotificationHelper {
             ).apply {
                 description = "Беззвучні сповіщення"
                 enableVibration(false)
+                vibrationPattern = longArrayOf(0)
                 setSound(null, null)
             }
 
             manager.createNotificationChannels(listOf(ch1, ch2, ch3, ch4))
         }
+    }
+
+    fun triggerVibration(context: Context) {
+        try {
+            val vibrator: Vibrator? = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                val vm = context.getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as? VibratorManager
+                vm?.defaultVibrator
+            } else {
+                @Suppress("DEPRECATION")
+                context.getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
+            }
+
+            if (vibrator == null || !vibrator.hasVibrator()) return
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                val effect = VibrationEffect.createWaveform(VIBRATION_PATTERN, -1)
+                val attrs = VibrationAttributes.Builder()
+                    .setUsage(VibrationAttributes.USAGE_ALARM)
+                    .build()
+                vibrator.vibrate(effect, attrs)
+            } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                val effect = VibrationEffect.createWaveform(VIBRATION_PATTERN, -1)
+                val audioAttrs = AudioAttributes.Builder()
+                    .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                    .setUsage(AudioAttributes.USAGE_ALARM)
+                    .build()
+                @Suppress("DEPRECATION")
+                vibrator.vibrate(effect, audioAttrs)
+            } else {
+                @Suppress("DEPRECATION")
+                vibrator.vibrate(VIBRATION_PATTERN, -1)
+            }
+        } catch (_: Exception) {}
     }
 
     fun showPreWarningNotification(
@@ -97,12 +137,15 @@ object NotificationHelper {
             return
         }
 
+        val activeSound = settings.notificationsEnabled && settings.soundEnabled
+        val activeVibe = settings.notificationsEnabled && settings.vibrationEnabled
+
         createNotificationChannels(context)
 
         val targetChannelId = when {
-            settings.soundEnabled && settings.vibrationEnabled -> CHANNEL_SOUND_VIBE
-            settings.soundEnabled && !settings.vibrationEnabled -> CHANNEL_SOUND_ONLY
-            !settings.soundEnabled && settings.vibrationEnabled -> CHANNEL_VIBE_ONLY
+            activeSound && activeVibe -> CHANNEL_SOUND_VIBE
+            activeSound && !activeVibe -> CHANNEL_SOUND_ONLY
+            !activeSound && activeVibe -> CHANNEL_VIBE_ONLY
             else -> CHANNEL_SILENT
         }
 
@@ -124,43 +167,31 @@ object NotificationHelper {
             .setContentTitle(title)
             .setContentText(body)
             .setStyle(NotificationCompat.BigTextStyle().bigText(body))
-            .setPriority(if (settings.soundEnabled || settings.vibrationEnabled) NotificationCompat.PRIORITY_HIGH else NotificationCompat.PRIORITY_LOW)
+            .setPriority(if (activeSound || activeVibe) NotificationCompat.PRIORITY_HIGH else NotificationCompat.PRIORITY_LOW)
             .setCategory(NotificationCompat.CATEGORY_ALARM)
             .setContentIntent(pendingIntent)
             .setAutoCancel(true)
 
         // Strict sound & vibration configuration
-        if (settings.soundEnabled) {
+        if (activeSound) {
             builder.setSound(soundUri)
         } else {
             builder.setSound(null)
         }
 
-        if (settings.vibrationEnabled) {
-            builder.setVibrate(longArrayOf(0, 400, 200, 400))
-            builder.setDefaults(0)
-            // Trigger hardware vibrator directly to ensure vibration even if sound is off or OS channel is cached
-            try {
-                val vibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                    val vm = context.getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as? android.os.VibratorManager
-                    vm?.defaultVibrator
-                } else {
-                    @Suppress("DEPRECATION")
-                    context.getSystemService(Context.VIBRATOR_SERVICE) as? android.os.Vibrator
-                }
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                    vibrator?.vibrate(android.os.VibrationEffect.createWaveform(longArrayOf(0, 400, 200, 400), -1))
-                } else {
-                    @Suppress("DEPRECATION")
-                    vibrator?.vibrate(longArrayOf(0, 400, 200, 400), -1)
-                }
-            } catch (_: Exception) {}
+        if (activeVibe) {
+            builder.setVibrate(VIBRATION_PATTERN)
+            if (!activeSound) {
+                builder.setDefaults(NotificationCompat.DEFAULT_VIBRATE)
+            }
+            // Trigger hardware vibrator directly with USAGE_ALARM so vibration always fires even when sound is disabled
+            triggerVibration(context)
         } else {
             builder.setVibrate(longArrayOf(0))
         }
 
         // Only mark silent if BOTH sound AND vibration are disabled
-        if (!settings.soundEnabled && !settings.vibrationEnabled) {
+        if (!activeSound && !activeVibe) {
             builder.setSilent(true)
         }
 

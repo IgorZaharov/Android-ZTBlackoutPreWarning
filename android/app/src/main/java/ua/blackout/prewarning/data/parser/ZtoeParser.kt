@@ -1,121 +1,234 @@
 package ua.blackout.prewarning.data.parser
 
+import android.content.Context
 import org.jsoup.Jsoup
 import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
 import ua.blackout.prewarning.data.model.BlackoutSlot
 import ua.blackout.prewarning.data.model.SlotStatus
+import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URL
+import java.net.UnknownHostException
+import java.net.SocketTimeoutException
+import java.net.ConnectException
 import java.time.LocalDate
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 
+enum class FetchStatus {
+    SUCCESS,
+    NO_INTERNET,
+    NO_QUEUES_FOUND
+}
+
 data class ScheduleFetchResult(
     val todaySlots: List<BlackoutSlot>,
     val tomorrowSlots: List<BlackoutSlot>?,
-    val hasTomorrowSchedule: Boolean
+    val hasTomorrowSchedule: Boolean,
+    val status: FetchStatus = FetchStatus.SUCCESS
 )
 
+// =========================================================================================
+// CRITICAL SECTION — DO NOT MODIFY UNLESS EXPLICITLY REQUESTED
+// Real ZTOE HTML Table Parser & URL Validator for https://www.ztoe.com.ua/unhooking-search.php
+// =========================================================================================
 object ZtoeParser {
     private const val USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 
-    fun isValidUrl(url: String): Boolean {
-        val trimmed = url.trim()
-        if (!trimmed.startsWith("http://") && !trimmed.startsWith("https://")) return false
-        val uri = try { java.net.URI(trimmed) } catch (e: Exception) { return false }
-        val host = uri.host?.lowercase() ?: return false
-        if (host != "www.ztoe.com.ua" && host != "ztoe.com.ua") return false
-        val path = uri.path ?: ""
-        return path == "/unhooking-search.php" || path == "/" || path.isEmpty()
+    private val DEFAULT_VALID_URLS = listOf(
+        "https://www.ztoe.com.ua/unhooking-search.php",
+        "https://example.com"
+    )
+
+    fun loadValidUrls(context: Context? = null): List<String> {
+        if (context != null) {
+            try {
+                val jsonStr = context.assets.open("valid-urls.json").bufferedReader().use { it.readText() }
+                val regex = Regex("\"([^\"]+)\"")
+                val matches = regex.findAll(jsonStr).map { it.groupValues[1].trim() }.filter { it.isNotEmpty() }.toList()
+                if (matches.isNotEmpty()) {
+                    return matches
+                }
+            } catch (_: Exception) {}
+        }
+        return DEFAULT_VALID_URLS
     }
 
-    fun fetchFullSchedule(url: String, queue: String): ScheduleFetchResult {
+    fun isValidUrl(url: String, context: Context? = null): Boolean {
+        val trimmed = url.trim().removeSuffix("/")
+        if (trimmed.isEmpty()) return false
+        val validUrls = loadValidUrls(context).map { it.trim().removeSuffix("/") }
+        return validUrls.any { it.equals(trimmed, ignoreCase = true) }
+    }
+
+    fun fetchFullSchedule(url: String, queue: String, context: Context? = null): ScheduleFetchResult {
         val kyivZone = ZoneId.of("Europe/Kyiv")
         val today = LocalDate.now(kyivZone)
-        val tomorrow = today.plusDays(1)
         val todayStr = today.format(DateTimeFormatter.ISO_LOCAL_DATE)
 
-        if (!isValidUrl(url)) {
+        if (!isValidUrl(url, context)) {
             return ScheduleFetchResult(
                 todaySlots = generateFallbackSchedule(queue, todayStr),
                 tomorrowSlots = null,
-                hasTomorrowSchedule = false
+                hasTomorrowSchedule = false,
+                status = FetchStatus.NO_QUEUES_FOUND
             )
         }
 
         return try {
-            val doc = fetchDocumentWithWindows1251(url)
-            val tables = doc.select("table")
-
-            // Format patterns to locate tables in ZTOE HTML
-            val todayD1 = String.format("%02d.%02d.%04d", today.dayOfMonth, today.monthValue, today.year)
-            val todayD2 = String.format("%d.%d.%04d", today.dayOfMonth, today.monthValue, today.year)
-            val todayD3 = String.format("%02d.%02d", today.dayOfMonth, today.monthValue)
-
-            val tomorrowD1 = String.format("%02d.%02d.%04d", tomorrow.dayOfMonth, tomorrow.monthValue, tomorrow.year)
-            val tomorrowD2 = String.format("%d.%d.%04d", tomorrow.dayOfMonth, tomorrow.monthValue, tomorrow.year)
-            val tomorrowD3 = String.format("%02d.%02d", tomorrow.dayOfMonth, tomorrow.monthValue)
-
-            var todayTable: Element? = null
-            var tomorrowTable: Element? = null
-
-            for (table in tables) {
-                val tableHtml = table.html()
-                val headerText = table.select("tr").firstOrNull()?.text() ?: ""
-                val fullText = table.text()
-
-                val matchesToday = headerText.contains(todayD1) || headerText.contains(todayD2) ||
-                        tableHtml.contains(todayD1) || tableHtml.contains(todayD2)
-                val matchesTomorrow = headerText.contains(tomorrowD1) || headerText.contains(tomorrowD2) ||
-                        tableHtml.contains(tomorrowD1) || tableHtml.contains(tomorrowD2)
-
-                if (matchesToday && todayTable == null) {
-                    todayTable = table
-                } else if (matchesTomorrow && tomorrowTable == null) {
-                    tomorrowTable = table
-                }
-            }
-
-            // Fallback table search if exact date in header wasn't found (e.g. DD.MM only)
-            if (todayTable == null) {
-                todayTable = tables.firstOrNull { t ->
-                    val txt = t.text()
-                    txt.contains(todayD3) && (txt.contains("Черга") || txt.contains("Підчерга") || txt.contains("1.1"))
-                }
-            }
-
-            if (tomorrowTable == null) {
-                tomorrowTable = tables.firstOrNull { t ->
-                    t != todayTable && (t.text().contains(tomorrowD3) || t.text().contains("на завтра")) &&
-                            (t.text().contains("Черга") || t.text().contains("1.1"))
-                }
-            }
-
-            val todaySlots = if (todayTable != null) {
-                parseTableForQueue(todayTable, queue, today)
-            } else {
-                generateFallbackSchedule(queue, todayStr)
-            }
-
-            val tomorrowSlots = if (tomorrowTable != null) {
-                parseTableForQueue(tomorrowTable, queue, tomorrow)
-            } else {
-                null
-            }
-
+            val doc = fetchDocumentWithWindows1251(url.trim())
+            parseDocumentFull(doc, queue, today)
+        } catch (e: UnknownHostException) {
             ScheduleFetchResult(
-                todaySlots = todaySlots,
-                tomorrowSlots = tomorrowSlots,
-                hasTomorrowSchedule = tomorrowSlots != null && tomorrowTable != null
+                todaySlots = generateFallbackSchedule(queue, todayStr),
+                tomorrowSlots = null,
+                hasTomorrowSchedule = false,
+                status = FetchStatus.NO_INTERNET
+            )
+        } catch (e: ConnectException) {
+            ScheduleFetchResult(
+                todaySlots = generateFallbackSchedule(queue, todayStr),
+                tomorrowSlots = null,
+                hasTomorrowSchedule = false,
+                status = FetchStatus.NO_INTERNET
+            )
+        } catch (e: SocketTimeoutException) {
+            ScheduleFetchResult(
+                todaySlots = generateFallbackSchedule(queue, todayStr),
+                tomorrowSlots = null,
+                hasTomorrowSchedule = false,
+                status = FetchStatus.NO_INTERNET
+            )
+        } catch (e: IOException) {
+            ScheduleFetchResult(
+                todaySlots = generateFallbackSchedule(queue, todayStr),
+                tomorrowSlots = null,
+                hasTomorrowSchedule = false,
+                status = FetchStatus.NO_INTERNET
             )
         } catch (e: Exception) {
             ScheduleFetchResult(
                 todaySlots = generateFallbackSchedule(queue, todayStr),
                 tomorrowSlots = null,
-                hasTomorrowSchedule = false
+                hasTomorrowSchedule = false,
+                status = FetchStatus.NO_QUEUES_FOUND
             )
         }
+    }
+
+    fun parseDocumentFull(
+        doc: Document,
+        queue: String,
+        today: LocalDate = LocalDate.now(ZoneId.of("Europe/Kyiv"))
+    ): ScheduleFetchResult {
+        val tomorrow = today.plusDays(1)
+        val todayStr = today.format(DateTimeFormatter.ISO_LOCAL_DATE)
+
+        // Filter to leaf tables (tables that do NOT contain nested <table> elements)
+        // because ztoe.com.ua wraps the entire page inside an outer layout <table>.
+        val leafTables = doc.select("table").filter { table ->
+            table.select("table").isEmpty() && table.select("tr").size >= 12
+        }
+
+        val todayD1 = String.format("%02d.%02d.%04d", today.dayOfMonth, today.monthValue, today.year)
+        val todayD2 = String.format("%d.%d.%04d", today.dayOfMonth, today.monthValue, today.year)
+        val todayD3 = String.format("%02d.%02d", today.dayOfMonth, today.monthValue)
+
+        val tomorrowD1 = String.format("%02d.%02d.%04d", tomorrow.dayOfMonth, tomorrow.monthValue, tomorrow.year)
+        val tomorrowD2 = String.format("%d.%d.%04d", tomorrow.dayOfMonth, tomorrow.monthValue, tomorrow.year)
+        val tomorrowD3 = String.format("%02d.%02d", tomorrow.dayOfMonth, tomorrow.monthValue)
+
+        var todayTable: Element? = null
+        var tomorrowTable: Element? = null
+
+        for (table in leafTables) {
+            val rows = table.select("tr")
+            val headerText = rows.take(3).joinToString(" ") { it.text() }
+            val hasQueues = table.text().contains("1.1") && table.text().contains("6.2")
+            if (!hasQueues) continue
+
+            val matchesToday = headerText.contains(todayD1) || headerText.contains(todayD2) || headerText.contains(todayD3)
+            val matchesTomorrow = headerText.contains(tomorrowD1) || headerText.contains(tomorrowD2) || headerText.contains(tomorrowD3)
+
+            if (matchesToday && todayTable == null) {
+                todayTable = table
+            } else if (matchesTomorrow && tomorrowTable == null) {
+                tomorrowTable = table
+            }
+        }
+
+        if (todayTable == null) {
+            return ScheduleFetchResult(
+                todaySlots = generateFallbackSchedule(queue, todayStr),
+                tomorrowSlots = null,
+                hasTomorrowSchedule = false,
+                status = FetchStatus.NO_QUEUES_FOUND
+            )
+        }
+
+        val todaySlots = parseTableForQueue(todayTable, queue, today)
+        if (todaySlots == null) {
+            return ScheduleFetchResult(
+                todaySlots = generateFallbackSchedule(queue, todayStr),
+                tomorrowSlots = null,
+                hasTomorrowSchedule = false,
+                status = FetchStatus.NO_QUEUES_FOUND
+            )
+        }
+
+        val tomorrowSlots = if (tomorrowTable != null) {
+            parseTableForQueue(tomorrowTable, queue, tomorrow)
+        } else {
+            null
+        }
+
+        return ScheduleFetchResult(
+            todaySlots = todaySlots,
+            tomorrowSlots = tomorrowSlots,
+            hasTomorrowSchedule = tomorrowSlots != null && tomorrowTable != null,
+            status = FetchStatus.SUCCESS
+        )
+    }
+
+    fun hasScheduleTableForDate(doc: Document, date: LocalDate): Boolean {
+        val leafTables = doc.select("table").filter { table ->
+            table.select("table").isEmpty() && table.select("tr").size >= 12
+        }
+        val d1 = String.format("%02d.%02d.%04d", date.dayOfMonth, date.monthValue, date.year)
+        val d2 = String.format("%d.%d.%04d", date.dayOfMonth, date.monthValue, date.year)
+        val d3 = String.format("%02d.%02d", date.dayOfMonth, date.monthValue)
+
+        return leafTables.any { table ->
+            val hasQueues = table.text().contains("1.1") && table.text().contains("6.2")
+            val headerText = table.select("tr").take(3).joinToString(" ") { it.text() }
+            hasQueues && (headerText.contains(d1) || headerText.contains(d2) || headerText.contains(d3))
+        }
+    }
+
+    fun parseHtmlForDate(
+        doc: Document,
+        queue: String,
+        date: LocalDate,
+        dateIso: String = date.format(DateTimeFormatter.ISO_LOCAL_DATE)
+    ): List<BlackoutSlot> {
+        val leafTables = doc.select("table").filter { table ->
+            table.select("table").isEmpty() && table.select("tr").size >= 12
+        }
+        val d1 = String.format("%02d.%02d.%04d", date.dayOfMonth, date.monthValue, date.year)
+        val d2 = String.format("%d.%d.%04d", date.dayOfMonth, date.monthValue, date.year)
+        val d3 = String.format("%02d.%02d", date.dayOfMonth, date.monthValue)
+
+        val matchingTable = leafTables.firstOrNull { table ->
+            val hasQueues = table.text().contains("1.1") && table.text().contains("6.2")
+            val headerText = table.select("tr").take(3).joinToString(" ") { it.text() }
+            hasQueues && (headerText.contains(d1) || headerText.contains(d2) || headerText.contains(d3))
+        }
+
+        if (matchingTable != null) {
+            parseTableForQueue(matchingTable, queue, date)?.let { return it }
+        }
+        return generateFallbackSchedule(queue, dateIso)
     }
 
     fun fetchAndParse(url: String, queue: String, date: LocalDate): List<BlackoutSlot> {
@@ -133,39 +246,57 @@ object ZtoeParser {
     private fun fetchDocumentWithWindows1251(urlStr: String): Document {
         val url = URL(urlStr)
         val connection = url.openConnection() as HttpURLConnection
-        connection.setRequestProperty("User-Agent", USER_AGENT)
-        connection.connectTimeout = 8000
-        connection.readTimeout = 8000
-        connection.connect()
-        return connection.inputStream.use { input ->
-            Jsoup.parse(input, "windows-1251", urlStr)
+        return try {
+            connection.setRequestProperty("User-Agent", USER_AGENT)
+            connection.connectTimeout = 8000
+            connection.readTimeout = 8000
+            connection.connect()
+            val responseCode = connection.responseCode
+            if (responseCode !in 200..299) {
+                throw IOException("HTTP $responseCode")
+            }
+            val contentType = connection.contentType?.lowercase() ?: ""
+            val charset = if (contentType.contains("utf-8")) "UTF-8" else "windows-1251"
+            connection.inputStream.use { input ->
+                Jsoup.parse(input, charset, urlStr)
+            }
+        } finally {
+            connection.disconnect()
         }
     }
 
-    private fun parseTableForQueue(table: Element, targetQueue: String, date: LocalDate): List<BlackoutSlot> {
+    private fun parseTableForQueue(table: Element, targetQueue: String, date: LocalDate): List<BlackoutSlot>? {
         val dateStr = date.format(DateTimeFormatter.ISO_LOCAL_DATE)
         val rows = table.select("tr")
 
-        // Find the row containing this specific queue (e.g. "1.1")
+        // Find the row containing this specific queue (e.g. "1.1") in its first 3 cells
         val targetRow = rows.firstOrNull { row ->
-            val cells = row.select("td, th")
-            cells.any { cell ->
+            val firstCells = row.select("td, th").take(3)
+            firstCells.any { cell ->
                 val txt = cell.text().trim()
-                txt == targetQueue || txt == "Черга $targetQueue" || txt == "Черга $targetQueue."
+                txt == targetQueue ||
+                        txt == "Черга $targetQueue" ||
+                        txt == "Черга $targetQueue." ||
+                        txt.equals("$targetQueue черга", ignoreCase = true)
             }
-        } ?: return generateFallbackSchedule(targetQueue, dateStr)
+        } ?: return null
 
         val tds = targetRow.select("td")
         if (tds.size < 24) {
-            return generateFallbackSchedule(targetQueue, dateStr)
+            return null
         }
 
-        // ZTOE table row structure: last 48 cells represent the 48 half-hour slots of the day (00:00 to 24:00)
-        val slotCells = if (tds.size >= 48) {
-            tds.takeLast(48)
-        } else {
-            // In case of 24 1-hour cells
-            tds.takeLast(24)
+        // Filter out thin 3pt separator cells if any, then take the last 48 (or 24) schedule cells
+        val validCells = tds.drop(1).filter { cell ->
+            val style = cell.attr("style").lowercase().replace(" ", "")
+            !style.contains("width:3pt") && !style.contains("width:1pt")
+        }
+
+        val slotCells = when {
+            validCells.size >= 48 -> validCells.takeLast(48)
+            tds.size >= 48 -> tds.takeLast(48)
+            validCells.size >= 24 -> validCells.takeLast(24)
+            else -> tds.takeLast(24)
         }
 
         val totalSlots = slotCells.size
@@ -186,7 +317,10 @@ object ZtoeParser {
             val attr = (cell.attr("style") + " " + cell.attr("bgcolor") + " " + cell.className()).lowercase()
             val text = cell.text().trim().lowercase()
 
-            val isOff = attr.contains("#ff3333") || attr.contains("red") || attr.contains("rgb(255, 51, 51)") ||
+            val isOff = attr.contains("#ff3333") || attr.contains("#ff3b30") ||
+                    attr.contains("background:red") || attr.contains("background: red") ||
+                    attr.contains("background-color:red") || attr.contains("background-color: red") ||
+                    attr.contains("rgb(255, 51, 51)") || attr.contains("rgb(255,51,51)") ||
                     attr.contains("danger") || text.contains("вимк") || text.contains("відкл") || text == "в" || text == "-"
 
             val status = if (isOff) SlotStatus.POWER_OFF else SlotStatus.POWER_ON
@@ -194,7 +328,7 @@ object ZtoeParser {
             BlackoutSlot(
                 id = "${dateStr}_${startStr}_Q$targetQueue",
                 startHour = startH,
-                endHour = if (endM > 0) endH else endH,
+                endHour = endH,
                 startMinute = startM,
                 endMinute = endM,
                 startTimeStr = startStr,
@@ -238,3 +372,6 @@ object ZtoeParser {
         }
     }
 }
+// =========================================================================================
+// END OF CRITICAL SECTION — DO NOT MODIFY UNLESS EXPLICITLY REQUESTED
+// =========================================================================================

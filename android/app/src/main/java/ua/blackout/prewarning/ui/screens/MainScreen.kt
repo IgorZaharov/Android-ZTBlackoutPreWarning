@@ -1,6 +1,7 @@
 package ua.blackout.prewarning.ui.screens
 
-import android.widget.Toast
+import android.content.Intent
+import android.net.Uri
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -10,8 +11,10 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.NotificationsOff
+import androidx.compose.material.icons.filled.OpenInNew
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material3.Icon
@@ -25,14 +28,15 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import ua.blackout.prewarning.data.model.BlackoutSlot
-import ua.blackout.prewarning.data.model.SlotStatus
 import ua.blackout.prewarning.data.repository.ScheduleRepository
 import ua.blackout.prewarning.ui.AppStrings
 import ua.blackout.prewarning.ui.components.TimelineBar
 import java.time.LocalTime
+import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 
 @Composable
@@ -46,34 +50,51 @@ fun MainScreen(
     hasTomorrowSchedule: Boolean = false,
     notificationsEnabled: Boolean = true,
     lastUpdated: String = "19:27",
-    nextUpdated: String = "19:42",
+    nextUpdated: String = "19:57",
     lang: String = "uk",
     onToggleNotifications: () -> Unit = {},
     onRefresh: () -> Unit = {}
 ) {
     val context = LocalContext.current
+    val scheduleRepo = remember { ScheduleRepository(context.applicationContext) }
     var selectedDayTab by remember { mutableStateOf("today") }
-    val activeSlots = if (selectedDayTab == "today") slots else (tomorrowSlots ?: slots)
 
-    // Compute continuous blackout intervals with exact 30-min resolution using ScheduleRepository
-    val intervals = remember(activeSlots) {
-        ScheduleRepository(context).getDetailedIntervals(activeSlots)
+    // Reset to "today" if tomorrow schedule is no longer available
+    LaunchedEffect(hasTomorrowSchedule, tomorrowSlots) {
+        if (!hasTomorrowSchedule || tomorrowSlots == null) {
+            selectedDayTab = "today"
+        }
     }
 
-    // Pulse animation for status dot
-    val infiniteTransition = rememberInfiniteTransition(label = "pulse")
-    val pulseScale by infiniteTransition.animateFloat(
-        initialValue = 0.85f,
-        targetValue = 1.25f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(900, easing = FastOutSlowInEasing),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "pulseScale"
-    )
+    val activeSlots = if (selectedDayTab == "today") slots else (tomorrowSlots ?: slots)
 
-    val currentTimeStr = remember {
-        LocalTime.now().format(DateTimeFormatter.ofPattern("HH:mm"))
+    // Compute continuous blackout intervals with exact 30-min resolution using hoisted ScheduleRepository
+    val intervals = remember(activeSlots) {
+        scheduleRepo.getDetailedIntervals(activeSlots)
+    }
+
+    // Pulse animation for status dot — only active during an active blackout to avoid 60fps idle CPU/battery drain
+    val pulseScale = if (isBlackoutNow) {
+        val infiniteTransition = rememberInfiniteTransition(label = "pulse")
+        val scale by infiniteTransition.animateFloat(
+            initialValue = 0.85f,
+            targetValue = 1.25f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(900, easing = FastOutSlowInEasing),
+                repeatMode = RepeatMode.Reverse
+            ),
+            label = "pulseScale"
+        )
+        scale
+    } else {
+        1f
+    }
+
+    val kyivNow = remember(countdownText) {
+        LocalTime.now(ZoneId.of("Europe/Kyiv"))
+    }
+    val currentTimeStr = remember(kyivNow.hour, kyivNow.minute) {
+        kyivNow.format(DateTimeFormatter.ofPattern("HH:mm"))
     }
 
     Column(
@@ -320,8 +341,8 @@ fun MainScreen(
                 // 24-Hour Timeline Bar
                 TimelineBar(
                     slots = activeSlots,
-                    currentHour = LocalTime.now().hour,
-                    currentMinute = LocalTime.now().minute
+                    currentHour = kyivNow.hour,
+                    currentMinute = kyivNow.minute
                 )
 
                 // List of Outage Hours for this day
@@ -437,7 +458,6 @@ fun MainScreen(
                         .background(Color.White)
                         .clickable {
                             onRefresh()
-                            Toast.makeText(context, AppStrings.refreshSuccessToast(lang), Toast.LENGTH_SHORT).show()
                         },
                     contentAlignment = Alignment.Center
                 ) {
@@ -448,6 +468,74 @@ fun MainScreen(
                         modifier = Modifier.size(20.dp)
                     )
                 }
+            }
+        }
+
+        // 6. Emergency Outages Info Link (right after refresh block, styled like AboutScreen links with site icon)
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(24.dp))
+                .background(Color(0xBF141A29))
+                .padding(14.dp)
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(Color(0x14FFFFFF))
+                    .clickable {
+                        try {
+                            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(AppStrings.EMERGENCY_OUTAGES_URL))
+                            context.startActivity(intent)
+                        } catch (_: Exception) {}
+                    }
+                    .padding(12.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(36.dp)
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(Color(0xFF1877F2)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Language,
+                            contentDescription = null,
+                            tint = Color.White,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                    Column {
+                        Text(
+                            text = AppStrings.emergencyOutagesLabel(lang),
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White
+                        )
+                        Text(
+                            text = AppStrings.EMERGENCY_OUTAGES_URL,
+                            fontSize = 10.sp,
+                            fontFamily = FontFamily.Monospace,
+                            color = Color(0x99BAE6FD),
+                            maxLines = 1,
+                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                        )
+                    }
+                }
+                Icon(
+                    imageVector = Icons.Default.OpenInNew,
+                    contentDescription = null,
+                    tint = Color(0x99BAE6FD),
+                    modifier = Modifier.size(16.dp)
+                )
             }
         }
 

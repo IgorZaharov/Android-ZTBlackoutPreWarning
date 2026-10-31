@@ -5,7 +5,7 @@ import { Language } from '../types';
 
 export const translations = {
   uk: {
-    appTitle: 'ZT Blackout Pre-Warning',
+    appTitle: 'Світло в Житомирі',
     appSubtitle: 'Попередження про відключення світла',
     queue: 'Черга',
     queueShort: 'Ч',
@@ -40,6 +40,10 @@ export const translations = {
     testAlertBody: 'Черга {queue}: відключення через {minutes} хв ({slot}).',
     realAlertTitle: 'Попередження про відключення',
     realAlertBody: 'Черга {queue}: відключення о {time} (через {minutes} хв).',
+    errorNoInternet: 'Немає доступу до Інтернету',
+    errorNoQueuesFound: 'На сайті не знайдено черг',
+    refreshSuccessToast: 'Сайт доступний, графік оновлено',
+    emergencyOutagesLabel: 'Інформація про аварійні відключення:',
     
     // Navigation
     navSchedule: 'Графік',
@@ -80,6 +84,7 @@ export const translations = {
     aboutDesc: 'Мобільний застосунок для Android для своєчасного інформування про планові та аварійні відключення електроенергії в мережах АТ «Житомиробленерго» (ztoe.com.ua). Створено на базі оригінального Windows Desktop додатку UABlackoutPreWarning.',
     aboutDesktopNotice: 'Базується на алгоритмі парсингу оригінальної програми для Windows.',
     aboutLinks: 'Посилання на проект',
+    aboutDonations: 'Donations / Благодійність і Пожертви',
     aboutGithubProfile: 'Мій головний GitHub профіль',
     aboutRepoIssues: 'Повідомити про помилку / Пропозиції (GitHub Issues)',
     aboutDesktopRepo: 'Оригінальний Windows Desktop додаток',
@@ -100,7 +105,7 @@ export const translations = {
     currentQueueHighlight: 'Виділено чергу'
   },
   en: {
-    appTitle: 'ZT Blackout Pre-Warning',
+    appTitle: 'Світло в Житомирі',
     appSubtitle: 'Power Outage Advance Warning Alert',
     queue: 'Queue',
     queueShort: 'Q',
@@ -136,6 +141,10 @@ export const translations = {
     testAlertBody: 'Queue {queue}: power outage in {minutes} min ({slot}).',
     realAlertTitle: 'Blackout Warning',
     realAlertBody: 'Queue {queue}: power will turn off at {time} (in {minutes} min).',
+    errorNoInternet: 'No Internet access',
+    errorNoQueuesFound: 'No queues found on site',
+    refreshSuccessToast: 'Site reachable, schedule updated',
+    emergencyOutagesLabel: 'Emergency outages info:',
 
     // Navigation
     navSchedule: 'Schedule',
@@ -176,6 +185,7 @@ export const translations = {
     aboutDesc: 'Native Android application for timely pre-warnings and monitoring of scheduled and emergency electricity blackouts on the Zhytomyroblenergo (ztoe.com.ua) power grid. Rebuilt from the original Windows Desktop UABlackoutPreWarning application.',
     aboutDesktopNotice: 'Built upon the parsing logic and algorithms of the original Windows application.',
     aboutLinks: 'Project Links',
+    aboutDonations: 'Donations / Благодійність і Пожертви',
     aboutGithubProfile: 'My Main GitHub Profile',
     aboutRepoIssues: 'Report Issues & Requests (GitHub Issues)',
     aboutDesktopRepo: 'Original Windows Desktop Application',

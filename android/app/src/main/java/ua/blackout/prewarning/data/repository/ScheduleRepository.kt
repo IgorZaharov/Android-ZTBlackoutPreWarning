@@ -23,9 +23,10 @@ data class OutageInterval(
     val durationHours: Double
 )
 
-class ScheduleRepository(private val context: Context) {
+class ScheduleRepository(context: Context) {
+    private val appContext: Context = context.applicationContext
     private val prefs: SharedPreferences =
-        context.getSharedPreferences("zt_schedule_cache_v2", Context.MODE_PRIVATE)
+        appContext.getSharedPreferences("zt_schedule_cache_v2", Context.MODE_PRIVATE)
 
     fun saveSchedule(queue: String, todaySlots: List<BlackoutSlot>, tomorrowSlots: List<BlackoutSlot>?) {
         val editor = prefs.edit()
@@ -45,7 +46,14 @@ class ScheduleRepository(private val context: Context) {
             editor.remove("cache_tomorrow_slots_$queue")
             editor.putBoolean("cache_has_tomorrow_$queue", false)
         }
-        editor.apply()
+        editor.commit()
+    }
+
+    fun hasValidTodayCache(queue: String): Boolean {
+        val todayStr = LocalDate.now(ZoneId.of("Europe/Kyiv")).format(DateTimeFormatter.ISO_LOCAL_DATE)
+        val cachedDate = prefs.getString("cache_today_date", null)
+        val cachedEncoded = prefs.getString("cache_today_slots_$queue", null)
+        return cachedDate == todayStr && !cachedEncoded.isNullOrEmpty() && cachedEncoded.length >= 24
     }
 
     fun getTodaySlots(queue: String): List<BlackoutSlot> {
@@ -77,6 +85,8 @@ class ScheduleRepository(private val context: Context) {
     fun hasTomorrowSchedule(queue: String): Boolean {
         return prefs.getBoolean("cache_has_tomorrow_$queue", false)
     }
+
+    fun getSharedPreferences(): SharedPreferences = prefs
 
     private fun decodeSlots(encoded: String, queue: String, dateStr: String): List<BlackoutSlot> {
         val totalSlots = encoded.length

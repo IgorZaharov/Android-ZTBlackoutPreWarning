@@ -1,6 +1,5 @@
 package ua.blackout.prewarning.ui.screens
 
-import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -20,6 +19,9 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import ua.blackout.prewarning.data.parser.FetchStatus
 import ua.blackout.prewarning.data.parser.ZtoeParser
 import ua.blackout.prewarning.ui.AppStrings
 
@@ -27,14 +29,17 @@ import ua.blackout.prewarning.ui.AppStrings
 @Composable
 fun SettingsScreen(
     currentQueue: String = "1.1",
-    advanceMinutes: Int = 30,
-    refreshMinutes: Int = 15,
+    siteUrl: String = "https://www.ztoe.com.ua/unhooking-search.php",
+    // CRITICAL CONSTANTS — Default values: advanceMinutes = 15, refreshMinutes = 30. Never modify on your own.
+    advanceMinutes: Int = 15,
+    refreshMinutes: Int = 30,
     notificationsEnabled: Boolean = true,
     soundEnabled: Boolean = true,
     vibrationEnabled: Boolean = true,
     currentLanguage: String = "SYSTEM",
     lang: String = "uk",
     onQueueSelected: (String) -> Unit = {},
+    onSiteUrlChanged: (String) -> Unit = {},
     onAdvanceMinutesChanged: (Int) -> Unit = {},
     onRefreshMinutesChanged: (Int) -> Unit = {},
     onToggleNotifications: (Boolean) -> Unit = {},
@@ -43,7 +48,8 @@ fun SettingsScreen(
     onLanguageSelected: (String) -> Unit = {},
     onSendTestAlert: () -> Unit = {},
     onForceRefresh: () -> Unit = {},
-    onResetDefaults: () -> Unit = {}
+    onResetDefaults: () -> Unit = {},
+    onShowAppBanner: (String) -> Unit = {}
 ) {
     val context = LocalContext.current
     var showQueueHelpDialog by remember { mutableStateOf(false) }
@@ -58,8 +64,25 @@ fun SettingsScreen(
     )
     val timerOptions = listOf(5, 10, 15, 20, 30, 45, 60, 90, 120, 180, 240)
 
-    var siteUrl by remember { mutableStateOf("https://www.ztoe.com.ua/unhooking-search.php") }
-    val isUrlStrictlyValid = remember(siteUrl) { ZtoeParser.isValidUrl(siteUrl) }
+    val isUrlInValidList = remember(siteUrl) { ZtoeParser.isValidUrl(siteUrl, context) }
+    var urlFetchStatus by remember { mutableStateOf(FetchStatus.SUCCESS) }
+    var isVerifyingUrl by remember { mutableStateOf(false) }
+
+    // Live URL verification against valid-urls.json + actual table with current date & queues on site
+    LaunchedEffect(siteUrl, currentQueue) {
+        if (!ZtoeParser.isValidUrl(siteUrl, context)) {
+            urlFetchStatus = FetchStatus.NO_QUEUES_FOUND
+            return@LaunchedEffect
+        }
+        isVerifyingUrl = true
+        val res = withContext(Dispatchers.IO) {
+            ZtoeParser.fetchFullSchedule(siteUrl, currentQueue, context)
+        }
+        urlFetchStatus = res.status
+        isVerifyingUrl = false
+    }
+
+    val isSiteVerifiedSuccess = isUrlInValidList && urlFetchStatus == FetchStatus.SUCCESS
 
     Column(
         modifier = Modifier
@@ -171,7 +194,7 @@ fun SettingsScreen(
             }
         }
 
-        // 2. Site Address with Strict Verification Glyph
+        // 2. Site Address with Strict Verification Glyph against /valid-urls.json & live table check
         Box(
             modifier = Modifier
                 .fillMaxWidth()
@@ -193,17 +216,22 @@ fun SettingsScreen(
                     )
 
                     // Verification Glyph
+                    val statusBadgeText = when {
+                        isSiteVerifiedSuccess -> AppStrings.siteReachable(lang)
+                        urlFetchStatus == FetchStatus.NO_INTERNET -> AppStrings.errorNoInternet(lang)
+                        else -> AppStrings.errorNoQueuesFound(lang)
+                    }
                     Box(
                         modifier = Modifier
                             .clip(RoundedCornerShape(12.dp))
-                            .background(if (isUrlStrictlyValid) Color(0x3310B981) else Color(0x33EF4444))
+                            .background(if (isSiteVerifiedSuccess) Color(0x3310B981) else Color(0x33EF4444))
                             .padding(horizontal = 8.dp, vertical = 3.dp)
                     ) {
                         Text(
-                            text = if (isUrlStrictlyValid) AppStrings.siteReachable(lang) else AppStrings.siteInvalid(lang),
+                            text = statusBadgeText,
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold,
-                            color = if (isUrlStrictlyValid) Color(0xFF34D399) else Color(0xFFF87171)
+                            color = if (isSiteVerifiedSuccess) Color(0xFF34D399) else Color(0xFFF87171)
                         )
                     }
                 }
@@ -216,23 +244,28 @@ fun SettingsScreen(
 
                 OutlinedTextField(
                     value = siteUrl,
-                    onValueChange = { siteUrl = it },
+                    onValueChange = { onSiteUrlChanged(it) },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(16.dp),
                     colors = OutlinedTextFieldDefaults.colors(
                         focusedTextColor = Color.White,
                         unfocusedTextColor = Color.White,
-                        focusedBorderColor = if (isUrlStrictlyValid) Color(0xFFFF5E3A) else Color(0xFFEF4444),
-                        unfocusedBorderColor = if (isUrlStrictlyValid) Color(0x33FFFFFF) else Color(0x66EF4444),
+                        focusedBorderColor = if (isSiteVerifiedSuccess) Color(0xFFFF5E3A) else Color(0xFFEF4444),
+                        unfocusedBorderColor = if (isSiteVerifiedSuccess) Color(0x33FFFFFF) else Color(0x66EF4444),
                         focusedContainerColor = Color(0x1AFFFFFF),
                         unfocusedContainerColor = Color(0x14FFFFFF)
                     )
                 )
 
-                if (!isUrlStrictlyValid) {
+                if (!isSiteVerifiedSuccess && !isVerifyingUrl) {
+                    val errText = if (urlFetchStatus == FetchStatus.NO_INTERNET) {
+                        AppStrings.errorNoInternet(lang)
+                    } else {
+                        AppStrings.errorNoQueuesFound(lang)
+                    }
                     Text(
-                        text = "Адреса має бути: https://www.ztoe.com.ua/unhooking-search.php",
+                        text = errText,
                         fontSize = 10.sp,
                         color = Color(0xFFF87171)
                     )
@@ -369,7 +402,7 @@ fun SettingsScreen(
             }
         }
 
-        // 4. Notification Toggles (All synchronized)
+        // 4. Notification Toggles (All synchronized; Sound & Vibration turn off and disable when Notifications are off)
         Box(
             modifier = Modifier
                 .fillMaxWidth()
@@ -518,7 +551,7 @@ fun SettingsScreen(
                             .background(Color(0xFFFF5E3A))
                             .clickable {
                                 onSendTestAlert()
-                                Toast.makeText(context, if (lang == "uk") "Тестове сповіщення надіслано" else "Test alert dispatched", Toast.LENGTH_SHORT).show()
+                                onShowAppBanner(if (lang == "uk") "Тестове сповіщення надіслано" else "Test alert dispatched")
                             }
                             .padding(vertical = 12.dp),
                         contentAlignment = Alignment.Center
@@ -532,7 +565,7 @@ fun SettingsScreen(
                         }
                     }
 
-                    // Refresh Button with Notification Toast
+                    // Refresh Button with In-App Application Icon Notification Banner
                     Box(
                         modifier = Modifier
                             .weight(1f)
@@ -540,7 +573,6 @@ fun SettingsScreen(
                             .background(Color(0x26FFFFFF))
                             .clickable {
                                 onForceRefresh()
-                                Toast.makeText(context, AppStrings.refreshSuccessToast(lang), Toast.LENGTH_SHORT).show()
                             }
                             .padding(vertical = 12.dp),
                         contentAlignment = Alignment.Center
@@ -572,20 +604,32 @@ fun SettingsScreen(
         Spacer(modifier = Modifier.height(96.dp))
     }
 
-    // Queue Help Dialog
+    // =========================================================================================
+    // CRITICAL SECTION — DO NOT MODIFY UNLESS EXPLICITLY REQUESTED
+    // Queue Help Dialog with numbered instructions for Users on how to find their queue
+    // =========================================================================================
     if (showQueueHelpDialog) {
         AlertDialog(
             onDismissRequest = { showQueueHelpDialog = false },
             title = { Text(AppStrings.queueHelpTitle(lang), fontWeight = FontWeight.Bold, color = Color.White) },
-            text = { Text(AppStrings.queueHelpDesc(lang), color = Color.LightGray) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    AppStrings.queueHelpSteps(lang).forEach { step ->
+                        Text(step, color = Color.LightGray, fontSize = 13.sp, lineHeight = 18.sp)
+                    }
+                }
+            },
             confirmButton = {
                 TextButton(onClick = { showQueueHelpDialog = false }) {
-                    Text("OK", color = Color(0xFFFF5E3A), fontWeight = FontWeight.Bold)
+                    Text(AppStrings.queueHelpGotIt(lang), color = Color(0xFFFF5E3A), fontWeight = FontWeight.Bold)
                 }
             },
             containerColor = Color(0xFF141A29)
         )
     }
+    // =========================================================================================
+    // END OF CRITICAL SECTION
+    // =========================================================================================
 
     // Reset Confirm Dialog
     if (showResetConfirmDialog) {
@@ -597,7 +641,7 @@ fun SettingsScreen(
                 TextButton(onClick = {
                     onResetDefaults()
                     showResetConfirmDialog = false
-                    Toast.makeText(context, if (lang == "uk") "Налаштування скинуто" else "Settings reset", Toast.LENGTH_SHORT).show()
+                    onShowAppBanner(if (lang == "uk") "Налаштування скинуто" else "Settings reset")
                 }) {
                     Text(AppStrings.resetYes(lang), color = Color(0xFFFF5E3A), fontWeight = FontWeight.Bold)
                 }

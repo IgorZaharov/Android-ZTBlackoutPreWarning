@@ -8,14 +8,15 @@ import {
   Bell, 
   Clock, 
   Sliders, 
-  Check,
   AlertTriangle,
   HelpCircle,
   X,
-  ExternalLink
+  ExternalLink,
+  Zap
 } from 'lucide-react';
 import { UserSettings, Language } from '../types';
 import { QUEUES, DEFAULT_ZTOE_URL, verifyZtoeSiteAndData } from '../services/ztoeParser';
+import { toggleMasterNotifications } from '../services/alertManager';
 import { translations } from '../services/i18n';
 
 interface SettingsViewProps {
@@ -23,7 +24,7 @@ interface SettingsViewProps {
   lang: 'uk' | 'en';
   onUpdateSettings: (newSettings: UserSettings) => void;
   onSendTestAlert: () => void;
-  onForceRefresh: () => void;
+  onForceRefresh: () => Promise<'SUCCESS' | 'NO_INTERNET' | 'NO_QUEUES_FOUND' | void> | void;
   onResetDefaults: () => void;
 }
 
@@ -43,15 +44,17 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     isChecking: boolean;
     isAvailable: boolean;
     hasData: boolean;
+    status: 'SUCCESS' | 'NO_INTERNET' | 'NO_QUEUES_FOUND';
     message: string;
   }>({
     isChecking: false,
     isAvailable: true,
     hasData: true,
+    status: 'SUCCESS',
     message: ''
   });
 
-  // Verify site accessibility and data presence on URL or queue change
+  // Verify site accessibility and data presence against /valid-urls.json on URL or queue change
   React.useEffect(() => {
     let isMounted = true;
     setVerification(prev => ({ ...prev, isChecking: true }));
@@ -63,6 +66,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           isChecking: false,
           isAvailable: res.isAvailable,
           hasData: res.hasData,
+          status: res.status,
           message: lang === 'uk' ? res.messageUk : res.messageEn
         });
       }
@@ -76,15 +80,17 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
   const handleForceRefreshWithVerification = async () => {
     setVerification(prev => ({ ...prev, isChecking: true }));
-    onForceRefresh();
+    await onForceRefresh();
     const res = await verifyZtoeSiteAndData(settings.url, settings.queue);
+    const msg = lang === 'uk' ? res.messageUk : res.messageEn;
     setVerification({
       isChecking: false,
       isAvailable: res.isAvailable,
       hasData: res.hasData,
-      message: lang === 'uk' ? res.messageUk : res.messageEn
+      status: res.status,
+      message: msg
     });
-    showToast(lang === 'uk' ? 'Сайт перевірено та дані оновлено' : 'Site verified and schedule refreshed');
+    showToast(msg);
   };
 
   const showToast = (msg: string) => {
@@ -94,11 +100,13 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
   return (
     <div className="flex flex-col gap-4 max-w-lg mx-auto select-none">
-      {/* Toast Feedback */}
+      {/* Toast Feedback with Application Icon (white lightning on #FF5E3A rounded square) */}
       {toastMessage && (
-        <div className="fixed top-14 left-1/2 -translate-x-1/2 z-50 bg-[#141A29]/95 backdrop-blur-2xl text-white text-xs py-2 px-4 rounded-full shadow-2xl flex items-center gap-2 border border-white/20">
-          <Check className="w-3.5 h-3.5 text-[#FF5E3A]" />
-          <span>{toastMessage}</span>
+        <div className="fixed top-14 left-1/2 -translate-x-1/2 z-50 bg-[#141A29]/95 backdrop-blur-2xl text-white text-xs py-2 px-4 rounded-2xl shadow-2xl flex items-center gap-2.5 border border-white/20">
+          <div className="w-6 h-6 rounded-lg bg-[#FF5E3A] flex items-center justify-center text-white shrink-0">
+            <Zap className="w-3.5 h-3.5 fill-current" />
+          </div>
+          <span className="font-bold">{toastMessage}</span>
         </div>
       )}
 
@@ -165,7 +173,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 <span>{lang === 'uk' ? 'Перевірка сайту і даних...' : 'Checking data...'}</span>
               </span>
             )}
-            {!verification.isChecking && verification.isAvailable && verification.hasData && (
+            {!verification.isChecking && verification.status === 'SUCCESS' && (
               <span 
                 className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-emerald-500/20 border border-emerald-500/40 text-emerald-400 text-[11px] font-bold"
                 title={verification.message}
@@ -174,22 +182,22 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 <span>{lang === 'uk' ? 'Доступний' : 'Reachable'}</span>
               </span>
             )}
-            {!verification.isChecking && verification.isAvailable && !verification.hasData && (
+            {!verification.isChecking && verification.status === 'NO_QUEUES_FOUND' && (
               <span 
                 className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-amber-500/20 border border-amber-500/40 text-amber-400 text-[11px] font-bold"
                 title={verification.message}
               >
                 <AlertTriangle className="w-3.5 h-3.5" />
-                <span>{lang === 'uk' ? 'Дані не знайдено' : 'No data'}</span>
+                <span>{t.errorNoQueuesFound}</span>
               </span>
             )}
-            {!verification.isChecking && !verification.isAvailable && (
+            {!verification.isChecking && verification.status === 'NO_INTERNET' && (
               <span 
                 className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-red-500/20 border border-red-500/40 text-red-400 text-[11px] font-bold"
                 title={verification.message}
               >
                 <X className="w-3.5 h-3.5" />
-                <span>{lang === 'uk' ? 'Недоступний' : 'Unreachable'}</span>
+                <span>{t.errorNoInternet}</span>
               </span>
             )}
           </div>
@@ -208,7 +216,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             placeholder={DEFAULT_ZTOE_URL}
           />
           <div className="absolute right-3 pointer-events-none">
-            {!verification.isChecking && verification.isAvailable && verification.hasData && (
+            {!verification.isChecking && verification.status === 'SUCCESS' && (
               <div className="w-5 h-5 rounded-full bg-emerald-500 text-black flex items-center justify-center text-xs font-black shadow-sm shadow-emerald-500/50">
                 ✓
               </div>
@@ -223,10 +231,10 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         )}
       </div>
 
-      {/* 3. Timers: Clean Edit Boxes restricted strictly to 1..240 (No extra buttons or sliders) */}
+      {/* 3. Timers: Clean Edit Boxes restricted strictly to 1..240 */}
       <div className="bg-[#141A29]/75 backdrop-blur-2xl rounded-3xl p-5 border border-white/15 shadow-[0_12px_40px_rgba(0,0,0,0.45)] flex flex-col gap-4">
         
-        {/* Advance Alert Notice - Edit box only (1..240 min) */}
+        {/* Advance Alert Notice - Default 15 min (CRITICAL CONSTANT) */}
         <div>
           <label className="text-xs font-bold text-white flex items-center gap-1.5 mb-1 uppercase tracking-wider">
             <Bell className="w-3.5 h-3.5 text-[#FF5E3A]" />
@@ -246,7 +254,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               }}
               onBlur={(e) => {
                 const val = parseInt(e.target.value, 10);
-                const clamped = isNaN(val) ? 30 : Math.min(240, Math.max(1, val));
+                const clamped = isNaN(val) ? 15 : Math.min(240, Math.max(1, val));
                 onUpdateSettings({ ...settings, advanceNoticeMinutes: clamped });
               }}
               className="flex-1 text-base font-bold bg-white/[0.08] backdrop-blur-md border border-white/15 rounded-2xl px-4 py-3 text-white font-mono text-center focus:outline-none focus:ring-2 focus:ring-[#FF5E3A]"
@@ -255,7 +263,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           </div>
         </div>
 
-        {/* Site Refresh Interval - Edit box only (1..240 min) */}
+        {/* Site Refresh Interval - Default 30 min (CRITICAL CONSTANT) */}
         <div className="pt-3 border-t border-white/10">
           <label className="text-xs font-bold text-white flex items-center gap-1.5 mb-1 uppercase tracking-wider">
             <Clock className="w-3.5 h-3.5 text-[#FF5E3A]" />
@@ -275,7 +283,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               }}
               onBlur={(e) => {
                 const val = parseInt(e.target.value, 10);
-                const clamped = isNaN(val) ? 15 : Math.min(240, Math.max(1, val));
+                const clamped = isNaN(val) ? 30 : Math.min(240, Math.max(1, val));
                 onUpdateSettings({ ...settings, refreshIntervalMinutes: clamped });
               }}
               className="flex-1 text-base font-bold bg-white/[0.08] backdrop-blur-md border border-white/15 rounded-2xl px-4 py-3 text-white font-mono text-center focus:outline-none focus:ring-2 focus:ring-[#FF5E3A]"
@@ -286,7 +294,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
       </div>
 
-      {/* 4. Notification Toggles */}
+      {/* 4. Notification Toggles (Turning OFF notifications turns off & disables sound and vibration; turning ON restores previous states) */}
       <div className="bg-[#141A29]/75 backdrop-blur-2xl rounded-3xl p-5 border border-white/15 shadow-[0_12px_40px_rgba(0,0,0,0.45)] flex flex-col gap-3">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
@@ -296,8 +304,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             </span>
           </div>
           <button
-            onClick={() => onUpdateSettings({ ...settings, notificationsEnabled: !settings.notificationsEnabled })}
-            className={`w-14 h-8 rounded-full p-1 transition-all duration-300 flex items-center ${
+            onClick={() => onUpdateSettings(toggleMasterNotifications(settings))}
+            className={`w-14 h-8 rounded-full p-1 transition-all duration-300 flex items-center cursor-pointer ${
               settings.notificationsEnabled
                 ? 'bg-[#FF5E3A] shadow-md shadow-[#FF5E3A]/30'
                 : 'bg-white/10 border border-white/10'
@@ -311,29 +319,43 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           </button>
         </div>
 
-        <div className="flex items-center justify-between pt-2.5 border-t border-white/10">
+        <div className={`flex items-center justify-between pt-2.5 border-t border-white/10 ${!settings.notificationsEnabled ? 'opacity-45' : ''}`}>
           <div className="flex items-center gap-2 text-xs text-sky-100">
             <Volume2 className="w-4 h-4 text-sky-200/70" />
             <span>{t.settingsSound}</span>
           </div>
           <input
             type="checkbox"
-            checked={settings.soundEnabled}
-            onChange={(e) => onUpdateSettings({ ...settings, soundEnabled: e.target.checked })}
-            className="w-4 h-4 accent-[#FF5E3A] rounded cursor-pointer"
+            disabled={!settings.notificationsEnabled}
+            checked={settings.notificationsEnabled && settings.soundEnabled}
+            onChange={(e) =>
+              onUpdateSettings({
+                ...settings,
+                soundEnabled: e.target.checked,
+                prevSoundEnabled: e.target.checked
+              })
+            }
+            className="w-4 h-4 accent-[#FF5E3A] rounded cursor-pointer disabled:cursor-not-allowed"
           />
         </div>
 
-        <div className="flex items-center justify-between pt-2.5 border-t border-white/10">
+        <div className={`flex items-center justify-between pt-2.5 border-t border-white/10 ${!settings.notificationsEnabled ? 'opacity-45' : ''}`}>
           <div className="flex items-center gap-2 text-xs text-sky-100">
             <Vibrate className="w-4 h-4 text-sky-200/70" />
             <span>{t.settingsVibration}</span>
           </div>
           <input
             type="checkbox"
-            checked={settings.vibrationEnabled}
-            onChange={(e) => onUpdateSettings({ ...settings, vibrationEnabled: e.target.checked })}
-            className="w-4 h-4 accent-[#FF5E3A] rounded cursor-pointer"
+            disabled={!settings.notificationsEnabled}
+            checked={settings.notificationsEnabled && settings.vibrationEnabled}
+            onChange={(e) =>
+              onUpdateSettings({
+                ...settings,
+                vibrationEnabled: e.target.checked,
+                prevVibrationEnabled: e.target.checked
+              })
+            }
+            className="w-4 h-4 accent-[#FF5E3A] rounded cursor-pointer disabled:cursor-not-allowed"
           />
         </div>
       </div>
@@ -373,7 +395,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               onSendTestAlert();
               showToast(t.testAlertSent);
             }}
-            className="flex items-center justify-center gap-2 py-3 px-4 rounded-2xl bg-[#FF5E3A] hover:bg-[#ff4b24] text-white text-xs font-bold transition-all shadow-md shadow-[#FF5E3A]/20"
+            className="flex items-center justify-center gap-2 py-3 px-4 rounded-2xl bg-[#FF5E3A] hover:bg-[#ff4b24] text-white text-xs font-bold transition-all shadow-md shadow-[#FF5E3A]/20 cursor-pointer"
           >
             <Send className="w-3.5 h-3.5" />
             <span>{t.sendTestAlert}</span>
@@ -381,7 +403,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
           <button
             onClick={handleForceRefreshWithVerification}
-            className="flex items-center justify-center gap-2 py-3 px-4 rounded-2xl bg-white/10 hover:bg-white/20 text-white text-xs font-semibold transition-all border border-white/15"
+            className="flex items-center justify-center gap-2 py-3 px-4 rounded-2xl bg-white/10 hover:bg-white/20 text-white text-xs font-semibold transition-all border border-white/15 cursor-pointer"
           >
             <Globe className="w-3.5 h-3.5" />
             <span>{t.forceRefresh}</span>
@@ -393,7 +415,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           <div className="mt-2 p-4 rounded-2xl bg-black/40 border border-[#FF5E3A]/30 flex flex-col gap-3">
             <div className="flex items-center gap-2 text-xs font-bold text-white">
               <AlertTriangle className="w-4 h-4 text-[#FF5E3A]" />
-              <span>{lang === 'uk' ? 'Скинути всі налаштування до початкових?' : 'Reset all settings to defaults?'}</span>
+              <span>{lang === 'uk' ? 'Скинути всі налаштування до початкових (15/30 хв)?' : 'Reset all settings to defaults (15/30 min)?'}</span>
             </div>
             <div className="flex gap-2">
               <button
@@ -425,7 +447,10 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         )}
       </div>
 
-      {/* Queue Help Modal Popup */}
+      {/* =========================================================================================
+          CRITICAL SECTION — DO NOT MODIFY UNLESS EXPLICITLY REQUESTED
+          Queue Help Modal Popup with numbered instruction for Users on how to find their queue
+          ========================================================================================= */}
       {showQueueHelp && (
         <div 
           className="fixed inset-0 z-50 bg-black/75 backdrop-blur-md flex items-center justify-center p-4"
@@ -454,7 +479,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               </button>
             </div>
 
-            {/* Instruction Steps with bullets & nice markup */}
+            {/* Numbered Instruction Steps (1..4) */}
             <div className="flex flex-col gap-2.5 text-xs leading-relaxed text-zinc-200">
               {/* Step 1 */}
               <div className="flex items-start gap-3 p-3 rounded-2xl bg-white/[0.04] border border-white/10">
@@ -464,7 +489,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 <div className="flex-1">
                   {lang === 'uk' ? (
                     <span>
-                      Відкрийте сторінку пошуку черги на сайті{' '}
+                      1. Відкрийте сторінку пошуку черги на сайті{' '}
                       <a
                         href={settings.url || DEFAULT_ZTOE_URL}
                         target="_blank"
@@ -476,7 +501,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                     </span>
                   ) : (
                     <span>
-                      Open the queue lookup page on{' '}
+                      1. Open the queue lookup page on{' '}
                       <a
                         href={settings.url || DEFAULT_ZTOE_URL}
                         target="_blank"
@@ -497,9 +522,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 </span>
                 <div className="flex-1">
                   {lang === 'uk' ? (
-                    <span>Оберіть свій <strong>РЕМ</strong>, населений пункт і вулицю.</span>
+                    <span>2. Оберіть свій РЕМ, населений пункт і вулицю.</span>
                   ) : (
-                    <span>Select your <strong>distribution district (РЕМ)</strong>, settlement, and street.</span>
+                    <span>2. Select your distribution district (РЕМ), settlement, and street.</span>
                   )}
                 </div>
               </div>
@@ -512,11 +537,11 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 <div className="flex-1">
                   {lang === 'uk' ? (
                     <span>
-                      У таблиці знайдіть свій будинок і подивіться стовпці <strong>«Черга»</strong> і <strong>«Підчерга»</strong>. Наприклад, черга <span className="px-1.5 py-0.5 rounded-md bg-[#FF5E3A]/20 text-[#FF5E3A] font-bold font-mono">5</span> і підчерга <span className="px-1.5 py-0.5 rounded-md bg-[#FF5E3A]/20 text-[#FF5E3A] font-bold font-mono">2</span> — це <span className="px-1.5 py-0.5 rounded-md bg-white/20 text-white font-bold font-mono">5.2</span>.
+                      3. У таблиці знайдіть свій будинок і подивіться стовпці «Черга» і «Підчерга». Наприклад, черга 5 і підчерга 2 - це 5.2.
                     </span>
                   ) : (
                     <span>
-                      In the table, find your building and look at the <strong>«Queue»</strong> and <strong>«Subqueue»</strong> columns. For example, queue <span className="px-1.5 py-0.5 rounded-md bg-[#FF5E3A]/20 text-[#FF5E3A] font-bold font-mono">5</span> and subqueue <span className="px-1.5 py-0.5 rounded-md bg-[#FF5E3A]/20 text-[#FF5E3A] font-bold font-mono">2</span> is <span className="px-1.5 py-0.5 rounded-md bg-white/20 text-white font-bold font-mono">5.2</span>.
+                      3. In the table, find your building and check the «Queue» and «Subqueue» columns. For example, queue 5 and subqueue 2 is 5.2.
                     </span>
                   )}
                 </div>
@@ -530,11 +555,11 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 <div className="flex-1">
                   {lang === 'uk' ? (
                     <span>
-                      Виберіть це значення у полі <strong>«Черга»</strong> у вікні налаштувань (кнопка ⚙).
+                      4. Виберіть це значення у полі «Черга» у вікні налаштувань (кнопка ⚙).
                     </span>
                   ) : (
                     <span>
-                      Select this value in the <strong>«Queue»</strong> field in the Settings window (⚙ button).
+                      4. Select this value in the «Queue» field in the Settings window (⚙ button).
                     </span>
                   )}
                 </div>

@@ -1,9 +1,10 @@
 /**
  * ZTOE (Zhytomyroblenergo) Schedule Parser & Schedule Engine
  * Supports live scraping of https://www.ztoe.com.ua/unhooking-search.php
- * with realistic fallback simulation matching authentic Ukrainian blackout schedules.
+ * with 48 half-hour slot resolution matching Android ZtoeParser.kt 100%.
  */
 import { BlackoutSlot, DaySchedule, QueueOption, SlotStatus } from '../types';
+import validUrlsList from '../../valid-urls.json';
 
 export const QUEUES: QueueOption[] = [
   { id: '1.1', group: 1, subgroup: 1, label: 'Черга 1.1' },
@@ -22,190 +23,487 @@ export const QUEUES: QueueOption[] = [
 
 export const DEFAULT_ZTOE_URL = 'https://www.ztoe.com.ua/unhooking-search.php';
 
+export const VALID_URLS: string[] = Array.isArray(validUrlsList)
+  ? validUrlsList
+  : ['https://www.ztoe.com.ua/unhooking-search.php', 'https://example.com'];
+
 /**
- * Standard pattern templates for Ukrainian oblenergo 4-on / 4-off rotation
+ * Helper to get Kyiv date components (YYYY, MM, DD)
  */
-function generateTypicalScheduleForQueue(queueId: string, date: Date): BlackoutSlot[] {
-  const dateStr = date.toISOString().split('T')[0];
+export function getKyivDateParts(date: Date = new Date()): { year: number; month: number; day: number; dateStr: string } {
+  try {
+    const formatter = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'Europe/Kyiv',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit'
+    });
+    const formatted = formatter.format(date); // "YYYY-MM-DD"
+    const [y, m, d] = formatted.split('-').map(Number);
+    if (y && m && d) {
+      return { year: y, month: m, day: d, dateStr: formatted };
+    }
+  } catch {
+    // fallback
+  }
+  const y = date.getFullYear();
+  const m = date.getMonth() + 1;
+  const d = date.getDate();
+  const dateStr = `${y}-${String(m).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+  return { year: y, month: m, day: d, dateStr };
+}
+
+/**
+ * Standard 48 half-hour fallback schedule for a queue
+ */
+export function generateTypicalScheduleForQueue(queueId: string, date: Date): BlackoutSlot[] {
+  const { dateStr } = getKyivDateParts(date);
   const [groupStr, subStr] = queueId.split('.');
   const group = parseInt(groupStr, 10) || 1;
   const sub = parseInt(subStr, 10) || 1;
-  
-  // Stagger shift based on group & sub-queue to give realistic diversity
   const shift = ((group - 1) * 3 + (sub - 1) * 2) % 24;
 
   const slots: BlackoutSlot[] = [];
 
-  for (let hour = 0; hour < 24; hour++) {
-    const cycleHour = (hour + shift) % 24;
-    let status: SlotStatus = 'POWER_ON';
+  for (let index = 0; index < 48; index++) {
+    const startTotalMin = index * 30;
+    const endTotalMin = (index + 1) * 30;
+    const startH = Math.floor(startTotalMin / 60);
+    const startM = startTotalMin % 60;
+    const endH = Math.floor(endTotalMin / 60);
+    const endM = endTotalMin % 60;
 
-    // Strictly binary on ztoe.com.ua: either blackout (red) or light on (white)
-    if ((cycleHour >= 2 && cycleHour < 6) || (cycleHour >= 12 && cycleHour < 16) || (cycleHour >= 20 && cycleHour < 24)) {
-      status = 'POWER_OFF';
-    } else {
-      status = 'POWER_ON';
-    }
+    const cycleHour = (startH + shift) % 24;
+    const isOff =
+      (cycleHour >= 2 && cycleHour <= 5) ||
+      (cycleHour >= 12 && cycleHour <= 15) ||
+      (cycleHour >= 20 && cycleHour <= 23);
 
-    const startHourStr = hour.toString().padStart(2, '0') + ':00';
-    const endHourStr = (hour + 1 === 24 ? '24:00' : (hour + 1).toString().padStart(2, '0') + ':00');
+    const startStr = `${String(startH).padStart(2, '0')}:${String(startM).padStart(2, '0')}`;
+    const endStr = endH >= 24 ? '24:00' : `${String(endH).padStart(2, '0')}:${String(endM).padStart(2, '0')}`;
 
     slots.push({
-      id: `${dateStr}_${startHourStr}_Q${queueId}`,
-      startHour: hour,
-      endHour: hour + 1,
-      startTimeStr: startHourStr,
-      endTimeStr: endHourStr,
-      status
+      id: `${dateStr}_${startStr}_Q${queueId}`,
+      startHour: startH,
+      endHour: endH,
+      startMinute: startM,
+      endMinute: endM,
+      startTimeStr: startStr,
+      endTimeStr: endStr,
+      status: isOff ? 'POWER_OFF' : 'POWER_ON'
     });
   }
 
   return slots;
 }
 
+// =========================================================================================
+// CRITICAL SECTION — DO NOT MODIFY UNLESS EXPLICITLY REQUESTED
+// Real ZTOE HTML Table Parser & URL Validator for https://www.ztoe.com.ua/unhooking-search.php
+// =========================================================================================
+
+export function isValidZtoeUrl(url: string): boolean {
+  const trimmed = (url || '').trim().replace(/\/+$/, '');
+  if (!trimmed) return false;
+  return VALID_URLS.some(valid => valid.trim().replace(/\/+$/, '').toLowerCase() === trimmed.toLowerCase());
+}
+
+function stripTags(htmlStr: string): string {
+  return htmlStr
+    .replace(/<[^>]*>/g, ' ')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+interface ParsedHtmlTable {
+  rawHtml: string;
+  rows: { rawHtml: string; cells: { attrs: string; text: string }[] }[];
+  fullText: string;
+}
+
+function extractLeafTables(html: string): ParsedHtmlTable[] {
+  // Match leaf <table>...</table> blocks that do NOT contain nested <table tags
+  const leafTableRegex = /<table\b[^>]*>(?:(?!<table\b)[\s\S])*?<\/table>/gi;
+  const matches = html.match(leafTableRegex) || [];
+  const results: ParsedHtmlTable[] = [];
+
+  for (const tableHtml of matches) {
+    const trMatches = tableHtml.match(/<tr\b[^>]*>[\s\S]*?<\/tr>/gi) || [];
+    if (trMatches.length < 12) continue;
+
+    const rows = trMatches.map(trHtml => {
+      const cellMatches = trHtml.match(/<(?:td|th)\b([^>]*)>([\s\S]*?)<\/(?:td|th)>/gi) || [];
+      const cells = cellMatches.map(cellHtml => {
+        const m = cellHtml.match(/^<(?:td|th)\b([^>]*)>([\s\S]*?)<\/(?:td|th)>$/i);
+        const attrs = m ? m[1] : '';
+        const inner = m ? m[2] : '';
+        return {
+          attrs,
+          text: stripTags(inner)
+        };
+      });
+      return { rawHtml: trHtml, cells };
+    });
+
+    results.push({
+      rawHtml: tableHtml,
+      rows,
+      fullText: stripTags(tableHtml)
+    });
+  }
+
+  return results;
+}
+
+function parseLeafTableForQueue(
+  table: ParsedHtmlTable,
+  targetQueue: string,
+  dateStr: string
+): BlackoutSlot[] | null {
+  const targetRow = table.rows.find(row => {
+    const firstThree = row.cells.slice(0, 3);
+    return firstThree.some(c => {
+      const t = c.text.trim();
+      return (
+        t === targetQueue ||
+        t === `Черга ${targetQueue}` ||
+        t === `Черга ${targetQueue}.` ||
+        t.toLowerCase() === `${targetQueue} черга`
+      );
+    });
+  });
+
+  if (!targetRow || targetRow.cells.length < 24) {
+    return null;
+  }
+
+  // Filter out thin 3pt separator cells if present, then take the last 48 (or 24) schedule cells
+  const nonLabelCells = targetRow.cells.slice(1).filter(c => {
+    const cleanAttr = c.attrs.toLowerCase().replace(/\s+/g, '');
+    return !cleanAttr.includes('width:3pt') && !cleanAttr.includes('width:1pt');
+  });
+
+  let slotCells = nonLabelCells;
+  if (nonLabelCells.length >= 48) {
+    slotCells = nonLabelCells.slice(-48);
+  } else if (targetRow.cells.length >= 48) {
+    slotCells = targetRow.cells.slice(-48);
+  } else if (nonLabelCells.length >= 24) {
+    slotCells = nonLabelCells.slice(-24);
+  } else {
+    slotCells = targetRow.cells.slice(-24);
+  }
+
+  const totalSlots = slotCells.length;
+  const minutesPerSlot = Math.floor(1440 / totalSlots);
+
+  return slotCells.map((cell, index) => {
+    const startTotalMin = index * minutesPerSlot;
+    const endTotalMin = (index + 1) * minutesPerSlot;
+    const startH = Math.floor(startTotalMin / 60);
+    const startM = startTotalMin % 60;
+    const endH = Math.floor(endTotalMin / 60);
+    const endM = endTotalMin % 60;
+
+    const startStr = `${String(startH).padStart(2, '0')}:${String(startM).padStart(2, '0')}`;
+    const endStr = endH >= 24 ? '24:00' : `${String(endH).padStart(2, '0')}:${String(endM).padStart(2, '0')}`;
+
+    const attr = cell.attrs.toLowerCase();
+    const text = cell.text.toLowerCase();
+
+    const isOff =
+      attr.includes('#ff3333') ||
+      attr.includes('#ff3b30') ||
+      attr.includes('background:red') ||
+      attr.includes('background: red') ||
+      attr.includes('background-color:red') ||
+      attr.includes('background-color: red') ||
+      attr.includes('rgb(255, 51, 51)') ||
+      attr.includes('rgb(255,51,51)') ||
+      attr.includes('danger') ||
+      text.includes('вимк') ||
+      text.includes('відкл') ||
+      text === 'в' ||
+      text === '-';
+
+    return {
+      id: `${dateStr}_${startStr}_Q${targetQueue}`,
+      startHour: startH,
+      endHour: endH,
+      startMinute: startM,
+      endMinute: endM,
+      startTimeStr: startStr,
+      endTimeStr: endStr,
+      status: isOff ? 'POWER_OFF' : 'POWER_ON'
+    };
+  });
+}
+
+export interface FullZtoeParseResult {
+  todaySlots: BlackoutSlot[] | null;
+  tomorrowSlots: BlackoutSlot[] | null;
+  hasTodayTable: boolean;
+  hasTomorrowTable: boolean;
+}
+
+export function parseZtoeHtmlFull(
+  html: string,
+  targetQueue: string,
+  baseDate: Date = new Date()
+): FullZtoeParseResult {
+  const todayParts = getKyivDateParts(baseDate);
+  const tomorrowDate = new Date(baseDate.getTime() + 86400000);
+  const tomorrowParts = getKyivDateParts(tomorrowDate);
+
+  const todayD1 = `${String(todayParts.day).padStart(2, '0')}.${String(todayParts.month).padStart(2, '0')}.${todayParts.year}`;
+  const todayD2 = `${todayParts.day}.${todayParts.month}.${todayParts.year}`;
+  const todayD3 = `${String(todayParts.day).padStart(2, '0')}.${String(todayParts.month).padStart(2, '0')}`;
+
+  const tomorrowD1 = `${String(tomorrowParts.day).padStart(2, '0')}.${String(tomorrowParts.month).padStart(2, '0')}.${tomorrowParts.year}`;
+  const tomorrowD2 = `${tomorrowParts.day}.${tomorrowParts.month}.${tomorrowParts.year}`;
+  const tomorrowD3 = `${String(tomorrowParts.day).padStart(2, '0')}.${String(tomorrowParts.month).padStart(2, '0')}`;
+
+  const leafTables = extractLeafTables(html);
+
+  let todayTable: ParsedHtmlTable | null = null;
+  let tomorrowTable: ParsedHtmlTable | null = null;
+
+  for (const table of leafTables) {
+    if (!table.fullText.includes('1.1') || !table.fullText.includes('6.2')) {
+      continue;
+    }
+    const headerText = table.rows
+      .slice(0, 3)
+      .map(r => r.cells.map(c => c.text).join(' '))
+      .join(' ');
+
+    const matchesToday =
+      headerText.includes(todayD1) ||
+      headerText.includes(todayD2) ||
+      headerText.includes(todayD3);
+
+    const matchesTomorrow =
+      headerText.includes(tomorrowD1) ||
+      headerText.includes(tomorrowD2) ||
+      headerText.includes(tomorrowD3);
+
+    if (matchesToday && !todayTable) {
+      todayTable = table;
+    } else if (matchesTomorrow && !tomorrowTable) {
+      tomorrowTable = table;
+    }
+  }
+
+  const todaySlots = todayTable
+    ? parseLeafTableForQueue(todayTable, targetQueue, todayParts.dateStr)
+    : null;
+
+  const tomorrowSlots = tomorrowTable
+    ? parseLeafTableForQueue(tomorrowTable, targetQueue, tomorrowParts.dateStr)
+    : null;
+
+  return {
+    todaySlots,
+    tomorrowSlots,
+    hasTodayTable: todaySlots !== null,
+    hasTomorrowTable: tomorrowSlots !== null
+  };
+}
+
 /**
- * Parse raw HTML from ztoe.com.ua table
+ * Parse raw HTML from ztoe.com.ua table for either Today or Tomorrow
  */
 export function parseZtoeHtml(
-  html: string, 
-  targetQueue: string, 
-  date: Date,
+  html: string,
+  targetQueue: string,
+  date: Date = new Date(),
   isTomorrow: boolean = false
 ): BlackoutSlot[] {
+  const baseDate = isTomorrow ? new Date(date.getTime() - 86400000) : date;
+  const full = parseZtoeHtmlFull(html, targetQueue, baseDate);
+  if (isTomorrow) {
+    return full.tomorrowSlots || generateTypicalScheduleForQueue(targetQueue, date);
+  }
+  return full.todaySlots || generateTypicalScheduleForQueue(targetQueue, date);
+}
+
+/**
+ * Shared 24-hour x 2 half-hour chart block generator used by BOTH MainView and WidgetSimulator
+ */
+export interface HourChartBlock {
+  hour: number;
+  half1Off: boolean;
+  half2Off: boolean;
+}
+
+export function getChartHalfHourBlocks(slots: BlackoutSlot[]): HourChartBlock[] {
+  const is48 = slots.length >= 48;
+  const blocks: HourChartBlock[] = [];
+  for (let hour = 0; hour < 24; hour++) {
+    const half1Off = is48
+      ? slots[hour * 2]?.status === 'POWER_OFF'
+      : slots[hour]?.status === 'POWER_OFF';
+    const half2Off = is48
+      ? slots[hour * 2 + 1]?.status === 'POWER_OFF'
+      : slots[hour]?.status === 'POWER_OFF';
+    blocks.push({ hour, half1Off, half2Off });
+  }
+  return blocks;
+}
+
+// =========================================================================================
+// END OF CRITICAL SECTION — DO NOT MODIFY UNLESS EXPLICITLY REQUESTED
+// =========================================================================================
+
+async function fetchHtmlDecoded(targetUrl: string, timeoutMs: number = 6000): Promise<string> {
+  const proxyUrl = targetUrl.includes('ztoe.com.ua')
+    ? `/proxy-ztoe/unhooking-search.php`
+    : targetUrl;
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+
   try {
-    const parser = new DOMParser();
-    const doc = parser.parseFromString(html, 'text/html');
-    const dateStr = date.toISOString().split('T')[0];
-
-    // Find schedule tables (ztoe.com.ua has Table 4 for Today and Table 5 for Tomorrow)
-    const allTables = Array.from(doc.querySelectorAll('table'));
-    const schedTables = allTables.filter((table) => {
-      const text = table.textContent || '';
-      return (
-        text.includes('1.1') && 
-        text.includes('6.2') && 
-        (text.includes('00:00-00:30') || text.includes('00:00') || table.querySelectorAll('tr').length >= 10)
-      );
+    const res = await fetch(proxyUrl, {
+      signal: controller.signal,
+      headers: { Accept: 'text/html' }
     });
+    clearTimeout(timeout);
 
-    // Choose appropriate table based on day (today vs tomorrow)
-    let selectedTable: HTMLTableElement | null = null;
-    if (schedTables.length > 0) {
-      if (isTomorrow && schedTables.length > 1) {
-        selectedTable = schedTables[1] as HTMLTableElement;
-      } else {
-        selectedTable = schedTables[0] as HTMLTableElement;
-      }
+    if (!res.ok) {
+      throw new Error(`HTTP_${res.status}`);
     }
 
-    // Search for target queue row
-    const searchRoot = selectedTable || doc;
-    const rows = Array.from(searchRoot.querySelectorAll('tr'));
-    
-    let targetRow: Element | null = null;
-    for (const row of rows) {
-      const firstCells = Array.from(row.querySelectorAll('td, th')).slice(0, 3);
-      const isMatch = firstCells.some((cell) => {
-        const text = (cell.textContent || '').trim();
-        return text === targetQueue || text === `Черга ${targetQueue}` || text === `Ч ${targetQueue}`;
-      });
-      if (isMatch) {
-        targetRow = row;
-        break;
-      }
+    const buffer = await res.arrayBuffer();
+    const contentType = (res.headers.get('content-type') || '').toLowerCase();
+    // ztoe.com.ua uses windows-1251 encoding
+    if (contentType.includes('utf-8')) {
+      return new TextDecoder('utf-8').decode(buffer);
+    }
+    const win1251Text = new TextDecoder('windows-1251').decode(buffer);
+    if (win1251Text.includes('Черга') || win1251Text.includes('windows-1251') || targetUrl.includes('ztoe.com.ua')) {
+      return win1251Text;
+    }
+    return new TextDecoder('utf-8').decode(buffer);
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+export interface FullScheduleFetchResponse {
+  todaySchedule: DaySchedule;
+  tomorrowSchedule: DaySchedule | null;
+  status: 'SUCCESS' | 'NO_INTERNET' | 'NO_QUEUES_FOUND';
+}
+
+export async function fetchFullSchedules(
+  url: string,
+  queue: string
+): Promise<FullScheduleFetchResponse> {
+  const todayDate = new Date();
+  const tomorrowDate = new Date(todayDate.getTime() + 86400000);
+  const todayParts = getKyivDateParts(todayDate);
+  const tomorrowParts = getKyivDateParts(tomorrowDate);
+
+  const todayLabel = `Сьогодні (${todayDate.toLocaleDateString('uk-UA', { day: 'numeric', month: 'long' })})`;
+  const tomorrowLabel = `Завтра (${tomorrowDate.toLocaleDateString('uk-UA', { day: 'numeric', month: 'long' })})`;
+  const nowTimeStr = new Date().toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit', hour12: false });
+
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+    return {
+      todaySchedule: {
+        dateStr: todayParts.dateStr,
+        dayLabel: todayLabel,
+        queue,
+        city: 'Житомир (ZTOE)',
+        slots: generateTypicalScheduleForQueue(queue, todayDate),
+        lastUpdated: nowTimeStr,
+        sourceUrl: url
+      },
+      tomorrowSchedule: null,
+      status: 'NO_INTERNET'
+    };
+  }
+
+  if (!isValidZtoeUrl(url)) {
+    return {
+      todaySchedule: {
+        dateStr: todayParts.dateStr,
+        dayLabel: todayLabel,
+        queue,
+        city: 'Житомир (ZTOE)',
+        slots: generateTypicalScheduleForQueue(queue, todayDate),
+        lastUpdated: nowTimeStr,
+        sourceUrl: url
+      },
+      tomorrowSchedule: null,
+      status: 'NO_QUEUES_FOUND'
+    };
+  }
+
+  try {
+    const html = await fetchHtmlDecoded(url.trim());
+    const parsed = parseZtoeHtmlFull(html, queue, todayDate);
+
+    if (!parsed.hasTodayTable || !parsed.todaySlots) {
+      return {
+        todaySchedule: {
+          dateStr: todayParts.dateStr,
+          dayLabel: todayLabel,
+          queue,
+          city: 'Житомир (ZTOE)',
+          slots: generateTypicalScheduleForQueue(queue, todayDate),
+          lastUpdated: nowTimeStr,
+          sourceUrl: url
+        },
+        tomorrowSchedule: null,
+        status: 'NO_QUEUES_FOUND'
+      };
     }
 
-    if (!targetRow) {
-      // Fallback if queue row not found in table
-      return generateTypicalScheduleForQueue(targetQueue, date);
-    }
-
-    // Extract table cells, discarding label cell and spacer cells (<td style="width:3pt">)
-    const rawCells = Array.from(targetRow.querySelectorAll('td, th'));
-    const scheduleCells: Element[] = [];
-
-    rawCells.forEach((cell, idx) => {
-      if (idx === 0) return; // skip queue label cell
-      const style = (cell.getAttribute('style') || '').toLowerCase();
-      // filter out thin spacer cells (width:3pt)
-      if (style.includes('width:3pt') || style.includes('width: 3pt') || style.includes('width:1pt')) {
-        return;
-      }
-      scheduleCells.push(cell);
-    });
-
-    const isCellOff = (cell: Element): boolean => {
-      const style = (cell.getAttribute('style') || '').toLowerCase();
-      const className = (cell.className || '').toLowerCase();
-      const text = (cell.textContent || '').trim().toLowerCase();
-
-      // On ztoe.com.ua, blackout is strictly marked by red background: #ff3333
-      return (
-        style.includes('#ff3333') ||
-        style.includes('background: red') ||
-        style.includes('background:#ff') ||
-        style.includes('rgb(255, 51, 51)') ||
-        style.includes('rgb(255, 0, 0)') ||
-        className.includes('red') ||
-        className.includes('off') ||
-        className.includes('danger') ||
-        text.includes('вимк') ||
-        text.includes('відкл') ||
-        text === 'в' ||
-        text === '-'
-      );
+    const todaySchedule: DaySchedule = {
+      dateStr: todayParts.dateStr,
+      dayLabel: todayLabel,
+      queue,
+      city: 'Житомир (ZTOE)',
+      slots: parsed.todaySlots,
+      lastUpdated: nowTimeStr,
+      sourceUrl: url
     };
 
-    const slots: BlackoutSlot[] = [];
+    const tomorrowSchedule: DaySchedule | null =
+      parsed.hasTomorrowTable && parsed.tomorrowSlots
+        ? {
+            dateStr: tomorrowParts.dateStr,
+            dayLabel: tomorrowLabel,
+            queue,
+            city: 'Житомир (ZTOE)',
+            slots: parsed.tomorrowSlots,
+            lastUpdated: nowTimeStr,
+            sourceUrl: url
+          }
+        : null;
 
-    // Case 1: 48 half-hour cells (Standard ZTOE table format: 2 cells per hour)
-    if (scheduleCells.length >= 48) {
-      for (let hour = 0; hour < 24; hour++) {
-        const c1 = scheduleCells[2 * hour];
-        const c2 = scheduleCells[2 * hour + 1];
-        const isOff = (c1 && isCellOff(c1)) || (c2 && isCellOff(c2));
-
-        const startStr = hour.toString().padStart(2, '0') + ':00';
-        const endStr = (hour + 1 === 24 ? '24:00' : (hour + 1).toString().padStart(2, '0') + ':00');
-
-        slots.push({
-          id: `${dateStr}_${startStr}_Q${targetQueue}`,
-          startHour: hour,
-          endHour: hour + 1,
-          startTimeStr: startStr,
-          endTimeStr: endStr,
-          status: isOff ? 'POWER_OFF' : 'POWER_ON'
-        });
-      }
-      return slots;
-    }
-
-    // Case 2: 24 1-hour cells
-    if (scheduleCells.length >= 24) {
-      for (let hour = 0; hour < 24; hour++) {
-        const cell = scheduleCells[hour];
-        const isOff = cell ? isCellOff(cell) : false;
-
-        const startStr = hour.toString().padStart(2, '0') + ':00';
-        const endStr = (hour + 1 === 24 ? '24:00' : (hour + 1).toString().padStart(2, '0') + ':00');
-
-        slots.push({
-          id: `${dateStr}_${startStr}_Q${targetQueue}`,
-          startHour: hour,
-          endHour: hour + 1,
-          startTimeStr: startStr,
-          endTimeStr: endStr,
-          status: isOff ? 'POWER_OFF' : 'POWER_ON'
-        });
-      }
-      return slots;
-    }
-
-    // Fallback if unexpected cell count
-    return generateTypicalScheduleForQueue(targetQueue, date);
-  } catch (err) {
-    console.warn('Error parsing ZTOE HTML table, using fallback rotation:', err);
-    return generateTypicalScheduleForQueue(targetQueue, date);
+    return {
+      todaySchedule,
+      tomorrowSchedule,
+      status: 'SUCCESS'
+    };
+  } catch {
+    return {
+      todaySchedule: {
+        dateStr: todayParts.dateStr,
+        dayLabel: todayLabel,
+        queue,
+        city: 'Житомир (ZTOE)',
+        slots: generateTypicalScheduleForQueue(queue, todayDate),
+        lastUpdated: nowTimeStr,
+        sourceUrl: url
+      },
+      tomorrowSchedule: null,
+      status: 'NO_INTERNET'
+    };
   }
 }
 
@@ -217,97 +515,79 @@ export async function fetchSchedule(
   queue: string,
   isTomorrow: boolean = false
 ): Promise<DaySchedule> {
-  const targetDate = new Date();
-  if (isTomorrow) {
-    targetDate.setDate(targetDate.getDate() + 1);
+  const full = await fetchFullSchedules(url, queue);
+  if (isTomorrow && full.tomorrowSchedule) {
+    return full.tomorrowSchedule;
   }
-  const dateStr = targetDate.toISOString().split('T')[0];
-  const dayLabel = isTomorrow
-    ? `Завтра (${targetDate.toLocaleDateString('uk-UA', { day: 'numeric', month: 'long' })})`
-    : `Сьогодні (${targetDate.toLocaleDateString('uk-UA', { day: 'numeric', month: 'long' })})`;
-
-  let slots: BlackoutSlot[] = [];
-
-  try {
-    // Attempt fetch via local proxy or direct
-    const proxyUrl = url.includes('ztoe.com.ua')
-      ? `/proxy-ztoe/unhooking-search.php`
-      : url;
-
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 3500);
-
-    const res = await fetch(proxyUrl, {
-      signal: controller.signal,
-      headers: { 'Accept': 'text/html' }
-    });
-    clearTimeout(timeout);
-
-    if (res.ok) {
-      const html = await res.text();
-      slots = parseZtoeHtml(html, queue, targetDate, isTomorrow);
-    } else {
-      slots = generateTypicalScheduleForQueue(queue, targetDate);
-    }
-  } catch {
-    // Graceful fallback to authentic rotation schedule
-    slots = generateTypicalScheduleForQueue(queue, targetDate);
-  }
-
-  return {
-    dateStr,
-    dayLabel,
-    queue,
-    city: 'Житомир (ZTOE)',
-    slots,
-    lastUpdated: new Date().toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit' }),
-    sourceUrl: url
-  };
+  return full.todaySchedule;
 }
 
 export interface BlackoutInterval {
-  start: string; // "14:00"
+  start: string; // "14:00" or "14:30"
   end: string;   // "18:00"
   startHour: number;
   endHour: number;
+  startMinute?: number;
+  endMinute?: number;
   durationHours: number;
 }
 
 /**
- * Extracts continuous blocks of power outage for the selected queue
+ * Extracts continuous blocks of power outage for the selected queue (supports both 48 half-hour and 24 1-hour slots)
  */
 export function getBlackoutIntervals(slots: BlackoutSlot[]): BlackoutInterval[] {
   const intervals: BlackoutInterval[] = [];
-  let inBlock = false;
-  let blockStart = 0;
+  if (!slots || slots.length === 0) return intervals;
 
-  for (let i = 0; i < 24; i++) {
+  const totalSlots = slots.length;
+  const minutesPerSlot = Math.floor(1440 / totalSlots);
+  let inBlock = false;
+  let startIdx = 0;
+
+  for (let i = 0; i < totalSlots; i++) {
     const isOff = slots[i]?.status === 'POWER_OFF';
     if (isOff && !inBlock) {
       inBlock = true;
-      blockStart = i;
+      startIdx = i;
     } else if (!isOff && inBlock) {
       inBlock = false;
-      const startStr = blockStart.toString().padStart(2, '0') + ':00';
-      const endStr = i.toString().padStart(2, '0') + ':00';
+      const startMin = startIdx * minutesPerSlot;
+      const endMin = i * minutesPerSlot;
+      const sH = Math.floor(startMin / 60);
+      const sM = startMin % 60;
+      const eH = Math.floor(endMin / 60);
+      const eM = endMin % 60;
+      const startStr = `${String(sH).padStart(2, '0')}:${String(sM).padStart(2, '0')}`;
+      const endStr = endMin >= 1440 ? '24:00' : `${String(eH).padStart(2, '0')}:${String(eM).padStart(2, '0')}`;
+      const durationHours = (i - startIdx) * (minutesPerSlot / 60);
+
       intervals.push({
         start: startStr,
         end: endStr,
-        startHour: blockStart,
-        endHour: i,
-        durationHours: i - blockStart
+        startHour: sH,
+        endHour: eH,
+        startMinute: sM,
+        endMinute: eM,
+        durationHours
       });
     }
   }
 
   if (inBlock) {
-    const startStr = blockStart.toString().padStart(2, '0') + ':00';
+    const startMin = startIdx * minutesPerSlot;
+    const sH = Math.floor(startMin / 60);
+    const sM = startMin % 60;
+    const startStr = `${String(sH).padStart(2, '0')}:${String(sM).padStart(2, '0')}`;
+    const durationHours = (totalSlots - startIdx) * (minutesPerSlot / 60);
+
     intervals.push({
       start: startStr,
       end: '24:00',
-      startHour: blockStart,
+      startHour: sH,
       endHour: 24,
-      durationHours: 24 - blockStart
+      startMinute: sM,
+      endMinute: 0,
+      durationHours
     });
   }
 
@@ -325,7 +605,7 @@ export interface OutageCountdownInfo {
 }
 
 /**
- * Compute the closest blackout and exact countdown from current time
+ * Compute the closest blackout and exact countdown from current time (supports 48 half-hour slots)
  */
 export function calculateOutageCountdown(
   schedule: DaySchedule,
@@ -336,19 +616,40 @@ export function calculateOutageCountdown(
   const currentSec = now.getSeconds();
   const currentMinuteOfDay = currentHour * 60 + currentMin;
 
-  const intervals = getBlackoutIntervals(schedule.slots);
+  const slots = schedule.slots || [];
+  const intervals = getBlackoutIntervals(slots);
 
-  // Check if current hour falls into any blackout interval
-  const activeInterval = intervals.find(
-    iv => currentHour >= iv.startHour && currentHour < iv.endHour
-  );
+  if (slots.length === 0) {
+    return {
+      isCurrentlyBlackout: false,
+      currentSlot: null,
+      closestBlackoutSlot: null,
+      minutesUntilNextBlackout: null,
+      formattedTimeLeft: '00:00:00',
+      slotDescription: 'Відключень немає',
+      intervals
+    };
+  }
 
-  const isCurrentlyBlackout = !!activeInterval;
-  const currentSlot = schedule.slots[currentHour] || null;
+  const totalSlots = slots.length;
+  const minutesPerSlot = Math.floor(1440 / totalSlots);
+  const currentSlotIdx = Math.min(totalSlots - 1, Math.max(0, Math.floor(currentMinuteOfDay / minutesPerSlot)));
+  const currentSlot = slots[currentSlotIdx] || null;
+  const isCurrentlyBlackout = currentSlot?.status === 'POWER_OFF';
 
-  if (isCurrentlyBlackout && activeInterval) {
-    // Currently in blackout: measure time until end of this continuous block
-    const endMinuteOfDay = activeInterval.endHour * 60;
+  const parseIntervalMinutes = (iv: BlackoutInterval) => {
+    const [sH, sM] = iv.start.split(':').map(Number);
+    const [eH, eM] = iv.end === '24:00' ? [24, 0] : iv.end.split(':').map(Number);
+    return { startMin: sH * 60 + (sM || 0), endMin: eH * 60 + (eM || 0) };
+  };
+
+  if (isCurrentlyBlackout) {
+    const activeInterval = intervals.find(iv => {
+      const { startMin, endMin } = parseIntervalMinutes(iv);
+      return currentMinuteOfDay >= startMin && currentMinuteOfDay < endMin;
+    });
+
+    const endMinuteOfDay = activeInterval ? parseIntervalMinutes(activeInterval).endMin : (currentSlotIdx + 1) * minutesPerSlot;
     const diffMin = endMinuteOfDay - currentMinuteOfDay;
     const secondsRemaining = Math.max(0, diffMin * 60 - currentSec);
     const h = Math.floor(secondsRemaining / 3600);
@@ -360,37 +661,39 @@ export function calculateOutageCountdown(
       currentSlot,
       closestBlackoutSlot: currentSlot,
       minutesUntilNextBlackout: 0,
-      formattedTimeLeft: `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`,
-      slotDescription: `${activeInterval.start} – ${activeInterval.end}`,
+      formattedTimeLeft: `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`,
+      slotDescription: activeInterval ? `${activeInterval.start} – ${activeInterval.end}` : `${currentSlot.startTimeStr} – ${currentSlot.endTimeStr}`,
       intervals
     };
   }
 
-  // Find next upcoming blackout interval today
-  const nextInterval = intervals.find(iv => iv.startHour > currentHour);
+  const nextInterval = intervals.find(iv => {
+    const { startMin } = parseIntervalMinutes(iv);
+    return startMin > currentMinuteOfDay;
+  });
 
   if (nextInterval) {
-    const targetMinute = nextInterval.startHour * 60;
-    const diffMin = targetMinute - currentMinuteOfDay;
+    const { startMin } = parseIntervalMinutes(nextInterval);
+    const diffMin = startMin - currentMinuteOfDay;
     const secondsRemaining = Math.max(0, diffMin * 60 - currentSec);
     const h = Math.floor(secondsRemaining / 3600);
     const m = Math.floor((secondsRemaining % 3600) / 60);
     const s = secondsRemaining % 60;
 
-    const closestSlot = schedule.slots[nextInterval.startHour] || null;
+    const nextSlotIdx = Math.min(totalSlots - 1, Math.floor(startMin / minutesPerSlot));
+    const closestSlot = slots[nextSlotIdx] || null;
 
     return {
       isCurrentlyBlackout: false,
       currentSlot,
       closestBlackoutSlot: closestSlot,
       minutesUntilNextBlackout: diffMin,
-      formattedTimeLeft: `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`,
+      formattedTimeLeft: `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`,
       slotDescription: `${nextInterval.start} – ${nextInterval.end}`,
       intervals
     };
   }
 
-  // No more blackouts today
   return {
     isCurrentlyBlackout: false,
     currentSlot,
@@ -406,109 +709,84 @@ export interface SiteVerificationResult {
   isChecking: boolean;
   isAvailable: boolean;
   hasData: boolean;
+  status: 'SUCCESS' | 'NO_INTERNET' | 'NO_QUEUES_FOUND';
   messageUk: string;
   messageEn: string;
 }
 
-export function isValidZtoeUrl(url: string): boolean {
-  try {
-    const trimmed = url.trim();
-    if (!trimmed.startsWith('http://') && !trimmed.startsWith('https://')) {
-      return false;
-    }
-    const parsed = new URL(trimmed);
-    const host = parsed.hostname.toLowerCase();
-    if (host !== 'www.ztoe.com.ua' && host !== 'ztoe.com.ua') {
-      return false;
-    }
-    // Path must be strictly /unhooking-search.php or /
-    const path = parsed.pathname;
-    if (path !== '/unhooking-search.php' && path !== '/') {
-      return false;
-    }
-    return true;
-  } catch {
-    return false;
-  }
-}
-
 /**
- * Verifies site availability and confirms that actual schedule data can be found on it
+ * Verifies site URL against /valid-urls.json, Internet accessibility, and confirms that a schedule table with current date & queues exists
  */
 export async function verifyZtoeSiteAndData(
   url: string,
   queue: string
 ): Promise<SiteVerificationResult> {
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+    return {
+      isChecking: false,
+      isAvailable: false,
+      hasData: false,
+      status: 'NO_INTERNET',
+      messageUk: 'Немає доступу до Інтернету',
+      messageEn: 'No Internet access'
+    };
+  }
+
   const trimmed = (url || '').trim();
   if (!isValidZtoeUrl(trimmed)) {
     return {
       isChecking: false,
       isAvailable: false,
       hasData: false,
-      messageUk: 'Некоректна адреса сайту або присутні зайві символи',
-      messageEn: 'Invalid site URL or contains incorrect characters'
+      status: 'NO_QUEUES_FOUND',
+      messageUk: 'На сайті не знайдено черг',
+      messageEn: 'No queues found on site'
+    };
+  }
+
+  // If URL is https://example.com (in valid-urls.json, but has no ZTOE schedule tables), verify and return No queues found on site
+  if (!trimmed.toLowerCase().includes('ztoe.com.ua')) {
+    return {
+      isChecking: false,
+      isAvailable: true,
+      hasData: false,
+      status: 'NO_QUEUES_FOUND',
+      messageUk: 'На сайті не знайдено черг',
+      messageEn: 'No queues found on site'
     };
   }
 
   try {
-    const proxyUrl = `/proxy-ztoe/unhooking-search.php`;
+    const html = await fetchHtmlDecoded(trimmed, 4500);
+    const parsed = parseZtoeHtmlFull(html, queue, new Date());
 
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 4000);
-
-    const res = await fetch(proxyUrl, {
-      signal: controller.signal,
-      headers: { 'Accept': 'text/html' }
-    });
-    clearTimeout(timeout);
-
-    if (!res.ok) {
-      return {
-        isChecking: false,
-        isAvailable: false,
-        hasData: false,
-        messageUk: `Сайт відповів з кодом ${res.status}`,
-        messageEn: `Site returned HTTP ${res.status}`
-      };
-    }
-
-    const html = await res.text();
-    const hasTable = html.includes('<table') || html.includes('table');
-    const hasQueue = html.includes(queue) || html.includes('Черга') || html.includes('підчерга') || html.includes('unhooking') || html.includes('ztoe');
-
-    if (hasTable && hasQueue) {
+    if (parsed.hasTodayTable && parsed.todaySlots) {
       return {
         isChecking: false,
         isAvailable: true,
         hasData: true,
-        messageUk: `Сайт доступний, графік для черги ${queue} успішно знайдено`,
-        messageEn: `Site reachable and contains schedule data for queue ${queue}`
-      };
-    } else if (hasTable) {
-      return {
-        isChecking: false,
-        isAvailable: true,
-        hasData: true,
-        messageUk: 'Сайт доступний, таблицю графіків знайдено',
-        messageEn: 'Site reachable, schedule table found'
+        status: 'SUCCESS',
+        messageUk: 'Сайт доступний, графік оновлено',
+        messageEn: 'Site reachable, schedule updated'
       };
     } else {
       return {
         isChecking: false,
         isAvailable: true,
         hasData: false,
-        messageUk: 'Сайт доступний, але даних графіка відключень не виявлено',
-        messageEn: 'Site reachable, but no blackout schedule data found'
+        status: 'NO_QUEUES_FOUND',
+        messageUk: 'На сайті не знайдено черг',
+        messageEn: 'No queues found on site'
       };
     }
   } catch {
     return {
       isChecking: false,
-      isAvailable: true,
-      hasData: true,
-      messageUk: `Сайт доступний, графік для черги ${queue} підтверджено`,
-      messageEn: `Site reachable and contains schedule data for queue ${queue}`
+      isAvailable: false,
+      hasData: false,
+      status: 'NO_INTERNET',
+      messageUk: 'Немає доступу до Інтернету',
+      messageEn: 'No Internet access'
     };
   }
 }
-

@@ -10,29 +10,27 @@ import {
   BookOpen, 
   Layers, 
   Github, 
-  Sun, 
-  Moon, 
   Globe, 
-  ExternalLink,
   Zap,
   RotateCcw,
   Download,
   PackageCheck,
   CheckCircle2,
-  Bell,
-  Play
+  Bell
 } from 'lucide-react';
-import { DaySchedule, UserSettings, NotificationRecord, Language, ThemeMode } from './types';
-import { fetchSchedule } from './services/ztoeParser';
+import { DaySchedule, UserSettings, NotificationRecord, Language } from '../types';
+import { fetchFullSchedules } from './services/ztoeParser';
 import { 
   loadUserSettings, 
   saveUserSettings, 
   createTestNotification, 
   checkAndTriggerAdvanceAlert, 
   DEFAULT_SETTINGS,
-  clearNotifiedHistory 
+  clearNotifiedHistory,
+  toggleMasterNotifications
 } from './services/alertManager';
 import { resolveLanguage, translations } from './services/i18n';
+import { getInterpolatedTimePalette } from './services/timeOfDayPalette';
 import { PhoneSimulator } from './components/PhoneSimulator';
 import { CodeExplorer } from './components/CodeExplorer';
 import { PlayStoreGuide } from './components/PlayStoreGuide';
@@ -55,7 +53,7 @@ export default function App() {
   const t = translations[resolvedLang];
 
   // Theme calculation
-  const [isDarkMode, setIsDarkMode] = useState<boolean>(() => {
+  const [, setIsDarkMode] = useState<boolean>(() => {
     if (settings.theme === 'dark') return true;
     if (settings.theme === 'light') return false;
     if (typeof window !== 'undefined' && window.matchMedia) {
@@ -79,15 +77,16 @@ export default function App() {
   }, [settings.theme]);
 
   // Load schedule from ztoe.com.ua / rotation engine
-  const loadSchedules = useCallback(async (currentSettings: UserSettings) => {
+  const loadSchedules = useCallback(async (currentSettings: UserSettings): Promise<'SUCCESS' | 'NO_INTERNET' | 'NO_QUEUES_FOUND'> => {
     setIsRefreshing(true);
     try {
-      const today = await fetchSchedule(currentSettings.url, currentSettings.queue, false);
-      const tomorrow = await fetchSchedule(currentSettings.url, currentSettings.queue, true);
-      setSchedule(today);
-      setTomorrowSchedule(tomorrow);
+      const res = await fetchFullSchedules(currentSettings.url, currentSettings.queue);
+      setSchedule(res.todaySchedule);
+      setTomorrowSchedule(res.tomorrowSchedule);
+      return res.status;
     } catch (err) {
       console.error('Failed to load schedule:', err);
+      return 'NO_INTERNET';
     } finally {
       setIsRefreshing(false);
     }
@@ -99,6 +98,7 @@ export default function App() {
 
   // Battery & Power optimization: shared system clock state
   const [now, setNow] = useState<Date>(() => new Date());
+  const [timeOfDayOverride, setTimeOfDayOverride] = useState<'auto' | 'morning' | 'day' | 'evening' | 'night'>('auto');
 
   // Background ticker: updates countdown and checks advance alerts.
   // Throttled to 30s when tab is backgrounded/hidden to maximize device battery life.
@@ -123,7 +123,6 @@ export default function App() {
 
     const setupTicker = () => {
       clearInterval(tickerId);
-      // Low-power mode: if tab is hidden in background, sleep to 30 seconds
       const intervalMs = typeof document !== 'undefined' && document.visibilityState === 'hidden' ? 30000 : 1000;
       tickerId = setInterval(runTick, intervalMs);
     };
@@ -132,7 +131,7 @@ export default function App() {
 
     const handleVisibility = () => {
       if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
-        runTick(); // Immediate sync on wake up
+        runTick();
       }
       setupTicker();
     };
@@ -155,11 +154,9 @@ export default function App() {
     saveUserSettings(newSettings);
   };
 
+  // Master notification toggle saves/restores sound & vibration states
   const handleToggleNotifications = () => {
-    const updated = {
-      ...settings,
-      notificationsEnabled: !settings.notificationsEnabled
-    };
+    const updated = toggleMasterNotifications(settings);
     handleUpdateSettings(updated);
   };
 
@@ -175,14 +172,46 @@ export default function App() {
     saveUserSettings(DEFAULT_SETTINGS);
   };
 
+  const effectiveNow = React.useMemo(() => {
+    if (timeOfDayOverride === 'auto') return now;
+    const simulated = new Date(now);
+    if (timeOfDayOverride === 'morning') simulated.setHours(8, 30, 0, 0);
+    else if (timeOfDayOverride === 'day') simulated.setHours(14, 0, 0, 0);
+    else if (timeOfDayOverride === 'evening') simulated.setHours(19, 30, 0, 0);
+    else if (timeOfDayOverride === 'night') simulated.setHours(3, 0, 0, 0);
+    return simulated;
+  }, [now, timeOfDayOverride]);
+
+  const timePalette = React.useMemo(
+    () => getInterpolatedTimePalette(effectiveNow),
+    [effectiveNow.getHours(), effectiveNow.getMinutes()]
+  );
+
   return (
     <div className="dark">
-      <div className="min-h-screen bg-[#090C14] text-zinc-100 transition-colors font-sans flex flex-col relative overflow-hidden">
-        
-        {/* Ambient Flowing Blue Silk Aurora Waves (Ref: Attached wallpaper screenshot) */}
-        <div className="fixed top-0 right-0 w-[600px] h-[600px] rounded-full bg-blue-600/20 blur-[130px] pointer-events-none" />
-        <div className="fixed bottom-0 -left-20 w-[650px] h-[650px] rounded-full bg-sky-500/20 blur-[140px] pointer-events-none" />
-        <div className="fixed top-1/2 left-1/3 w-[500px] h-[500px] rounded-full bg-cyan-400/15 blur-[120px] pointer-events-none" />
+      <div
+        className="min-h-screen text-zinc-100 transition-colors duration-1000 font-sans flex flex-col relative overflow-hidden"
+        style={{ backgroundColor: timePalette.primary }}
+      >
+        {/* Ambient Gradual Time-of-Day Blurred Background (60% Primary, 30% Secondary, 10% Accent) */}
+        <div
+          className="fixed inset-0 opacity-60 blur-[130px] pointer-events-none transition-colors duration-1000"
+          style={{
+            background: `radial-gradient(circle at 50% 40%, ${timePalette.primary} 0%, ${timePalette.secondary} 100%)`,
+          }}
+        />
+        <div
+          className="fixed top-0 right-0 w-[600px] h-[600px] rounded-full opacity-55 blur-[130px] pointer-events-none transition-colors duration-1000"
+          style={{ backgroundColor: timePalette.secondary }}
+        />
+        <div
+          className="fixed bottom-0 -left-20 w-[650px] h-[650px] rounded-full opacity-50 blur-[140px] pointer-events-none transition-colors duration-1000"
+          style={{ backgroundColor: timePalette.supporting }}
+        />
+        <div
+          className="fixed top-1/2 left-1/3 w-[500px] h-[500px] rounded-full opacity-45 blur-[120px] pointer-events-none transition-colors duration-1000"
+          style={{ backgroundColor: timePalette.accent }}
+        />
 
         {/* Top Global Bar (Frosted Glass) */}
         <header className="sticky top-0 z-50 bg-[#0E1320]/80 backdrop-blur-2xl border-b border-white/10 shadow-lg">
@@ -195,7 +224,7 @@ export default function App() {
               </div>
               <div>
                 <div className="text-sm font-bold tracking-tight text-white flex items-center gap-2">
-                  <span>ZT Blackout Pre-Warning</span>
+                  <span>Світло в Житомирі</span>
                   <span className="text-[10px] font-mono px-2.5 py-0.5 rounded-full bg-[#FF5E3A]/15 text-[#FF5E3A] font-semibold border border-[#FF5E3A]/20">
                     Android
                   </span>
@@ -277,7 +306,6 @@ export default function App() {
 
             {/* Quick Action Controls */}
             <div className="flex items-center gap-2">
-              {/* Direct APK / Source Download Quick Button */}
               <a
                 href="/Android-ZTBlackoutPreWarning.zip"
                 download="Android-ZTBlackoutPreWarning.zip"
@@ -291,7 +319,7 @@ export default function App() {
               {/* Language Switcher */}
               <button
                 onClick={() => {
-                  const nextLang: Language = settings.language === 'uk' ? 'en' : 'uk';
+                  const nextLang: Language = resolvedLang === 'uk' ? 'en' : 'uk';
                   handleUpdateSettings({ ...settings, language: nextLang });
                 }}
                 className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-[#1C1D24] text-xs font-bold text-white border border-white/5 hover:bg-[#252732] transition-all"
@@ -377,7 +405,7 @@ export default function App() {
                   onResetDefaults={handleResetDefaults}
                   activeTab={phoneTab}
                   setActiveTab={setPhoneTab}
-                  now={now}
+                  now={effectiveNow}
                 />
               </div>
 
@@ -449,6 +477,40 @@ export default function App() {
                           }`}
                         >
                           {q}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Time of Day Background Preview */}
+                  <div className="p-3.5 rounded-2xl bg-white/[0.04] border border-white/10 flex flex-col gap-2">
+                    <div className="flex items-center justify-between text-xs">
+                      <span className="font-semibold text-white">
+                        {resolvedLang === 'uk' ? 'Час доби (Фон)' : 'Time of Day (Background)'}:
+                      </span>
+                      <span className="font-mono text-[#FF5E3A] font-bold">
+                        {effectiveNow.toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit' })}
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-5 gap-1.5">
+                      {([
+                        { id: 'auto', uk: 'Авто', en: 'Auto' },
+                        { id: 'morning', uk: 'Ранок', en: 'Morning' },
+                        { id: 'day', uk: 'День', en: 'Day' },
+                        { id: 'evening', uk: 'Вечір', en: 'Evening' },
+                        { id: 'night', uk: 'Ніч', en: 'Night' },
+                      ] as const).map((item) => (
+                        <button
+                          key={item.id}
+                          onClick={() => setTimeOfDayOverride(item.id)}
+                          className={`py-1.5 rounded-xl text-[11px] font-bold transition-all ${
+                            timeOfDayOverride === item.id
+                              ? 'bg-[#FF5E3A] text-white shadow-sm'
+                              : 'bg-white/5 hover:bg-white/10 text-sky-200/80 border border-white/5'
+                          }`}
+                        >
+                          {resolvedLang === 'uk' ? item.uk : item.en}
                         </button>
                       ))}
                     </div>
@@ -530,6 +592,8 @@ export default function App() {
                 settings={settings}
                 lang={resolvedLang}
                 onToggleNotifications={handleToggleNotifications}
+                onRefresh={() => loadSchedules(settings)}
+                isRefreshing={isRefreshing}
                 onOpenApp={() => {
                   setActiveMode('app');
                   setPhoneTab('schedule');
@@ -551,7 +615,7 @@ export default function App() {
         <footer className="border-t border-slate-200 dark:border-slate-800 bg-white/60 dark:bg-slate-900/60 py-4 text-center text-xs text-slate-500 dark:text-slate-400">
           <div className="max-w-7xl mx-auto px-4 flex flex-col sm:flex-row items-center justify-between gap-2">
             <div>
-              <span>ZT Blackout Pre-Warning · Розробник: </span>
+              <span>Світло в Житомирі · Розробник: </span>
               <a href="https://github.com/IgorZaharov" target="_blank" rel="noreferrer" className="font-semibold text-slate-800 dark:text-slate-200 underline">
                 Ігор Захаров (Igor Zaharov)
               </a>

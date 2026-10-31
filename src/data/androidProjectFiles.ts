@@ -269,11 +269,14 @@ data class DaySchedule(
 data class UserSettings(
     val cityUrl: String = "https://www.ztoe.com.ua/unhooking-search.php",
     val queue: String = "2.1",
-    val refreshIntervalMinutes: Long = 15L,
-    val advanceNoticeMinutes: Int = 30,
+    // CRITICAL CONSTANTS — DO NOT MODIFY UNLESS EXPLICITLY REQUESTED
+    val refreshIntervalMinutes: Long = 30L,
+    val advanceNoticeMinutes: Int = 15,
     val notificationsEnabled: Boolean = true,
     val soundEnabled: Boolean = true,
     val vibrationEnabled: Boolean = true,
+    val prevSoundEnabled: Boolean = true,
+    val prevVibrationEnabled: Boolean = true,
     val themeMode: String = "SYSTEM", // "SYSTEM", "DARK", "LIGHT"
     val language: String = "SYSTEM" // "SYSTEM", "UK", "EN"
 )`
@@ -704,7 +707,7 @@ class BlackoutGlanceWidget : GlanceAppWidget() {
                             Spacer(modifier = GlanceModifier.defaultWeight())
                             // Status text
                             Text(
-                                text = if (info.isBlackoutNow) "ЗНЕСТРУМЛЕНО" else "СВІТЛО Є",
+                                text = if (info.isBlackoutNow) "СВІТЛА НЕМАЄ" else "СВІТЛО Є",
                                 style = TextStyle(
                                     fontWeight = FontWeight.Medium,
                                     fontSize = 11.sp,
@@ -873,8 +876,8 @@ fun MainScreen(
             TopAppBar(
                 title = {
                     Column {
-                        Text("ZT Blackout Pre-Warning", fontSize = 18.sp, fontWeight = FontWeight.Bold)
-                        Text("Житомиробленерго (ztoe.com.ua)", fontSize = 12.sp, color = MaterialTheme.colorScheme.outline)
+                        Text("Світло в Житомирі", fontSize = 18.sp, fontWeight = FontWeight.Bold)
+                        Text("Житомиробленерго (ZTOE)", fontSize = 12.sp, color = MaterialTheme.colorScheme.outline)
                     }
                 },
                 actions = {
@@ -1012,7 +1015,7 @@ import androidx.compose.ui.unit.sp
 @Composable
 fun SettingsScreen(
     currentQueue: String = "2.1",
-    advanceMinutes: Int = 30,
+    advanceMinutes: Int = 15,
     refreshMinutes: Int = 30,
     notificationsEnabled: Boolean = true,
     soundEnabled: Boolean = true,
@@ -1178,7 +1181,7 @@ fun SettingsScreen(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text("Звук сповіщення")
-                    Switch(checked = soundEnabled, onCheckedChange = onToggleSound)
+                    Switch(checked = notificationsEnabled && soundEnabled, enabled = notificationsEnabled, onCheckedChange = onToggleSound)
                 }
                 Divider()
                 Row(
@@ -1187,7 +1190,7 @@ fun SettingsScreen(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text("Вібрація")
-                    Switch(checked = vibrationEnabled, onCheckedChange = onToggleVibration)
+                    Switch(checked = notificationsEnabled && vibrationEnabled, enabled = notificationsEnabled, onCheckedChange = onToggleVibration)
                 }
             }
         }

@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   Github, 
   ExternalLink, 
@@ -6,9 +6,16 @@ import {
   Smartphone, 
   Monitor, 
   ShieldAlert, 
-  Zap
+  Zap,
+  Heart,
+  Globe
 } from 'lucide-react';
 import { translations } from '../services/i18n';
+import {
+  DonationLink,
+  getCachedDonations,
+  getDonationsWithDailyRefresh,
+} from '../services/donationsService';
 
 interface AboutViewProps {
   lang: 'uk' | 'en';
@@ -16,6 +23,19 @@ interface AboutViewProps {
 
 export const AboutView: React.FC<AboutViewProps> = ({ lang }) => {
   const t = translations[lang];
+  const [donations, setDonations] = useState<DonationLink[]>(() => getCachedDonations());
+
+  useEffect(() => {
+    let mounted = true;
+    getDonationsWithDailyRefresh().then((items) => {
+      if (mounted) {
+        setDonations(items);
+      }
+    });
+    return () => {
+      mounted = false;
+    };
+  }, []);
 
   return (
     <div className="flex flex-col gap-4 max-w-lg mx-auto select-none">
@@ -132,6 +152,45 @@ export const AboutView: React.FC<AboutViewProps> = ({ lang }) => {
           </div>
           <ExternalLink className="w-4 h-4 text-sky-200/70 group-hover:text-white transition-colors shrink-0" />
         </a>
+      </div>
+
+      {/* Donations / Благодійність і Пожертви */}
+      <div className="bg-[#141A29]/75 backdrop-blur-2xl rounded-3xl p-5 border border-white/15 shadow-[0_12px_40px_rgba(0,0,0,0.45)] flex flex-col gap-3">
+        <h2 className="text-xs font-bold uppercase tracking-wider text-sky-200/70">
+          {t.aboutDonations}
+        </h2>
+
+        {donations.map((item, idx) => (
+          <a
+            key={`${item.url}_${idx}`}
+            href={item.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            title={item.url}
+            className="flex items-center justify-between p-3.5 rounded-2xl bg-white/[0.06] hover:bg-white/[0.12] border border-white/10 transition-all group overflow-hidden"
+          >
+            <div className="flex items-center gap-3.5 min-w-0 flex-1 mr-2">
+              <div
+                className={`w-10 h-10 rounded-2xl flex items-center justify-center shrink-0 shadow-sm ${
+                  idx % 2 === 0
+                    ? 'bg-emerald-500 text-white shadow-emerald-500/30'
+                    : 'bg-amber-500 text-black shadow-amber-500/30'
+                }`}
+              >
+                {idx % 2 === 0 ? <Heart className="w-5 h-5" /> : <Globe className="w-5 h-5" />}
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="text-xs font-bold text-white group-hover:text-[#FF5E3A] transition-colors truncate">
+                  {item.title}
+                </div>
+                <div className="text-[11px] text-sky-200/70 font-mono truncate">
+                  {item.url.replace(/^https?:\/\//, '')}
+                </div>
+              </div>
+            </div>
+            <ExternalLink className="w-4 h-4 text-sky-200/70 group-hover:text-white transition-colors shrink-0" />
+          </a>
+        ))}
       </div>
 
       {/* Google Play Console Status Card */}
