@@ -125,10 +125,10 @@ object ZtoeParser {
         val tomorrow = today.plusDays(1)
         val todayStr = today.format(DateTimeFormatter.ISO_LOCAL_DATE)
 
-        // Filter to leaf tables (tables that do NOT contain nested <table> elements)
+        // Filter to leaf tables (tables that do NOT contain nested <table> elements; in Jsoup, table.select("table") includes table itself so size == 1)
         // because ztoe.com.ua wraps the entire page inside an outer layout <table>.
         val leafTables = doc.select("table").filter { table ->
-            table.select("table").isEmpty() && table.select("tr").size >= 12
+            table.select("table").size == 1 && table.select("tr").size >= 12
         }
 
         val todayD1 = String.format("%02d.%02d.%04d", today.dayOfMonth, today.monthValue, today.year)
@@ -193,7 +193,7 @@ object ZtoeParser {
 
     fun hasScheduleTableForDate(doc: Document, date: LocalDate): Boolean {
         val leafTables = doc.select("table").filter { table ->
-            table.select("table").isEmpty() && table.select("tr").size >= 12
+            table.select("table").size == 1 && table.select("tr").size >= 12
         }
         val d1 = String.format("%02d.%02d.%04d", date.dayOfMonth, date.monthValue, date.year)
         val d2 = String.format("%d.%d.%04d", date.dayOfMonth, date.monthValue, date.year)
@@ -213,7 +213,7 @@ object ZtoeParser {
         dateIso: String = date.format(DateTimeFormatter.ISO_LOCAL_DATE)
     ): List<BlackoutSlot> {
         val leafTables = doc.select("table").filter { table ->
-            table.select("table").isEmpty() && table.select("tr").size >= 12
+            table.select("table").size == 1 && table.select("tr").size >= 12
         }
         val d1 = String.format("%02d.%02d.%04d", date.dayOfMonth, date.monthValue, date.year)
         val d2 = String.format("%d.%d.%04d", date.dayOfMonth, date.monthValue, date.year)
