@@ -26,11 +26,13 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import ua.blackout.prewarning.R
 import ua.blackout.prewarning.data.model.BlackoutSlot
 import ua.blackout.prewarning.data.repository.ScheduleRepository
 import ua.blackout.prewarning.ui.AppStrings
@@ -69,7 +71,7 @@ fun MainScreen(
     val activeSlots = if (selectedDayTab == "today") slots else (tomorrowSlots ?: slots)
 
     // Compute continuous blackout intervals with exact 30-min resolution using hoisted ScheduleRepository
-    val intervals = remember(activeSlots) {
+    val intervals = remember(queue, activeSlots, selectedDayTab) {
         scheduleRepo.getDetailedIntervals(activeSlots)
     }
 
@@ -339,11 +341,14 @@ fun MainScreen(
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
                 // 24-Hour Timeline Bar
-                TimelineBar(
-                    slots = activeSlots,
-                    currentHour = kyivNow.hour,
-                    currentMinute = kyivNow.minute
-                )
+                key(queue, selectedDayTab, activeSlots) {
+                    TimelineBar(
+                        slots = activeSlots,
+                        currentHour = kyivNow.hour,
+                        currentMinute = kyivNow.minute,
+                        showNeedle = selectedDayTab == "today"
+                    )
+                }
 
                 // List of Outage Hours for this day
                 Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(Color(0x1AFFFFFF)))
@@ -506,19 +511,21 @@ fun MainScreen(
                             .background(Color(0xFF1877F2)),
                         contentAlignment = Alignment.Center
                     ) {
+                        // Facebook vector logo (replaces generic Icons.Default.Language globe)
                         Icon(
-                            imageVector = Icons.Default.Language,
-                            contentDescription = null,
+                            painter = painterResource(id = R.drawable.ic_facebook),
+                            contentDescription = "Facebook",
                             tint = Color.White,
-                            modifier = Modifier.size(18.dp)
+                            modifier = Modifier.size(20.dp)
                         )
                     }
-                    Column {
+                    Column(modifier = Modifier.weight(1f)) {
                         Text(
                             text = AppStrings.emergencyOutagesLabel(lang),
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Bold,
-                            color = Color.White
+                            color = Color.White,
+                            softWrap = true
                         )
                         Text(
                             text = AppStrings.EMERGENCY_OUTAGES_URL,

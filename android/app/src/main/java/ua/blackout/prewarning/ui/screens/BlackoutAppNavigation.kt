@@ -26,6 +26,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
@@ -50,6 +51,28 @@ import ua.blackout.prewarning.widget.BlackoutGlanceWidget
 import java.time.LocalTime
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
+
+private fun smoothGaussianRadialBrush(
+    color: Color,
+    maxAlpha: Float,
+    center: Offset,
+    radius: Float
+): Brush {
+    val safeRadius = radius.coerceAtLeast(1f)
+    return Brush.radialGradient(
+        colorStops = arrayOf(
+            0.00f to color.copy(alpha = maxAlpha),
+            0.18f to color.copy(alpha = maxAlpha * 0.90f),
+            0.36f to color.copy(alpha = maxAlpha * 0.68f),
+            0.54f to color.copy(alpha = maxAlpha * 0.42f),
+            0.72f to color.copy(alpha = maxAlpha * 0.18f),
+            0.88f to color.copy(alpha = maxAlpha * 0.04f),
+            1.00f to color.copy(alpha = 0f)
+        ),
+        center = center,
+        radius = safeRadius
+    )
+}
 
 @Composable
 fun BlackoutAppNavigation(
@@ -126,14 +149,11 @@ fun BlackoutAppNavigation(
         }
     }
 
-    // Listen to SharedPreferences changes from Widget (ToggleAlertsActionCallback / RefreshWidgetActionCallback)
-    // Properly unregistered in onDispose to prevent memory leaks
-    DisposableEffect(settingsRepo, scheduleRepo) {
-        val settingsPrefs = settingsRepo.getSharedPreferences()
-        val schedulePrefs = scheduleRepo.getSharedPreferences()
-
-        val settingsListener = SharedPreferences.OnSharedPreferenceChangeListener { _, _ ->
+    // Keep strong references to SharedPreferences listeners (Android stores them in a WeakHashMap)
+    val settingsListener = remember(settingsRepo, scheduleRepo) {
+        SharedPreferences.OnSharedPreferenceChangeListener { _, _ ->
             val updated = settingsRepo.getSettings()
+            val queueChanged = queue != updated.queue
             queue = updated.queue
             siteUrl = updated.cityUrl
             advanceMinutes = updated.advanceNoticeMinutes
@@ -142,15 +162,30 @@ fun BlackoutAppNavigation(
             soundEnabled = updated.soundEnabled
             vibrationEnabled = updated.vibrationEnabled
             currentLanguage = updated.language
+            if (queueChanged) {
+                slots = scheduleRepo.getTodaySlots(updated.queue)
+                tomorrowSlots = scheduleRepo.getTomorrowSlots(updated.queue)
+                hasTomorrowSchedule = scheduleRepo.hasTomorrowSchedule(updated.queue)
+                statusInfo = scheduleRepo.getCurrentStatusAndCountdown(updated.queue)
+            }
         }
+    }
 
-        val scheduleListener = SharedPreferences.OnSharedPreferenceChangeListener { _, _ ->
+    val scheduleListener = remember(settingsRepo, scheduleRepo) {
+        SharedPreferences.OnSharedPreferenceChangeListener { _, _ ->
             val currentQ = settingsRepo.getSettings().queue
             slots = scheduleRepo.getTodaySlots(currentQ)
             tomorrowSlots = scheduleRepo.getTomorrowSlots(currentQ)
             hasTomorrowSchedule = scheduleRepo.hasTomorrowSchedule(currentQ)
             statusInfo = scheduleRepo.getCurrentStatusAndCountdown(currentQ)
         }
+    }
+
+    // Listen to SharedPreferences changes from Widget (ToggleAlertsActionCallback / RefreshWidgetActionCallback)
+    // Properly unregistered in onDispose to prevent memory leaks
+    DisposableEffect(settingsRepo, scheduleRepo, settingsListener, scheduleListener) {
+        val settingsPrefs = settingsRepo.getSharedPreferences()
+        val schedulePrefs = scheduleRepo.getSharedPreferences()
 
         settingsPrefs.registerOnSharedPreferenceChangeListener(settingsListener)
         schedulePrefs.registerOnSharedPreferenceChangeListener(scheduleListener)
@@ -161,17 +196,31 @@ fun BlackoutAppNavigation(
         }
     }
 
-    // Fetch initial schedule in background
-    LaunchedEffect(queue) {
-        withContext(Dispatchers.IO) {
-            val res = ZtoeParser.fetchFullSchedule(siteUrl, queue, appContext)
-            if (res.status == FetchStatus.SUCCESS) {
-                slots = res.todaySlots
-                tomorrowSlots = res.tomorrowSlots
-                hasTomorrowSchedule = res.hasTomorrowSchedule
-                scheduleRepo.saveSchedule(queue, res.todaySlots, res.tomorrowSlots)
-                statusInfo = scheduleRepo.getCurrentStatusAndCountdown(queue)
+    // Fetch schedule when queue or siteUrl changes; update all Compose states on the Main UI thread
+    LaunchedEffect(queue, siteUrl) {
+        val activeQ = queue
+        slots = scheduleRepo.getTodaySlots(activeQ)
+        tomorrowSlots = scheduleRepo.getTomorrowSlots(activeQ)
+        hasTomorrowSchedule = scheduleRepo.hasTomorrowSchedule(activeQ)
+        statusInfo = scheduleRepo.getCurrentStatusAndCountdown(activeQ)
+
+        val res = withContext(Dispatchers.IO) {
+            ZtoeParser.fetchFullSchedule(siteUrl, activeQ, appContext)
+        }
+        if (res.status == FetchStatus.SUCCESS || !scheduleRepo.hasValidTodayCache(activeQ)) {
+            withContext(Dispatchers.IO) {
+                scheduleRepo.saveSchedule(activeQ, res.todaySlots, res.tomorrowSlots)
             }
+        }
+        slots = scheduleRepo.getTodaySlots(activeQ)
+        tomorrowSlots = scheduleRepo.getTomorrowSlots(activeQ)
+        hasTomorrowSchedule = scheduleRepo.hasTomorrowSchedule(activeQ)
+        statusInfo = scheduleRepo.getCurrentStatusAndCountdown(activeQ)
+        val now = LocalTime.now(ZoneId.of("Europe/Kyiv"))
+        lastUpdated = now.format(DateTimeFormatter.ofPattern("HH:mm"))
+        nextUpdated = now.plusMinutes(refreshMinutes.toLong()).format(DateTimeFormatter.ofPattern("HH:mm"))
+
+        withContext(Dispatchers.IO) {
             try {
                 BlackoutGlanceWidget.syncAllWidgets(appContext)
             } catch (_: Exception) {}
@@ -182,7 +231,7 @@ fun BlackoutAppNavigation(
     val performManualRefresh: () -> Unit = {
         coroutineScope.launch {
             val res = withContext(Dispatchers.IO) {
-                ZtoeParser.fetchFullSchedule(siteUrl, queue, appContext)
+                ZtoeParser.fetchFullSchedule(siteUrl, queue, appContext, forceNetwork = true)
             }
             when (res.status) {
                 FetchStatus.SUCCESS -> {
@@ -229,39 +278,77 @@ fun BlackoutAppNavigation(
             .fillMaxSize()
             .background(bgColors.primary)
             .drawBehind {
-                // Primary (60%) & Secondary (30%) atmospheric base gradient
+                val w = size.width.coerceAtLeast(1f)
+                val h = size.height.coerceAtLeast(1f)
+                val maxDim = maxOf(w, h)
+
+                // 1. Primary (60%) & Secondary (30%) full-canvas radial atmospheric base matching PhoneSimulator.tsx
+                drawRect(
+                    brush = Brush.radialGradient(
+                        colorStops = arrayOf(
+                            0.0f to bgColors.primary.copy(alpha = 0.60f),
+                            0.55f to bgColors.primary.copy(alpha = 0.35f),
+                            1.0f to bgColors.secondary.copy(alpha = 0.60f)
+                        ),
+                        center = Offset(w * 0.50f, h * 0.45f),
+                        radius = maxDim * 0.85f
+                    )
+                )
+
+                // 2. Secondary (30%) top-right smooth Gaussian blurred orb (full-rect draw avoids circular edge clipping)
+                drawRect(
+                    brush = smoothGaussianRadialBrush(
+                        color = bgColors.secondary,
+                        maxAlpha = 0.68f,
+                        center = Offset(w * 0.88f, h * 0.08f),
+                        radius = w * 0.98f
+                    )
+                )
+
+                // 3. Supporting/Core top-left contrast orb matching PhoneSimulator.tsx
+                drawRect(
+                    brush = smoothGaussianRadialBrush(
+                        color = bgColors.supporting,
+                        maxAlpha = 0.62f,
+                        center = Offset(w * 0.12f, h * 0.06f),
+                        radius = w * 0.92f
+                    )
+                )
+
+                // 4. Secondary (30%) lower-left smooth Gaussian wave matching PhoneSimulator.tsx
+                drawRect(
+                    brush = smoothGaussianRadialBrush(
+                        color = bgColors.secondary,
+                        maxAlpha = 0.58f,
+                        center = Offset(w * 0.08f, h * 0.68f),
+                        radius = w * 0.98f
+                    )
+                )
+
+                // 5. Accent (10%) bottom-right highlight orb matching PhoneSimulator.tsx
+                drawRect(
+                    brush = smoothGaussianRadialBrush(
+                        color = bgColors.accent,
+                        maxAlpha = 0.52f,
+                        center = Offset(w * 0.82f, h * 0.84f),
+                        radius = w * 0.82f
+                    )
+                )
+
+                // 6. Subtle top scrim (#0B0C10 at 65% -> 25% -> 0%) matching PhoneSimulator.tsx for crisp header contrast
+                val scrimHeight = 148.dp.toPx().coerceAtMost(h)
                 drawRect(
                     brush = Brush.verticalGradient(
-                        colors = listOf(
-                            bgColors.supporting.copy(alpha = 0.55f),
-                            bgColors.primary.copy(alpha = 0.60f),
-                            bgColors.secondary.copy(alpha = 0.45f)
-                        )
-                    )
-                )
-                // Secondary (30%) top-right radial blurred orb
-                drawCircle(
-                    brush = Brush.radialGradient(
-                        colors = listOf(bgColors.secondary.copy(alpha = 0.65f), bgColors.secondary.copy(alpha = 0.25f), Color.Transparent),
-                        center = Offset(size.width * 0.92f, size.height * 0.14f),
-                        radius = size.width * 0.90f
-                    )
-                )
-                // Secondary (30%) & Supporting lower-left radial blurred orb
-                drawCircle(
-                    brush = Brush.radialGradient(
-                        colors = listOf(bgColors.secondary.copy(alpha = 0.55f), bgColors.supporting.copy(alpha = 0.22f), Color.Transparent),
-                        center = Offset(size.width * 0.08f, size.height * 0.65f),
-                        radius = size.width * 0.92f
-                    )
-                )
-                // Accent (10%) bottom-right radial blurred highlight orb
-                drawCircle(
-                    brush = Brush.radialGradient(
-                        colors = listOf(bgColors.accent.copy(alpha = 0.55f), bgColors.accent.copy(alpha = 0.18f), Color.Transparent),
-                        center = Offset(size.width * 0.85f, size.height * 0.86f),
-                        radius = size.width * 0.72f
-                    )
+                        colorStops = arrayOf(
+                            0.0f to Color(0xFF0B0C10).copy(alpha = 0.65f),
+                            0.45f to Color(0xFF0B0C10).copy(alpha = 0.25f),
+                            1.0f to Color(0xFF0B0C10).copy(alpha = 0.0f)
+                        ),
+                        startY = 0f,
+                        endY = scrimHeight
+                    ),
+                    topLeft = Offset.Zero,
+                    size = Size(w, scrimHeight)
                 )
             }
     ) {
@@ -316,20 +403,11 @@ fun BlackoutAppNavigation(
                             queue = newQueue
                             val current = settingsRepo.getSettings()
                             settingsRepo.saveSettings(current.copy(queue = newQueue))
-
-                            coroutineScope.launch(Dispatchers.IO) {
-                                val res = ZtoeParser.fetchFullSchedule(siteUrl, newQueue, appContext)
-                                if (res.status == FetchStatus.SUCCESS || !scheduleRepo.hasValidTodayCache(newQueue)) {
-                                    scheduleRepo.saveSchedule(newQueue, res.todaySlots, res.tomorrowSlots)
-                                }
-                                slots = scheduleRepo.getTodaySlots(newQueue)
-                                tomorrowSlots = scheduleRepo.getTomorrowSlots(newQueue)
-                                hasTomorrowSchedule = scheduleRepo.hasTomorrowSchedule(newQueue)
-                                statusInfo = scheduleRepo.getCurrentStatusAndCountdown(newQueue)
-                                try {
-                                    BlackoutGlanceWidget.syncAllWidgets(appContext)
-                                } catch (_: Exception) {}
-                            }
+                            // Immediately update MainScreen chart and status on the Main UI thread
+                            slots = scheduleRepo.getTodaySlots(newQueue)
+                            tomorrowSlots = scheduleRepo.getTomorrowSlots(newQueue)
+                            hasTomorrowSchedule = scheduleRepo.hasTomorrowSchedule(newQueue)
+                            statusInfo = scheduleRepo.getCurrentStatusAndCountdown(newQueue)
                         },
                         onSiteUrlChanged = { newUrl ->
                             siteUrl = newUrl
@@ -420,24 +498,15 @@ fun BlackoutAppNavigation(
                                     language = "SYSTEM"
                                 )
                             )
+                            slots = scheduleRepo.getTodaySlots("1.1")
+                            tomorrowSlots = scheduleRepo.getTomorrowSlots("1.1")
+                            hasTomorrowSchedule = scheduleRepo.hasTomorrowSchedule("1.1")
+                            statusInfo = scheduleRepo.getCurrentStatusAndCountdown("1.1")
+
                             ua.blackout.prewarning.worker.ScheduleSyncWorker.schedulePeriodicWork(
                                 appContext,
                                 androidx.work.ExistingPeriodicWorkPolicy.UPDATE
                             )
-
-                            coroutineScope.launch(Dispatchers.IO) {
-                                val res = ZtoeParser.fetchFullSchedule(siteUrl, "1.1", appContext)
-                                if (res.status == FetchStatus.SUCCESS || !scheduleRepo.hasValidTodayCache("1.1")) {
-                                    scheduleRepo.saveSchedule("1.1", res.todaySlots, res.tomorrowSlots)
-                                }
-                                slots = scheduleRepo.getTodaySlots("1.1")
-                                tomorrowSlots = scheduleRepo.getTomorrowSlots("1.1")
-                                hasTomorrowSchedule = scheduleRepo.hasTomorrowSchedule("1.1")
-                                statusInfo = scheduleRepo.getCurrentStatusAndCountdown("1.1")
-                                try {
-                                    BlackoutGlanceWidget.syncAllWidgets(appContext)
-                                } catch (_: Exception) {}
-                            }
                         },
                         onShowAppBanner = showAppBanner
                     )

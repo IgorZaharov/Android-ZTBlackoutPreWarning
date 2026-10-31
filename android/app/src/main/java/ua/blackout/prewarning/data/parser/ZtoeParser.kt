@@ -62,7 +62,25 @@ object ZtoeParser {
         return validUrls.any { it.equals(trimmed, ignoreCase = true) }
     }
 
-    fun fetchFullSchedule(url: String, queue: String, context: Context? = null): ScheduleFetchResult {
+    private val ALL_QUEUES = listOf(
+        "1.1", "1.2", "2.1", "2.2", "3.1", "3.2",
+        "4.1", "4.2", "5.1", "5.2", "6.1", "6.2"
+    )
+
+    @Volatile
+    private var cachedDocUrl: String? = null
+    @Volatile
+    private var cachedDoc: Document? = null
+    @Volatile
+    private var cachedDocTimestampMs: Long = 0L
+    private const val DOC_MEMORY_CACHE_MS = 20_000L
+
+    fun fetchFullSchedule(
+        url: String,
+        queue: String,
+        context: Context? = null,
+        forceNetwork: Boolean = false
+    ): ScheduleFetchResult {
         val kyivZone = ZoneId.of("Europe/Kyiv")
         val today = LocalDate.now(kyivZone)
         val todayStr = today.format(DateTimeFormatter.ISO_LOCAL_DATE)
@@ -76,8 +94,34 @@ object ZtoeParser {
             )
         }
 
+        val cleanUrl = url.trim()
         return try {
-            val doc = fetchDocumentWithWindows1251(url.trim())
+            val nowMs = System.currentTimeMillis()
+            val recentDoc = cachedDoc
+            val doc = if (!forceNetwork && recentDoc != null && cachedDocUrl == cleanUrl && (nowMs - cachedDocTimestampMs) < DOC_MEMORY_CACHE_MS) {
+                recentDoc
+            } else {
+                fetchDocumentWithWindows1251(cleanUrl).also { fetched ->
+                    cachedDocUrl = cleanUrl
+                    cachedDoc = fetched
+                    cachedDocTimestampMs = System.currentTimeMillis()
+                }
+            }
+
+            // If context is available, pre-cache all 12 queues into ScheduleRepository from this single HTML document
+            // so switching queues in Settings immediately has the live schedule for every queue.
+            if (context != null) {
+                try {
+                    val repo = ua.blackout.prewarning.data.repository.ScheduleRepository(context.applicationContext)
+                    for (q in ALL_QUEUES) {
+                        val qRes = parseDocumentFull(doc, q, today)
+                        if (qRes.status == FetchStatus.SUCCESS) {
+                            repo.saveSchedule(q, qRes.todaySlots, qRes.tomorrowSlots)
+                        }
+                    }
+                } catch (_: Exception) {}
+            }
+
             parseDocumentFull(doc, queue, today)
         } catch (e: UnknownHostException) {
             ScheduleFetchResult(
