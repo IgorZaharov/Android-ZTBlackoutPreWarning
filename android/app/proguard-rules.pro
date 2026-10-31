@@ -7,5 +7,12 @@
 # Keep WorkManager worker
 -keep class ua.blackout.prewarning.worker.** { *; }
 
-# Keep Jsoup
+# Keep BroadcastReceivers
+-keep class ua.blackout.prewarning.receiver.** { *; }
+
+# Keep Jsoup and ignore its compile-time nullability annotations in R8
 -keep class org.jsoup.** { *; }
+-dontwarn org.jsoup.**
+-dontwarn org.jspecify.annotations.**
+-dontwarn javax.annotation.**
+-dontwarn org.codehaus.mojo.animal_sniffer.**
