@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.2.0] - 2026-11-01
+
+### Added
+- **Donation Links Favicons & Startup Sync**: Automatically load website favicons by default for all charity and donation links in the About window (`DonationsRepository.kt`, `AboutScreen.kt`, `donationsService.ts`, `AboutView.tsx`), and re-fetch `donations.json` from GitHub on every application startup.
+- **Dynamic Build Version in About Window**: Version name is resolved dynamically from `BuildConfig.VERSION_NAME` / `PackageInfo.versionName` (`AboutScreen.kt`, `AboutView.tsx`).
+- **Battery Usage & UI Documentation in README.md**: Added battery usage report (~0.15% per hour), real Android device UI screenshots, and widget redraw frequency explanation.
+
+### Fixed
+- **Big Widget Next Blackout Line**: Corrected upcoming blackout countdown calculation both automatically and upon pressing the widget refresh button (`ScheduleSyncWorker.kt`, `AlarmReceiver.kt`, `BlackoutGlanceWidget.kt`, `WidgetSimulator.tsx`).
+- **Widget Transparency**: Applied 20% background transparency to both Small (2x1) and Big (3x2) home screen widgets (`BlackoutGlanceWidget.kt`, `glance_default_loading_layout.xml`, `WidgetSimulator.tsx`).
+
 ## [1.1.0] - 2026-10-31
 
 ### Added
