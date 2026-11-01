@@ -19,27 +19,21 @@
 
 ---
 
+Android-застосунок, який стежить за графіком погодинних відключень електроенергії від **АТ «Житомиробленерго»** і попереджає про відключення заздалегідь. Показує, скільки лишилося до відключення (або до повернення світла), малює 24-годинну шкалу дня й має віджет для робочого столу.
+
+Дані беруться зі сторінки [ztoe.com.ua/unhooking-search.php](https://www.ztoe.com.ua/unhooking-search.php). Це неофіційний застосунок і він не пов'язаний із «Житомиробленерго».
+
+Продовження десктопного проєкту [UABlackoutPreWarning](https://github.com/IgorZaharov/UABlackoutPreWarning).
+
+---
+
 ## Інтерфейс застосунку (UI)
 
 | Віджети (`UI1.jpg`) | Сповіщення (`UI2.jpg`) | Головний екран (`UI3.jpg`) | Налаштування (`UI4.jpg`) |
 |:---:|:---:|:---:|:---:|
 | <img src="docs/screenshots/UI1.jpg" width="210" alt="Віджети"> | <img src="docs/screenshots/UI2.jpg" width="210" alt="Сповіщення"> | <img src="docs/screenshots/UI3.jpg" width="210" alt="Головний екран"> | <img src="docs/screenshots/UI4.jpg" width="210" alt="Налаштування"> |
 
-### Відеоогляд інтерфейсу
-
-<video src="docs/screenshots/ui-demo.mp4" width="320" controls muted loop playsinline>
-  <a href="docs/screenshots/Recording%202026-10-31%20133721.mp4">Переглянути відео інтерфейсу (Recording 2026-10-31 133721.mp4)</a>
-</video>
-
-- Пряме посилання на відеофайл: [`Recording 2026-10-31 133721.mp4`](docs/screenshots/Recording%202026-10-31%20133721.mp4)
-
 ---
-
-Android-застосунок, який стежить за графіком погодинних відключень електроенергії від **АТ «Житомиробленерго»** і попереджає про відключення заздалегідь. Показує, скільки лишилося до відключення (або до повернення світла), малює 24-годинну шкалу дня й має віджет для робочого столу.
-
-Дані беруться зі сторінки [ztoe.com.ua/unhooking-search.php](https://www.ztoe.com.ua/unhooking-search.php). Це неофіційний застосунок і він не пов'язаний із «Житомиробленерго».
-
-Продовження десктопного проєкту [UABlackoutPreWarning](https://github.com/IgorZaharov/UABlackoutPreWarning).
 
 ## Можливості
 
