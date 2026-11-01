@@ -1,9 +1,16 @@
 package ua.blackout.prewarning.data.repository
 
 import android.content.Context
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import org.json.JSONArray
+import org.json.JSONObject
+import java.io.File
+import java.io.FileOutputStream
 import java.net.HttpURLConnection
+import java.net.URI
 import java.net.URL
+import java.util.concurrent.ConcurrentHashMap
 
 data class DonationLink(
     val title: String,
@@ -17,9 +24,13 @@ object DonationsRepository {
 
     const val GITHUB_DONATIONS_URL =
         "https://raw.githubusercontent.com/IgorZaharov/Android-ZTBlackoutPreWarning/main/donations.json"
+    const val GITHUB_PUBLIC_DONATIONS_URL =
+        "https://raw.githubusercontent.com/IgorZaharov/Android-ZTBlackoutPreWarning/main/public/donations.json"
 
-    // Re-read 1 time per day (24 hours)
+    // Re-read 1 time per day (24 hours) in addition to refreshing on every application start
     const val REFRESH_INTERVAL_MS = 24L * 60L * 60L * 1000L
+
+    private val faviconMemoryCache = ConcurrentHashMap<String, Bitmap>()
 
     val DEFAULT_DONATIONS = listOf(
         DonationLink(
@@ -65,39 +76,158 @@ object DonationsRepository {
         }
     }
 
-    fun getDonationsWithDailyRefresh(context: Context, nowMs: Long = System.currentTimeMillis()): List<DonationLink> {
+    private fun fetchUrlText(endpoint: String): String? {
+        var conn: HttpURLConnection? = null
+        return try {
+            val cacheBusted = "$endpoint?t=${System.currentTimeMillis()}"
+            conn = (URL(cacheBusted).openConnection() as HttpURLConnection).apply {
+                connectTimeout = 6000
+                readTimeout = 6000
+                useCaches = false
+                requestMethod = "GET"
+                setRequestProperty("Cache-Control", "no-cache, no-store, must-revalidate")
+                setRequestProperty("Pragma", "no-cache")
+            }
+            if (conn.responseCode in 200..299) {
+                conn.inputStream.bufferedReader().use { it.readText() }
+            } else {
+                null
+            }
+        } catch (_: Exception) {
+            null
+        } finally {
+            conn?.disconnect()
+        }
+    }
+
+    fun getDonationsWithDailyRefresh(
+        context: Context,
+        nowMs: Long = System.currentTimeMillis(),
+        forceRefresh: Boolean = false
+    ): List<DonationLink> {
         val appContext = context.applicationContext
         val prefs = appContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         val lastFetchMs = prefs.getLong(KEY_LAST_FETCH_MS, 0L)
         val cached = getCachedDonations(appContext)
 
-        if (lastFetchMs > 0L && (nowMs - lastFetchMs) < REFRESH_INTERVAL_MS) {
+        if (!forceRefresh && lastFetchMs > 0L && (nowMs - lastFetchMs) < REFRESH_INTERVAL_MS) {
             return cached
         }
 
-        var conn: HttpURLConnection? = null
-        return try {
-            conn = (URL(GITHUB_DONATIONS_URL).openConnection() as HttpURLConnection).apply {
-                connectTimeout = 6000
-                readTimeout = 6000
-                requestMethod = "GET"
+        val rootText = fetchUrlText(GITHUB_DONATIONS_URL)
+        val publicText = fetchUrlText(GITHUB_PUBLIC_DONATIONS_URL)
+
+        val rootParsed = if (!rootText.isNullOrBlank()) parseDonationsJson(rootText) else null
+        val publicParsed = if (!publicText.isNullOrBlank()) parseDonationsJson(publicText) else null
+
+        val merged = LinkedHashMap<String, DonationLink>()
+        rootParsed?.forEach { merged[it.url] = it }
+        publicParsed?.forEach {
+            if (!merged.containsKey(it.url)) {
+                merged[it.url] = it
             }
-            if (conn.responseCode in 200..299) {
-                val responseText = conn.inputStream.bufferedReader().use { it.readText() }
-                val parsed = parseDonationsJson(responseText)
-                if (parsed != null) {
-                    prefs.edit()
-                        .putString(KEY_CACHED_JSON, responseText)
-                        .putLong(KEY_LAST_FETCH_MS, nowMs)
-                        .apply()
-                    return parsed
-                }
-            }
-            cached
-        } catch (_: Exception) {
-            cached
-        } finally {
-            conn?.disconnect()
         }
+
+        val finalItems = merged.values.toList()
+        if (finalItems.isNotEmpty()) {
+            val serialized = JSONArray().apply {
+                finalItems.forEach { item ->
+                    put(JSONObject().apply {
+                        put("title", item.title)
+                        put("url", item.url)
+                    })
+                }
+            }.toString()
+            prefs.edit()
+                .putString(KEY_CACHED_JSON, serialized)
+                .putLong(KEY_LAST_FETCH_MS, nowMs)
+                .apply()
+            return finalItems
+        }
+
+        return cached
+    }
+
+    fun getFaviconCandidateUrls(pageUrl: String): List<String> {
+        val host = try {
+            URI(pageUrl.trim()).host?.lowercase()?.removePrefix("www.") ?: ""
+        } catch (_: Exception) {
+            ""
+        }
+        if (host.isEmpty()) return emptyList()
+
+        val parts = host.split(".")
+        val twoPartTlds = setOf("in.ua", "com.ua", "org.ua", "gov.ua", "net.ua", "edu.ua", "co.uk", "org.uk")
+        val lastTwo = if (parts.size >= 2) "${parts[parts.size - 2]}.${parts.last()}" else host
+        val rootDomain = when {
+            parts.size <= 2 -> host
+            twoPartTlds.contains(lastTwo) && parts.size >= 3 ->
+                "${parts[parts.size - 3]}.$lastTwo"
+            else -> lastTwo
+        }
+
+        val candidates = mutableListOf<String>()
+        candidates.add("https://www.google.com/s2/favicons?sz=64&domain=$rootDomain")
+        if (rootDomain != host) {
+            candidates.add("https://www.google.com/s2/favicons?sz=64&domain=$host")
+        }
+        candidates.add("https://icons.duckduckgo.com/ip3/$host.ico")
+        if (rootDomain != host) {
+            candidates.add("https://icons.duckduckgo.com/ip3/$rootDomain.ico")
+        }
+        candidates.add("https://$host/favicon.ico")
+        return candidates.distinct()
+    }
+
+    fun fetchFaviconBitmap(context: Context, pageUrl: String): Bitmap? {
+        val candidates = getFaviconCandidateUrls(pageUrl)
+        if (candidates.isEmpty()) return null
+
+        val cacheKey = pageUrl.trim().lowercase()
+        faviconMemoryCache[cacheKey]?.let { return it }
+
+        val appContext = context.applicationContext
+        val cacheFile = File(appContext.cacheDir, "favicon_${cacheKey.hashCode()}.png")
+        if (cacheFile.exists() && cacheFile.length() > 64) {
+            try {
+                BitmapFactory.decodeFile(cacheFile.absolutePath)?.let { bmp ->
+                    faviconMemoryCache[cacheKey] = bmp
+                    return bmp
+                }
+            } catch (_: Exception) {}
+        }
+
+        for (faviconUrl in candidates) {
+            var conn: HttpURLConnection? = null
+            try {
+                conn = (URL(faviconUrl).openConnection() as HttpURLConnection).apply {
+                    requestMethod = "GET"
+                    instanceFollowRedirects = true
+                    connectTimeout = 6000
+                    readTimeout = 6000
+                    setRequestProperty("User-Agent", "Mozilla/5.0 (Android; ZTBlackoutPreWarning)")
+                }
+                if (conn.responseCode in 200..299) {
+                    val bytes = conn.inputStream.use { it.readBytes() }
+                    if (bytes.size > 64) {
+                        val bmp = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+                        if (bmp != null && bmp.width > 0 && bmp.height > 0) {
+                            faviconMemoryCache[cacheKey] = bmp
+                            try {
+                                FileOutputStream(cacheFile).use { out ->
+                                    bmp.compress(Bitmap.CompressFormat.PNG, 100, out)
+                                }
+                            } catch (_: Exception) {}
+                            return bmp
+                        }
+                    }
+                }
+            } catch (_: Exception) {
+                // Try next candidate
+            } finally {
+                conn?.disconnect()
+            }
+        }
+        return null
     }
 }

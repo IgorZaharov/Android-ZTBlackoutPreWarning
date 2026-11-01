@@ -196,6 +196,21 @@ fun BlackoutAppNavigation(
         }
     }
 
+    // Refresh donations links from .json on GitHub when Application is started
+    LaunchedEffect(Unit) {
+        withContext(Dispatchers.IO) {
+            try {
+                val links = ua.blackout.prewarning.data.repository.DonationsRepository.getDonationsWithDailyRefresh(
+                    appContext,
+                    forceRefresh = true
+                )
+                for (item in links) {
+                    ua.blackout.prewarning.data.repository.DonationsRepository.fetchFaviconBitmap(appContext, item.url)
+                }
+            } catch (_: Exception) {}
+        }
+    }
+
     // Fetch schedule when queue or siteUrl changes; update all Compose states on the Main UI thread
     LaunchedEffect(queue, siteUrl) {
         val activeQ = queue

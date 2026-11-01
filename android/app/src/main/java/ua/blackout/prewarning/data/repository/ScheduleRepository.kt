@@ -247,4 +247,36 @@ class ScheduleRepository(context: Context) {
             totalBlackoutHours = totalBlackoutHours
         )
     }
+
+    /**
+     * Computes the "Наступне відключення" ("Next blackout") interval text for the Big Widget.
+     * Finds the first blackout interval today whose start time is strictly after current time (startMin > currentMinutes),
+     * so an already-finished or currently-active blackout interval is never shown as the next blackout.
+     * If no future blackout interval remains today, checks tomorrow's schedule if available.
+     */
+    fun getNextUpcomingIntervalText(queue: String): String {
+        val now = LocalTime.now(ZoneId.of("Europe/Kyiv"))
+        val currentMinutes = now.hour * 60 + now.minute
+        val todayIntervals = getDetailedIntervals(getTodaySlots(queue))
+
+        val nextToday = todayIntervals.firstOrNull { interval ->
+            val parts = interval.startStr.split(":")
+            val startMin = parts[0].toInt() * 60 + parts[1].toInt()
+            startMin > currentMinutes
+        }
+        if (nextToday != null) {
+            return "${nextToday.startStr} – ${nextToday.endStr}"
+        }
+
+        val tomorrowSlots = getTomorrowSlots(queue)
+        if (tomorrowSlots != null) {
+            val tomorrowIntervals = getDetailedIntervals(tomorrowSlots)
+            val firstTomorrow = tomorrowIntervals.firstOrNull()
+            if (firstTomorrow != null) {
+                return "Завтра ${firstTomorrow.startStr} – ${firstTomorrow.endStr}"
+            }
+        }
+
+        return if (todayIntervals.isEmpty()) "Відключень немає" else "Сьогодні більше немає"
+    }
 }

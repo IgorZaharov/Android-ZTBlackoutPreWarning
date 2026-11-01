@@ -15,7 +15,29 @@ import {
   DonationLink,
   getCachedDonations,
   getDonationsWithDailyRefresh,
+  getFaviconCandidateUrls,
 } from '../services/donationsService';
+
+declare const __APP_VERSION__: string | undefined;
+const CURRENT_BUILD_VERSION = `v${typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '1.1.0'}`;
+
+const DonationFavicon: React.FC<{ url: string; title: string }> = ({ url, title }) => {
+  const candidates = getFaviconCandidateUrls(url);
+  const [candidateIdx, setCandidateIdx] = useState(0);
+
+  if (candidateIdx >= candidates.length) {
+    return <Globe className="w-5 h-5 text-white" />;
+  }
+
+  return (
+    <img
+      src={candidates[candidateIdx]}
+      alt={title}
+      className="w-5 h-5 rounded-[4px] object-contain"
+      onError={() => setCandidateIdx((prev) => prev + 1)}
+    />
+  );
+};
 
 interface AboutViewProps {
   lang: 'uk' | 'en';
@@ -27,7 +49,7 @@ export const AboutView: React.FC<AboutViewProps> = ({ lang }) => {
 
   useEffect(() => {
     let mounted = true;
-    getDonationsWithDailyRefresh().then((items) => {
+    getDonationsWithDailyRefresh(Date.now(), true).then((items) => {
       if (mounted) {
         setDonations(items);
       }
@@ -54,7 +76,7 @@ export const AboutView: React.FC<AboutViewProps> = ({ lang }) => {
 
         <div className="flex items-center gap-2 mt-3 text-[11px] font-mono">
           <span className="px-3 py-1 rounded-full bg-white/10 text-sky-100 font-semibold border border-white/15">
-            v1.0.0
+            {CURRENT_BUILD_VERSION}
           </span>
           <span className="px-3 py-1 rounded-full bg-[#FF5E3A]/20 text-[#FF5E3A] font-semibold border border-[#FF5E3A]/30">
             Jetpack Compose M3
@@ -170,14 +192,8 @@ export const AboutView: React.FC<AboutViewProps> = ({ lang }) => {
             className="flex items-center justify-between p-3.5 rounded-2xl bg-white/[0.06] hover:bg-white/[0.12] border border-white/10 transition-all group overflow-hidden"
           >
             <div className="flex items-center gap-3.5 min-w-0 flex-1 mr-2">
-              <div
-                className={`w-10 h-10 rounded-2xl flex items-center justify-center shrink-0 shadow-sm ${
-                  idx % 2 === 0
-                    ? 'bg-emerald-500 text-white shadow-emerald-500/30'
-                    : 'bg-amber-500 text-black shadow-amber-500/30'
-                }`}
-              >
-                {idx % 2 === 0 ? <Heart className="w-5 h-5" /> : <Globe className="w-5 h-5" />}
+              <div className="w-10 h-10 rounded-2xl bg-white/15 border border-white/15 flex items-center justify-center shrink-0 shadow-sm">
+                <DonationFavicon url={item.url} title={item.title} />
               </div>
               <div className="min-w-0 flex-1">
                 <div className="text-xs font-bold text-white group-hover:text-[#FF5E3A] transition-colors truncate">

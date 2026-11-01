@@ -70,10 +70,17 @@ class BlackoutGlanceWidget : GlanceAppWidget() {
         val KEY_NOTIFICATIONS_ENABLED = booleanPreferencesKey("glance_notifications_enabled")
         val KEY_QUEUE = stringPreferencesKey("glance_queue")
         val KEY_REFRESH_TICK = longPreferencesKey("glance_refresh_tick")
+        val KEY_IS_BLACKOUT_NOW = booleanPreferencesKey("glance_is_blackout_now")
+        val KEY_COUNTDOWN_TEXT = stringPreferencesKey("glance_countdown_text")
+        val KEY_NEXT_SLOT_TIME = stringPreferencesKey("glance_next_slot_time")
+        val KEY_NEXT_BLACKOUT_TEXT = stringPreferencesKey("glance_next_blackout_text")
 
         suspend fun syncAllWidgets(context: Context) {
             val appCtx = context.applicationContext
             val settings = SettingsRepository(appCtx).getSettings()
+            val scheduleRepo = ScheduleRepository(appCtx)
+            val info = scheduleRepo.getCurrentStatusAndCountdown(settings.queue)
+            val nextBlackoutText = scheduleRepo.getNextUpcomingIntervalText(settings.queue)
             val manager = GlanceAppWidgetManager(appCtx)
             val glanceIds = manager.getGlanceIds(BlackoutGlanceWidget::class.java)
             val nowMs = System.currentTimeMillis()
@@ -83,6 +90,10 @@ class BlackoutGlanceWidget : GlanceAppWidget() {
                         this[KEY_NOTIFICATIONS_ENABLED] = settings.notificationsEnabled
                         this[KEY_QUEUE] = settings.queue
                         this[KEY_REFRESH_TICK] = nowMs
+                        this[KEY_IS_BLACKOUT_NOW] = info.isBlackoutNow
+                        this[KEY_COUNTDOWN_TEXT] = info.countdownText
+                        this[KEY_NEXT_SLOT_TIME] = info.nextSlotTime
+                        this[KEY_NEXT_BLACKOUT_TEXT] = nextBlackoutText
                     }
                 }
                 BlackoutGlanceWidget().update(appCtx, gId)
@@ -266,25 +277,30 @@ class BlackoutGlanceWidget : GlanceAppWidget() {
             val currentSettings = settingsRepo.getSettings()
             val notificationsEnabled = prefs[KEY_NOTIFICATIONS_ENABLED] ?: currentSettings.notificationsEnabled
             val activeQueue = prefs[KEY_QUEUE] ?: currentSettings.queue
-            val _tick = prefs[KEY_REFRESH_TICK] ?: 0L
+            val refreshTick = prefs[KEY_REFRESH_TICK] ?: 0L
 
             // Always use Today's schedule for the widget
             val slots = scheduleRepo.getTodaySlots(activeQueue)
-            val info = scheduleRepo.getCurrentStatusAndCountdown(activeQueue)
-            val intervals = scheduleRepo.getIntervals(slots)
+            val liveInfo = scheduleRepo.getCurrentStatusAndCountdown(activeQueue)
+            val isBlackoutNow = if (refreshTick > 0L) (prefs[KEY_IS_BLACKOUT_NOW] ?: liveInfo.isBlackoutNow) else liveInfo.isBlackoutNow
+            val countdownText = prefs[KEY_COUNTDOWN_TEXT]?.takeIf { it.isNotBlank() && refreshTick > 0L } ?: liveInfo.countdownText
+            val nextSlotTime = prefs[KEY_NEXT_SLOT_TIME]?.takeIf { it.isNotBlank() && refreshTick > 0L } ?: liveInfo.nextSlotTime
+            val nextBlackoutText = scheduleRepo.getNextUpcomingIntervalText(activeQueue).ifBlank {
+                prefs[KEY_NEXT_BLACKOUT_TEXT] ?: "Сьогодні більше немає"
+            }
 
             val size = LocalSize.current
             val isBigWidget = size.height >= 115.dp || size.width >= 230.dp
 
-            val statusText = if (info.isBlackoutNow) "СВІТЛА НЕМАЄ" else "СВІТЛО Є"
-            val statusColor = if (info.isBlackoutNow) Color(0xFFFF5E3A) else Color(0xFF34D399)
+            val statusText = if (isBlackoutNow) "СВІТЛА НЕМАЄ" else "СВІТЛО Є"
+            val statusColor = if (isBlackoutNow) Color(0xFFFF5E3A) else Color(0xFF34D399)
 
             GlanceTheme {
                 Box(
                     modifier = GlanceModifier
                         .fillMaxSize()
                         .cornerRadius(20.dp)
-                        .background(ColorProvider(Color(0xFF141A29)))
+                        .background(ColorProvider(Color(0xCC141A29)))
                         .padding(12.dp)
                 ) {
                     if (isBigWidget) {
@@ -379,11 +395,11 @@ class BlackoutGlanceWidget : GlanceAppWidget() {
                             ) {
                                 Column(modifier = GlanceModifier.defaultWeight()) {
                                     Text(
-                                        text = if (info.isBlackoutNow) "До увімкнення:" else "До відключення:",
+                                        text = if (isBlackoutNow) "До увімкнення:" else "До відключення:",
                                         style = TextStyle(fontSize = 10.sp, color = ColorProvider(Color(0xB3BAE6FD)))
                                     )
                                     Text(
-                                        text = info.countdownText,
+                                        text = countdownText,
                                         style = TextStyle(
                                             fontSize = 20.sp,
                                             fontWeight = FontWeight.Bold,
@@ -397,7 +413,7 @@ class BlackoutGlanceWidget : GlanceAppWidget() {
                                         style = TextStyle(fontSize = 10.sp, color = ColorProvider(Color(0xB3BAE6FD)))
                                     )
                                     Text(
-                                        text = info.nextSlotTime,
+                                        text = nextSlotTime,
                                         style = TextStyle(
                                             fontSize = 12.sp,
                                             fontWeight = FontWeight.Bold,
@@ -420,36 +436,33 @@ class BlackoutGlanceWidget : GlanceAppWidget() {
                                     .clickable(actionStartActivity<MainActivity>())
                             )
 
-                            // Upcoming Outage Interval
-                            if (intervals.isNotEmpty()) {
-                                Spacer(modifier = GlanceModifier.height(4.dp))
-                                val firstInterval = intervals.first()
-                                Row(
-                                    modifier = GlanceModifier
-                                        .fillMaxWidth()
-                                        .cornerRadius(8.dp)
-                                        .background(ColorProvider(Color(0x26000000)))
-                                        .padding(horizontal = 8.dp, vertical = 3.dp)
-                                        .clickable(actionStartActivity<MainActivity>()),
-                                    verticalAlignment = Alignment.Vertical.CenterVertically
-                                ) {
-                                    Text(
-                                        text = "${firstInterval.first} – ${firstInterval.second}",
-                                        style = TextStyle(
-                                            fontSize = 11.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            color = ColorProvider(Color.White)
-                                        )
+                            // Upcoming Outage Interval ("Наступне відключення")
+                            Spacer(modifier = GlanceModifier.height(4.dp))
+                            Row(
+                                modifier = GlanceModifier
+                                    .fillMaxWidth()
+                                    .cornerRadius(8.dp)
+                                    .background(ColorProvider(Color(0x26000000)))
+                                    .padding(horizontal = 8.dp, vertical = 3.dp)
+                                    .clickable(actionStartActivity<MainActivity>()),
+                                verticalAlignment = Alignment.Vertical.CenterVertically
+                            ) {
+                                Text(
+                                    text = nextBlackoutText,
+                                    style = TextStyle(
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = ColorProvider(Color.White)
                                     )
-                                    Spacer(modifier = GlanceModifier.defaultWeight())
-                                    Text(
-                                        text = "Наступне відключення",
-                                        style = TextStyle(
-                                            fontSize = 10.sp,
-                                            color = ColorProvider(Color(0xFFFF5E3A))
-                                        )
+                                )
+                                Spacer(modifier = GlanceModifier.defaultWeight())
+                                Text(
+                                    text = "Наступне відключення",
+                                    style = TextStyle(
+                                        fontSize = 10.sp,
+                                        color = ColorProvider(Color(0xFFFF5E3A))
                                     )
-                                }
+                                )
                             }
                         }
                     } else {
@@ -497,11 +510,11 @@ class BlackoutGlanceWidget : GlanceAppWidget() {
                                         .clickable(actionStartActivity<MainActivity>())
                                 ) {
                                     Text(
-                                        text = if (info.isBlackoutNow) "До увімкнення:" else "До відключення:",
+                                        text = if (isBlackoutNow) "До увімкнення:" else "До відключення:",
                                         style = TextStyle(fontSize = 10.sp, color = ColorProvider(Color(0xB3BAE6FD)))
                                     )
                                     Text(
-                                        text = info.countdownText,
+                                        text = countdownText,
                                         style = TextStyle(
                                             fontSize = 18.sp,
                                             fontWeight = FontWeight.Bold,
@@ -588,7 +601,7 @@ class RefreshWidgetActionCallback : ActionCallback {
 
         withContext(Dispatchers.IO) {
             try {
-                val res = ZtoeParser.fetchFullSchedule(current.cityUrl, current.queue, appContext)
+                val res = ZtoeParser.fetchFullSchedule(current.cityUrl, current.queue, appContext, forceNetwork = true)
                 if (res.status == ua.blackout.prewarning.data.parser.FetchStatus.SUCCESS || !scheduleRepo.hasValidTodayCache(current.queue)) {
                     scheduleRepo.saveSchedule(current.queue, res.todaySlots, res.tomorrowSlots)
                 }

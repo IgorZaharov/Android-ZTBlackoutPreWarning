@@ -96,6 +96,12 @@ export default function App() {
     loadSchedules(settings);
   }, [loadSchedules, settings.queue, settings.url]);
 
+  useEffect(() => {
+    import('./services/donationsService').then(({ getDonationsWithDailyRefresh }) => {
+      getDonationsWithDailyRefresh(Date.now(), true).catch(() => {});
+    });
+  }, []);
+
   // Battery & Power optimization: shared system clock state
   const [now, setNow] = useState<Date>(() => new Date());
   const [timeOfDayOverride, setTimeOfDayOverride] = useState<'auto' | 'morning' | 'day' | 'evening' | 'night'>('auto');

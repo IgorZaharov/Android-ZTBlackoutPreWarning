@@ -1,6 +1,6 @@
 {
-  "summary":  "Revised implementation plan incorporating user feedback: notifications are sent strictly once per blackout slot, tapping the widget launches the app, and the 2x1 widget features an integrated quick-toggle button to enable/disable notifications.",
-  "updatedAt":  "2026-10-30T17:22:19.315890618Z",
+  "summary":  "Updated implementation plan for Світло в Житомирі incorporating the 4 additional requirements: round Refresh button on both widgets (Small 2x1 and Big 3x2/4x2), adding https://example.com to /valid-urls.json in Chapter 10, adding the emergency outages Facebook link at the bottom of the Main Window after the refresh block, and fixing the standard Android icon appearing when the Refresh button is pressed in Settings.",
+  "updatedAt":  "2026-10-31T06:54:49.233196444Z",
   "requestFeedback":  true,
   "userFacing":  true
 }

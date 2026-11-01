@@ -1,183 +1,138 @@
-# UABlackoutPreWarning Mobile (Android) — Implementation Plan
+# Світло в Житомирі (Android & Web Emulator) — Implementation Plan
 
-A native Android mobile application with Jetpack Compose, Material 3, and WorkManager background monitoring for Ukrainian blackout schedules (Zhytomyroblenergo `ztoe.com.ua`), accompanied by a live interactive web mockup simulator, home-screen widget, GitHub CI/CD build automation, and Google Play publication guide.
+## 1. Overview & Objectives
 
----
-
-## User Review & Critical Decisions
-
-> [!IMPORTANT]
-> The following architectural and UX choices have been updated based on your feedback:
-
-- **Notification Frequency Rule (Confirmed)**: **Notifications are sent strictly once per blackout slot**. A persistent alert history/cache records notified slot IDs (e.g., date + start hour + queue) to prevent repeated or duplicate alerts for the same outage window.
-- **Widget Interaction & 2x1 Capabilities (Confirmed)**:
-  - **Tap to Open App**: Tapping the main body of any widget directly launches the Android application into the Main Screen.
-  - **2x1 Minimalist Widget Controls**: Even in the compact 2x1 size, the widget includes a dedicated quick-action toggle button to stop or resume notifications directly without opening the full app.
-- **Confirmed Framework**: **Native Android with Jetpack Compose** & **Material 3**, utilizing Kotlin Coroutines and StateFlow for modern, reactive, fluid performance.
-- **Confirmed Alert Engine**: **WorkManager Periodic Worker** (15-min background fetch) combined with Android **AlarmManager exact alarms** for precise advance notifications (e.g. 15, 30, or 60 minutes before scheduled power cut) and **NotificationManager** channels.
-- **Confirmed Parser Architecture**: **Zhytomyroblenergo (`ztoe.com.ua`) primary parser** built on an extensible provider interface (`OblenergoProvider`) so additional regional oblenergos (DTEK, Lvivoblenergo, etc.) can be seamlessly added later.
-- **Dual Delivery Strategy**:
-  1. Complete native Android project structure with Kotlin/Compose source files, Glance Widget, AndroidManifest, Gradle setup, and GitHub Actions CI workflow to build unsigned and release APK/AAB artifacts directly in your repository (`https://github.com/IgorZaharov/Android-ZTBlackoutPreWarning`). **[STATUS: Commit pushed to `main`; CI workflow running with 30-min vertical block chart, verified reachability + data check, and 1–240 min timer edit boxes]**
-  2. A fully interactive, high-fidelity web prototype and visual simulator running right here in AI Studio, allowing you to preview the Android mobile UI (with Android status bar, gesture navigation, simulated widget, light/dark modes, Ukrainian/English localization, live table parser inspection, screenshot-accurate 30-minute block timeline without horizontal scroll, and clean timer edit boxes restricted to 1–240 min).
+This plan addresses all 16 core requirements and the 4 additional enhancements, plus automated unit testing and CI/CD enforcement in GitHub Actions, while strictly preserving the established UI design, layout, colors, icons, and element positions.
 
 ---
 
-## 1. Overview & Core Concept
+## 2. Detailed Implementation Plan
 
-- **What It Does**: Parses the official blackout schedule tables from `https://www.ztoe.com.ua/unhooking-search.php`, extracts time slots for the user's selected queue (e.g., Queue 1.1–6.2), pinpoints the current time position, computes the exact countdown to the next scheduled outage, and triggers timely pre-warning notifications (strictly once per blackout slot) to give users ample time to charge devices and prepare.
-- **Target Audience**: Residents of Zhytomyr and Zhytomyr Oblast affected by emergency and hourly outage schedules (ГПВ), who need reliable, battery-efficient advance warnings on their phones.
-- **Key Value**: Eliminates the frustration of manually checking slow or unstable energy provider websites during emergencies. One glance at the app or home-screen widget provides immediate status, countdown, and quick-toggle controls.
+### 1. Fix Vibration When Sound Toggle Is Disabled
+- **Root Cause**: On Android 8.0+ (especially MIUI/HyperOS and Android 13+), notification channels with `sound = null` can suppress vibration unless `NotificationCompat.DEFAULT_VIBRATE` is set, channel IDs are versioned so stale OS channel caches are invalidated, and direct `Vibrator` invocation specifies `VibrationAttributes.USAGE_ALARM` / `AudioAttributes.USAGE_ALARM`.
+- **Fix**:
+  - Update `NotificationHelper.kt` with versioned channel IDs (`v2`) so cached OS channel states are refreshed.
+  - When `vibrationEnabled == true` (including when `soundEnabled == false`), configure `CHANNEL_VIBE_ONLY` with `enableVibration(true)` and pattern `longArrayOf(0, 400, 200, 400)`, set `VibrationAttributes` (`USAGE_ALARM` on API 33+) / `AudioAttributes` (`USAGE_ALARM` on API 26+) on the hardware `Vibrator` waveform call, and do not clear vibration defaults with `setDefaults(0)`.
+  - In `src/services/alertManager.ts`, invoke `navigator.vibrate([400, 200, 400])` whenever `settings.vibrationEnabled` is `true`, independent of `settings.soundEnabled`.
 
----
+### 2. Notification Toggle Controls Sound & Vibration States
+- **Fix**:
+  - Add `prevSoundEnabled` and `prevVibrationEnabled` persistence in `SettingsRepository.kt`, `UserSettings` (`Models.kt` and `src/types.ts`), and `src/services/alertManager.ts`.
+  - When the master notification switch is turned **OFF** (from Main Screen, Settings, or Widget): save current `soundEnabled` and `vibrationEnabled` into `prevSoundEnabled` and `prevVibrationEnabled`, set `soundEnabled = false` and `vibrationEnabled = false`, and disable both Sound and Vibration switches in Settings.
+  - When the master notification switch is turned **ON**: restore `soundEnabled` and `vibrationEnabled` to `prevSoundEnabled` and `prevVibrationEnabled`, and re-enable both switches.
 
-## 2. User Experience & Visual Design
+### 3. Fix Notification Toggle & Add Round "Refresh" Button on Both Widgets (Small 2x1 & Big 3x2/4x2)
+- **Root Cause (Notification Toggle)**:
+  1. Jetpack Glance skips recomposition on `update()` / `updateAll()` unless `PreferencesGlanceStateDefinition` state keys are mutated via `updateAppWidgetState`.
+  2. When notifications are enabled, the white bell vector (`ic_notification.xml`, `#FFFFFFFF`) was rendered on a white circle background (`Color.White`) without a dark tint filter, making the icon invisible on active state.
+- **Fix (Notification Toggle)**:
+  - Use `PreferencesGlanceStateDefinition` in `BlackoutGlanceWidget.kt` and update Glance widget state (`updateAppWidgetState`) inside `ToggleAlertsActionCallback`, `WidgetToggleReceiver`, and whenever settings change in the app.
+  - Apply proper `ColorFilter.tint` on the bell icon in both 2x1 and 3x2/4x2 widget layouts so the active/inactive states are clearly visible.
+  - Register a `SharedPreferences.OnSharedPreferenceChangeListener` inside `BlackoutAppNavigation.kt` (cleaned up via `DisposableEffect`) so widget toggle actions immediately synchronize with the Main Screen and Settings switches.
+- **Addition (Round "Refresh" Button on Both Widgets)**:
+  - Add a round "Refresh" button (`ic_refresh.xml` vector icon inside a circular button matching the size, corner radius, and visual style of the existing round "Notification" toggle button) next to the Notification toggle on both the Small (2x1) and Big (3x2/4x2) widgets (in `BlackoutGlanceWidget.kt` and the web widget preview in `src/components/MainView.tsx`).
+  - Implement `RefreshWidgetActionCallback : ActionCallback` (and corresponding handler in `WidgetToggleReceiver` / web emulator) that works identically to the Refresh button in Settings: reads the currently selected queue from `SettingsRepository`, fetches live schedule data from the configured website (`ZtoeParser.fetchFullSchedule(settings.cityUrl, settings.queue)`), saves the updated schedule to `ScheduleRepository`, updates `PreferencesGlanceStateDefinition` timestamp/state, and refreshes all widget contents (`updateAll(context)`).
 
-```
-+-------------------------------------------------------------+
-| [UA / EN]   ⚡ ZT Blackout Pre-Warning    [🌙 Dark] [⚙️]    |
-+-------------------------------------------------------------+
-|  QUEUE 2.1 · ZHYTOMYROBLENERGO              [🔔 Alerts ON]  |
-|                                                             |
-|  ┌────────────────────────────────────────────────────────┐ |
-|  │ NEXT POWER OUTAGE IN:                                  │ |
-|  │              01 h : 35 m                               │ |
-|  │ Scheduled Outage: 14:00 – 18:00 (Today)                │ |
-|  │ Status: 🟢 Currently Power ON                          │ |
-|  │ Alert: 🔔 Scheduled 30m prior (1x per slot)            │ |
-|  └────────────────────────────────────────────────────────┘ |
-|                                                             |
-|  TODAY'S SCHEDULE (24-Hour Interactive Timeline)           |
-|  [00..04] [04..08] [08..12] [12..16] [16..20] [20..24]      |
-|  [  ON  ] [ OFF  ] [  ON  ] [ OFF  ] [  ON  ] [ OFF  ]      |
-|                               ▲                             |
-|                        CURRENT TIME (12:25)                 |
-|                                                             |
-|  [🔄 Force Refresh]     [🧪 Send Test Alert]   [🔗 ztoe]    |
-+-------------------------------------------------------------+
-|  [📱 Android Glance Widget Preview (Tap Body -> Open App)]  |
-|  ┌──────────────────────────────────────────────────────┐   |
-|  │ [2x1 Minimal]  Q 2.1 · In 1h 35m    [🔕 Stop Alerts] │   |
-|  └──────────────────────────────────────────────────────┘   |
-+-------------------------------------------------------------+
-|  (🏠 Main)           (⚙️ Settings)           (ℹ️ About)       |
-+-------------------------------------------------------------+
-```
+### 4. Immediate Queue & Schedule Fetch When Widgets Are Added
+- **Root Cause**: `BlackoutGlanceWidget.provideGlance` called `scheduleRepo.getTodaySlots(settings.queue)`, which returned fallback synthetic data if the app had not yet cached today's schedule.
+- **Fix**:
+  - In `BlackoutGlanceWidget.provideGlance` and `BlackoutWidgetReceiver.onUpdate` / `onEnabled`, check if valid live schedule data for `settings.queue` and today's date is cached; if not, immediately fetch live data from `ZtoeParser.fetchFullSchedule(settings.cityUrl, settings.queue)` on `Dispatchers.IO`, persist it to `ScheduleRepository`, and render the widget immediately without requiring manual refresh.
 
-### Visual Identity & Theme
-- **Material 3 Design Guidelines**:
-  - Dynamic surface colors, tonal palettes, and expressive typography.
-  - High-contrast accessibility compliance for outdoor sunlight readability.
-  - Dark Theme: OLED-friendly dark surface (`#121316` / `#1E1F24`) to conserve phone battery during blackouts.
-  - Light Theme: Clean paper-white and neutral gray backdrop (`#F8F9FB`) with soft elevation.
-- **Semantic Status Palette**:
-  - **Power ON (Active)**: Emerald green (`#10B981` / `#059669`) with soothing pulse.
-  - **Power OFF (Blackout)**: High-visibility electric crimson (`#EF4444` / `#DC2626`).
-  - **Possible Outage (Reserve)**: Amber / Gold (`#F59E0B` / `#D97706`).
-- **Typography**: Clean Android system typeface (`Roboto` / `Inter`), bold numerical monospace digits for countdown clocks (`tabular-nums`), and crisp bilingual typography in Ukrainian and English.
+### 5. Fix Live Data Fetching from `ztoe.com.ua` (Today & Tomorrow Tables) & Mark as Critical
+- **Root Cause**: On `https://www.ztoe.com.ua/unhooking-search.php`, the outermost `<table width="100%" height="100%" border="0">` wraps the entire page and all inner tables. In `ZtoeParser.kt`, `doc.select("table")` matched this outer layout table first because its `.html()` contained today's date string, and `row.select("td")` on its outer `<tr>` selected all `<td>` cells across the entire document.
+- **Fix**:
+  - Filter out outer wrapper tables (`table.select("table").isEmpty()` — only leaf tables with `rows.size >= 12` that contain queue rows `1.1`..`6.2`).
+  - Match the exact date in the table header row (`DD.MM.YYYY`, e.g., `31.10.2026` for Today in `Europe/Kyiv` timezone, and `tomorrow` date `DD.MM.YYYY` for Tomorrow).
+  - If a table with tomorrow's date in the header exists on the site, show the Today/Tomorrow selector on the Main Screen and display the respective timeslots and graph when selected. Otherwise, hide the Tomorrow button and center the Today button.
+  - Ensure the widget always displays the graph and countdown for Today.
+  - Add explicit `CRITICAL SECTION — DO NOT MODIFY UNLESS EXPLICITLY REQUESTED` comments around the parser and table selection logic in both `ZtoeParser.kt` and `src/services/ztoeParser.ts`.
 
-### Key Screens & Navigation
-1. **Main Screen (Schedule & Status)**:
-   - **Hero Countdown Card**: Prominent display of time remaining until the next outage (or time until restoration if currently disconnected).
-   - **24-Hour Segmented Timeline**: Visual hour-by-hour bar (00:00 to 24:00) color-coded by status, with a live moving indicator needle at the exact current time.
-   - **Queue Selector & Status Bar**: Quick switch between queue sub-branches (e.g. 1.1, 1.2, 2.1, 2.2 ... 6.2).
-   - **Notification Quick-Toggle**: 1-tap button to temporarily snooze or re-enable alarms.
-2. **Settings Screen**:
-   - **Provider / City URL**: Default to `https://www.ztoe.com.ua/unhooking-search.php`, with capability to edit or choose regional providers.
-   - **Queue Configuration**: Select target queue and subqueue.
-   - **Update Interval**: Background polling frequency (15 min, 30 min, 1 hour, 2 hours).
-   - **Advance Pre-Warning Alert**: Configurable warning threshold (10, 15, 30, 45, or 60 minutes before blackout begins).
-   - **Alert Frequency Guard**: Confirms "Sent only once per slot" rule with reset history option.
-   - **Test & Diagnostics**: "Send Test Notification", "Force Scrape Now", and "Restore Defaults".
-   - **Theme & Language**: Light / Dark / Follow System; Ukrainian / English / Follow System.
-3. **About Screen**:
-   - Application version (e.g., v1.0.0), author attribution (Igor Zaharov), project description.
-   - Direct button links to main GitHub profile (`https://github.com/IgorZaharov`) and GitHub Issues (`https://github.com/IgorZaharov/Android-ZTBlackoutPreWarning/issues`).
-   - Disclaimer regarding public open utility data.
-4. **Android Home Screen AppWidget (Jetpack Glance)**:
-   - **Tap anywhere on widget body** $\rightarrow$ Instantly navigates to the App's Main Screen via explicit `PendingIntent`.
-   - **Minimalist (2x1)**: Displays Queue badge (e.g. `Q 2.1`), current status indicator, next blackout countdown, and a dedicated **Stop/Start Notifications button** with immediate widget state update.
-   - **Standard & Resizable (3x2 / 4x2)**: Expanded view with detailed time slot (e.g. `14:00 - 18:00`), mini 24h timeline strip, countdown clock, and notification toggle action button.
+### 6. Change Application Name to "Світло в Житомирі"
+- **Fix**:
+  - Set `app_name` and `widget_name` in `android/app/src/main/res/values/strings.xml`, `src/data/androidProjectFiles.ts`, `metadata.json`, `index.html`, and app headers/titles in `src/` and `AppStrings.kt` to `"Світло в Житомирі"`.
 
----
+### 7. Revert "?" Help Popup in Settings to Numbered Instructions (Critical Text)
+- **Fix**:
+  - Restore the exact 4-step numbered instruction in `SettingsScreen.kt` and `AppStrings.kt` (matching `SettingsView.tsx`), with confirm button `"Зрозуміло"` / `"Got it"`:
+    1. Відкрийте сторінку пошуку черги на сайті ztoe.com.ua.
+    2. Оберіть свій РЕМ, населений пункт і вулицю.
+    3. У таблиці знайдіть свій будинок і подивіться стовпці «Черга» і «Підчерга». Наприклад, черга 5 і підчерга 2 - це 5.2.
+    4. Виберіть це значення у полі «Черга» у вікні налаштувань (кнопка ⚙).
+  - Mark this help popup text as critical in code comments so it is never modified unless explicitly requested.
 
-## 3. Technical Architecture & Data Strategy
+### 8. Default Values: Advance Warning = 15 min, Site Refresh Interval = 30 min
+- **Fix**:
+  - Set default `advanceNoticeMinutes = 15` and `refreshIntervalMinutes = 30` across `Models.kt`, `SettingsRepository.kt`, `BlackoutAppNavigation.kt`, `SettingsScreen.kt`, `AppStrings.kt`, `src/services/alertManager.ts`, and `src/components/SettingsView.tsx`.
+  - Mark these default constants as critical so they are never modified on their own in the future.
 
-```
-┌────────────────────────────────────────────────────────┐
-│                   Android Architecture                 │
-└────────────────────────────────────────────────────────┘
-                           │
-       ┌───────────────────┴───────────────────┐
-       ▼                                       ▼
-┌─────────────────────────┐         ┌─────────────────────────┐
-│     UI Layer            │         │   Background Services   │
-│  - Jetpack Compose M3   │         │  - WorkManager Worker   │
-│  - Navigation Compose   │         │  - AlarmManager Alarms  │
-│  - Glance AppWidget     │         │  - NotificationManager  │
-│    * Tap -> Open App    │         │  - Alert Deduplication  │
-│    * 2x1 Toggle Button  │         │    (1x per slot record) │
-└──────────┬──────────────┘         └──────────┬──────────────┘
-           │                                   │
-           └─────────────────┬─────────────────┘
-                             ▼
-              ┌─────────────────────────────┐
-              │     Repository & State      │
-              │  - PreferencesDataStore     │
-              │  - NotifiedSlotsRegistry    │
-              │  - Kotlin StateFlow         │
-              └──────────────┬──────────────┘
-                             ▼
-              ┌─────────────────────────────┐
-              │    Parser / Data Source     │
-              │  - Jsoup HTML Parser        │
-              │  - ZTOE Provider Engine     │
-              │  - Fallback / Mock Cache    │
-              └─────────────────────────────┘
-```
+### 9. Redraw Graph in Main Window & Widget on Refresh Button Press + Main Window Emergency Outages Link
+- **Fix (Graph Redraw on Refresh)**:
+  - Ensure pressing Refresh in the Main Window, Settings, or Widget fetches fresh schedule data from `ztoe.com.ua`, updates `ScheduleRepository`, updates state in `BlackoutAppNavigation` (forcing recomposition of `TimelineBar` and outage intervals), updates `lastUpdated` and `nextUpdated` timestamps, and updates all Glance widgets via `updateAppWidgetState` + `updateAll(context)`.
+- **Addition (Emergency Outages Link at Bottom of Main Window)**:
+  - At the bottom of the Main Window (`MainScreen.kt` and `src/components/MainView.tsx`), immediately after the Refresh block, add a block/row with the clickable link:
+    `Інформація про аварійні відключення: https://www.facebook.com/ztoe.com.ua`
+    Clicking the link opens `https://www.facebook.com/ztoe.com.ua` in the browser (`Intent(Intent.ACTION_VIEW, Uri.parse("https://www.facebook.com/ztoe.com.ua"))` on Android and `<a href="https://www.facebook.com/ztoe.com.ua" target="_blank" rel="noopener noreferrer">` on Web).
 
-### Android Project Structure
-- `app/src/main/java/ua/blackout/prewarning/`
-  - `data/parser/`: `ZtoeParser.kt` (using Jsoup to parse tables, classes, cells, and regex timeslots), `OblenergoProvider.kt`
-  - `data/model/`: `BlackoutSlot.kt` (with unique `slotKey = "${date}_${startTime}_${queue}"`), `QueueSchedule.kt`, `UserSettings.kt`
-  - `data/repository/`: `ScheduleRepository.kt`, `SettingsDataStore.kt`, `AlertHistoryStore.kt` (tracks notified slot keys to ensure single notification per slot)
-  - `worker/`: `ScheduleSyncWorker.kt` (WorkManager periodic job), `AlarmReceiver.kt` (AlarmManager exact pre-warning trigger with slot deduplication check)
-  - `notification/`: `NotificationHelper.kt` (heads-up notification channel with direct tap Intent to app)
-  - `widget/`:
-    - `BlackoutGlanceWidget.kt`: Glance AppWidget defining 2x1 minimal and 3x2/4x2 layouts, clickable root action (`actionStartActivity<MainActivity>()`), and isolated notification toggle button (`actionRunCallback<ToggleNotificationAction>()`).
-    - `BlackoutWidgetReceiver.kt`: GlanceAppWidgetReceiver updating widgets on state or schedule changes.
-  - `ui/`:
-    - `screens/`: `MainScreen.kt`, `SettingsScreen.kt`, `AboutScreen.kt`, `TimelineView.kt`
-    - `theme/`: `Theme.kt`, `Color.kt`, `Type.kt`
-    - `navigation/`: `NavGraph.kt`, `Screen.kt`
+### 10. Repository File with Valid Site URLs (`/valid-urls.json`) & Strict URL Verification
+- **Fix**:
+  - Create `/valid-urls.json` in the repository root (and sync with Android assets/parser and Web) containing:
+    ```json
+    [
+      "https://www.ztoe.com.ua/unhooking-search.php",
+      "https://example.com"
+    ]
+    ```
+  - Update URL verification in both `ZtoeParser.kt` and `src/services/ztoeParser.ts` to verify that:
+    1. The normalized URL is present in `/valid-urls.json`.
+    2. The site is reachable over the network.
+    3. The page contains a valid schedule table for the current date with queues present.
 
-### GitHub CI/CD & Play Store Roadmap
-1. **GitHub Actions Workflow (`.github/workflows/android-build.yml`)**:
-   - Set up JDK 17, Android SDK.
-   - Cache Gradle dependencies.
-   - Run `gradlew test` and `gradlew assembleDebug` / `gradlew bundleRelease`.
-   - Upload debug APK and signed/unsigned AAB to GitHub Workflow Artifacts & Releases.
-2. **README.md**:
-   - Comprehensive documentation in Ukrainian and English.
-   - Badges, feature list, build instructions, APK download instructions, and changelog.
-3. **Google Play Store Publishing Guide**:
-   - Step-by-step documentation for Google Play Developer Console, keystore generation, app signing, privacy policy, and release tracks.
+### 11. Refresh Button & URL Verification Error Reporting + Fix Standard Android Icon on Settings Refresh
+- **Fix (Error Reporting)**:
+  - Differentiate verification and refresh outcomes in both Android (`ZtoeParser.kt`, `MainScreen.kt`, `SettingsScreen.kt`, `AppStrings.kt`) and Web (`ztoeParser.ts`, `SettingsView.tsx`, `MainView.tsx`):
+    - Report success only if Internet is accessible, site is in `/valid-urls.json` and reached, and a schedule table with the current date and queues exists on the site.
+    - If network/internet connection fails or times out: report `"Немає доступу до Інтернету"` / `"No Internet access"`.
+    - If site is reached (or URL not in allowlist / missing table) and no schedule table with current date and queues is found: report `"На сайті не знайдено черг"` / `"No queues found on site"`.
+- **Fix (Standard Android Icon Appearing When Refresh Button Is Pressed in Settings)**:
+  - **Root Cause**: When pressing the Refresh button in Settings, `Toast.makeText(...)` is triggered. On Android 12+ (API 31+) and OEM skins (MIUI/HyperOS, OneUI, Pixel), system Toasts render the app's launcher icon next to the message. Because the project only had `mipmap-anydpi-v26/ic_launcher.xml` without legacy density PNG mipmap fallbacks (`mipmap-mdpi` through `mipmap-xxxhdpi`), without `<monochrome>` in `<adaptive-icon>`, and because `Toast` was invoked rapidly while background coroutines updated state, Android SystemUI intermittently failed to rasterize the adaptive icon in time and fell back to `android.R.drawable.sym_def_app_icon` (the default Android robot icon).
+  - **Solution**:
+    1. Generate and include complete rasterized PNG launcher icons (`ic_launcher.png` and `ic_launcher_round.png` featuring the white lightning bolt on the `#FF5E3A` rounded background) across all standard density buckets (`mipmap-mdpi`, `mipmap-hdpi`, `mipmap-xhdpi`, `mipmap-xxhdpi`, `mipmap-xxxhdpi`) in addition to `mipmap-anydpi-v26` (with `<monochrome android:drawable="@drawable/ic_launcher_foreground" />` added).
+    2. Replace raw `Toast.makeText` calls on Refresh / Test Alert / Reset in `SettingsScreen.kt` and `MainScreen.kt` with a dedicated in-app styled notification toast/snackbar banner (and/or application-context toast with pre-cached icon) that explicitly renders the Application Icon (`ic_launcher_foreground` on `#FF5E3A` rounded square) alongside the status message, guaranteeing the standard Android robot icon never appears.
+
+### 12. Fix Jittering When Swiping Between Application Windows
+- **Root Cause**: `HorizontalPager` in `BlackoutAppNavigation.kt` was recomposing heavy child layouts and recreating `ScheduleRepository` / `LocalTime.now()` on every frame during swipe transitions without `beyondViewportPageCount` or stable keys.
+- **Fix**:
+  - Set `beyondViewportPageCount = 2` on `HorizontalPager` so all 3 screens (Main, Settings, About) remain composed in memory during horizontal swipes.
+  - Hoist `ScheduleRepository` and derived intervals out of per-frame composition in `MainScreen.kt` and `SettingsScreen.kt`, and use `graphicsLayer` hardware layer caching to eliminate swipe jitter.
+
+### 13. Prevent Memory Leaks
+- **Fix**:
+  - Use `applicationContext` inside `SettingsRepository`, `ScheduleRepository`, and `AlertRegistry` so Activity references are never retained.
+  - Register and unregister `SharedPreferences.OnSharedPreferenceChangeListener` inside `DisposableEffect` in `BlackoutAppNavigation.kt`.
+  - Use `goAsync()` with structured completion in `WidgetToggleReceiver` so broadcast receivers do not leak coroutines.
+  - Close `AudioContext` after chime playback in `src/services/alertManager.ts`.
+
+### 14. Both Widgets Show Correct Information When Application Is Closed
+- **Fix**:
+  - Ensure `BlackoutWidgetReceiver`, `BlackoutGlanceWidget`, and `ScheduleSyncWorker` operate independently of `MainActivity` using `SettingsRepository` and `ScheduleRepository` backed by `SharedPreferences` and `ZtoeParser` network fetches, updating widget countdowns, status (`СВІТЛО Є` / `СВІТЛА НЕМАЄ`), and today's 24-hour chart even when the app process is closed.
+
+### 15. Prevent Battery Drain in Background or When Closed
+- **Fix**:
+  - Keep the 1-second countdown ticker strictly lifecycle-aware inside `BlackoutAppNavigation.kt` (`repeatOnLifecycle(Lifecycle.State.RESUMED)`) so the 1-second loop stops completely whenever the screen is off or the app is in the background.
+  - In `BlackoutApp.kt`, configure `ScheduleSyncWorker` with `Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).setRequiresBatteryNotLow(false).build()` and `settings.refreshIntervalMinutes` (default 30 min) instead of hardcoded 15 min, using a single exact alarm per merged blackout block.
+
+### 16. Write Changes to Changelog
+- **Fix**:
+  - Create and maintain `/CHANGELOG.md` documenting all changes in this release (without modifying `README.md`).
 
 ---
 
-## 4. Implementation Steps
+## 3. Automated Unit Tests & GitHub Actions CI Integration
 
-1. **Interactive Web App & Visual Mockup Simulator**:
-   - Build a complete, responsive mobile-first simulator of the Android app using React, Tailwind CSS, Lucide icons, and Motion.
-   - Implement real parser logic against `ztoe.com.ua` (with built-in CORS proxy and fallback schedules).
-   - Implement "once per slot" notification simulation with history inspection.
-   - Implement interactive 2x1 and 3x2 Android Glance Widget simulators with working Stop/Start notification toggle and tap-to-open-app simulation.
-   - Include 24-hour interactive visual timeline with current-time needle, live countdown clock, settings editor, test notification system, and language switcher (UA/EN).
-2. **Android Project Codebase & Assets Generation**:
-   - Generate all production-ready Kotlin Jetpack Compose files, Gradle build files (`build.gradle.kts`, `settings.gradle.kts`, `libs.versions.toml`), `AndroidManifest.xml`, resources, Glance 2x1 & 3x2 Widget implementation, and deduplication logic.
-   - Generate modern app icons and vector drawables.
-3. **Repository Files & Automation**:
-   - Create `.github/workflows/android-build.yml` for automated CI/CD builds on push.
-   - Create structured `README.md` (Ukrainian + English) with changelog, architecture guide, and Google Play publication roadmap.
-4. **Verification & Packaging**:
-   - Run full build and compilation checks.
-   - Verify all interactive controls, language switching, widget toggle, and schedule calculation algorithms.
+1. **Unit Test Suite (`tests/unit.test.ts` & Android `ZtoeParserTest.kt`)**:
+   - **Test A (Live/HTML ZTOE Data & Graph Parity Check)**:
+     - Validates `/valid-urls.json` (containing `["https://www.ztoe.com.ua/unhooking-search.php", "https://example.com"]`), fetches/parses schedule data from `https://www.ztoe.com.ua/unhooking-search.php`, selects a random queue (`1.1`–`6.2`), determines blackout timeslots for today, and verifies that the 48 half-hour graph blocks and blackout intervals rendered on the Big Widget and Main Window are 100% identical. Fails the CI build if any discrepancy is found.
+   - **Test B (UI Snapshot & Changelog Guard)**:
+     - Verifies that UI icons, text, labels, design, colors, critical help popup text, default timer values (15 min / 30 min), widget buttons (Notification toggle and Refresh button), and the emergency outages link on the Main Window match the approved baseline snapshot (`tests/ui-baseline.json`), and fails the CI workflow if any UI/text modification is not documented in `CHANGELOG.md`.
+2. **GitHub Actions (`.github/workflows/build-apk.yml`)**:
+   - Add a dedicated CI step that runs the unit tests (`npm test` and `./gradlew testDebugUnitTest`) on every push and pull request before building the APK/AAB artifacts, failing the workflow immediately if either Unit Test A or Unit Test B fails.

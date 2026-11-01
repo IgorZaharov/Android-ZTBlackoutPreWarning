@@ -36,13 +36,14 @@
             </intent-filter>
         </activity>
 
-        <!-- Alarm BroadcastReceiver for Exact Pre-Warnings (1x per slot) -->
+        <!-- Alarm BroadcastReceiver for Exact Pre-Warnings (1x per slot) & Widget Transition Redraws -->
         <receiver
             android:name=".notification.AlarmReceiver"
             android:enabled="true"
             android:exported="false">
             <intent-filter>
                 <action android:name="ua.blackout.prewarning.ACTION_TRIGGER_BLACKOUT_ALERT" />
+                <action android:name="ua.blackout.prewarning.ACTION_WIDGET_TRANSITION_UPDATE" />
             </intent-filter>
         </receiver>
 

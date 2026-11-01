@@ -5,6 +5,8 @@ export interface DonationLink {
 
 export const GITHUB_DONATIONS_URL =
   'https://raw.githubusercontent.com/IgorZaharov/Android-ZTBlackoutPreWarning/main/donations.json';
+export const GITHUB_PUBLIC_DONATIONS_URL =
+  'https://raw.githubusercontent.com/IgorZaharov/Android-ZTBlackoutPreWarning/main/public/donations.json';
 
 export const DONATIONS_REFRESH_INTERVAL_MS = 24 * 60 * 60 * 1000; // 1 time per day (24 hours)
 
@@ -57,10 +59,42 @@ export function getCachedDonations(): DonationLink[] {
   }
 }
 
-export async function getDonationsWithDailyRefresh(nowMs: number = Date.now()): Promise<DonationLink[]> {
+export function getFaviconCandidateUrls(pageUrl: string): string[] {
+  try {
+    const parsed = new URL(pageUrl.trim());
+    const host = parsed.hostname.toLowerCase().replace(/^www\./, '');
+    if (!host) return [];
+
+    const parts = host.split('.');
+    const twoPartTlds = new Set(['in.ua', 'com.ua', 'org.ua', 'gov.ua', 'net.ua', 'edu.ua', 'co.uk', 'org.uk']);
+    const lastTwo = parts.length >= 2 ? `${parts[parts.length - 2]}.${parts[parts.length - 1]}` : host;
+    let rootDomain = host;
+    if (parts.length > 2) {
+      rootDomain = twoPartTlds.has(lastTwo) && parts.length >= 3
+        ? `${parts[parts.length - 3]}.${lastTwo}`
+        : lastTwo;
+    }
+
+    const candidates = [
+      `https://www.google.com/s2/favicons?sz=64&domain=${encodeURIComponent(rootDomain)}`,
+      ...(rootDomain !== host ? [`https://www.google.com/s2/favicons?sz=64&domain=${encodeURIComponent(host)}`] : []),
+      `https://icons.duckduckgo.com/ip3/${host}.ico`,
+      ...(rootDomain !== host ? [`https://icons.duckduckgo.com/ip3/${rootDomain}.ico`] : []),
+      `https://${host}/favicon.ico`,
+    ];
+    return Array.from(new Set(candidates));
+  } catch {
+    return [];
+  }
+}
+
+export async function getDonationsWithDailyRefresh(
+  nowMs: number = Date.now(),
+  forceRefresh: boolean = false
+): Promise<DonationLink[]> {
   const cached = getCachedDonations();
 
-  if (typeof window !== 'undefined' && window.localStorage) {
+  if (!forceRefresh && typeof window !== 'undefined' && window.localStorage) {
     try {
       const lastFetchStr = window.localStorage.getItem(STORAGE_TS_KEY);
       const lastFetchMs = lastFetchStr ? parseInt(lastFetchStr, 10) : 0;
@@ -72,28 +106,43 @@ export async function getDonationsWithDailyRefresh(nowMs: number = Date.now()): 
     }
   }
 
-  const urlsToTry = [GITHUB_DONATIONS_URL, '/donations.json'];
-  for (const endpoint of urlsToTry) {
+  const merged = new Map<string, DonationLink>();
+  const githubEndpoints = [
+    `${GITHUB_DONATIONS_URL}?t=${nowMs}`,
+    `${GITHUB_PUBLIC_DONATIONS_URL}?t=${nowMs}`,
+    '/donations.json',
+  ];
+
+  for (const endpoint of githubEndpoints) {
     try {
       const response = await fetch(endpoint, { cache: 'no-store' });
       if (response.ok) {
         const json = await response.json();
         const valid = sanitizeDonations(json);
         if (valid) {
-          if (typeof window !== 'undefined' && window.localStorage) {
-            try {
-              window.localStorage.setItem(STORAGE_DATA_KEY, JSON.stringify(valid));
-              window.localStorage.setItem(STORAGE_TS_KEY, String(nowMs));
-            } catch {
-              // Ignore quota errors
+          for (const item of valid) {
+            if (!merged.has(item.url)) {
+              merged.set(item.url, item);
             }
           }
-          return valid;
         }
       }
     } catch {
-      // Try next fallback
+      // Try next endpoint
     }
+  }
+
+  if (merged.size > 0) {
+    const finalItems = Array.from(merged.values());
+    if (typeof window !== 'undefined' && window.localStorage) {
+      try {
+        window.localStorage.setItem(STORAGE_DATA_KEY, JSON.stringify(finalItems));
+        window.localStorage.setItem(STORAGE_TS_KEY, String(nowMs));
+      } catch {
+        // Ignore quota errors
+      }
+    }
+    return finalItems;
   }
 
   return cached;

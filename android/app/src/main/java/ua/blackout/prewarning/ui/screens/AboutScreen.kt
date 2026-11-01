@@ -1,7 +1,9 @@
 package ua.blackout.prewarning.ui.screens
 
 import android.content.Intent
+import android.graphics.Bitmap
 import android.net.Uri
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -17,13 +19,17 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import ua.blackout.prewarning.BuildConfig
 import ua.blackout.prewarning.data.repository.DonationsRepository
 import ua.blackout.prewarning.ui.AppStrings
 
@@ -34,12 +40,35 @@ fun AboutScreen(lang: String = "uk") {
     var donationLinks by remember {
         mutableStateOf(DonationsRepository.getCachedDonations(appContext))
     }
+    var faviconBitmaps by remember {
+        mutableStateOf<Map<String, Bitmap>>(emptyMap())
+    }
+
+    val currentBuildVersion = remember {
+        try {
+            val pInfo = appContext.packageManager.getPackageInfo(appContext.packageName, 0)
+            val vName = pInfo.versionName
+            if (!vName.isNullOrBlank()) "v$vName" else "v${BuildConfig.VERSION_NAME}"
+        } catch (_: Exception) {
+            "v${BuildConfig.VERSION_NAME}"
+        }
+    }
 
     LaunchedEffect(Unit) {
         val refreshed = withContext(Dispatchers.IO) {
-            DonationsRepository.getDonationsWithDailyRefresh(appContext)
+            DonationsRepository.getDonationsWithDailyRefresh(appContext, forceRefresh = true)
         }
         donationLinks = refreshed
+        for (item in refreshed) {
+            launch(Dispatchers.IO) {
+                val bmp = DonationsRepository.fetchFaviconBitmap(appContext, item.url)
+                if (bmp != null) {
+                    withContext(Dispatchers.Main) {
+                        faviconBitmaps = faviconBitmaps + (item.url to bmp)
+                    }
+                }
+            }
+        }
     }
 
     Column(
@@ -104,7 +133,7 @@ fun AboutScreen(lang: String = "uk") {
                             .background(Color(0x1AFFFFFF))
                             .padding(horizontal = 10.dp, vertical = 4.dp)
                     ) {
-                        Text("v1.0.0", fontSize = 11.sp, fontFamily = FontFamily.Monospace, color = Color.White)
+                        Text(currentBuildVersion, fontSize = 11.sp, fontFamily = FontFamily.Monospace, color = Color.White)
                     }
                     Box(
                         modifier = Modifier
@@ -296,7 +325,8 @@ fun AboutScreen(lang: String = "uk") {
                     color = Color(0xB3BAE6FD)
                 )
 
-                donationLinks.forEachIndexed { index, item ->
+                donationLinks.forEach { item ->
+                    val faviconBmp = faviconBitmaps[item.url]
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -321,15 +351,26 @@ fun AboutScreen(lang: String = "uk") {
                                 modifier = Modifier
                                     .size(36.dp)
                                     .clip(RoundedCornerShape(10.dp))
-                                    .background(if (index % 2 == 0) Color(0xFF10B981) else Color(0xFFF59E0B)),
+                                    .background(Color(0x26FFFFFF)),
                                 contentAlignment = Alignment.Center
                             ) {
-                                Icon(
-                                    imageVector = if (index % 2 == 0) Icons.Default.Favorite else Icons.Default.Language,
-                                    contentDescription = null,
-                                    tint = if (index % 2 == 0) Color.White else Color.Black,
-                                    modifier = Modifier.size(18.dp)
-                                )
+                                if (faviconBmp != null) {
+                                    Image(
+                                        bitmap = faviconBmp.asImageBitmap(),
+                                        contentDescription = item.title,
+                                        contentScale = ContentScale.Fit,
+                                        modifier = Modifier
+                                            .size(22.dp)
+                                            .clip(RoundedCornerShape(4.dp))
+                                    )
+                                } else {
+                                    Icon(
+                                        imageVector = Icons.Default.Language,
+                                        contentDescription = null,
+                                        tint = Color.White,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                }
                             }
                             Column {
                                 Text(item.title, fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.White)

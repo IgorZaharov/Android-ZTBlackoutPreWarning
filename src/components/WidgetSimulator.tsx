@@ -56,7 +56,17 @@ export const WidgetSimulator: React.FC<WidgetSimulatorProps> = ({
     : (isUk ? 'До відключення:' : 'Time to blackout:');
 
   const periodLabel = isUk ? 'Період' : 'Period';
-  const hoursUnit = isUk ? 'год' : 'h';
+  const nextBlackoutLabel = isUk ? 'Наступне відключення' : 'Next blackout';
+  const currentMinutes = currentHour * 60 + currentMinute;
+  const nextUpcomingInterval = blackoutIntervals.find((iv) => {
+    const [h, m] = iv.start.split(':').map(Number);
+    return h * 60 + m > currentMinutes;
+  });
+  const nextBlackoutText = nextUpcomingInterval
+    ? `${nextUpcomingInterval.start} – ${nextUpcomingInterval.end}`
+    : blackoutIntervals.length === 0
+      ? (isUk ? 'Відключень немає' : 'No blackouts')
+      : (isUk ? 'Сьогодні більше немає' : 'No more today');
 
   return (
     <div className="flex flex-col gap-4 max-w-lg mx-auto select-none">
@@ -122,7 +132,7 @@ export const WidgetSimulator: React.FC<WidgetSimulatorProps> = ({
         {widgetSize === '2x1' ? (
           <div
             onClick={onOpenApp}
-            className="w-full max-w-[340px] z-10 bg-[#141A29]/90 backdrop-blur-2xl text-white rounded-3xl p-4.5 border border-white/25 shadow-[0_12px_40px_rgba(0,0,0,0.5)] cursor-pointer hover:border-white/40 transition-all group"
+            className="w-full max-w-[340px] z-10 bg-[#141A29]/80 backdrop-blur-2xl text-white rounded-3xl p-4.5 border border-white/25 shadow-[0_12px_40px_rgba(0,0,0,0.5)] cursor-pointer hover:border-white/40 transition-all group"
           >
             {/* Top row: Localized Queue + Status */}
             <div className="flex items-center justify-between mb-2">
@@ -187,7 +197,7 @@ export const WidgetSimulator: React.FC<WidgetSimulatorProps> = ({
           /* ----------------- 3x2 BIG WIDGET ----------------- */
           <div
             onClick={onOpenApp}
-            className="w-full max-w-[360px] z-10 bg-[#141A29]/90 backdrop-blur-2xl text-white rounded-3xl p-5 border border-white/25 shadow-[0_12px_40px_rgba(0,0,0,0.5)] cursor-pointer hover:border-white/40 transition-all flex flex-col gap-3.5 group"
+            className="w-full max-w-[360px] z-10 bg-[#141A29]/80 backdrop-blur-2xl text-white rounded-3xl p-5 border border-white/25 shadow-[0_12px_40px_rgba(0,0,0,0.5)] cursor-pointer hover:border-white/40 transition-all flex flex-col gap-3.5 group"
           >
             {/* Header: Localized Queue + Round Refresh Button + Round Notification Toggle */}
             <div className="flex items-center justify-between">
@@ -299,17 +309,13 @@ export const WidgetSimulator: React.FC<WidgetSimulatorProps> = ({
               </div>
             </div>
 
-            {/* Outage windows list */}
-            {blackoutIntervals.length > 0 && (
-              <div className="pt-2 border-t border-white/10 flex flex-col gap-1.5">
-                {blackoutIntervals.slice(0, 2).map((iv, idx) => (
-                  <div key={idx} className="flex items-center justify-between text-xs py-1.5 px-3 rounded-xl bg-black/30 backdrop-blur-md border border-white/10 font-mono">
-                    <span className="font-bold text-white">{iv.start} – {iv.end}</span>
-                    <span className="text-[11px] text-[#FF5E3A] font-bold">{iv.durationHours} {hoursUnit}</span>
-                  </div>
-                ))}
+            {/* Upcoming Outage Interval ("Наступне відключення") */}
+            <div className="pt-2 border-t border-white/10 flex flex-col gap-1.5">
+              <div className="flex items-center justify-between text-xs py-1.5 px-3 rounded-xl bg-black/30 backdrop-blur-md border border-white/10 font-mono">
+                <span className="font-bold text-white">{nextBlackoutText}</span>
+                <span className="text-[11px] text-[#FF5E3A] font-bold font-sans">{nextBlackoutLabel}</span>
               </div>
-            )}
+            </div>
           </div>
         )}
       </div>
