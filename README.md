@@ -21,9 +21,9 @@
 
 ## Інтерфейс застосунку (UI)
 
-| Головний екран (`UI1.jpg`) | Про додаток і Благодійність (`UI2.jpg`) | Віджети 2×1 та 3×2 (`UI3.jpg`) | Налаштування (`UI4.jpg`) |
+| Віджети (`UI1.jpg`) | Сповіщення (`UI2.jpg`) | Головний екран (`UI3.jpg`) | Налаштування (`UI4.jpg`) |
 |:---:|:---:|:---:|:---:|
-| <img src="docs/screenshots/UI1.jpg" width="210" alt="Головний екран"> | <img src="docs/screenshots/UI2.jpg" width="210" alt="Про додаток"> | <img src="docs/screenshots/UI3.jpg" width="210" alt="Віджети"> | <img src="docs/screenshots/UI4.jpg" width="210" alt="Налаштування"> |
+| <img src="docs/screenshots/UI1.jpg" width="210" alt="Віджети"> | <img src="docs/screenshots/UI2.jpg" width="210" alt="Сповіщення"> | <img src="docs/screenshots/UI3.jpg" width="210" alt="Головний екран"> | <img src="docs/screenshots/UI4.jpg" width="210" alt="Налаштування"> |
 
 ### Відеоогляд інтерфейсу
 
