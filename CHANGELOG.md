@@ -1,9 +1,10 @@
 # Changelog
 
-## [1.2.1] - 2026-11-01
+## [1.3.0] - 2026-11-01
 
 ### Changed
-- **Queue Help Popup Step 1 Full URL (`AppStrings.kt`, `SettingsScreen.kt`, `SettingsView.tsx`)**: Updated Step 1 in the Queue selection "?" help dialog to display and open the full URL `https://www.ztoe.com.ua/unhooking-search.php`.
+- **Queue Help Popup Step 1 Visible URL Link (`AppStrings.kt`, `SettingsScreen.kt`, `SettingsView.tsx`)**: Updated Step 1 in the Queue selection "?" help dialog to visibly highlight and underline the full URL `https://www.ztoe.com.ua/unhooking-search.php` as a clickable link.
+- **Build Version Resolution & Release 1.3.0 (`build.gradle.kts`, `AboutScreen.kt`, `AboutView.tsx`, `vite.config.ts`, `package.json`, `.github/workflows/build-apk.yml`)**: Fixed CI/CD and Gradle version resolution so branch builds never overwrite `versionName` with the branch name (`"main"`), and updated the application version to `1.3.0`.
 - **Seamless In-Place APK Upgrade & Settings Preservation (`build.gradle.kts`, `SettingsRepository.kt`, `BootCompletedReceiver.kt`)**: Unified `applicationId` across builds, configured a persistent signing keystore (`android/app/keystore/debug.keystore`) and incrementing `versionCode`, and added automatic legacy `SharedPreferences` migration so installing a new APK updates the previous version in-place while preserving all user settings.
 - **Battery Consumption Optimizations (`BlackoutWidgetReceiver.kt`, `ScheduleSyncWorker.kt`, `ZtoeParser.kt`, `DonationsRepository.kt`, `ScheduleRepository.kt`, `BlackoutGlanceWidget.kt`)**:
   - Avoided duplicate network fetches in `BlackoutWidgetReceiver.onUpdate` when the schedule cache is already fresh within `refreshIntervalMinutes`.

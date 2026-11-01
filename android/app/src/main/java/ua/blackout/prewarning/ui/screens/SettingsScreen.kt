@@ -16,7 +16,10 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.Dispatchers
@@ -615,26 +618,45 @@ fun SettingsScreen(
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     AppStrings.queueHelpSteps(lang).forEach { step ->
-                        val hasUrl = step.contains("https://www.ztoe.com.ua/unhooking-search.php")
-                        Text(
-                            text = step,
-                            color = Color.LightGray,
-                            fontSize = 13.sp,
-                            lineHeight = 18.sp,
-                            modifier = if (hasUrl) {
-                                Modifier.clickable {
+                        val targetUrl = "https://www.ztoe.com.ua/unhooking-search.php"
+                        val urlStart = step.indexOf(targetUrl)
+                        if (urlStart >= 0) {
+                            val urlEnd = urlStart + targetUrl.length
+                            val annotatedStep = buildAnnotatedString {
+                                append(step)
+                                addStyle(
+                                    style = SpanStyle(
+                                        color = Color(0xFFFF5E3A),
+                                        fontWeight = FontWeight.SemiBold,
+                                        textDecoration = TextDecoration.Underline
+                                    ),
+                                    start = urlStart,
+                                    end = urlEnd
+                                )
+                            }
+                            Text(
+                                text = annotatedStep,
+                                color = Color.LightGray,
+                                fontSize = 13.sp,
+                                lineHeight = 18.sp,
+                                modifier = Modifier.clickable {
                                     try {
                                         val intent = android.content.Intent(
                                             android.content.Intent.ACTION_VIEW,
-                                            android.net.Uri.parse("https://www.ztoe.com.ua/unhooking-search.php")
+                                            android.net.Uri.parse(targetUrl)
                                         )
                                         context.startActivity(intent)
                                     } catch (_: Exception) {}
                                 }
-                            } else {
-                                Modifier
-                            }
-                        )
+                            )
+                        } else {
+                            Text(
+                                text = step,
+                                color = Color.LightGray,
+                                fontSize = 13.sp,
+                                lineHeight = 18.sp
+                            )
+                        }
                     }
                 }
             },

@@ -45,13 +45,20 @@ fun AboutScreen(lang: String = "uk") {
     }
 
     val currentBuildVersion = remember {
-        try {
+        val semverRegex = Regex("^[0-9]+\\.[0-9]+.*")
+        val rawVersion = try {
             val pInfo = appContext.packageManager.getPackageInfo(appContext.packageName, 0)
-            val vName = pInfo.versionName
-            if (!vName.isNullOrBlank()) "v$vName" else "v${BuildConfig.VERSION_NAME}"
+            pInfo.versionName?.removePrefix("v")?.trim()
         } catch (_: Exception) {
-            "v${BuildConfig.VERSION_NAME}"
+            null
         }
+        val buildCfgVersion = BuildConfig.VERSION_NAME.removePrefix("v").trim()
+        val resolved = when {
+            !rawVersion.isNullOrBlank() && rawVersion.matches(semverRegex) -> rawVersion
+            buildCfgVersion.matches(semverRegex) -> buildCfgVersion
+            else -> "1.3.0"
+        }
+        "v$resolved"
     }
 
     LaunchedEffect(Unit) {

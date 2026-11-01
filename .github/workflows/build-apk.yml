@@ -16,7 +16,7 @@ jobs:
     name: Build Android APK and AAB Bundle
     runs-on: ubuntu-latest
     env:
-      APP_VERSION_NAME: ${{ github.ref_name }}
+      APP_VERSION_NAME: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || '' }}
 
     steps:
       - name: Checkout Code

@@ -494,7 +494,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                         href={settings.url || DEFAULT_ZTOE_URL}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="text-[#FF5E3A] hover:underline inline-flex items-center gap-1 font-semibold break-all"
+                        className="text-[#FF5E3A] underline hover:opacity-80 inline-flex items-center gap-1 font-semibold break-all"
                       >
                         https://www.ztoe.com.ua/unhooking-search.php <ExternalLink className="w-3 h-3 shrink-0" />
                       </a>.
@@ -506,7 +506,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                         href={settings.url || DEFAULT_ZTOE_URL}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="text-[#FF5E3A] hover:underline inline-flex items-center gap-1 font-semibold break-all"
+                        className="text-[#FF5E3A] underline hover:opacity-80 inline-flex items-center gap-1 font-semibold break-all"
                       >
                         https://www.ztoe.com.ua/unhooking-search.php <ExternalLink className="w-3 h-3 shrink-0" />
                       </a>.
