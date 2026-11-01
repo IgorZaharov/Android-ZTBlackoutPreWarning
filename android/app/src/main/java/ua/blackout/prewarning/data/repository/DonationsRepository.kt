@@ -76,20 +76,48 @@ object DonationsRepository {
         }
     }
 
-    private fun fetchUrlText(endpoint: String): String? {
+    private fun fetchUrlText(
+        endpoint: String,
+        prefs: android.content.SharedPreferences? = null,
+        cachedJsonFallback: String? = null
+    ): String? {
         var conn: HttpURLConnection? = null
+        val etagKey = "etag_${endpoint.hashCode()}"
+        val lastModKey = "lastmod_${endpoint.hashCode()}"
         return try {
-            val cacheBusted = "$endpoint?t=${System.currentTimeMillis()}"
-            conn = (URL(cacheBusted).openConnection() as HttpURLConnection).apply {
+            conn = (URL(endpoint).openConnection() as HttpURLConnection).apply {
                 connectTimeout = 6000
                 readTimeout = 6000
-                useCaches = false
+                useCaches = true
                 requestMethod = "GET"
-                setRequestProperty("Cache-Control", "no-cache, no-store, must-revalidate")
-                setRequestProperty("Pragma", "no-cache")
+                setRequestProperty("Accept-Encoding", "gzip")
+                if (prefs != null && !cachedJsonFallback.isNullOrBlank()) {
+                    prefs.getString(etagKey, null)?.takeIf { it.isNotBlank() }?.let {
+                        setRequestProperty("If-None-Match", it)
+                    }
+                    prefs.getString(lastModKey, null)?.takeIf { it.isNotBlank() }?.let {
+                        setRequestProperty("If-Modified-Since", it)
+                    }
+                }
             }
-            if (conn.responseCode in 200..299) {
-                conn.inputStream.bufferedReader().use { it.readText() }
+            val code = conn.responseCode
+            if (code == HttpURLConnection.HTTP_NOT_MODIFIED && !cachedJsonFallback.isNullOrBlank()) {
+                return cachedJsonFallback
+            }
+            if (code in 200..299) {
+                if (prefs != null) {
+                    val editor = prefs.edit()
+                    conn.getHeaderField("ETag")?.takeIf { it.isNotBlank() }?.let { editor.putString(etagKey, it) }
+                    conn.getHeaderField("Last-Modified")?.takeIf { it.isNotBlank() }?.let { editor.putString(lastModKey, it) }
+                    editor.apply()
+                }
+                val encoding = conn.contentEncoding?.lowercase() ?: ""
+                val stream = if (encoding.contains("gzip")) {
+                    java.util.zip.GZIPInputStream(conn.inputStream)
+                } else {
+                    conn.inputStream
+                }
+                stream.bufferedReader().use { it.readText() }
             } else {
                 null
             }
@@ -108,28 +136,25 @@ object DonationsRepository {
         val appContext = context.applicationContext
         val prefs = appContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
         val lastFetchMs = prefs.getLong(KEY_LAST_FETCH_MS, 0L)
+        val cachedJsonStr = prefs.getString(KEY_CACHED_JSON, null)
         val cached = getCachedDonations(appContext)
 
         if (!forceRefresh && lastFetchMs > 0L && (nowMs - lastFetchMs) < REFRESH_INTERVAL_MS) {
             return cached
         }
 
-        val rootText = fetchUrlText(GITHUB_DONATIONS_URL)
-        val publicText = fetchUrlText(GITHUB_PUBLIC_DONATIONS_URL)
-
+        // Fetch primary GitHub URL first; only query fallback URL if primary failed or returned empty
+        val rootText = fetchUrlText(GITHUB_DONATIONS_URL, prefs, cachedJsonStr)
         val rootParsed = if (!rootText.isNullOrBlank()) parseDonationsJson(rootText) else null
-        val publicParsed = if (!publicText.isNullOrBlank()) parseDonationsJson(publicText) else null
 
-        val merged = LinkedHashMap<String, DonationLink>()
-        rootParsed?.forEach { merged[it.url] = it }
-        publicParsed?.forEach {
-            if (!merged.containsKey(it.url)) {
-                merged[it.url] = it
-            }
+        val finalItems = if (!rootParsed.isNullOrEmpty()) {
+            rootParsed
+        } else {
+            val publicText = fetchUrlText(GITHUB_PUBLIC_DONATIONS_URL, prefs, cachedJsonStr)
+            if (!publicText.isNullOrBlank()) parseDonationsJson(publicText) else null
         }
 
-        val finalItems = merged.values.toList()
-        if (finalItems.isNotEmpty()) {
+        if (!finalItems.isNullOrEmpty()) {
             val serialized = JSONArray().apply {
                 finalItems.forEach { item ->
                     put(JSONObject().apply {

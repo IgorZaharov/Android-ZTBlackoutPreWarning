@@ -134,7 +134,7 @@ class ZtoeParserTest {
         assertEquals("Світло в Житомирі", AppStrings.aboutTitle("uk"))
         val steps = AppStrings.queueHelpSteps("uk")
         assertEquals(4, steps.size)
-        assertEquals("1. Відкрийте сторінку пошуку черги на сайті ztoe.com.ua.", steps[0])
+        assertEquals("1. Відкрийте сторінку пошуку черги на сайті https://www.ztoe.com.ua/unhooking-search.php.", steps[0])
         assertEquals("2. Оберіть свій РЕМ, населений пункт і вулицю.", steps[1])
         assertEquals(
             "3. У таблиці знайдіть свій будинок і подивіться стовпці «Черга» і «Підчерга». Наприклад, черга 5 і підчерга 2 - це 5.2.",

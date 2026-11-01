@@ -73,6 +73,10 @@ object ZtoeParser {
     private var cachedDoc: Document? = null
     @Volatile
     private var cachedDocTimestampMs: Long = 0L
+    @Volatile
+    private var lastETag: String? = null
+    @Volatile
+    private var lastModifiedHeader: String? = null
     private const val DOC_MEMORY_CACHE_MS = 20_000L
 
     fun fetchFullSchedule(
@@ -95,34 +99,61 @@ object ZtoeParser {
         }
 
         val cleanUrl = url.trim()
+        val repo = if (context != null) {
+            ua.blackout.prewarning.data.repository.ScheduleRepository(context.applicationContext)
+        } else {
+            null
+        }
+
         return try {
             val nowMs = System.currentTimeMillis()
             val recentDoc = cachedDoc
-            val doc = if (!forceNetwork && recentDoc != null && cachedDocUrl == cleanUrl && (nowMs - cachedDocTimestampMs) < DOC_MEMORY_CACHE_MS) {
+            val canUseConditionalHeaders = !forceNetwork && repo != null && repo.hasValidTodayCache(queue)
+
+            val doc: Document? = if (!forceNetwork && recentDoc != null && cachedDocUrl == cleanUrl && (nowMs - cachedDocTimestampMs) < DOC_MEMORY_CACHE_MS) {
                 recentDoc
             } else {
-                fetchDocumentWithWindows1251(cleanUrl).also { fetched ->
+                fetchDocumentWithWindows1251(
+                    urlStr = cleanUrl,
+                    sendConditionalHeaders = canUseConditionalHeaders
+                )?.also { fetched ->
                     cachedDocUrl = cleanUrl
                     cachedDoc = fetched
                     cachedDocTimestampMs = System.currentTimeMillis()
                 }
             }
 
-            // If context is available, pre-cache all 12 queues into ScheduleRepository from this single HTML document
-            // so switching queues in Settings immediately has the live schedule for every queue.
-            if (context != null) {
+            // HTTP 304 Not Modified: reuse already-cached schedule with zero HTML transfer or Jsoup parsing
+            if (doc == null && repo != null && repo.hasValidTodayCache(queue)) {
+                val cachedToday = repo.getTodaySlots(queue)
+                val cachedTomorrow = repo.getTomorrowSlots(queue)
+                return ScheduleFetchResult(
+                    todaySlots = cachedToday,
+                    tomorrowSlots = cachedTomorrow,
+                    hasTomorrowSchedule = cachedTomorrow != null,
+                    status = FetchStatus.SUCCESS
+                )
+            }
+
+            val effectiveDoc = doc ?: return ScheduleFetchResult(
+                todaySlots = generateFallbackSchedule(queue, todayStr),
+                tomorrowSlots = null,
+                hasTomorrowSchedule = false,
+                status = FetchStatus.NO_QUEUES_FOUND
+            )
+
+            // Single-pass DOM table lookup for all 12 queues + single batched asynchronous SharedPreferences write
+            val allQueueResults = parseAllQueuesSinglePass(effectiveDoc, today)
+            if (repo != null && allQueueResults.isNotEmpty()) {
                 try {
-                    val repo = ua.blackout.prewarning.data.repository.ScheduleRepository(context.applicationContext)
-                    for (q in ALL_QUEUES) {
-                        val qRes = parseDocumentFull(doc, q, today)
-                        if (qRes.status == FetchStatus.SUCCESS) {
-                            repo.saveSchedule(q, qRes.todaySlots, qRes.tomorrowSlots)
-                        }
+                    val batchMap = allQueueResults.mapValues { (_, r) ->
+                        Pair(r.todaySlots, r.tomorrowSlots)
                     }
+                    repo.saveAllSchedulesBatch(batchMap, queue)
                 } catch (_: Exception) {}
             }
 
-            parseDocumentFull(doc, queue, today)
+            allQueueResults[queue] ?: parseDocumentFull(effectiveDoc, queue, today)
         } catch (e: UnknownHostException) {
             ScheduleFetchResult(
                 todaySlots = generateFallbackSchedule(queue, todayStr),
@@ -161,16 +192,11 @@ object ZtoeParser {
         }
     }
 
-    fun parseDocumentFull(
+    private fun findTodayAndTomorrowTables(
         doc: Document,
-        queue: String,
-        today: LocalDate = LocalDate.now(ZoneId.of("Europe/Kyiv"))
-    ): ScheduleFetchResult {
+        today: LocalDate
+    ): Pair<Element?, Element?> {
         val tomorrow = today.plusDays(1)
-        val todayStr = today.format(DateTimeFormatter.ISO_LOCAL_DATE)
-
-        // Filter to leaf tables (tables that do NOT contain nested <table> elements; in Jsoup, table.select("table") includes table itself so size == 1)
-        // because ztoe.com.ua wraps the entire page inside an outer layout <table>.
         val leafTables = doc.select("table").filter { table ->
             table.select("table").size == 1 && table.select("tr").size >= 12
         }
@@ -189,7 +215,8 @@ object ZtoeParser {
         for (table in leafTables) {
             val rows = table.select("tr")
             val headerText = rows.take(3).joinToString(" ") { it.text() }
-            val hasQueues = table.text().contains("1.1") && table.text().contains("6.2")
+            val tableText = table.text()
+            val hasQueues = tableText.contains("1.1") && tableText.contains("6.2")
             if (!hasQueues) continue
 
             val matchesToday = headerText.contains(todayD1) || headerText.contains(todayD2) || headerText.contains(todayD3)
@@ -201,6 +228,46 @@ object ZtoeParser {
                 tomorrowTable = table
             }
         }
+        return Pair(todayTable, tomorrowTable)
+    }
+
+    /**
+     * Parses all 12 queues from the document in a single table-lookup pass, avoiding 12 redundant Jsoup DOM scans.
+     */
+    private fun parseAllQueuesSinglePass(
+        doc: Document,
+        today: LocalDate
+    ): Map<String, ScheduleFetchResult> {
+        val tomorrow = today.plusDays(1)
+        val (todayTable, tomorrowTable) = findTodayAndTomorrowTables(doc, today)
+        if (todayTable == null) return emptyMap()
+
+        val results = LinkedHashMap<String, ScheduleFetchResult>(ALL_QUEUES.size)
+        for (q in ALL_QUEUES) {
+            val todaySlots = parseTableForQueue(todayTable, q, today) ?: continue
+            val tomorrowSlots = if (tomorrowTable != null) {
+                parseTableForQueue(tomorrowTable, q, tomorrow)
+            } else {
+                null
+            }
+            results[q] = ScheduleFetchResult(
+                todaySlots = todaySlots,
+                tomorrowSlots = tomorrowSlots,
+                hasTomorrowSchedule = tomorrowSlots != null && tomorrowTable != null,
+                status = FetchStatus.SUCCESS
+            )
+        }
+        return results
+    }
+
+    fun parseDocumentFull(
+        doc: Document,
+        queue: String,
+        today: LocalDate = LocalDate.now(ZoneId.of("Europe/Kyiv"))
+    ): ScheduleFetchResult {
+        val tomorrow = today.plusDays(1)
+        val todayStr = today.format(DateTimeFormatter.ISO_LOCAL_DATE)
+        val (todayTable, tomorrowTable) = findTodayAndTomorrowTables(doc, today)
 
         if (todayTable == null) {
             return ScheduleFetchResult(
@@ -287,21 +354,42 @@ object ZtoeParser {
         }
     }
 
-    private fun fetchDocumentWithWindows1251(urlStr: String): Document {
+    private fun fetchDocumentWithWindows1251(
+        urlStr: String,
+        sendConditionalHeaders: Boolean = false
+    ): Document? {
         val url = URL(urlStr)
         val connection = url.openConnection() as HttpURLConnection
         return try {
             connection.setRequestProperty("User-Agent", USER_AGENT)
+            connection.setRequestProperty("Accept-Encoding", "gzip")
+            if (sendConditionalHeaders && cachedDocUrl == urlStr) {
+                lastETag?.let { connection.setRequestProperty("If-None-Match", it) }
+                lastModifiedHeader?.let { connection.setRequestProperty("If-Modified-Since", it) }
+            }
             connection.connectTimeout = 8000
             connection.readTimeout = 8000
             connection.connect()
             val responseCode = connection.responseCode
+            if (responseCode == HttpURLConnection.HTTP_NOT_MODIFIED) {
+                return null
+            }
             if (responseCode !in 200..299) {
                 throw IOException("HTTP $responseCode")
             }
+            connection.getHeaderField("ETag")?.takeIf { it.isNotBlank() }?.let { lastETag = it }
+            connection.getHeaderField("Last-Modified")?.takeIf { it.isNotBlank() }?.let { lastModifiedHeader = it }
+
             val contentType = connection.contentType?.lowercase() ?: ""
             val charset = if (contentType.contains("utf-8")) "UTF-8" else "windows-1251"
-            connection.inputStream.use { input ->
+            val contentEncoding = connection.contentEncoding?.lowercase() ?: ""
+            val rawStream = connection.inputStream
+            val stream = if (contentEncoding.contains("gzip")) {
+                java.util.zip.GZIPInputStream(rawStream)
+            } else {
+                rawStream
+            }
+            stream.use { input ->
                 Jsoup.parse(input, charset, urlStr)
             }
         } finally {

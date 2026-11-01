@@ -46,9 +46,17 @@ class ScheduleSyncWorker(
             }
             val slots = scheduleRepo.getTodaySlots(settings.queue)
 
-            try {
-                BlackoutGlanceWidget.syncAllWidgets(appContext)
-            } catch (_: Exception) {}
+            val hasWidgets = try {
+                BlackoutGlanceWidget.hasActiveWidgets(appContext)
+            } catch (_: Exception) {
+                false
+            }
+
+            if (hasWidgets) {
+                try {
+                    BlackoutGlanceWidget.syncAllWidgets(appContext)
+                } catch (_: Exception) {}
+            }
 
             val now = LocalDateTime.now(ZoneId.of("Europe/Kyiv"))
             val alarmManager = appContext.getSystemService(Context.ALARM_SERVICE) as AlarmManager
@@ -56,43 +64,42 @@ class ScheduleSyncWorker(
             // Battery & UX Optimization: Group consecutive blackout slots into continuous blocks
             val intervals = scheduleRepo.getDetailedIntervals(slots)
 
-            // Schedule widget transition redraw alarms at exact start and end of each upcoming blackout block
-            for (block in intervals) {
-                val startParts = block.startStr.split(":")
-                val startH = startParts[0].toInt()
-                val startM = startParts[1].toInt()
-                val blockStart = LocalDateTime.of(today, LocalTime.of(startH, startM))
+            // Schedule widget transition redraw alarms only when active widgets are placed on home screen
+            // Use non-wakeup RTC so screen-off deep sleep is not interrupted solely for visual widget redraws
+            if (hasWidgets) {
+                for (block in intervals) {
+                    val startParts = block.startStr.split(":")
+                    val startH = startParts[0].toInt()
+                    val startM = startParts[1].toInt()
+                    val blockStart = LocalDateTime.of(today, LocalTime.of(startH, startM))
 
-                val blockEnd = if (block.endStr == "24:00") {
-                    LocalDateTime.of(today.plusDays(1), LocalTime.MIDNIGHT)
-                } else {
-                    val endParts = block.endStr.split(":")
-                    LocalDateTime.of(today, LocalTime.of(endParts[0].toInt(), endParts[1].toInt()))
-                }
-
-                listOf("start_${today}_${block.startStr}" to blockStart, "end_${today}_${block.endStr}" to blockEnd)
-                    .forEach { (transitionId, transitionTime) ->
-                        if (transitionTime.isAfter(now)) {
-                            val epochMs = transitionTime.atZone(ZoneId.of("Europe/Kyiv")).toInstant().toEpochMilli() + 1500L
-                            val widgetIntent = Intent(appContext, AlarmReceiver::class.java).apply {
-                                action = "ua.blackout.prewarning.ACTION_WIDGET_TRANSITION_UPDATE"
-                                putExtra("EXTRA_TRANSITION_ID", transitionId)
-                            }
-                            val widgetPi = PendingIntent.getBroadcast(
-                                appContext,
-                                transitionId.hashCode(),
-                                widgetIntent,
-                                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-                            )
-                            try {
-                                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                                    alarmManager.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, epochMs, widgetPi)
-                                } else {
-                                    alarmManager.setExact(AlarmManager.RTC_WAKEUP, epochMs, widgetPi)
-                                }
-                            } catch (_: Exception) {}
-                        }
+                    val blockEnd = if (block.endStr == "24:00") {
+                        LocalDateTime.of(today.plusDays(1), LocalTime.MIDNIGHT)
+                    } else {
+                        val endParts = block.endStr.split(":")
+                        LocalDateTime.of(today, LocalTime.of(endParts[0].toInt(), endParts[1].toInt()))
                     }
+
+                    listOf("start_${today}_${block.startStr}" to blockStart, "end_${today}_${block.endStr}" to blockEnd)
+                        .forEach { (transitionId, transitionTime) ->
+                            if (transitionTime.isAfter(now)) {
+                                val epochMs = transitionTime.atZone(ZoneId.of("Europe/Kyiv")).toInstant().toEpochMilli() + 1500L
+                                val widgetIntent = Intent(appContext, AlarmReceiver::class.java).apply {
+                                    action = "ua.blackout.prewarning.ACTION_WIDGET_TRANSITION_UPDATE"
+                                    putExtra("EXTRA_TRANSITION_ID", transitionId)
+                                }
+                                val widgetPi = PendingIntent.getBroadcast(
+                                    appContext,
+                                    transitionId.hashCode(),
+                                    widgetIntent,
+                                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+                                )
+                                try {
+                                    alarmManager.setExact(AlarmManager.RTC, epochMs, widgetPi)
+                                } catch (_: Exception) {}
+                            }
+                        }
+                }
             }
 
             if (!settings.notificationsEnabled) {

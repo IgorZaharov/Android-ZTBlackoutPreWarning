@@ -75,14 +75,31 @@ class BlackoutGlanceWidget : GlanceAppWidget() {
         val KEY_NEXT_SLOT_TIME = stringPreferencesKey("glance_next_slot_time")
         val KEY_NEXT_BLACKOUT_TEXT = stringPreferencesKey("glance_next_blackout_text")
 
+        @Volatile
+        private var cachedChartBitmapKey: String? = null
+        @Volatile
+        private var cachedChartBitmap: Bitmap? = null
+
+        suspend fun hasActiveWidgets(context: Context): Boolean {
+            return try {
+                val appCtx = context.applicationContext
+                val manager = GlanceAppWidgetManager(appCtx)
+                manager.getGlanceIds(BlackoutGlanceWidget::class.java).isNotEmpty()
+            } catch (_: Exception) {
+                false
+            }
+        }
+
         suspend fun syncAllWidgets(context: Context) {
             val appCtx = context.applicationContext
+            val manager = GlanceAppWidgetManager(appCtx)
+            val glanceIds = manager.getGlanceIds(BlackoutGlanceWidget::class.java)
+            if (glanceIds.isEmpty()) return
+
             val settings = SettingsRepository(appCtx).getSettings()
             val scheduleRepo = ScheduleRepository(appCtx)
             val info = scheduleRepo.getCurrentStatusAndCountdown(settings.queue)
             val nextBlackoutText = scheduleRepo.getNextUpcomingIntervalText(settings.queue)
-            val manager = GlanceAppWidgetManager(appCtx)
-            val glanceIds = manager.getGlanceIds(BlackoutGlanceWidget::class.java)
             val nowMs = System.currentTimeMillis()
             for (gId in glanceIds) {
                 updateAppWidgetState(appCtx, PreferencesGlanceStateDefinition, gId) { prefs ->
@@ -102,15 +119,25 @@ class BlackoutGlanceWidget : GlanceAppWidget() {
 
         /**
          * Renders the 24-hour analog electricity counter (САЗУ-ИТ) chart as a high-DPI Bitmap
-         * so Jetpack Glance displays all 48 half-hour blocks, light-gray hour separators,
-         * vintage beige faceplate, dark-grey contour, protruding black needle, and stamped hour markers
-         * without hitting RemoteViews' 10-child Row/Column limit.
+         * and caches it by (slotStatuses, currentH, currentM) to avoid redundant Bitmap allocations
+         * and Canvas redraws within the same minute (e.g., when toggling the alert bell icon).
          */
         fun renderAnalogCounterBitmap(
             slots: List<BlackoutSlot>,
             currentH: Int,
             currentM: Int
         ): Bitmap {
+            val slotSignature = buildString(slots.size) {
+                for (s in slots) {
+                    append(if (s.status == SlotStatus.POWER_OFF) '1' else '0')
+                }
+            }
+            val bitmapKey = "${slotSignature}_${currentH}_$currentM"
+            val existingBmp = cachedChartBitmap
+            if (cachedChartBitmapKey == bitmapKey && existingBmp != null && !existingBmp.isRecycled) {
+                return existingBmp
+            }
+
             val width = 720
             val height = 132
             val bmp = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
@@ -251,6 +278,8 @@ class BlackoutGlanceWidget : GlanceAppWidget() {
                 canvas.drawText(label, x, textY, textPaint)
             }
 
+            cachedChartBitmapKey = bitmapKey
+            cachedChartBitmap = bmp
             return bmp
         }
     }

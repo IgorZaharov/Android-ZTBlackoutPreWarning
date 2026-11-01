@@ -66,14 +66,14 @@ object AppStrings {
     fun queueHelpTitle(lang: String) = if (lang == "uk") "Як дізнатися свою чергу" else "How to find your queue"
     fun queueHelpSteps(lang: String): List<String> = if (lang == "uk") {
         listOf(
-            "1. Відкрийте сторінку пошуку черги на сайті ztoe.com.ua.",
+            "1. Відкрийте сторінку пошуку черги на сайті https://www.ztoe.com.ua/unhooking-search.php.",
             "2. Оберіть свій РЕМ, населений пункт і вулицю.",
             "3. У таблиці знайдіть свій будинок і подивіться стовпці «Черга» і «Підчерга». Наприклад, черга 5 і підчерга 2 - це 5.2.",
             "4. Виберіть це значення у полі «Черга» у вікні налаштувань (кнопка ⚙)."
         )
     } else {
         listOf(
-            "1. Open the queue lookup page on ztoe.com.ua.",
+            "1. Open the queue lookup page on https://www.ztoe.com.ua/unhooking-search.php.",
             "2. Select your distribution district (РЕМ), settlement, and street.",
             "3. In the table, find your building and check the «Queue» and «Subqueue» columns. For example, queue 5 and subqueue 2 is 5.2.",
             "4. Select this value in the «Queue» field in the Settings window (⚙ button)."

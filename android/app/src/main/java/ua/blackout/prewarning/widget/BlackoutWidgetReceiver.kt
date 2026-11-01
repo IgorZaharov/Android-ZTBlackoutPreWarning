@@ -16,7 +16,7 @@ class BlackoutWidgetReceiver : GlanceAppWidgetReceiver() {
 
     override fun onEnabled(context: Context) {
         super.onEnabled(context)
-        fetchAndRefreshWidgetImmediately(context)
+        fetchAndRefreshWidgetImmediately(context, forceNetwork = true)
     }
 
     override fun onUpdate(
@@ -25,19 +25,24 @@ class BlackoutWidgetReceiver : GlanceAppWidgetReceiver() {
         appWidgetIds: IntArray
     ) {
         super.onUpdate(context, appWidgetManager, appWidgetIds)
-        fetchAndRefreshWidgetImmediately(context)
+        fetchAndRefreshWidgetImmediately(context, forceNetwork = false)
     }
 
-    private fun fetchAndRefreshWidgetImmediately(context: Context) {
+    private fun fetchAndRefreshWidgetImmediately(context: Context, forceNetwork: Boolean) {
         val pendingResult = goAsync()
         val appContext = context.applicationContext
         CoroutineScope(Dispatchers.IO).launch {
             try {
                 val settings = SettingsRepository(appContext).getSettings()
                 val scheduleRepo = ScheduleRepository(appContext)
-                val res = ZtoeParser.fetchFullSchedule(settings.cityUrl, settings.queue, appContext)
-                if (res.status == ua.blackout.prewarning.data.parser.FetchStatus.SUCCESS || !scheduleRepo.hasValidTodayCache(settings.queue)) {
-                    scheduleRepo.saveSchedule(settings.queue, res.todaySlots, res.tomorrowSlots)
+                val cacheFresh = scheduleRepo.hasValidTodayCache(settings.queue) &&
+                    scheduleRepo.isCacheFresh(settings.refreshIntervalMinutes)
+
+                if (forceNetwork || !cacheFresh) {
+                    val res = ZtoeParser.fetchFullSchedule(settings.cityUrl, settings.queue, appContext)
+                    if (res.status == ua.blackout.prewarning.data.parser.FetchStatus.SUCCESS || !scheduleRepo.hasValidTodayCache(settings.queue)) {
+                        scheduleRepo.saveSchedule(settings.queue, res.todaySlots, res.tomorrowSlots)
+                    }
                 }
                 BlackoutGlanceWidget.syncAllWidgets(appContext)
             } catch (_: Exception) {

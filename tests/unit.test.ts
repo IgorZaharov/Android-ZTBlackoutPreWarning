@@ -212,7 +212,7 @@ function runUnitTestB() {
     path.join(ROOT_DIR, 'src/components/SettingsView.tsx'),
     'utf-8'
   );
-  const step1 = '1. Відкрийте сторінку пошуку черги на сайті ztoe.com.ua.';
+  const step1 = '1. Відкрийте сторінку пошуку черги на сайті https://www.ztoe.com.ua/unhooking-search.php.';
   const step2 = '2. Оберіть свій РЕМ, населений пункт і вулицю.';
   const step3 =
     '3. У таблиці знайдіть свій будинок і подивіться стовпці «Черга» і «Підчерга». Наприклад, черга 5 і підчерга 2 - це 5.2.';
@@ -227,7 +227,7 @@ function runUnitTestB() {
   );
   assert.ok(
     settingsViewTsx.includes('1. Відкрийте сторінку пошуку черги на сайті') &&
-      settingsViewTsx.includes('ztoe.com.ua') &&
+      settingsViewTsx.includes('https://www.ztoe.com.ua/unhooking-search.php') &&
       settingsViewTsx.includes(step2) &&
       settingsViewTsx.includes(step3) &&
       settingsViewTsx.includes(step4),

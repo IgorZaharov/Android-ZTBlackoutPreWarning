@@ -20,13 +20,22 @@ data class ScheduleStatusInfo(
 data class OutageInterval(
     val startStr: String,
     val endStr: String,
-    val durationHours: Double
+    val durationHours: Double,
+    val startMinuteOfDay: Int = 0,
+    val endMinuteOfDay: Int = 1440
 )
 
 class ScheduleRepository(context: Context) {
     private val appContext: Context = context.applicationContext
     private val prefs: SharedPreferences =
         appContext.getSharedPreferences("zt_schedule_cache_v2", Context.MODE_PRIVATE)
+
+    companion object {
+        // Process-wide in-memory cache of decoded slots and intervals to eliminate
+        // 48 BlackoutSlot allocations and 96 String.format calls on every 1-second UI countdown tick
+        private val decodedSlotsCache = java.util.concurrent.ConcurrentHashMap<String, List<BlackoutSlot>>()
+        private val detailedIntervalsCache = java.util.concurrent.ConcurrentHashMap<Int, List<OutageInterval>>()
+    }
 
     fun saveSchedule(queue: String, todaySlots: List<BlackoutSlot>, tomorrowSlots: List<BlackoutSlot>?) {
         val editor = prefs.edit()
@@ -37,6 +46,7 @@ class ScheduleRepository(context: Context) {
         editor.putString("cache_today_date", todayStr)
         editor.putString("cache_today_queue", queue)
         editor.putString("cache_today_slots_$queue", todayEncoded)
+        editor.putLong("cache_last_sync_ms", System.currentTimeMillis())
 
         if (tomorrowSlots != null) {
             val tomorrowEncoded = tomorrowSlots.joinToString("") { if (it.status == SlotStatus.POWER_OFF) "1" else "0" }
@@ -46,7 +56,56 @@ class ScheduleRepository(context: Context) {
             editor.remove("cache_tomorrow_slots_$queue")
             editor.putBoolean("cache_has_tomorrow_$queue", false)
         }
-        editor.commit()
+        editor.apply()
+    }
+
+    /**
+     * Saves all 12 queues in a single SharedPreferences transaction using asynchronous apply()
+     * instead of 12 separate synchronous disk commits.
+     */
+    fun saveAllSchedulesBatch(
+        schedules: Map<String, Pair<List<BlackoutSlot>, List<BlackoutSlot>?>>,
+        activeQueue: String
+    ) {
+        if (schedules.isEmpty()) return
+        val editor = prefs.edit()
+        val todayStr = LocalDate.now(ZoneId.of("Europe/Kyiv")).format(DateTimeFormatter.ISO_LOCAL_DATE)
+        editor.putString("cache_today_date", todayStr)
+        editor.putString("cache_today_queue", activeQueue)
+        editor.putLong("cache_last_sync_ms", System.currentTimeMillis())
+
+        for ((queue, pair) in schedules) {
+            val (todaySlots, tomorrowSlots) = pair
+            val todayEncoded = todaySlots.joinToString("") { if (it.status == SlotStatus.POWER_OFF) "1" else "0" }
+            editor.putString("cache_today_slots_$queue", todayEncoded)
+
+            if (tomorrowSlots != null) {
+                val tomorrowEncoded = tomorrowSlots.joinToString("") { if (it.status == SlotStatus.POWER_OFF) "1" else "0" }
+                editor.putString("cache_tomorrow_slots_$queue", tomorrowEncoded)
+                editor.putBoolean("cache_has_tomorrow_$queue", true)
+            } else {
+                editor.remove("cache_tomorrow_slots_$queue")
+                editor.putBoolean("cache_has_tomorrow_$queue", false)
+            }
+        }
+        editor.apply()
+    }
+
+    fun isCacheFresh(refreshIntervalMinutes: Long): Boolean {
+        val lastSyncMs = prefs.getLong("cache_last_sync_ms", 0L)
+        if (lastSyncMs <= 0L) return false
+        val maxAgeMs = (refreshIntervalMinutes.coerceAtLeast(5L) * 60_000L) - 30_000L
+        return (System.currentTimeMillis() - lastSyncMs) in 0..maxAgeMs
+    }
+
+    fun getEncodedTodaySlots(queue: String): String {
+        val todayStr = LocalDate.now(ZoneId.of("Europe/Kyiv")).format(DateTimeFormatter.ISO_LOCAL_DATE)
+        val cachedDate = prefs.getString("cache_today_date", null)
+        val cachedEncoded = prefs.getString("cache_today_slots_$queue", null)
+        if (cachedDate == todayStr && !cachedEncoded.isNullOrEmpty()) {
+            return cachedEncoded
+        }
+        return ""
     }
 
     fun hasValidTodayCache(queue: String): Boolean {
@@ -64,9 +123,12 @@ class ScheduleRepository(context: Context) {
         val cachedEncoded = prefs.getString("cache_today_slots_$queue", null)
 
         if (cachedDate == todayStr && !cachedEncoded.isNullOrEmpty() && cachedEncoded.length >= 24) {
-            return decodeSlots(cachedEncoded, queue, todayStr)
+            return decodeSlotsCached(cachedEncoded, queue, todayStr)
         }
-        return ZtoeParser.generateFallbackSchedule(queue, todayStr)
+        val fallbackKey = "fallback_${todayStr}_$queue"
+        return decodedSlotsCache.getOrPut(fallbackKey) {
+            ZtoeParser.generateFallbackSchedule(queue, todayStr)
+        }
     }
 
     fun getTomorrowSlots(queue: String): List<BlackoutSlot>? {
@@ -77,7 +139,7 @@ class ScheduleRepository(context: Context) {
         val cachedEncoded = prefs.getString("cache_tomorrow_slots_$queue", null)
 
         if (hasTomorrow && !cachedEncoded.isNullOrEmpty() && cachedEncoded.length >= 24) {
-            return decodeSlots(cachedEncoded, queue, tomorrowStr)
+            return decodeSlotsCached(cachedEncoded, queue, tomorrowStr)
         }
         return null
     }
@@ -88,11 +150,14 @@ class ScheduleRepository(context: Context) {
 
     fun getSharedPreferences(): SharedPreferences = prefs
 
-    private fun decodeSlots(encoded: String, queue: String, dateStr: String): List<BlackoutSlot> {
+    private fun decodeSlotsCached(encoded: String, queue: String, dateStr: String): List<BlackoutSlot> {
+        val cacheKey = "${dateStr}_${queue}_$encoded"
+        decodedSlotsCache[cacheKey]?.let { return it }
+
         val totalSlots = encoded.length
         val minutesPerSlot = 1440 / totalSlots
 
-        return (0 until totalSlots).map { index ->
+        val decoded = (0 until totalSlots).map { index ->
             val isOff = encoded[index] == '1'
             val startTotalMin = index * minutesPerSlot
             val endTotalMin = (index + 1) * minutesPerSlot
@@ -116,6 +181,12 @@ class ScheduleRepository(context: Context) {
                 status = if (isOff) SlotStatus.POWER_OFF else SlotStatus.POWER_ON
             )
         }
+
+        if (decodedSlotsCache.size > 64) {
+            decodedSlotsCache.clear()
+        }
+        decodedSlotsCache[cacheKey] = decoded
+        return decoded
     }
 
     // Common calculation of blackout intervals from any slot list (today or tomorrow)
@@ -125,9 +196,11 @@ class ScheduleRepository(context: Context) {
     }
 
     fun getDetailedIntervals(slots: List<BlackoutSlot>): List<OutageInterval> {
-        val list = mutableListOf<OutageInterval>()
-        if (slots.isEmpty()) return list
+        if (slots.isEmpty()) return emptyList()
+        val cacheKey = System.identityHashCode(slots)
+        detailedIntervalsCache[cacheKey]?.let { return it }
 
+        val list = mutableListOf<OutageInterval>()
         val totalSlots = slots.size
         val minutesPerSlot = 1440 / totalSlots
         var inBlock = false
@@ -145,15 +218,20 @@ class ScheduleRepository(context: Context) {
                 val sStr = String.format("%02d:%02d", startMin / 60, startMin % 60)
                 val eStr = if (endMin >= 1440) "24:00" else String.format("%02d:%02d", endMin / 60, endMin % 60)
                 val duration = (i - startIdx) * (minutesPerSlot / 60.0)
-                list.add(OutageInterval(sStr, eStr, duration))
+                list.add(OutageInterval(sStr, eStr, duration, startMin, endMin))
             }
         }
         if (inBlock) {
             val startMin = startIdx * minutesPerSlot
             val sStr = String.format("%02d:%02d", startMin / 60, startMin % 60)
             val duration = (totalSlots - startIdx) * (minutesPerSlot / 60.0)
-            list.add(OutageInterval(sStr, "24:00", duration))
+            list.add(OutageInterval(sStr, "24:00", duration, startMin, 1440))
         }
+
+        if (detailedIntervalsCache.size > 64) {
+            detailedIntervalsCache.clear()
+        }
+        detailedIntervalsCache[cacheKey] = list
         return list
     }
 
@@ -221,20 +299,15 @@ class ScheduleRepository(context: Context) {
         val s = totalSecsLeft % 60
         val countdownText = String.format("%02d:%02d:%02d", h, m, s)
 
-        // Find time range for the upcoming or current blackout block
+        // Find time range for the upcoming or current blackout block using pre-computed integer minutes
         val intervals = getDetailedIntervals(slots)
         val nextPeriod = if (isBlackoutNow) {
-            // Find interval containing current time
             intervals.firstOrNull {
-                val sMin = it.startStr.split(":")[0].toInt() * 60 + it.startStr.split(":")[1].toInt()
-                val eMin = if (it.endStr == "24:00") 1440 else (it.endStr.split(":")[0].toInt() * 60 + it.endStr.split(":")[1].toInt())
-                currentMinutes in sMin until eMin
+                currentMinutes in it.startMinuteOfDay until it.endMinuteOfDay
             }?.let { "${it.startStr} – ${it.endStr}" } ?: slots[currentSlotIdx].let { "${it.startTimeStr} – ${it.endTimeStr}" }
         } else {
-            // Find next upcoming blackout interval
             intervals.firstOrNull {
-                val sMin = it.startStr.split(":")[0].toInt() * 60 + it.startStr.split(":")[1].toInt()
-                sMin >= currentMinutes
+                it.startMinuteOfDay >= currentMinutes
             }?.let { "${it.startStr} – ${it.endStr}" } ?: intervals.firstOrNull()?.let { "${it.startStr} – ${it.endStr}" } ?: "Відключень немає"
         }
 
@@ -260,9 +333,7 @@ class ScheduleRepository(context: Context) {
         val todayIntervals = getDetailedIntervals(getTodaySlots(queue))
 
         val nextToday = todayIntervals.firstOrNull { interval ->
-            val parts = interval.startStr.split(":")
-            val startMin = parts[0].toInt() * 60 + parts[1].toInt()
-            startMin > currentMinutes
+            interval.startMinuteOfDay > currentMinutes
         }
         if (nextToday != null) {
             return "${nextToday.startStr} – ${nextToday.endStr}"

@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.2.1] - 2026-11-01
+
+### Changed
+- **Queue Help Popup Step 1 Full URL (`AppStrings.kt`, `SettingsScreen.kt`, `SettingsView.tsx`)**: Updated Step 1 in the Queue selection "?" help dialog to display and open the full URL `https://www.ztoe.com.ua/unhooking-search.php`.
+- **Seamless In-Place APK Upgrade & Settings Preservation (`build.gradle.kts`, `SettingsRepository.kt`, `BootCompletedReceiver.kt`)**: Unified `applicationId` across builds, configured a persistent signing keystore (`android/app/keystore/debug.keystore`) and incrementing `versionCode`, and added automatic legacy `SharedPreferences` migration so installing a new APK updates the previous version in-place while preserving all user settings.
+- **Battery Consumption Optimizations (`BlackoutWidgetReceiver.kt`, `ScheduleSyncWorker.kt`, `ZtoeParser.kt`, `DonationsRepository.kt`, `ScheduleRepository.kt`, `BlackoutGlanceWidget.kt`)**:
+  - Avoided duplicate network fetches in `BlackoutWidgetReceiver.onUpdate` when the schedule cache is already fresh within `refreshIntervalMinutes`.
+  - Gated widget transition alarms on active home screen widget presence (`hasActiveWidgets`) and switched visual widget transition alarms to non-wakeup `AlarmManager.RTC` while keeping advance blackout warning notifications on `AlarmManager.RTC_WAKEUP`.
+  - Added `Accept-Encoding: gzip` and conditional `ETag` / `If-Modified-Since` (`HTTP 304 Not Modified`) caching to `ZtoeParser.kt` and `DonationsRepository.kt`, plus single-pass 12-queue HTML table extraction and batched `SharedPreferences.apply()` writes.
+  - Added in-memory parsed slot/interval caching in `ScheduleRepository.kt` and 24-hour timeline `Bitmap` caching in `BlackoutGlanceWidget.kt`.
+
 ## [1.2.0] - 2026-11-01
 
 ### Added

@@ -615,7 +615,26 @@ fun SettingsScreen(
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     AppStrings.queueHelpSteps(lang).forEach { step ->
-                        Text(step, color = Color.LightGray, fontSize = 13.sp, lineHeight = 18.sp)
+                        val hasUrl = step.contains("https://www.ztoe.com.ua/unhooking-search.php")
+                        Text(
+                            text = step,
+                            color = Color.LightGray,
+                            fontSize = 13.sp,
+                            lineHeight = 18.sp,
+                            modifier = if (hasUrl) {
+                                Modifier.clickable {
+                                    try {
+                                        val intent = android.content.Intent(
+                                            android.content.Intent.ACTION_VIEW,
+                                            android.net.Uri.parse("https://www.ztoe.com.ua/unhooking-search.php")
+                                        )
+                                        context.startActivity(intent)
+                                    } catch (_: Exception) {}
+                                }
+                            } else {
+                                Modifier
+                            }
+                        )
                     }
                 }
             },
