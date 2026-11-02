@@ -52,7 +52,7 @@ The repository houses two synchronized implementations that share 100% parity in
 | Battery Consumption (`battery1.png`) | Google Play Protect (`sec1.jpg`) | System Security Scan (`sec2.jpg`) |
 |:---:|:---:|:---:|
 | <img src="docs/screenshots/battery1.png" width="210" alt="Battery Usage"> | <img src="docs/screenshots/sec1.jpg" width="210" alt="Google Play Protect"> | <img src="docs/screenshots/sec2.jpg" width="210" alt="Security Check"> |
-| ~5.5 mA/hour (~0.11% per hour on a 5000 mAh battery), comparable to idle Bluetooth. | Verified clean by Google Play Protect. | Verified clean by Android system security scanner. |
+| ~5.5 mA/hour (~0.11% on a 5000 mAh battery), comparable to idle Bluetooth. | Verified clean by Google Play Protect. | Verified clean by Android system security scanner. |
 
 ### 2.3 Google Play Store Promotional Graphics (`public/playstore/`)
 
