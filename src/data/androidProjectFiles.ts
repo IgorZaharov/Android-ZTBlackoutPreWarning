@@ -726,15 +726,16 @@ class BlackoutGlanceWidget : GlanceAppWidget() {
                             Column(modifier = GlanceModifier.defaultWeight()) {
                                 Text(
                                     text = if (info.isBlackoutNow) "До увімкнення:" else "До відключення:",
-                                    style = TextStyle(fontSize = 11.sp, color = GlanceTheme.colors.onSurfaceVariant)
+                                    style = TextStyle(fontSize = 10.sp, color = GlanceTheme.colors.onSurfaceVariant)
                                 )
                                 Text(
-                                    text = info.countdownText, // e.g. "01:35"
+                                    text = info.countdownText, // e.g. "01г. 35хв." / "01hr. 35m."
                                     style = TextStyle(
-                                        fontSize = 18.sp,
+                                        fontSize = 12.sp,
                                         fontWeight = FontWeight.Bold,
                                         color = GlanceTheme.colors.onSurface
-                                    )
+                                    ),
+                                    maxLines = 1
                                 )
                             }
 

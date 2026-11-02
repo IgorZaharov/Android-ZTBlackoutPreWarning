@@ -215,12 +215,15 @@ function parseLeafTableForQueue(
     const isOff =
       attr.includes('#ff3333') ||
       attr.includes('#ff3b30') ||
+      attr.includes('#ff0000') ||
       attr.includes('background:red') ||
       attr.includes('background: red') ||
       attr.includes('background-color:red') ||
       attr.includes('background-color: red') ||
       attr.includes('rgb(255, 51, 51)') ||
       attr.includes('rgb(255,51,51)') ||
+      attr.includes('rgb(255, 0, 0)') ||
+      attr.includes('rgb(255,0,0)') ||
       attr.includes('danger') ||
       text.includes('вимк') ||
       text.includes('відкл') ||
@@ -240,6 +243,28 @@ function parseLeafTableForQueue(
   });
 }
 
+function matchesHeaderDate(
+  headerText: string,
+  target: { day: number; month: number; year: number }
+): boolean {
+  const fullDateRegex = /(?<!\d)(\d{1,2})\.(\d{1,2})\.(\d{4})(?!\d)/g;
+  const fullMatches = Array.from(headerText.matchAll(fullDateRegex));
+  if (fullMatches.length > 0) {
+    return fullMatches.some(m => {
+      const d = parseInt(m[1], 10);
+      const mo = parseInt(m[2], 10);
+      const y = parseInt(m[3], 10);
+      return d === target.day && mo === target.month && y === target.year;
+    });
+  }
+  const shortDateRegex = /(?<!\d)(\d{1,2})\.(\d{1,2})(?!\.\d|\d)/g;
+  return Array.from(headerText.matchAll(shortDateRegex)).some(m => {
+    const d = parseInt(m[1], 10);
+    const mo = parseInt(m[2], 10);
+    return d === target.day && mo === target.month;
+  });
+}
+
 export interface FullZtoeParseResult {
   todaySlots: BlackoutSlot[] | null;
   tomorrowSlots: BlackoutSlot[] | null;
@@ -256,14 +281,6 @@ export function parseZtoeHtmlFull(
   const tomorrowDate = new Date(baseDate.getTime() + 86400000);
   const tomorrowParts = getKyivDateParts(tomorrowDate);
 
-  const todayD1 = `${String(todayParts.day).padStart(2, '0')}.${String(todayParts.month).padStart(2, '0')}.${todayParts.year}`;
-  const todayD2 = `${todayParts.day}.${todayParts.month}.${todayParts.year}`;
-  const todayD3 = `${String(todayParts.day).padStart(2, '0')}.${String(todayParts.month).padStart(2, '0')}`;
-
-  const tomorrowD1 = `${String(tomorrowParts.day).padStart(2, '0')}.${String(tomorrowParts.month).padStart(2, '0')}.${tomorrowParts.year}`;
-  const tomorrowD2 = `${tomorrowParts.day}.${tomorrowParts.month}.${tomorrowParts.year}`;
-  const tomorrowD3 = `${String(tomorrowParts.day).padStart(2, '0')}.${String(tomorrowParts.month).padStart(2, '0')}`;
-
   const leafTables = extractLeafTables(html);
 
   let todayTable: ParsedHtmlTable | null = null;
@@ -274,19 +291,12 @@ export function parseZtoeHtmlFull(
       continue;
     }
     const headerText = table.rows
-      .slice(0, 3)
+      .slice(0, 2)
       .map(r => r.cells.map(c => c.text).join(' '))
       .join(' ');
 
-    const matchesToday =
-      headerText.includes(todayD1) ||
-      headerText.includes(todayD2) ||
-      headerText.includes(todayD3);
-
-    const matchesTomorrow =
-      headerText.includes(tomorrowD1) ||
-      headerText.includes(tomorrowD2) ||
-      headerText.includes(tomorrowD3);
+    const matchesToday = matchesHeaderDate(headerText, todayParts);
+    const matchesTomorrow = matchesHeaderDate(headerText, tomorrowParts);
 
     if (matchesToday && !todayTable) {
       todayTable = table;
@@ -609,7 +619,8 @@ export interface OutageCountdownInfo {
  */
 export function calculateOutageCountdown(
   schedule: DaySchedule,
-  now: Date = new Date()
+  now: Date = new Date(),
+  tomorrowSchedule: DaySchedule | null = null
 ): OutageCountdownInfo {
   const currentHour = now.getHours();
   const currentMin = now.getMinutes();
@@ -625,7 +636,7 @@ export function calculateOutageCountdown(
       currentSlot: null,
       closestBlackoutSlot: null,
       minutesUntilNextBlackout: null,
-      formattedTimeLeft: '00:00:00',
+      formattedTimeLeft: '--:--:--',
       slotDescription: 'Відключень немає',
       intervals
     };
@@ -649,7 +660,17 @@ export function calculateOutageCountdown(
       return currentMinuteOfDay >= startMin && currentMinuteOfDay < endMin;
     });
 
-    const endMinuteOfDay = activeInterval ? parseIntervalMinutes(activeInterval).endMin : (currentSlotIdx + 1) * minutesPerSlot;
+    let endMinuteOfDay = activeInterval ? parseIntervalMinutes(activeInterval).endMin : (currentSlotIdx + 1) * minutesPerSlot;
+    if (endMinuteOfDay >= 1440 && tomorrowSchedule?.slots?.length) {
+      const tomorrowIntervals = getBlackoutIntervals(tomorrowSchedule.slots);
+      if (tomorrowIntervals.length > 0) {
+        const firstTom = parseIntervalMinutes(tomorrowIntervals[0]);
+        if (firstTom.startMin === 0) {
+          endMinuteOfDay = 1440 + firstTom.endMin;
+        }
+      }
+    }
+
     const diffMin = endMinuteOfDay - currentMinuteOfDay;
     const secondsRemaining = Math.max(0, diffMin * 60 - currentSec);
     const h = Math.floor(secondsRemaining / 3600);
@@ -692,6 +713,35 @@ export function calculateOutageCountdown(
       slotDescription: `${nextInterval.start} – ${nextInterval.end}`,
       intervals
     };
+  }
+
+  if (tomorrowSchedule?.slots?.length) {
+    const tomorrowIntervals = getBlackoutIntervals(tomorrowSchedule.slots);
+    if (tomorrowIntervals.length > 0) {
+      const firstTomorrow = tomorrowIntervals[0];
+      const { startMin: tomStartMin } = parseIntervalMinutes(firstTomorrow);
+      const targetMin = 1440 + tomStartMin;
+      const diffMin = targetMin - currentMinuteOfDay;
+      const secondsRemaining = Math.max(0, diffMin * 60 - currentSec);
+      const h = Math.floor(secondsRemaining / 3600);
+      const m = Math.floor((secondsRemaining % 3600) / 60);
+      const s = secondsRemaining % 60;
+
+      const tomTotalSlots = tomorrowSchedule.slots.length;
+      const tomMinutesPerSlot = Math.floor(1440 / tomTotalSlots);
+      const tomSlotIdx = Math.min(tomTotalSlots - 1, Math.floor(tomStartMin / tomMinutesPerSlot));
+      const closestSlot = tomorrowSchedule.slots[tomSlotIdx] || null;
+
+      return {
+        isCurrentlyBlackout: false,
+        currentSlot,
+        closestBlackoutSlot: closestSlot,
+        minutesUntilNextBlackout: diffMin,
+        formattedTimeLeft: `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`,
+        slotDescription: `${firstTomorrow.start} – ${firstTomorrow.end}`,
+        intervals
+      };
+    }
   }
 
   return {

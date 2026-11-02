@@ -68,10 +68,14 @@ fun MainScreen(
         }
     }
 
-    val activeSlots = if (selectedDayTab == "today") slots else (tomorrowSlots ?: slots)
+    val isTomorrowSelected = selectedDayTab == "tomorrow" && hasTomorrowSchedule && tomorrowSlots != null
+    val activeSlots = if (isTomorrowSelected) tomorrowSlots!! else slots
+    val activeSlotsSignature = activeSlots.joinToString("") {
+        if (it.status == ua.blackout.prewarning.data.model.SlotStatus.POWER_OFF) "1" else "0"
+    }
 
     // Compute continuous blackout intervals with exact 30-min resolution using hoisted ScheduleRepository
-    val intervals = remember(queue, activeSlots, selectedDayTab) {
+    val intervals = remember(queue, selectedDayTab, activeSlotsSignature) {
         scheduleRepo.getDetailedIntervals(activeSlots)
     }
 
@@ -339,92 +343,92 @@ fun MainScreen(
                 .background(Color(0xBF141A29))
                 .padding(18.dp)
         ) {
-            Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                // 24-Hour Timeline Bar
-                key(queue, selectedDayTab, activeSlots) {
+            key(queue, selectedDayTab, activeSlotsSignature) {
+                Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                    // 24-Hour Timeline Bar
                     TimelineBar(
                         slots = activeSlots,
                         currentHour = kyivNow.hour,
                         currentMinute = kyivNow.minute,
                         showNeedle = selectedDayTab == "today"
                     )
-                }
 
-                // List of Outage Hours for this day
-                Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(Color(0x1AFFFFFF)))
+                    // List of Outage Hours for this day
+                    Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(Color(0x1AFFFFFF)))
 
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text(
-                        text = AppStrings.blackoutHoursHeader(lang),
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = Color(0xB3BAE6FD)
-                    )
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Text(
+                            text = AppStrings.blackoutHoursHeader(lang),
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xB3BAE6FD)
+                        )
 
-                    if (intervals.isNotEmpty()) {
-                        intervals.forEach { interval ->
-                            val start = interval.startStr
-                            val end = interval.endStr
-                            val dur = interval.durationHours
-                            val durStr = if (dur % 1.0 == 0.0) "${dur.toInt()} ${AppStrings.hourShort(lang)}" else "${String.format(java.util.Locale.US, "%.1f", dur)} ${AppStrings.hourShort(lang)}"
-                            Row(
+                        if (intervals.isNotEmpty()) {
+                            intervals.forEach { interval ->
+                                val start = interval.startStr
+                                val end = interval.endStr
+                                val dur = interval.durationHours
+                                val durStr = if (dur % 1.0 == 0.0) "${dur.toInt()} ${AppStrings.hourShort(lang)}" else "${String.format(java.util.Locale.US, "%.1f", dur)} ${AppStrings.hourShort(lang)}"
+                                Row(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(14.dp))
+                                        .background(Color(0x14FFFFFF))
+                                        .padding(horizontal = 14.dp, vertical = 10.dp),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                    ) {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(8.dp)
+                                                .clip(CircleShape)
+                                                .background(Color(0xFFFF5E3A))
+                                        )
+                                        Text(
+                                            text = "$start – $end",
+                                            fontSize = 15.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            fontFamily = FontFamily.Monospace,
+                                            color = Color.White
+                                        )
+                                    }
+
+                                    Box(
+                                        modifier = Modifier
+                                            .clip(RoundedCornerShape(8.dp))
+                                            .background(Color(0x26FF5E3A))
+                                            .padding(horizontal = 8.dp, vertical = 3.dp)
+                                    ) {
+                                        Text(
+                                            text = durStr,
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            fontFamily = FontFamily.Monospace,
+                                            color = Color(0xFFFF5E3A)
+                                        )
+                                    }
+                                }
+                            }
+                        } else {
+                            Box(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .clip(RoundedCornerShape(14.dp))
                                     .background(Color(0x14FFFFFF))
-                                    .padding(horizontal = 14.dp, vertical = 10.dp),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
+                                    .padding(14.dp),
+                                contentAlignment = Alignment.Center
                             ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                                ) {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(8.dp)
-                                            .clip(CircleShape)
-                                            .background(Color(0xFFFF5E3A))
-                                    )
-                                    Text(
-                                        text = "$start – $end",
-                                        fontSize = 15.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        fontFamily = FontFamily.Monospace,
-                                        color = Color.White
-                                    )
-                                }
-
-                                Box(
-                                    modifier = Modifier
-                                        .clip(RoundedCornerShape(8.dp))
-                                        .background(Color(0x26FF5E3A))
-                                        .padding(horizontal = 8.dp, vertical = 3.dp)
-                                ) {
-                                    Text(
-                                        text = durStr,
-                                        fontSize = 11.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        fontFamily = FontFamily.Monospace,
-                                        color = Color(0xFFFF5E3A)
-                                    )
-                                }
+                                Text(
+                                    text = AppStrings.noBlackoutsScheduled(lang),
+                                    fontSize = 13.sp,
+                                    color = Color(0xB3BAE6FD)
+                                )
                             }
-                        }
-                    } else {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(14.dp))
-                                .background(Color(0x14FFFFFF))
-                                .padding(14.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                text = AppStrings.noBlackoutsScheduled(lang),
-                                fontSize = 13.sp,
-                                color = Color(0xB3BAE6FD)
-                            )
                         }
                     }
                 }

@@ -52,6 +52,8 @@ import ua.blackout.prewarning.data.model.SlotStatus
 import ua.blackout.prewarning.data.parser.ZtoeParser
 import ua.blackout.prewarning.data.repository.ScheduleRepository
 import ua.blackout.prewarning.data.repository.SettingsRepository
+import ua.blackout.prewarning.notification.AlarmScheduler
+import ua.blackout.prewarning.ui.AppStrings
 import java.time.LocalTime
 import java.time.ZoneId
 
@@ -69,11 +71,25 @@ class BlackoutGlanceWidget : GlanceAppWidget() {
     companion object {
         val KEY_NOTIFICATIONS_ENABLED = booleanPreferencesKey("glance_notifications_enabled")
         val KEY_QUEUE = stringPreferencesKey("glance_queue")
+        val KEY_LANGUAGE = stringPreferencesKey("glance_language")
         val KEY_REFRESH_TICK = longPreferencesKey("glance_refresh_tick")
         val KEY_IS_BLACKOUT_NOW = booleanPreferencesKey("glance_is_blackout_now")
         val KEY_COUNTDOWN_TEXT = stringPreferencesKey("glance_countdown_text")
         val KEY_NEXT_SLOT_TIME = stringPreferencesKey("glance_next_slot_time")
         val KEY_NEXT_BLACKOUT_TEXT = stringPreferencesKey("glance_next_blackout_text")
+
+        private val COUNTDOWN_PART_REGEX = Regex("(\\d{1,2}|--)")
+
+        fun formatWidgetCountdown(rawCountdown: String, lang: String): String {
+            val isEn = lang.equals("en", ignoreCase = true)
+            val matches = COUNTDOWN_PART_REGEX.findAll(rawCountdown).map { it.value }.toList()
+            if (matches.size >= 2) {
+                val hh = if (matches[0] == "--") "--" else matches[0].padStart(2, '0')
+                val mm = if (matches[1] == "--") "--" else matches[1].padStart(2, '0')
+                return if (isEn) "${hh}hr. ${mm}m." else "${hh}г. ${mm}хв."
+            }
+            return rawCountdown
+        }
 
         @Volatile
         private var cachedChartBitmapKey: String? = null
@@ -97,8 +113,10 @@ class BlackoutGlanceWidget : GlanceAppWidget() {
             if (glanceIds.isEmpty()) return
 
             val settings = SettingsRepository(appCtx).getSettings()
+            val resolvedLang = AppStrings.resolveLang(settings.language)
             val scheduleRepo = ScheduleRepository(appCtx)
             val info = scheduleRepo.getCurrentStatusAndCountdown(settings.queue)
+            val formattedCountdown = formatWidgetCountdown(info.countdownText, resolvedLang)
             val nextBlackoutText = scheduleRepo.getNextUpcomingIntervalText(settings.queue)
             val nowMs = System.currentTimeMillis()
             for (gId in glanceIds) {
@@ -106,9 +124,10 @@ class BlackoutGlanceWidget : GlanceAppWidget() {
                     prefs.toMutablePreferences().apply {
                         this[KEY_NOTIFICATIONS_ENABLED] = settings.notificationsEnabled
                         this[KEY_QUEUE] = settings.queue
+                        this[KEY_LANGUAGE] = resolvedLang
                         this[KEY_REFRESH_TICK] = nowMs
                         this[KEY_IS_BLACKOUT_NOW] = info.isBlackoutNow
-                        this[KEY_COUNTDOWN_TEXT] = info.countdownText
+                        this[KEY_COUNTDOWN_TEXT] = formattedCountdown
                         this[KEY_NEXT_SLOT_TIME] = info.nextSlotTime
                         this[KEY_NEXT_BLACKOUT_TEXT] = nextBlackoutText
                     }
@@ -304,15 +323,17 @@ class BlackoutGlanceWidget : GlanceAppWidget() {
             val prefs = currentState<Preferences>()
             // Observe Glance state preferences so recomposition always triggers when toggled or refreshed
             val currentSettings = settingsRepo.getSettings()
+            val resolvedLang = AppStrings.resolveLang(prefs[KEY_LANGUAGE] ?: currentSettings.language)
             val notificationsEnabled = prefs[KEY_NOTIFICATIONS_ENABLED] ?: currentSettings.notificationsEnabled
-            val activeQueue = prefs[KEY_QUEUE] ?: currentSettings.queue
+            val activeQueue = currentSettings.queue
             val refreshTick = prefs[KEY_REFRESH_TICK] ?: 0L
 
             // Always use Today's schedule for the widget
             val slots = scheduleRepo.getTodaySlots(activeQueue)
             val liveInfo = scheduleRepo.getCurrentStatusAndCountdown(activeQueue)
             val isBlackoutNow = if (refreshTick > 0L) (prefs[KEY_IS_BLACKOUT_NOW] ?: liveInfo.isBlackoutNow) else liveInfo.isBlackoutNow
-            val countdownText = prefs[KEY_COUNTDOWN_TEXT]?.takeIf { it.isNotBlank() && refreshTick > 0L } ?: liveInfo.countdownText
+            val rawCountdownText = prefs[KEY_COUNTDOWN_TEXT]?.takeIf { it.isNotBlank() && refreshTick > 0L } ?: liveInfo.countdownText
+            val countdownText = formatWidgetCountdown(rawCountdownText, resolvedLang)
             val nextSlotTime = prefs[KEY_NEXT_SLOT_TIME]?.takeIf { it.isNotBlank() && refreshTick > 0L } ?: liveInfo.nextSlotTime
             val nextBlackoutText = scheduleRepo.getNextUpcomingIntervalText(activeQueue).ifBlank {
                 prefs[KEY_NEXT_BLACKOUT_TEXT] ?: "Сьогодні більше немає"
@@ -433,7 +454,8 @@ class BlackoutGlanceWidget : GlanceAppWidget() {
                                             fontSize = 20.sp,
                                             fontWeight = FontWeight.Bold,
                                             color = ColorProvider(Color.White)
-                                        )
+                                        ),
+                                        maxLines = 1
                                     )
                                 }
                                 Column(horizontalAlignment = Alignment.Horizontal.End) {
@@ -545,10 +567,11 @@ class BlackoutGlanceWidget : GlanceAppWidget() {
                                     Text(
                                         text = countdownText,
                                         style = TextStyle(
-                                            fontSize = 18.sp,
+                                            fontSize = 12.sp,
                                             fontWeight = FontWeight.Bold,
                                             color = ColorProvider(Color.White)
-                                        )
+                                        ),
+                                        maxLines = 1
                                     )
                                 }
 
@@ -612,6 +635,9 @@ class ToggleAlertsActionCallback : ActionCallback {
         val newState = !current.notificationsEnabled
         settingsRepo.updateNotificationsEnabled(newState)
         try {
+            AlarmScheduler.syncAlarms(appContext)
+        } catch (_: Exception) {}
+        try {
             BlackoutGlanceWidget.syncAllWidgets(appContext)
         } catch (_: Exception) {}
     }
@@ -631,12 +657,14 @@ class RefreshWidgetActionCallback : ActionCallback {
         withContext(Dispatchers.IO) {
             try {
                 val res = ZtoeParser.fetchFullSchedule(current.cityUrl, current.queue, appContext, forceNetwork = true)
-                if (res.status == ua.blackout.prewarning.data.parser.FetchStatus.SUCCESS || !scheduleRepo.hasValidTodayCache(current.queue)) {
+                if (res.status == ua.blackout.prewarning.data.parser.FetchStatus.SUCCESS) {
                     scheduleRepo.saveSchedule(current.queue, res.todaySlots, res.tomorrowSlots)
                 }
+                AlarmScheduler.syncAlarms(appContext)
                 BlackoutGlanceWidget.syncAllWidgets(appContext)
             } catch (_: Exception) {
                 try {
+                    AlarmScheduler.syncAlarms(appContext)
                     BlackoutGlanceWidget.syncAllWidgets(appContext)
                 } catch (_: Exception) {}
             }

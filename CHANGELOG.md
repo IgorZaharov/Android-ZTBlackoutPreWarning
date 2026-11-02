@@ -1,8 +1,18 @@
 # Changelog
 
+## [1.3.1] - 2026-11-02
+
+### Fixed
+- **Tomorrow Schedule "Next Period" & Today/Tomorrow Tab Switching (`ScheduleRepository.kt`, `MainScreen.kt`, `BlackoutAppNavigation.kt`, `ZtoeParser.kt`, `ztoeParser.ts`, `MainView.tsx`)**:
+  - Fixed `"Next period"` (`Найближчий період`) in the main window so that when today's blackouts have ended and tomorrow's schedule is available, it displays tomorrow's 1st blackout interval instead of wrapping around to today's 1st blackout, and validated cached today/tomorrow schedule dates per queue so yesterday's tomorrow schedule never leaks into tomorrow's slot cache.
+  - Fixed switching between `Today` (`Сьогодні`) and `Tomorrow` (`Завтра`) tabs on the main window so `"Години без світла на цей день:"` (`"Outage hours for this day:"`) below the 24h timeline always recomposes and displays the selected day's blackout intervals using a content-based slot signature key instead of `System.identityHashCode`.
+  - Enforced exact `(day, month, year)` date matching on table header rows (`rows.take(2)`) and `#ff0000` cell recognition in `ZtoeParser.kt` and `ztoeParser.ts`.
+
 ## [1.3.0] - 2026-11-01
 
 ### Changed
+- **Google Play Store Promotional Screenshots (`PlayStoreGuide.tsx`, `/public/playstore/playstore_promo_1.png`–`playstore_promo_5.png`)**: Generated 5 `1080x1920` Google Play Store promotional graphics with Ukrainian captions (4 preserving the original screenshot UI untouched, plus a 5th showcasing the Battery Consumption Optimization Plan tweaks), and added preview/download cards in the Play Store tab.
+- **Smartphone Emulator 9:20 Aspect Ratio & Internal Scrolling (`PhoneSimulator.tsx`)**: Enforced a strict `9:20` (`1080x2400`) smartphone screen aspect ratio (`aspect-[9/20]`), contained dialogs/toasts within the phone viewport, and enabled smooth internal vertical scrolling with hidden desktop scrollbars for accurate interface screenshots.
 - **Queue Help Popup Step 1 Visible URL Link (`AppStrings.kt`, `SettingsScreen.kt`, `SettingsView.tsx`)**: Updated Step 1 in the Queue selection "?" help dialog to visibly highlight and underline the full URL `https://www.ztoe.com.ua/unhooking-search.php` as a clickable link.
 - **Build Version Resolution & Release 1.3.0 (`build.gradle.kts`, `AboutScreen.kt`, `AboutView.tsx`, `vite.config.ts`, `package.json`, `.github/workflows/build-apk.yml`)**: Fixed CI/CD and Gradle version resolution so branch builds never overwrite `versionName` with the branch name (`"main"`), and updated the application version to `1.3.0`.
 - **Seamless In-Place APK Upgrade & Settings Preservation (`build.gradle.kts`, `SettingsRepository.kt`, `BootCompletedReceiver.kt`)**: Unified `applicationId` across builds, configured a persistent signing keystore (`android/app/keystore/debug.keystore`) and incrementing `versionCode`, and added automatic legacy `SharedPreferences` migration so installing a new APK updates the previous version in-place while preserving all user settings.
@@ -11,6 +21,10 @@
   - Gated widget transition alarms on active home screen widget presence (`hasActiveWidgets`) and switched visual widget transition alarms to non-wakeup `AlarmManager.RTC` while keeping advance blackout warning notifications on `AlarmManager.RTC_WAKEUP`.
   - Added `Accept-Encoding: gzip` and conditional `ETag` / `If-Modified-Since` (`HTTP 304 Not Modified`) caching to `ZtoeParser.kt` and `DonationsRepository.kt`, plus single-pass 12-queue HTML table extraction and batched `SharedPreferences.apply()` writes.
   - Added in-memory parsed slot/interval caching in `ScheduleRepository.kt` and 24-hour timeline `Bitmap` caching in `BlackoutGlanceWidget.kt`.
+
+### Fixed
+- **Main Window Stopped Countdown & Widget Countdown Format (`ScheduleRepository.kt`, `BlackoutAppNavigation.kt`, `BlackoutGlanceWidget.kt`, `ztoeParser.ts`, `MainView.tsx`, `WidgetSimulator.tsx`)**: Fixed the main window countdown so it stops counting (`--:--:--`) instead of wrapping around to earlier today slots when no more blackouts remain for today and no schedule/blackouts exist for tomorrow, and formatted widget countdowns without seconds (`HHг. MMхв.` / `HHhr. MMm.`).
+- **Stale Queue 1.1 Notifications on Mobile Time Change (`AlarmScheduler.kt`, `AlarmReceiver.kt`, `AlertRegistry.kt`, `ScheduleSyncWorker.kt`, `BootCompletedReceiver.kt`, `BlackoutApp.kt`, `BlackoutAppNavigation.kt`, `BlackoutGlanceWidget.kt`, `BlackoutWidgetReceiver.kt`, `WidgetToggleReceiver.kt`, `AndroidManifest.xml`)**: Added `AlarmScheduler` to track and cancel all previously registered `AlarmManager` intents across queues whenever the selected queue, advance warning timer, notification toggle, or system clock (`TIME_SET`, `TIMEZONE_CHANGED`, `DATE_CHANGED`) changes, and added strict active-queue and pre-warning time window validation in `AlarmReceiver.kt` so stale `1.1` queue or past-due alarms never fire when mobile time is adjusted.
 
 ## [1.2.0] - 2026-11-01
 

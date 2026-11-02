@@ -55,6 +55,18 @@ export const WidgetSimulator: React.FC<WidgetSimulatorProps> = ({
     ? (isUk ? 'До увімкнення:' : 'Power on in:')
     : (isUk ? 'До відключення:' : 'Time to blackout:');
 
+  const formatWidgetCountdown = (raw: string): string => {
+    const parts = (raw || '').split(':');
+    if (parts.length >= 2) {
+      const hh = parts[0].trim();
+      const mm = parts[1].trim();
+      return isUk ? `${hh}г. ${mm}хв.` : `${hh}hr. ${mm}m.`;
+    }
+    return raw;
+  };
+
+  const widgetCountdownText = formatWidgetCountdown(countdown.formattedTimeLeft);
+
   const periodLabel = isUk ? 'Період' : 'Period';
   const nextBlackoutLabel = isUk ? 'Наступне відключення' : 'Next blackout';
   const currentMinutes = currentHour * 60 + currentMinute;
@@ -147,12 +159,12 @@ export const WidgetSimulator: React.FC<WidgetSimulatorProps> = ({
 
             {/* Bottom row: Countdown + Round Refresh Button + Round Notification Toggle */}
             <div className="flex items-center justify-between pt-2.5 border-t border-white/15">
-              <div>
-                <div className="text-[10px] uppercase tracking-wider text-sky-200/70 font-semibold">
+              <div className="min-w-0 pr-2">
+                <div className="text-[10px] uppercase tracking-wider text-sky-200/70 font-semibold leading-tight">
                   {countdownLabel}
                 </div>
-                <div className="text-2xl font-black font-mono text-white drop-shadow-md">
-                  {countdown.formattedTimeLeft}
+                <div className="text-base font-black font-mono text-white drop-shadow-md whitespace-nowrap">
+                  {widgetCountdownText}
                 </div>
               </div>
 
@@ -253,8 +265,8 @@ export const WidgetSimulator: React.FC<WidgetSimulatorProps> = ({
                 <div className="text-[10px] uppercase text-sky-200/70 font-semibold">
                   {countdownLabel}
                 </div>
-                <div className="text-2xl font-black font-mono text-white drop-shadow-md">
-                  {countdown.formattedTimeLeft}
+                <div className="text-xl font-black font-mono text-white drop-shadow-md whitespace-nowrap">
+                  {widgetCountdownText}
                 </div>
               </div>
               <div className="text-right">

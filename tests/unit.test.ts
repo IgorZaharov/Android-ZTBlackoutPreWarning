@@ -6,6 +6,8 @@ import {
   QUEUES,
   parseZtoeHtmlFull,
   getChartHalfHourBlocks,
+  getBlackoutIntervals,
+  calculateOutageCountdown,
 } from '../src/services/ztoeParser';
 import { translations } from '../src/services/i18n';
 import {
@@ -312,7 +314,111 @@ function runUnitTestB() {
   assert.equal(translations.uk.errorNoQueuesFound, 'На сайті не знайдено черг');
   assert.equal(translations.en.errorNoQueuesFound, 'No queues found on site');
 
-  // 8. Verify git modified UI files are mentioned in CHANGELOG.md
+  // 10. Verify Bug 1 & Bug 2:
+  // - Bug 1: When today's blackouts are over and tomorrow's schedule is available, "Next period" shows tomorrow's 1st blackout (not today's 1st blackout).
+  // - Bug 2: Switching Today / Tomorrow tabs updates "blackout hours for this day" below the 24h timeline.
+  const baseDate = new Date('2026-11-02T12:00:00+02:00');
+  const buildTwoDayHtml = (todayDateDdMmYyyy: string, tomorrowDateDdMmYyyy: string): string => {
+    const headerCells = Array.from({ length: 24 }, (_, i) => {
+      const s = String(i).padStart(2, '0') + ':00';
+      const e = String(i + 1).padStart(2, '0') + ':00';
+      return `<td>${s}-${e}</td>`;
+    }).join('');
+    const allQueues = ['1.1', '1.2', '2.1', '2.2', '3.1', '3.2', '4.1', '4.2', '5.1', '5.2', '6.1', '6.2'];
+    const makeTable = (dateHeader: string, offSlotStart: number, offSlotEndExclusive: number) => {
+      const rows = allQueues
+        .map((q) => {
+          const cells = Array.from({ length: 48 }, (_, idx) => {
+            const bg = idx >= offSlotStart && idx < offSlotEndExclusive ? '#ff0000' : '#ffffff';
+            return `<td style="background: ${bg};"></td>`;
+          }).join('');
+          return `<tr><td>1</td><td>${q}</td>${cells}</tr>`;
+        })
+        .join('\n');
+      return `<table><tr><td colspan="50">Графік погодинних відключень на ${dateHeader}</td></tr><tr><td>Черга</td><td>Підчерга</td>${headerCells}</tr>${rows}</table>`;
+    };
+    // Today: blackout 08:00–10:00 (slots 16..20). Tomorrow: blackout 14:00–17:00 (slots 28..34).
+    return `<html><body>${makeTable(todayDateDdMmYyyy, 16, 20)}${makeTable(tomorrowDateDdMmYyyy, 28, 34)}</body></html>`;
+  };
+
+  const twoDayHtml = buildTwoDayHtml('02.11.2026', '03.11.2026');
+  const parsedTwoDay = parseZtoeHtmlFull(twoDayHtml, '1.1', baseDate);
+  assert.ok(parsedTwoDay.hasTodayTable && parsedTwoDay.todaySlots, 'Must parse Today schedule table');
+  assert.ok(parsedTwoDay.hasTomorrowTable && parsedTwoDay.tomorrowSlots, 'Must parse Tomorrow schedule table');
+
+  const todayIntervals = getBlackoutIntervals(parsedTwoDay.todaySlots!);
+  const tomorrowIntervals = getBlackoutIntervals(parsedTwoDay.tomorrowSlots!);
+  assert.equal(todayIntervals.length, 1);
+  assert.equal(`${todayIntervals[0].start} – ${todayIntervals[0].end}`, '08:00 – 10:00');
+  assert.equal(tomorrowIntervals.length, 1);
+  assert.equal(`${tomorrowIntervals[0].start} – ${tomorrowIntervals[0].end}`, '14:00 – 17:00');
+  assert.notDeepEqual(
+    todayIntervals,
+    tomorrowIntervals,
+    'Switching Today/Tomorrow tabs must produce distinct blackout hours lists for each day'
+  );
+
+  // At 21:00 today (after today's 08:00–10:00 blackout has ended), Next period must be tomorrow's 1st blackout (14:00 – 17:00), NOT today's 1st blackout (08:00 – 10:00)
+  const lateEveningNow = new Date(2026, 10, 2, 21, 0, 0);
+  const countdownWithTomorrow = calculateOutageCountdown(
+    {
+      dateStr: '2026-11-02',
+      dayLabel: 'Сьогодні',
+      queue: '1.1',
+      city: 'Житомир (ZTOE)',
+      slots: parsedTwoDay.todaySlots!,
+      lastUpdated: '21:00',
+      sourceUrl: 'https://www.ztoe.com.ua/unhooking-search.php'
+    },
+    lateEveningNow,
+    {
+      dateStr: '2026-11-03',
+      dayLabel: 'Завтра',
+      queue: '1.1',
+      city: 'Житомир (ZTOE)',
+      slots: parsedTwoDay.tomorrowSlots!,
+      lastUpdated: '21:00',
+      sourceUrl: 'https://www.ztoe.com.ua/unhooking-search.php'
+    }
+  );
+  assert.equal(
+    countdownWithTomorrow.slotDescription,
+    '14:00 – 17:00',
+    'Bug 1 regression check: Next period must show tomorrow 1st blackout (14:00 – 17:00), never today 1st blackout (08:00 – 10:00)'
+  );
+  assert.equal(countdownWithTomorrow.formattedTimeLeft, '17:00:00');
+
+  // Verify Android Kotlin source files also enforce content-based slot signature and tomorrow 1st blackout fallback
+  const scheduleRepoKt = fs.readFileSync(
+    path.join(ROOT_DIR, 'android/app/src/main/java/ua/blackout/prewarning/data/repository/ScheduleRepository.kt'),
+    'utf-8'
+  );
+  assert.ok(
+    !scheduleRepoKt.includes('System.identityHashCode'),
+    'ScheduleRepository.kt must not use System.identityHashCode for interval caching'
+  );
+  assert.ok(
+    scheduleRepoKt.includes('calculateStatusAndCountdown') &&
+      scheduleRepoKt.includes('computeDetailedIntervals') &&
+      mainScreenKt.includes('key(queue, selectedDayTab, activeSlotsSignature)'),
+    'MainScreen.kt and ScheduleRepository.kt must recompose blackout hours on Today/Tomorrow tab switch and compute tomorrow 1st blackout'
+  );
+
+  // 11. Verify Build Version 1.3.1 across project files
+  const packageJson = JSON.parse(fs.readFileSync(path.join(ROOT_DIR, 'package.json'), 'utf-8'));
+  assert.equal(packageJson.version, '1.3.1', 'package.json version must be 1.3.1');
+  const buildGradle = fs.readFileSync(path.join(ROOT_DIR, 'android/app/build.gradle.kts'), 'utf-8');
+  assert.ok(buildGradle.includes('"1.3.1"'), 'android/app/build.gradle.kts default versionName must be 1.3.1');
+  const aboutScreenKt = fs.readFileSync(
+    path.join(ROOT_DIR, 'android/app/src/main/java/ua/blackout/prewarning/ui/screens/AboutScreen.kt'),
+    'utf-8'
+  );
+  assert.ok(aboutScreenKt.includes('"1.3.1"'), 'AboutScreen.kt fallback version must be 1.3.1');
+  const aboutViewTsx = fs.readFileSync(path.join(ROOT_DIR, 'src/components/AboutView.tsx'), 'utf-8');
+  assert.ok(aboutViewTsx.includes("'1.3.1'"), 'AboutView.tsx fallback version must be 1.3.1');
+  assert.ok(changelog.includes('## [1.3.1]'), 'CHANGELOG.md must document v1.3.1');
+
+  // 12. Verify git modified UI files are mentioned in CHANGELOG.md
   try {
     const gitStatus = execSync('git status --porcelain', { encoding: 'utf-8' });
     const modifiedFiles = gitStatus

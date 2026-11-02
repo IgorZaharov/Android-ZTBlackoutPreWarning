@@ -12,9 +12,9 @@ android {
         applicationId = "ua.blackout.prewarning"
         minSdk = 26
         targetSdk = 35
-        versionCode = (System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull() ?: 4) + 100
+        versionCode = (System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull() ?: 5) + 100
         val semverEnv = System.getenv("APP_VERSION_NAME")?.removePrefix("v")?.trim()?.takeIf { it.matches(Regex("^[0-9]+\\.[0-9]+\\.[0-9]+.*")) }
-        versionName = semverEnv ?: "1.3.0"
+        versionName = semverEnv ?: "1.3.1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {

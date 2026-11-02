@@ -66,13 +66,21 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
     [now.getHours(), now.getMinutes()]
   );
 
+  const scrollContainerRef = React.useRef<HTMLDivElement>(null);
+
+  React.useEffect(() => {
+    if (scrollContainerRef.current) {
+      scrollContainerRef.current.scrollTop = 0;
+    }
+  }, [activeTab]);
+
   return (
-    <div className="relative mx-auto w-full max-w-[420px] rounded-[52px] bg-[#07090E] p-3.5 shadow-[0_25px_60px_rgba(0,0,0,0.8)] ring-1 ring-white/10 select-none">
+    <div className="relative mx-auto w-[416px] max-w-full rounded-[52px] bg-[#07090E] p-3.5 shadow-[0_25px_60px_rgba(0,0,0,0.8)] ring-1 ring-white/10 select-none">
       
-      {/* Phone Screen Canvas with Gradual Time-of-Day Blurred Background (60% Primary, 30% Secondary, 10% Accent) */}
+      {/* Phone Screen Canvas in strict 9:20 smartphone aspect ratio (1080x2400 proportion) */}
       <div
-        className="relative overflow-hidden rounded-[42px] min-h-[790px] flex flex-col border border-white/15 text-white transition-colors duration-1000"
-        style={{ backgroundColor: timePalette.primary }}
+        className="relative overflow-hidden rounded-[42px] w-full aspect-[9/20] flex flex-col border border-white/15 text-white transition-colors duration-1000"
+        style={{ backgroundColor: timePalette.primary, transform: 'translateZ(0)' }}
       >
         {/* Primary (60%) blurred atmospheric base layer */}
         <div
@@ -105,7 +113,7 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
         <div className="absolute inset-x-0 top-0 h-36 bg-gradient-to-b from-[#0B0C10]/65 via-[#0B0C10]/25 to-transparent pointer-events-none" />
 
         {/* Status Bar in Strict 24-Hour Clock */}
-        <div className="relative z-30 flex items-center justify-between px-7 pt-4 pb-2 text-[13px] font-semibold text-sky-100">
+        <div className="relative z-30 shrink-0 flex items-center justify-between px-7 pt-4 pb-2 text-[13px] font-semibold text-sky-100">
           <div className="tracking-tight font-mono">{currentTimeStr || '19:27'}</div>
           
           {/* Subtle Camera Notch */}
@@ -152,7 +160,10 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
         )}
 
         {/* Scrollable View Area */}
-        <div className="flex-1 overflow-y-auto px-4 pt-2 pb-28 relative z-10">
+        <div
+          ref={scrollContainerRef}
+          className="flex-1 min-h-0 overflow-y-auto overscroll-contain scroll-smooth px-4 pt-2 pb-28 relative z-10 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+        >
           {activeTab === 'schedule' && (
             <MainView
               schedule={schedule}
@@ -254,7 +265,7 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
         </div>
 
         {/* Android Gesture Bar */}
-        <div className="flex justify-center pb-2 bg-transparent z-10">
+        <div className="shrink-0 flex justify-center pb-2 bg-transparent z-10">
           <div className="w-32 h-1 rounded-full bg-white/25" />
         </div>
       </div>

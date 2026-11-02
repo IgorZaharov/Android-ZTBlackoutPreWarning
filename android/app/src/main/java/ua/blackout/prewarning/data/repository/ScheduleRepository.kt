@@ -34,25 +34,208 @@ class ScheduleRepository(context: Context) {
         // Process-wide in-memory cache of decoded slots and intervals to eliminate
         // 48 BlackoutSlot allocations and 96 String.format calls on every 1-second UI countdown tick
         private val decodedSlotsCache = java.util.concurrent.ConcurrentHashMap<String, List<BlackoutSlot>>()
-        private val detailedIntervalsCache = java.util.concurrent.ConcurrentHashMap<Int, List<OutageInterval>>()
+        private val detailedIntervalsCache = java.util.concurrent.ConcurrentHashMap<String, List<OutageInterval>>()
+
+        fun computeDetailedIntervals(slots: List<BlackoutSlot>): List<OutageInterval> {
+            if (slots.isEmpty()) return emptyList()
+            val cacheKey = buildString(slots.size + 4) {
+                append(slots.size)
+                append('_')
+                for (s in slots) {
+                    append(if (s.status == SlotStatus.POWER_OFF) '1' else '0')
+                }
+            }
+            detailedIntervalsCache[cacheKey]?.let { return it }
+
+            val list = mutableListOf<OutageInterval>()
+            val totalSlots = slots.size
+            val minutesPerSlot = 1440 / totalSlots
+            var inBlock = false
+            var startIdx = 0
+
+            for (i in 0 until totalSlots) {
+                val isOff = slots[i].status == SlotStatus.POWER_OFF
+                if (isOff && !inBlock) {
+                    inBlock = true
+                    startIdx = i
+                } else if (!isOff && inBlock) {
+                    inBlock = false
+                    val startMin = startIdx * minutesPerSlot
+                    val endMin = i * minutesPerSlot
+                    val sStr = String.format("%02d:%02d", startMin / 60, startMin % 60)
+                    val eStr = if (endMin >= 1440) "24:00" else String.format("%02d:%02d", endMin / 60, endMin % 60)
+                    val duration = (i - startIdx) * (minutesPerSlot / 60.0)
+                    list.add(OutageInterval(sStr, eStr, duration, startMin, endMin))
+                }
+            }
+            if (inBlock) {
+                val startMin = startIdx * minutesPerSlot
+                val sStr = String.format("%02d:%02d", startMin / 60, startMin % 60)
+                val duration = (totalSlots - startIdx) * (minutesPerSlot / 60.0)
+                list.add(OutageInterval(sStr, "24:00", duration, startMin, 1440))
+            }
+
+            if (detailedIntervalsCache.size > 64) {
+                detailedIntervalsCache.clear()
+            }
+            detailedIntervalsCache[cacheKey] = list
+            return list
+        }
+
+        fun calculateStatusAndCountdown(
+            slots: List<BlackoutSlot>,
+            tomorrowSlots: List<BlackoutSlot>?,
+            now: LocalTime
+        ): ScheduleStatusInfo {
+            val currentMinutes = now.hour * 60 + now.minute
+            val currentSeconds = now.second
+
+            if (slots.isEmpty()) {
+                return ScheduleStatusInfo(
+                    isBlackoutNow = false,
+                    countdownText = "--:--:--",
+                    nextSlotTime = "Відключень немає"
+                )
+            }
+
+            val totalSlots = slots.size
+            val minutesPerSlot = 1440 / totalSlots
+            val currentSlotIdx = (currentMinutes / minutesPerSlot).coerceIn(0, totalSlots - 1)
+            val isBlackoutNow = slots[currentSlotIdx].status == SlotStatus.POWER_OFF
+            val intervals = computeDetailedIntervals(slots)
+            val totalBlackoutHours = intervals.sumOf { it.durationHours }
+
+            if (isBlackoutNow) {
+                var targetSlotIdx = -1
+                for (i in (currentSlotIdx + 1) until totalSlots) {
+                    if (slots[i].status == SlotStatus.POWER_ON) {
+                        targetSlotIdx = i
+                        break
+                    }
+                }
+
+                val targetMinutes = if (targetSlotIdx != -1) {
+                    targetSlotIdx * minutesPerSlot
+                } else if (tomorrowSlots != null && tomorrowSlots.isNotEmpty() && tomorrowSlots[0].status == SlotStatus.POWER_OFF) {
+                    val tomorrowMinutesPerSlot = 1440 / tomorrowSlots.size
+                    val tomorrowOnIdx = tomorrowSlots.indexOfFirst { it.status == SlotStatus.POWER_ON }
+                    if (tomorrowOnIdx != -1) {
+                        1440 + tomorrowOnIdx * tomorrowMinutesPerSlot
+                    } else {
+                        2880
+                    }
+                } else {
+                    1440
+                }
+
+                val remainingMinutes = (targetMinutes - currentMinutes - 1).coerceAtLeast(0)
+                val remainingSeconds = 60 - currentSeconds
+                val totalSecsLeft = remainingMinutes * 60 + remainingSeconds
+                val h = totalSecsLeft / 3600
+                val m = (totalSecsLeft % 3600) / 60
+                val s = totalSecsLeft % 60
+                val countdownText = String.format("%02d:%02d:%02d", h, m, s)
+
+                val activePeriod = intervals.firstOrNull {
+                    currentMinutes in it.startMinuteOfDay until it.endMinuteOfDay
+                }?.let { "${it.startStr} – ${it.endStr}" }
+                    ?: slots[currentSlotIdx].let { "${it.startTimeStr} – ${it.endTimeStr}" }
+
+                return ScheduleStatusInfo(
+                    isBlackoutNow = true,
+                    countdownText = countdownText,
+                    nextSlotTime = activePeriod,
+                    totalBlackoutHours = totalBlackoutHours
+                )
+            }
+
+            // Power is currently ON: find next blackout in remainder of today
+            var targetSlotIdx = -1
+            for (i in (currentSlotIdx + 1) until totalSlots) {
+                if (slots[i].status == SlotStatus.POWER_OFF) {
+                    targetSlotIdx = i
+                    break
+                }
+            }
+
+            if (targetSlotIdx != -1) {
+                val targetMinutes = targetSlotIdx * minutesPerSlot
+                val remainingMinutes = (targetMinutes - currentMinutes - 1).coerceAtLeast(0)
+                val remainingSeconds = 60 - currentSeconds
+                val totalSecsLeft = remainingMinutes * 60 + remainingSeconds
+                val h = totalSecsLeft / 3600
+                val m = (totalSecsLeft % 3600) / 60
+                val s = totalSecsLeft % 60
+                val countdownText = String.format("%02d:%02d:%02d", h, m, s)
+
+                val nextPeriod = intervals.firstOrNull {
+                    it.startMinuteOfDay > currentMinutes
+                }?.let { "${it.startStr} – ${it.endStr}" } ?: "Відключень немає"
+
+                return ScheduleStatusInfo(
+                    isBlackoutNow = false,
+                    countdownText = countdownText,
+                    nextSlotTime = nextPeriod,
+                    totalBlackoutHours = totalBlackoutHours
+                )
+            }
+
+            // No more blackouts today: check tomorrow's schedule if available
+            val tomorrowOffIdx = tomorrowSlots?.indexOfFirst { it.status == SlotStatus.POWER_OFF } ?: -1
+            if (tomorrowSlots != null && tomorrowSlots.isNotEmpty() && tomorrowOffIdx != -1) {
+                val tomorrowMinutesPerSlot = 1440 / tomorrowSlots.size
+                val targetMinutes = 1440 + tomorrowOffIdx * tomorrowMinutesPerSlot
+                val remainingMinutes = (targetMinutes - currentMinutes - 1).coerceAtLeast(0)
+                val remainingSeconds = 60 - currentSeconds
+                val totalSecsLeft = remainingMinutes * 60 + remainingSeconds
+                val h = totalSecsLeft / 3600
+                val m = (totalSecsLeft % 3600) / 60
+                val s = totalSecsLeft % 60
+                val countdownText = String.format("%02d:%02d:%02d", h, m, s)
+
+                val tomorrowIntervals = computeDetailedIntervals(tomorrowSlots)
+                val nextPeriod = tomorrowIntervals.firstOrNull()?.let { "${it.startStr} – ${it.endStr}" } ?: "Відключень немає"
+
+                return ScheduleStatusInfo(
+                    isBlackoutNow = false,
+                    countdownText = countdownText,
+                    nextSlotTime = nextPeriod,
+                    totalBlackoutHours = totalBlackoutHours
+                )
+            }
+
+            // No more blackouts for today and no schedule (or no blackouts) for tomorrow
+            return ScheduleStatusInfo(
+                isBlackoutNow = false,
+                countdownText = "--:--:--",
+                nextSlotTime = "Відключень немає",
+                totalBlackoutHours = totalBlackoutHours
+            )
+        }
     }
 
     fun saveSchedule(queue: String, todaySlots: List<BlackoutSlot>, tomorrowSlots: List<BlackoutSlot>?) {
         val editor = prefs.edit()
-        val todayStr = LocalDate.now(ZoneId.of("Europe/Kyiv")).format(DateTimeFormatter.ISO_LOCAL_DATE)
+        val kyivZone = ZoneId.of("Europe/Kyiv")
+        val today = LocalDate.now(kyivZone)
+        val todayStr = today.format(DateTimeFormatter.ISO_LOCAL_DATE)
+        val tomorrowStr = today.plusDays(1).format(DateTimeFormatter.ISO_LOCAL_DATE)
 
         // Store serialized slot statuses as a simple 48-char string of '0' (ON) and '1' (OFF)
         val todayEncoded = todaySlots.joinToString("") { if (it.status == SlotStatus.POWER_OFF) "1" else "0" }
         editor.putString("cache_today_date", todayStr)
+        editor.putString("cache_today_date_$queue", todayStr)
         editor.putString("cache_today_queue", queue)
         editor.putString("cache_today_slots_$queue", todayEncoded)
         editor.putLong("cache_last_sync_ms", System.currentTimeMillis())
 
-        if (tomorrowSlots != null) {
+        if (tomorrowSlots != null && tomorrowSlots.isNotEmpty()) {
             val tomorrowEncoded = tomorrowSlots.joinToString("") { if (it.status == SlotStatus.POWER_OFF) "1" else "0" }
+            editor.putString("cache_tomorrow_date_$queue", tomorrowStr)
             editor.putString("cache_tomorrow_slots_$queue", tomorrowEncoded)
             editor.putBoolean("cache_has_tomorrow_$queue", true)
         } else {
+            editor.remove("cache_tomorrow_date_$queue")
             editor.remove("cache_tomorrow_slots_$queue")
             editor.putBoolean("cache_has_tomorrow_$queue", false)
         }
@@ -69,7 +252,10 @@ class ScheduleRepository(context: Context) {
     ) {
         if (schedules.isEmpty()) return
         val editor = prefs.edit()
-        val todayStr = LocalDate.now(ZoneId.of("Europe/Kyiv")).format(DateTimeFormatter.ISO_LOCAL_DATE)
+        val kyivZone = ZoneId.of("Europe/Kyiv")
+        val today = LocalDate.now(kyivZone)
+        val todayStr = today.format(DateTimeFormatter.ISO_LOCAL_DATE)
+        val tomorrowStr = today.plusDays(1).format(DateTimeFormatter.ISO_LOCAL_DATE)
         editor.putString("cache_today_date", todayStr)
         editor.putString("cache_today_queue", activeQueue)
         editor.putLong("cache_last_sync_ms", System.currentTimeMillis())
@@ -77,13 +263,16 @@ class ScheduleRepository(context: Context) {
         for ((queue, pair) in schedules) {
             val (todaySlots, tomorrowSlots) = pair
             val todayEncoded = todaySlots.joinToString("") { if (it.status == SlotStatus.POWER_OFF) "1" else "0" }
+            editor.putString("cache_today_date_$queue", todayStr)
             editor.putString("cache_today_slots_$queue", todayEncoded)
 
-            if (tomorrowSlots != null) {
+            if (tomorrowSlots != null && tomorrowSlots.isNotEmpty()) {
                 val tomorrowEncoded = tomorrowSlots.joinToString("") { if (it.status == SlotStatus.POWER_OFF) "1" else "0" }
+                editor.putString("cache_tomorrow_date_$queue", tomorrowStr)
                 editor.putString("cache_tomorrow_slots_$queue", tomorrowEncoded)
                 editor.putBoolean("cache_has_tomorrow_$queue", true)
             } else {
+                editor.remove("cache_tomorrow_date_$queue")
                 editor.remove("cache_tomorrow_slots_$queue")
                 editor.putBoolean("cache_has_tomorrow_$queue", false)
             }
@@ -100,7 +289,7 @@ class ScheduleRepository(context: Context) {
 
     fun getEncodedTodaySlots(queue: String): String {
         val todayStr = LocalDate.now(ZoneId.of("Europe/Kyiv")).format(DateTimeFormatter.ISO_LOCAL_DATE)
-        val cachedDate = prefs.getString("cache_today_date", null)
+        val cachedDate = prefs.getString("cache_today_date_$queue", prefs.getString("cache_today_date", null))
         val cachedEncoded = prefs.getString("cache_today_slots_$queue", null)
         if (cachedDate == todayStr && !cachedEncoded.isNullOrEmpty()) {
             return cachedEncoded
@@ -110,7 +299,7 @@ class ScheduleRepository(context: Context) {
 
     fun hasValidTodayCache(queue: String): Boolean {
         val todayStr = LocalDate.now(ZoneId.of("Europe/Kyiv")).format(DateTimeFormatter.ISO_LOCAL_DATE)
-        val cachedDate = prefs.getString("cache_today_date", null)
+        val cachedDate = prefs.getString("cache_today_date_$queue", prefs.getString("cache_today_date", null))
         val cachedEncoded = prefs.getString("cache_today_slots_$queue", null)
         return cachedDate == todayStr && !cachedEncoded.isNullOrEmpty() && cachedEncoded.length >= 24
     }
@@ -119,7 +308,7 @@ class ScheduleRepository(context: Context) {
         val kyivZone = ZoneId.of("Europe/Kyiv")
         val today = LocalDate.now(kyivZone)
         val todayStr = today.format(DateTimeFormatter.ISO_LOCAL_DATE)
-        val cachedDate = prefs.getString("cache_today_date", null)
+        val cachedDate = prefs.getString("cache_today_date_$queue", prefs.getString("cache_today_date", null))
         val cachedEncoded = prefs.getString("cache_today_slots_$queue", null)
 
         if (cachedDate == todayStr && !cachedEncoded.isNullOrEmpty() && cachedEncoded.length >= 24) {
@@ -133,19 +322,23 @@ class ScheduleRepository(context: Context) {
 
     fun getTomorrowSlots(queue: String): List<BlackoutSlot>? {
         val kyivZone = ZoneId.of("Europe/Kyiv")
-        val tomorrow = LocalDate.now(kyivZone).plusDays(1)
-        val tomorrowStr = tomorrow.format(DateTimeFormatter.ISO_LOCAL_DATE)
+        val today = LocalDate.now(kyivZone)
+        val todayStr = today.format(DateTimeFormatter.ISO_LOCAL_DATE)
+        val tomorrowStr = today.plusDays(1).format(DateTimeFormatter.ISO_LOCAL_DATE)
+        val cachedTodayDate = prefs.getString("cache_today_date_$queue", prefs.getString("cache_today_date", null))
+        val cachedTomorrowDate = prefs.getString("cache_tomorrow_date_$queue", null)
         val hasTomorrow = prefs.getBoolean("cache_has_tomorrow_$queue", false)
         val cachedEncoded = prefs.getString("cache_tomorrow_slots_$queue", null)
 
-        if (hasTomorrow && !cachedEncoded.isNullOrEmpty() && cachedEncoded.length >= 24) {
+        val isDateValid = cachedTodayDate == todayStr && (cachedTomorrowDate == null || cachedTomorrowDate == tomorrowStr)
+        if (isDateValid && hasTomorrow && !cachedEncoded.isNullOrEmpty() && cachedEncoded.length >= 24) {
             return decodeSlotsCached(cachedEncoded, queue, tomorrowStr)
         }
         return null
     }
 
     fun hasTomorrowSchedule(queue: String): Boolean {
-        return prefs.getBoolean("cache_has_tomorrow_$queue", false)
+        return getTomorrowSlots(queue) != null
     }
 
     fun getSharedPreferences(): SharedPreferences = prefs
@@ -196,129 +389,15 @@ class ScheduleRepository(context: Context) {
     }
 
     fun getDetailedIntervals(slots: List<BlackoutSlot>): List<OutageInterval> {
-        if (slots.isEmpty()) return emptyList()
-        val cacheKey = System.identityHashCode(slots)
-        detailedIntervalsCache[cacheKey]?.let { return it }
-
-        val list = mutableListOf<OutageInterval>()
-        val totalSlots = slots.size
-        val minutesPerSlot = 1440 / totalSlots
-        var inBlock = false
-        var startIdx = 0
-
-        for (i in 0 until totalSlots) {
-            val isOff = slots[i].status == SlotStatus.POWER_OFF
-            if (isOff && !inBlock) {
-                inBlock = true
-                startIdx = i
-            } else if (!isOff && inBlock) {
-                inBlock = false
-                val startMin = startIdx * minutesPerSlot
-                val endMin = i * minutesPerSlot
-                val sStr = String.format("%02d:%02d", startMin / 60, startMin % 60)
-                val eStr = if (endMin >= 1440) "24:00" else String.format("%02d:%02d", endMin / 60, endMin % 60)
-                val duration = (i - startIdx) * (minutesPerSlot / 60.0)
-                list.add(OutageInterval(sStr, eStr, duration, startMin, endMin))
-            }
-        }
-        if (inBlock) {
-            val startMin = startIdx * minutesPerSlot
-            val sStr = String.format("%02d:%02d", startMin / 60, startMin % 60)
-            val duration = (totalSlots - startIdx) * (minutesPerSlot / 60.0)
-            list.add(OutageInterval(sStr, "24:00", duration, startMin, 1440))
-        }
-
-        if (detailedIntervalsCache.size > 64) {
-            detailedIntervalsCache.clear()
-        }
-        detailedIntervalsCache[cacheKey] = list
-        return list
+        return computeDetailedIntervals(slots)
     }
 
-    // Common status and countdown calculation for Today's schedule
+    // Common status and countdown calculation for Today's schedule (falling back to Tomorrow's schedule when today's blackouts are over)
     fun getCurrentStatusAndCountdown(queue: String): ScheduleStatusInfo {
         val slots = getTodaySlots(queue)
+        val tomorrowSlots = getTomorrowSlots(queue)
         val now = LocalTime.now(ZoneId.of("Europe/Kyiv"))
-        val currentMinutes = now.hour * 60 + now.minute
-        val currentSeconds = now.second
-
-        if (slots.isEmpty()) {
-            return ScheduleStatusInfo(
-                isBlackoutNow = false,
-                countdownText = "00:00:00",
-                nextSlotTime = "Відключень немає"
-            )
-        }
-
-        val totalSlots = slots.size
-        val minutesPerSlot = 1440 / totalSlots
-        val currentSlotIdx = (currentMinutes / minutesPerSlot).coerceIn(0, totalSlots - 1)
-        val isBlackoutNow = slots[currentSlotIdx].status == SlotStatus.POWER_OFF
-
-        // Find next transition
-        val targetStatus = if (isBlackoutNow) SlotStatus.POWER_ON else SlotStatus.POWER_OFF
-        var targetSlotIdx = -1
-
-        for (i in (currentSlotIdx + 1) until totalSlots) {
-            if (slots[i].status == targetStatus) {
-                targetSlotIdx = i
-                break
-            }
-        }
-
-        // If not found in remainder of day, search from midnight (next day wrap)
-        if (targetSlotIdx == -1) {
-            for (i in 0..currentSlotIdx) {
-                if (slots[i].status == targetStatus) {
-                    targetSlotIdx = i
-                    break
-                }
-            }
-        }
-
-        if (targetSlotIdx == -1) {
-            // Whole day is in the same status
-            return ScheduleStatusInfo(
-                isBlackoutNow = isBlackoutNow,
-                countdownText = "24:00:00",
-                nextSlotTime = if (isBlackoutNow) "Цілий день" else "Відключень немає"
-            )
-        }
-
-        val targetMinutes = targetSlotIdx * minutesPerSlot
-        val remainingMinutes = if (targetMinutes > currentMinutes) {
-            targetMinutes - currentMinutes - 1
-        } else {
-            (1440 + targetMinutes) - currentMinutes - 1
-        }
-        val remainingSeconds = 60 - currentSeconds
-
-        val totalSecsLeft = remainingMinutes * 60 + remainingSeconds
-        val h = totalSecsLeft / 3600
-        val m = (totalSecsLeft % 3600) / 60
-        val s = totalSecsLeft % 60
-        val countdownText = String.format("%02d:%02d:%02d", h, m, s)
-
-        // Find time range for the upcoming or current blackout block using pre-computed integer minutes
-        val intervals = getDetailedIntervals(slots)
-        val nextPeriod = if (isBlackoutNow) {
-            intervals.firstOrNull {
-                currentMinutes in it.startMinuteOfDay until it.endMinuteOfDay
-            }?.let { "${it.startStr} – ${it.endStr}" } ?: slots[currentSlotIdx].let { "${it.startTimeStr} – ${it.endTimeStr}" }
-        } else {
-            intervals.firstOrNull {
-                it.startMinuteOfDay >= currentMinutes
-            }?.let { "${it.startStr} – ${it.endStr}" } ?: intervals.firstOrNull()?.let { "${it.startStr} – ${it.endStr}" } ?: "Відключень немає"
-        }
-
-        val totalBlackoutHours = intervals.sumOf { it.durationHours }
-
-        return ScheduleStatusInfo(
-            isBlackoutNow = isBlackoutNow,
-            countdownText = countdownText,
-            nextSlotTime = nextPeriod,
-            totalBlackoutHours = totalBlackoutHours
-        )
+        return calculateStatusAndCountdown(slots, tomorrowSlots, now)
     }
 
     /**

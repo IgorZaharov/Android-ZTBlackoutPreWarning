@@ -5,8 +5,42 @@ import {
   Copy, 
   Check, 
   Smartphone,
-  BookOpen
+  BookOpen,
+  Download
 } from 'lucide-react';
+
+const PROMO_IMAGES = [
+  {
+    id: 1,
+    src: '/playstore/playstore_promo_1.png',
+    filename: 'playstore_promo_1.png',
+    title: '1. Візуалізація відключень світла'
+  },
+  {
+    id: 2,
+    src: '/playstore/playstore_promo_2.png',
+    filename: 'playstore_promo_2.png',
+    title: '2. Налаштування черги, інтервалів попередження, та автоматичного оновлення при зміні графіків'
+  },
+  {
+    id: 3,
+    src: '/playstore/playstore_promo_3.png',
+    filename: 'playstore_promo_3.png',
+    title: '3. Українська та Англійська мови інтерфейсу та окремі налаштування попереджень'
+  },
+  {
+    id: 4,
+    src: '/playstore/playstore_promo_4.png',
+    filename: 'playstore_promo_4.png',
+    title: '4. Віджети для головного екрану'
+  },
+  {
+    id: 5,
+    src: '/playstore/playstore_promo_5.png',
+    filename: 'playstore_promo_5.png',
+    title: '5. Мінімальне споживання батареї'
+  }
+];
 
 export const PlayStoreGuide: React.FC = () => {
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
@@ -20,7 +54,7 @@ export const PlayStoreGuide: React.FC = () => {
   const keytoolCmd = `keytool -genkey -v -keystore release-key.jks -keyalg RSA -keysize 2048 -validity 10000 -alias zt-blackout`;
 
   return (
-    <div className="flex flex-col gap-4 p-2 max-w-2xl mx-auto select-none">
+    <div className="flex flex-col gap-4 p-2 max-w-4xl mx-auto select-none">
       {/* Header */}
       <div className="bg-[#1C1D24] rounded-3xl p-6 border border-white/5 shadow-xl">
         <div className="flex items-center gap-3.5 mb-2">
@@ -29,12 +63,52 @@ export const PlayStoreGuide: React.FC = () => {
           </div>
           <div>
             <h2 className="text-base font-bold text-white tracking-tight">
-              Google Play Store Publishing Guide
+              Google Play Store Publishing Guide & Promo Graphics
             </h2>
             <p className="text-xs text-[#8E92A0]">
-              Покрокова інструкція публікації додатку ZT Blackout Pre-Warning в Google Play
+              Рекламні зображення для Google Play Store (1080×1920) та покрокова інструкція публікації
             </p>
           </div>
+        </div>
+      </div>
+
+      {/* Google Play Store Promotional Images (1080x1920) */}
+      <div className="bg-[#1C1D24] rounded-3xl p-5 border border-white/5 shadow-xl flex flex-col gap-4">
+        <div className="flex items-center justify-between flex-wrap gap-2">
+          <h3 className="text-xs font-bold text-white uppercase tracking-wider">
+            Рекламні скріншоти для Google Play Store (1080×1920, 9:16)
+          </h3>
+          <span className="text-[11px] font-mono text-emerald-400 bg-emerald-500/15 px-2.5 py-0.5 rounded-full border border-emerald-500/30">
+            5 PNG готові до завантаження
+          </span>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
+          {PROMO_IMAGES.map((item) => (
+            <div
+              key={item.id}
+              className="bg-[#121316] rounded-2xl p-3 border border-white/10 flex flex-col justify-between gap-3"
+            >
+              <div className="flex flex-col gap-2">
+                <img
+                  src={item.src}
+                  alt={item.title}
+                  className="w-full aspect-[9/16] object-cover rounded-xl border border-white/10 shadow-lg"
+                />
+                <p className="text-[11px] text-zinc-200 font-medium leading-snug">
+                  {item.title}
+                </p>
+              </div>
+              <a
+                href={item.src}
+                download={item.filename}
+                className="w-full py-2 px-3 rounded-xl bg-[#FF5E3A] hover:bg-[#e04e2c] text-white font-bold text-xs flex items-center justify-center gap-1.5 transition-all shadow-md"
+              >
+                <Download className="w-3.5 h-3.5" />
+                <span>Завантажити PNG</span>
+              </a>
+            </div>
+          ))}
         </div>
       </div>
 

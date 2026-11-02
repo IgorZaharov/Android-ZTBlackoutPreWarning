@@ -47,7 +47,7 @@
             </intent-filter>
         </receiver>
 
-        <!-- Boot Completed Receiver to Reschedule Workers and Alarms -->
+        <!-- Boot & Time Change Receiver to Reschedule Workers and Alarms -->
         <receiver
             android:name=".worker.BootCompletedReceiver"
             android:enabled="true"
@@ -55,6 +55,9 @@
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
                 <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+                <action android:name="android.intent.action.TIME_SET" />
+                <action android:name="android.intent.action.TIMEZONE_CHANGED" />
+                <action android:name="android.intent.action.DATE_CHANGED" />
             </intent-filter>
         </receiver>
 

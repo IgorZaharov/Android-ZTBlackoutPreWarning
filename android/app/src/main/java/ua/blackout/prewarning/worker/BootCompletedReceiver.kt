@@ -7,16 +7,32 @@ import androidx.work.ExistingPeriodicWorkPolicy
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import ua.blackout.prewarning.notification.AlarmScheduler
 import ua.blackout.prewarning.widget.BlackoutGlanceWidget
 
 class BootCompletedReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
-        if (intent.action == Intent.ACTION_BOOT_COMPLETED || intent.action == Intent.ACTION_MY_PACKAGE_REPLACED) {
+        val action = intent.action ?: return
+        if (
+            action == Intent.ACTION_BOOT_COMPLETED ||
+            action == Intent.ACTION_MY_PACKAGE_REPLACED ||
+            action == Intent.ACTION_TIME_CHANGED ||
+            action == Intent.ACTION_TIMEZONE_CHANGED ||
+            action == Intent.ACTION_DATE_CHANGED
+        ) {
             val appContext = context.applicationContext
-            ScheduleSyncWorker.schedulePeriodicWork(appContext, ExistingPeriodicWorkPolicy.UPDATE)
+            val isTimeChanged = action == Intent.ACTION_TIME_CHANGED ||
+                action == Intent.ACTION_TIMEZONE_CHANGED ||
+                action == Intent.ACTION_DATE_CHANGED
+
+            if (!isTimeChanged) {
+                ScheduleSyncWorker.schedulePeriodicWork(appContext, ExistingPeriodicWorkPolicy.UPDATE)
+            }
+
             val pendingResult = goAsync()
             CoroutineScope(Dispatchers.IO).launch {
                 try {
+                    AlarmScheduler.syncAlarms(appContext, onTimeChanged = isTimeChanged)
                     if (BlackoutGlanceWidget.hasActiveWidgets(appContext)) {
                         BlackoutGlanceWidget.syncAllWidgets(appContext)
                     }
@@ -30,4 +46,3 @@ class BootCompletedReceiver : BroadcastReceiver() {
         }
     }
 }
-

@@ -38,6 +38,34 @@ class AlertRegistry(context: Context) {
     }
 
     /**
+     * When system clock is adjusted backward on mobile, clears notified flags for slots
+     * whose alert time is now in the future again or whose recorded notification timestamp
+     * is ahead of current wall-clock time.
+     */
+    fun resetFutureSlotsOnTimeChange(nowMs: Long, futureBlockIds: Set<String>) {
+        val editor = prefs.edit()
+        var modified = false
+        for ((key, value) in prefs.all) {
+            if (key.startsWith("ts_") && value is Long && value > nowMs) {
+                val slotId = key.removePrefix("ts_")
+                editor.remove(key)
+                editor.remove("notified_$slotId")
+                modified = true
+            }
+        }
+        for (blockId in futureBlockIds) {
+            if (prefs.contains("notified_$blockId") || prefs.contains("ts_$blockId")) {
+                editor.remove("notified_$blockId")
+                editor.remove("ts_$blockId")
+                modified = true
+            }
+        }
+        if (modified) {
+            editor.apply()
+        }
+    }
+
+    /**
      * Clears old history (e.g. from previous days)
      */
     fun clearHistory() {

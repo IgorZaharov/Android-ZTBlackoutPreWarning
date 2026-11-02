@@ -10,6 +10,7 @@ import kotlinx.coroutines.launch
 import ua.blackout.prewarning.data.parser.ZtoeParser
 import ua.blackout.prewarning.data.repository.ScheduleRepository
 import ua.blackout.prewarning.data.repository.SettingsRepository
+import ua.blackout.prewarning.notification.AlarmScheduler
 
 class BlackoutWidgetReceiver : GlanceAppWidgetReceiver() {
     override val glanceAppWidget: GlanceAppWidget = BlackoutGlanceWidget()
@@ -40,13 +41,15 @@ class BlackoutWidgetReceiver : GlanceAppWidgetReceiver() {
 
                 if (forceNetwork || !cacheFresh) {
                     val res = ZtoeParser.fetchFullSchedule(settings.cityUrl, settings.queue, appContext)
-                    if (res.status == ua.blackout.prewarning.data.parser.FetchStatus.SUCCESS || !scheduleRepo.hasValidTodayCache(settings.queue)) {
+                    if (res.status == ua.blackout.prewarning.data.parser.FetchStatus.SUCCESS) {
                         scheduleRepo.saveSchedule(settings.queue, res.todaySlots, res.tomorrowSlots)
                     }
                 }
+                AlarmScheduler.syncAlarms(appContext)
                 BlackoutGlanceWidget.syncAllWidgets(appContext)
             } catch (_: Exception) {
                 try {
+                    AlarmScheduler.syncAlarms(appContext)
                     BlackoutGlanceWidget.syncAllWidgets(appContext)
                 } catch (_: Exception) {}
             } finally {

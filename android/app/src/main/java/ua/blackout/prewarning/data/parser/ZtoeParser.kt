@@ -72,12 +72,33 @@ object ZtoeParser {
     @Volatile
     private var cachedDoc: Document? = null
     @Volatile
+    private var cachedDocDate: LocalDate? = null
+    @Volatile
     private var cachedDocTimestampMs: Long = 0L
     @Volatile
     private var lastETag: String? = null
     @Volatile
     private var lastModifiedHeader: String? = null
     private const val DOC_MEMORY_CACHE_MS = 20_000L
+    private val FULL_DATE_REGEX = Regex("""(?<!\d)(\d{1,2})\.(\d{1,2})\.(\d{4})(?!\d)""")
+    private val SHORT_DATE_REGEX = Regex("""(?<!\d)(\d{1,2})\.(\d{1,2})(?!\.\d|\d)""")
+
+    private fun matchesTableDate(headerText: String, targetDate: LocalDate): Boolean {
+        val fullMatches = FULL_DATE_REGEX.findAll(headerText).toList()
+        if (fullMatches.isNotEmpty()) {
+            return fullMatches.any { m ->
+                val d = m.groupValues[1].toIntOrNull()
+                val mo = m.groupValues[2].toIntOrNull()
+                val y = m.groupValues[3].toIntOrNull()
+                d == targetDate.dayOfMonth && mo == targetDate.monthValue && y == targetDate.year
+            }
+        }
+        return SHORT_DATE_REGEX.findAll(headerText).any { m ->
+            val d = m.groupValues[1].toIntOrNull()
+            val mo = m.groupValues[2].toIntOrNull()
+            d == targetDate.dayOfMonth && mo == targetDate.monthValue
+        }
+    }
 
     fun fetchFullSchedule(
         url: String,
@@ -108,9 +129,9 @@ object ZtoeParser {
         return try {
             val nowMs = System.currentTimeMillis()
             val recentDoc = cachedDoc
-            val canUseConditionalHeaders = !forceNetwork && repo != null && repo.hasValidTodayCache(queue)
+            val canUseConditionalHeaders = !forceNetwork && repo != null && repo.hasValidTodayCache(queue) && repo.hasTomorrowSchedule(queue)
 
-            val doc: Document? = if (!forceNetwork && recentDoc != null && cachedDocUrl == cleanUrl && (nowMs - cachedDocTimestampMs) < DOC_MEMORY_CACHE_MS) {
+            val doc: Document? = if (!forceNetwork && recentDoc != null && cachedDocUrl == cleanUrl && cachedDocDate == today && (nowMs - cachedDocTimestampMs) in 0 until DOC_MEMORY_CACHE_MS) {
                 recentDoc
             } else {
                 fetchDocumentWithWindows1251(
@@ -119,6 +140,7 @@ object ZtoeParser {
                 )?.also { fetched ->
                     cachedDocUrl = cleanUrl
                     cachedDoc = fetched
+                    cachedDocDate = today
                     cachedDocTimestampMs = System.currentTimeMillis()
                 }
             }
@@ -201,26 +223,18 @@ object ZtoeParser {
             table.select("table").size == 1 && table.select("tr").size >= 12
         }
 
-        val todayD1 = String.format("%02d.%02d.%04d", today.dayOfMonth, today.monthValue, today.year)
-        val todayD2 = String.format("%d.%d.%04d", today.dayOfMonth, today.monthValue, today.year)
-        val todayD3 = String.format("%02d.%02d", today.dayOfMonth, today.monthValue)
-
-        val tomorrowD1 = String.format("%02d.%02d.%04d", tomorrow.dayOfMonth, tomorrow.monthValue, tomorrow.year)
-        val tomorrowD2 = String.format("%d.%d.%04d", tomorrow.dayOfMonth, tomorrow.monthValue, tomorrow.year)
-        val tomorrowD3 = String.format("%02d.%02d", tomorrow.dayOfMonth, tomorrow.monthValue)
-
         var todayTable: Element? = null
         var tomorrowTable: Element? = null
 
         for (table in leafTables) {
             val rows = table.select("tr")
-            val headerText = rows.take(3).joinToString(" ") { it.text() }
+            val headerText = rows.take(2).joinToString(" ") { it.text() }
             val tableText = table.text()
             val hasQueues = tableText.contains("1.1") && tableText.contains("6.2")
             if (!hasQueues) continue
 
-            val matchesToday = headerText.contains(todayD1) || headerText.contains(todayD2) || headerText.contains(todayD3)
-            val matchesTomorrow = headerText.contains(tomorrowD1) || headerText.contains(tomorrowD2) || headerText.contains(tomorrowD3)
+            val matchesToday = matchesTableDate(headerText, today)
+            val matchesTomorrow = matchesTableDate(headerText, tomorrow)
 
             if (matchesToday && todayTable == null) {
                 todayTable = table
@@ -306,14 +320,11 @@ object ZtoeParser {
         val leafTables = doc.select("table").filter { table ->
             table.select("table").size == 1 && table.select("tr").size >= 12
         }
-        val d1 = String.format("%02d.%02d.%04d", date.dayOfMonth, date.monthValue, date.year)
-        val d2 = String.format("%d.%d.%04d", date.dayOfMonth, date.monthValue, date.year)
-        val d3 = String.format("%02d.%02d", date.dayOfMonth, date.monthValue)
 
         return leafTables.any { table ->
             val hasQueues = table.text().contains("1.1") && table.text().contains("6.2")
-            val headerText = table.select("tr").take(3).joinToString(" ") { it.text() }
-            hasQueues && (headerText.contains(d1) || headerText.contains(d2) || headerText.contains(d3))
+            val headerText = table.select("tr").take(2).joinToString(" ") { it.text() }
+            hasQueues && matchesTableDate(headerText, date)
         }
     }
 
@@ -326,14 +337,11 @@ object ZtoeParser {
         val leafTables = doc.select("table").filter { table ->
             table.select("table").size == 1 && table.select("tr").size >= 12
         }
-        val d1 = String.format("%02d.%02d.%04d", date.dayOfMonth, date.monthValue, date.year)
-        val d2 = String.format("%d.%d.%04d", date.dayOfMonth, date.monthValue, date.year)
-        val d3 = String.format("%02d.%02d", date.dayOfMonth, date.monthValue)
 
         val matchingTable = leafTables.firstOrNull { table ->
             val hasQueues = table.text().contains("1.1") && table.text().contains("6.2")
-            val headerText = table.select("tr").take(3).joinToString(" ") { it.text() }
-            hasQueues && (headerText.contains(d1) || headerText.contains(d2) || headerText.contains(d3))
+            val headerText = table.select("tr").take(2).joinToString(" ") { it.text() }
+            hasQueues && matchesTableDate(headerText, date)
         }
 
         if (matchingTable != null) {
@@ -449,10 +457,11 @@ object ZtoeParser {
             val attr = (cell.attr("style") + " " + cell.attr("bgcolor") + " " + cell.className()).lowercase()
             val text = cell.text().trim().lowercase()
 
-            val isOff = attr.contains("#ff3333") || attr.contains("#ff3b30") ||
+            val isOff = attr.contains("#ff3333") || attr.contains("#ff3b30") || attr.contains("#ff0000") ||
                     attr.contains("background:red") || attr.contains("background: red") ||
                     attr.contains("background-color:red") || attr.contains("background-color: red") ||
                     attr.contains("rgb(255, 51, 51)") || attr.contains("rgb(255,51,51)") ||
+                    attr.contains("rgb(255, 0, 0)") || attr.contains("rgb(255,0,0)") ||
                     attr.contains("danger") || text.contains("вимк") || text.contains("відкл") || text == "в" || text == "-"
 
             val status = if (isOff) SlotStatus.POWER_OFF else SlotStatus.POWER_ON

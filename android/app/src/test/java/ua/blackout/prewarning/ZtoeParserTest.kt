@@ -156,4 +156,60 @@ class ZtoeParserTest {
         val morningColors = TimeOfDayPalette.getInterpolatedColors(LocalTime.of(8, 30))
         assertEquals(TimeOfDayPalette.MORNING.primary, morningColors.primary)
     }
+
+    @Test
+    fun testUnitC_TomorrowNextPeriodAndDayTabIntervals() {
+        val today = LocalDate.of(2026, 11, 2)
+        val headerCells = (1..24).joinToString("") { h ->
+            val start = String.format("%02d:00", h - 1)
+            val end = String.format("%02d:00", h)
+            "<td>$start-$end</td>"
+        }
+        val queues = listOf("1.1", "1.2", "2.1", "2.2", "3.1", "3.2", "4.1", "4.2", "5.1", "5.2", "6.1", "6.2")
+        fun buildDayTable(dateStr: String, offRange: IntRange): String {
+            val rows = queues.joinToString("\n") { q ->
+                val cells = (0 until 48).joinToString("") { idx ->
+                    val bg = if (idx in offRange) "#ff0000" else "#ffffff"
+                    "<td style=\"background: $bg;\"></td>"
+                }
+                "<tr><td>1</td><td>$q</td>$cells</tr>"
+            }
+            return """
+                <table>
+                    <tr><td colspan="50">Графік погодинних відключень на $dateStr</td></tr>
+                    <tr><td>Черга</td><td>Підчерга</td>$headerCells</tr>
+                    $rows
+                </table>
+            """.trimIndent()
+        }
+
+        // Today (02.11.2026): blackout 08:00–10:00 (slots 16..19)
+        // Tomorrow (03.11.2026): blackout 14:00–17:00 (slots 28..33)
+        val html = "<html><body>${buildDayTable("02.11.2026", 16..19)}${buildDayTable("03.11.2026", 28..33)}</body></html>"
+        val doc = Jsoup.parse(html)
+        val parsed = ZtoeParser.parseDocumentFull(doc, "1.1", today)
+
+        assertTrue("Expected tomorrow schedule to be detected", parsed.hasTomorrowSchedule && parsed.tomorrowSlots != null)
+
+        val todayIntervals = ua.blackout.prewarning.data.repository.ScheduleRepository.computeDetailedIntervals(parsed.todaySlots)
+        val tomorrowIntervals = ua.blackout.prewarning.data.repository.ScheduleRepository.computeDetailedIntervals(parsed.tomorrowSlots!!)
+
+        assertEquals(1, todayIntervals.size)
+        assertEquals("08:00", todayIntervals[0].startStr)
+        assertEquals("10:00", todayIntervals[0].endStr)
+
+        assertEquals(1, tomorrowIntervals.size)
+        assertEquals("14:00", tomorrowIntervals[0].startStr)
+        assertEquals("17:00", tomorrowIntervals[0].endStr)
+
+        // At 21:00 (after today's 08:00–10:00 blackout), Next period must show tomorrow's 1st blackout (14:00 – 17:00), NOT today's 1st blackout (08:00 – 10:00)
+        val statusAt21 = ua.blackout.prewarning.data.repository.ScheduleRepository.calculateStatusAndCountdown(
+            slots = parsed.todaySlots,
+            tomorrowSlots = parsed.tomorrowSlots,
+            now = LocalTime.of(21, 0, 0)
+        )
+        assertEquals(false, statusAt21.isBlackoutNow)
+        assertEquals("14:00 – 17:00", statusAt21.nextSlotTime)
+        assertEquals("17:00:00", statusAt21.countdownText)
+    }
 }

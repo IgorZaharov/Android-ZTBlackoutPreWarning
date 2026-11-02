@@ -44,6 +44,7 @@ import ua.blackout.prewarning.data.parser.FetchStatus
 import ua.blackout.prewarning.data.parser.ZtoeParser
 import ua.blackout.prewarning.data.repository.ScheduleRepository
 import ua.blackout.prewarning.data.repository.SettingsRepository
+import ua.blackout.prewarning.notification.AlarmScheduler
 import ua.blackout.prewarning.notification.NotificationHelper
 import ua.blackout.prewarning.ui.AppStrings
 import ua.blackout.prewarning.ui.theme.TimeOfDayPalette
@@ -140,11 +141,25 @@ fun BlackoutAppNavigation(
         mutableStateOf(scheduleRepo.getCurrentStatusAndCountdown(queue))
     }
 
-    LaunchedEffect(lifecycleOwner, slots, queue) {
+    LaunchedEffect(lifecycleOwner, slots, tomorrowSlots, hasTomorrowSchedule, queue) {
         lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+            withContext(Dispatchers.IO) {
+                try {
+                    AlarmScheduler.syncAlarms(appContext)
+                } catch (_: Exception) {}
+            }
             while (true) {
-                statusInfo = scheduleRepo.getCurrentStatusAndCountdown(queue)
-                delay(1000L)
+                val updatedStatus = ScheduleRepository.calculateStatusAndCountdown(
+                    slots = slots,
+                    tomorrowSlots = if (hasTomorrowSchedule) tomorrowSlots else null,
+                    now = LocalTime.now(ZoneId.of("Europe/Kyiv"))
+                )
+                statusInfo = updatedStatus
+                if (!updatedStatus.isBlackoutNow && updatedStatus.countdownText == "--:--:--" && updatedStatus.nextSlotTime == "Відключень немає") {
+                    delay(15_000L)
+                } else {
+                    delay(1000L)
+                }
             }
         }
     }
@@ -166,7 +181,11 @@ fun BlackoutAppNavigation(
                 slots = scheduleRepo.getTodaySlots(updated.queue)
                 tomorrowSlots = scheduleRepo.getTomorrowSlots(updated.queue)
                 hasTomorrowSchedule = scheduleRepo.hasTomorrowSchedule(updated.queue)
-                statusInfo = scheduleRepo.getCurrentStatusAndCountdown(updated.queue)
+                statusInfo = ScheduleRepository.calculateStatusAndCountdown(
+                    slots = slots,
+                    tomorrowSlots = if (hasTomorrowSchedule) tomorrowSlots else null,
+                    now = LocalTime.now(ZoneId.of("Europe/Kyiv"))
+                )
             }
         }
     }
@@ -177,7 +196,11 @@ fun BlackoutAppNavigation(
             slots = scheduleRepo.getTodaySlots(currentQ)
             tomorrowSlots = scheduleRepo.getTomorrowSlots(currentQ)
             hasTomorrowSchedule = scheduleRepo.hasTomorrowSchedule(currentQ)
-            statusInfo = scheduleRepo.getCurrentStatusAndCountdown(currentQ)
+            statusInfo = ScheduleRepository.calculateStatusAndCountdown(
+                slots = slots,
+                tomorrowSlots = if (hasTomorrowSchedule) tomorrowSlots else null,
+                now = LocalTime.now(ZoneId.of("Europe/Kyiv"))
+            )
         }
     }
 
@@ -217,25 +240,40 @@ fun BlackoutAppNavigation(
         slots = scheduleRepo.getTodaySlots(activeQ)
         tomorrowSlots = scheduleRepo.getTomorrowSlots(activeQ)
         hasTomorrowSchedule = scheduleRepo.hasTomorrowSchedule(activeQ)
-        statusInfo = scheduleRepo.getCurrentStatusAndCountdown(activeQ)
+        statusInfo = ScheduleRepository.calculateStatusAndCountdown(
+            slots = slots,
+            tomorrowSlots = if (hasTomorrowSchedule) tomorrowSlots else null,
+            now = LocalTime.now(ZoneId.of("Europe/Kyiv"))
+        )
 
         val res = withContext(Dispatchers.IO) {
             ZtoeParser.fetchFullSchedule(siteUrl, activeQ, appContext)
         }
-        if (res.status == FetchStatus.SUCCESS || !scheduleRepo.hasValidTodayCache(activeQ)) {
+        if (res.status == FetchStatus.SUCCESS) {
+            slots = res.todaySlots
+            tomorrowSlots = res.tomorrowSlots
+            hasTomorrowSchedule = res.hasTomorrowSchedule && res.tomorrowSlots != null
             withContext(Dispatchers.IO) {
                 scheduleRepo.saveSchedule(activeQ, res.todaySlots, res.tomorrowSlots)
             }
+        } else {
+            slots = scheduleRepo.getTodaySlots(activeQ)
+            tomorrowSlots = scheduleRepo.getTomorrowSlots(activeQ)
+            hasTomorrowSchedule = scheduleRepo.hasTomorrowSchedule(activeQ)
         }
-        slots = scheduleRepo.getTodaySlots(activeQ)
-        tomorrowSlots = scheduleRepo.getTomorrowSlots(activeQ)
-        hasTomorrowSchedule = scheduleRepo.hasTomorrowSchedule(activeQ)
-        statusInfo = scheduleRepo.getCurrentStatusAndCountdown(activeQ)
         val now = LocalTime.now(ZoneId.of("Europe/Kyiv"))
+        statusInfo = ScheduleRepository.calculateStatusAndCountdown(
+            slots = slots,
+            tomorrowSlots = if (hasTomorrowSchedule) tomorrowSlots else null,
+            now = now
+        )
         lastUpdated = now.format(DateTimeFormatter.ofPattern("HH:mm"))
         nextUpdated = now.plusMinutes(refreshMinutes.toLong()).format(DateTimeFormatter.ofPattern("HH:mm"))
 
         withContext(Dispatchers.IO) {
+            try {
+                AlarmScheduler.syncAlarms(appContext)
+            } catch (_: Exception) {}
             try {
                 BlackoutGlanceWidget.syncAllWidgets(appContext)
             } catch (_: Exception) {}
@@ -255,14 +293,21 @@ fun BlackoutAppNavigation(
                     nextUpdated = now.plusMinutes(refreshMinutes.toLong()).format(DateTimeFormatter.ofPattern("HH:mm"))
                     slots = res.todaySlots
                     tomorrowSlots = res.tomorrowSlots
-                    hasTomorrowSchedule = res.hasTomorrowSchedule
+                    hasTomorrowSchedule = res.hasTomorrowSchedule && res.tomorrowSlots != null
+                    statusInfo = ScheduleRepository.calculateStatusAndCountdown(
+                        slots = res.todaySlots,
+                        tomorrowSlots = if (hasTomorrowSchedule) res.tomorrowSlots else null,
+                        now = now
+                    )
                     withContext(Dispatchers.IO) {
                         scheduleRepo.saveSchedule(queue, res.todaySlots, res.tomorrowSlots)
+                        try {
+                            AlarmScheduler.syncAlarms(appContext)
+                        } catch (_: Exception) {}
                         try {
                             BlackoutGlanceWidget.syncAllWidgets(appContext)
                         } catch (_: Exception) {}
                     }
-                    statusInfo = scheduleRepo.getCurrentStatusAndCountdown(queue)
                     showAppBanner(AppStrings.refreshSuccessToast(resolvedLang))
                 }
                 FetchStatus.NO_INTERNET -> {
@@ -394,6 +439,7 @@ fun BlackoutAppNavigation(
                             vibrationEnabled = updated.vibrationEnabled
                             coroutineScope.launch(Dispatchers.IO) {
                                 try {
+                                    AlarmScheduler.syncAlarms(appContext)
                                     BlackoutGlanceWidget.syncAllWidgets(appContext)
                                 } catch (_: Exception) {}
                             }
@@ -423,6 +469,12 @@ fun BlackoutAppNavigation(
                             tomorrowSlots = scheduleRepo.getTomorrowSlots(newQueue)
                             hasTomorrowSchedule = scheduleRepo.hasTomorrowSchedule(newQueue)
                             statusInfo = scheduleRepo.getCurrentStatusAndCountdown(newQueue)
+                            coroutineScope.launch(Dispatchers.IO) {
+                                try {
+                                    AlarmScheduler.syncAlarms(appContext)
+                                    BlackoutGlanceWidget.syncAllWidgets(appContext)
+                                } catch (_: Exception) {}
+                            }
                         },
                         onSiteUrlChanged = { newUrl ->
                             siteUrl = newUrl
@@ -433,6 +485,11 @@ fun BlackoutAppNavigation(
                             advanceMinutes = it
                             val current = settingsRepo.getSettings()
                             settingsRepo.saveSettings(current.copy(advanceNoticeMinutes = it))
+                            coroutineScope.launch(Dispatchers.IO) {
+                                try {
+                                    AlarmScheduler.syncAlarms(appContext)
+                                } catch (_: Exception) {}
+                            }
                         },
                         onRefreshMinutesChanged = {
                             refreshMinutes = it
@@ -452,6 +509,7 @@ fun BlackoutAppNavigation(
                             vibrationEnabled = updated.vibrationEnabled
                             coroutineScope.launch(Dispatchers.IO) {
                                 try {
+                                    AlarmScheduler.syncAlarms(appContext)
                                     BlackoutGlanceWidget.syncAllWidgets(appContext)
                                 } catch (_: Exception) {}
                             }
@@ -470,6 +528,11 @@ fun BlackoutAppNavigation(
                             currentLanguage = it
                             val current = settingsRepo.getSettings()
                             settingsRepo.saveSettings(current.copy(language = it))
+                            coroutineScope.launch(Dispatchers.IO) {
+                                try {
+                                    BlackoutGlanceWidget.syncAllWidgets(appContext)
+                                } catch (_: Exception) {}
+                            }
                         },
                         onSendTestAlert = {
                             // Test notification strictly respects sound and vibration settings
@@ -522,6 +585,12 @@ fun BlackoutAppNavigation(
                                 appContext,
                                 androidx.work.ExistingPeriodicWorkPolicy.UPDATE
                             )
+                            coroutineScope.launch(Dispatchers.IO) {
+                                try {
+                                    AlarmScheduler.syncAlarms(appContext)
+                                    BlackoutGlanceWidget.syncAllWidgets(appContext)
+                                } catch (_: Exception) {}
+                            }
                         },
                         onShowAppBanner = showAppBanner
                     )

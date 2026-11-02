@@ -43,21 +43,26 @@ export const MainView: React.FC<MainViewProps> = ({
     }
   }, [tomorrowSchedule, selectedDayTab]);
 
-  const activeSchedule = selectedDayTab === 'today' ? schedule : (tomorrowSchedule || schedule);
+  const isTomorrowActive = selectedDayTab === 'tomorrow' && tomorrowSchedule !== null;
+  const activeSchedule = isTomorrowActive ? tomorrowSchedule : schedule;
+  const activeSlotsSignature = useMemo(
+    () => activeSchedule.slots.map(s => (s.status === 'POWER_OFF' ? '1' : '0')).join(''),
+    [activeSchedule]
+  );
 
   const blackoutIntervals = useMemo(
     () => getBlackoutIntervals(activeSchedule.slots),
-    [activeSchedule.slots]
+    [selectedDayTab, activeSchedule.dateStr, activeSlotsSignature, activeSchedule.slots]
   );
 
   const chartBlocks = useMemo(
     () => getChartHalfHourBlocks(activeSchedule.slots),
-    [activeSchedule.slots]
+    [selectedDayTab, activeSchedule.dateStr, activeSlotsSignature, activeSchedule.slots]
   );
 
   const countdown = useMemo(
-    () => calculateOutageCountdown(schedule, now),
-    [schedule, now]
+    () => calculateOutageCountdown(schedule, now, tomorrowSchedule),
+    [schedule, now, tomorrowSchedule]
   );
 
   const currentHour = now.getHours();
@@ -324,7 +329,7 @@ export const MainView: React.FC<MainViewProps> = ({
             <div className="flex flex-col gap-2">
               {blackoutIntervals.map((interval, idx) => (
                 <div
-                  key={idx}
+                  key={`${selectedDayTab}_${interval.start}_${interval.end}_${idx}`}
                   className="flex items-center justify-between p-3 rounded-xl bg-white/[0.06] backdrop-blur-md border border-white/10"
                 >
                   <div className="flex items-center gap-3">
