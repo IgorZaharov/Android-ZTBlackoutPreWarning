@@ -404,7 +404,7 @@ function runUnitTestB() {
     'MainScreen.kt and ScheduleRepository.kt must recompose blackout hours on Today/Tomorrow tab switch and compute tomorrow 1st blackout'
   );
 
-  // 11. Verify Build Version 1.3.1 across project files
+  // 11. Verify Build Version 1.3.1 & Developer Handover Documentation across project files
   const packageJson = JSON.parse(fs.readFileSync(path.join(ROOT_DIR, 'package.json'), 'utf-8'));
   assert.equal(packageJson.version, '1.3.1', 'package.json version must be 1.3.1');
   const buildGradle = fs.readFileSync(path.join(ROOT_DIR, 'android/app/build.gradle.kts'), 'utf-8');
@@ -417,6 +417,18 @@ function runUnitTestB() {
   const aboutViewTsx = fs.readFileSync(path.join(ROOT_DIR, 'src/components/AboutView.tsx'), 'utf-8');
   assert.ok(aboutViewTsx.includes("'1.3.1'"), 'AboutView.tsx fallback version must be 1.3.1');
   assert.ok(changelog.includes('## [1.3.1]'), 'CHANGELOG.md must document v1.3.1');
+
+  const handoverPath = path.join(ROOT_DIR, 'HANDOVER.md');
+  assert.ok(fs.existsSync(handoverPath), 'HANDOVER.md must exist in repository root');
+  const handoverMd = fs.readFileSync(handoverPath, 'utf-8');
+  assert.ok(
+    handoverMd.includes('ZtoeParser.kt') &&
+      handoverMd.includes('ScheduleRepository.kt') &&
+      handoverMd.includes('AlarmScheduler.kt') &&
+      handoverMd.includes('BlackoutGlanceWidget.kt') &&
+      handoverMd.includes('docs/screenshots/UI1.jpg'),
+    'HANDOVER.md must document core classes, methods, and application screenshots'
+  );
 
   // 12. Verify git modified UI files are mentioned in CHANGELOG.md
   try {
