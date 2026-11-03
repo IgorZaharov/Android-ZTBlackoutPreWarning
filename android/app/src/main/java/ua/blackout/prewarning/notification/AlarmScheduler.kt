@@ -13,7 +13,7 @@ import ua.blackout.prewarning.widget.BlackoutGlanceWidget
 import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.LocalTime
-import java.time.ZoneId
+import ua.blackout.prewarning.data.KYIV_ZONE
 import java.time.format.DateTimeFormatter
 
 object AlarmScheduler {
@@ -48,7 +48,7 @@ object AlarmScheduler {
         val alarmManager = appContext.getSystemService(Context.ALARM_SERVICE) as AlarmManager
         val alarmPrefs = appContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
 
-        val kyivZone = ZoneId.of("Europe/Kyiv")
+        val kyivZone = KYIV_ZONE
         val today = LocalDate.now(kyivZone)
         val now = LocalDateTime.now(kyivZone)
 

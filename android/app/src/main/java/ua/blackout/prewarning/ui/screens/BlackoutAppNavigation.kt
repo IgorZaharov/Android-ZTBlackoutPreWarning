@@ -50,7 +50,7 @@ import ua.blackout.prewarning.ui.AppStrings
 import ua.blackout.prewarning.ui.theme.TimeOfDayPalette
 import ua.blackout.prewarning.widget.BlackoutGlanceWidget
 import java.time.LocalTime
-import java.time.ZoneId
+import ua.blackout.prewarning.data.KYIV_ZONE
 import java.time.format.DateTimeFormatter
 
 private fun smoothGaussianRadialBrush(
@@ -117,7 +117,7 @@ fun BlackoutAppNavigation(
     }
 
     // Dynamic Last Updated & Next Update Timers
-    val nowTime = remember { LocalTime.now(ZoneId.of("Europe/Kyiv")) }
+    val nowTime = remember { LocalTime.now(KYIV_ZONE) }
     var lastUpdated by remember {
         mutableStateOf(nowTime.format(DateTimeFormatter.ofPattern("HH:mm")))
     }
@@ -152,7 +152,7 @@ fun BlackoutAppNavigation(
                 val updatedStatus = ScheduleRepository.calculateStatusAndCountdown(
                     slots = slots,
                     tomorrowSlots = if (hasTomorrowSchedule) tomorrowSlots else null,
-                    now = LocalTime.now(ZoneId.of("Europe/Kyiv"))
+                    now = LocalTime.now(KYIV_ZONE)
                 )
                 statusInfo = updatedStatus
                 if (!updatedStatus.isBlackoutNow && updatedStatus.countdownText == "--:--:--" && updatedStatus.nextSlotTime == "Відключень немає") {
@@ -184,7 +184,7 @@ fun BlackoutAppNavigation(
                 statusInfo = ScheduleRepository.calculateStatusAndCountdown(
                     slots = slots,
                     tomorrowSlots = if (hasTomorrowSchedule) tomorrowSlots else null,
-                    now = LocalTime.now(ZoneId.of("Europe/Kyiv"))
+                    now = LocalTime.now(KYIV_ZONE)
                 )
             }
         }
@@ -199,7 +199,7 @@ fun BlackoutAppNavigation(
             statusInfo = ScheduleRepository.calculateStatusAndCountdown(
                 slots = slots,
                 tomorrowSlots = if (hasTomorrowSchedule) tomorrowSlots else null,
-                now = LocalTime.now(ZoneId.of("Europe/Kyiv"))
+                now = LocalTime.now(KYIV_ZONE)
             )
         }
     }
@@ -243,7 +243,7 @@ fun BlackoutAppNavigation(
         statusInfo = ScheduleRepository.calculateStatusAndCountdown(
             slots = slots,
             tomorrowSlots = if (hasTomorrowSchedule) tomorrowSlots else null,
-            now = LocalTime.now(ZoneId.of("Europe/Kyiv"))
+            now = LocalTime.now(KYIV_ZONE)
         )
 
         val res = withContext(Dispatchers.IO) {
@@ -261,7 +261,7 @@ fun BlackoutAppNavigation(
             tomorrowSlots = scheduleRepo.getTomorrowSlots(activeQ)
             hasTomorrowSchedule = scheduleRepo.hasTomorrowSchedule(activeQ)
         }
-        val now = LocalTime.now(ZoneId.of("Europe/Kyiv"))
+        val now = LocalTime.now(KYIV_ZONE)
         statusInfo = ScheduleRepository.calculateStatusAndCountdown(
             slots = slots,
             tomorrowSlots = if (hasTomorrowSchedule) tomorrowSlots else null,
@@ -288,7 +288,7 @@ fun BlackoutAppNavigation(
             }
             when (res.status) {
                 FetchStatus.SUCCESS -> {
-                    val now = LocalTime.now(ZoneId.of("Europe/Kyiv"))
+                    val now = LocalTime.now(KYIV_ZONE)
                     lastUpdated = now.format(DateTimeFormatter.ofPattern("HH:mm"))
                     nextUpdated = now.plusMinutes(refreshMinutes.toLong()).format(DateTimeFormatter.ofPattern("HH:mm"))
                     slots = res.todaySlots
@@ -323,11 +323,11 @@ fun BlackoutAppNavigation(
     // Gradual Time-of-Day Background Palette (60% Primary, 30% Secondary, 10% Accent, Supporting/Core)
     // Keyed by minute-of-day so full-screen radial gradients are only recalculated once per minute instead of every second
     val currentMinuteOfDay = remember(statusInfo.countdownText) {
-        val now = LocalTime.now(ZoneId.of("Europe/Kyiv"))
+        val now = LocalTime.now(KYIV_ZONE)
         now.hour * 60 + now.minute
     }
     val bgColors = remember(currentMinuteOfDay) {
-        TimeOfDayPalette.getInterpolatedColors(LocalTime.now(ZoneId.of("Europe/Kyiv")))
+        TimeOfDayPalette.getInterpolatedColors(LocalTime.now(KYIV_ZONE))
     }
 
     // Pager for swipe left/right between windows with beyondViewportPageCount = 2 to eliminate swipe jittering
@@ -495,7 +495,7 @@ fun BlackoutAppNavigation(
                             refreshMinutes = it
                             val current = settingsRepo.getSettings()
                             settingsRepo.saveSettings(current.copy(refreshIntervalMinutes = it.toLong()))
-                            val now = LocalTime.now(ZoneId.of("Europe/Kyiv"))
+                            val now = LocalTime.now(KYIV_ZONE)
                             nextUpdated = now.plusMinutes(it.toLong()).format(DateTimeFormatter.ofPattern("HH:mm"))
                             ua.blackout.prewarning.worker.ScheduleSyncWorker.schedulePeriodicWork(
                                 appContext,

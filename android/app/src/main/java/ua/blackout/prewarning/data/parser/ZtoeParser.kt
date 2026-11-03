@@ -13,7 +13,7 @@ import java.net.UnknownHostException
 import java.net.SocketTimeoutException
 import java.net.ConnectException
 import java.time.LocalDate
-import java.time.ZoneId
+import ua.blackout.prewarning.data.KYIV_ZONE
 import java.time.format.DateTimeFormatter
 
 enum class FetchStatus {
@@ -106,7 +106,7 @@ object ZtoeParser {
         context: Context? = null,
         forceNetwork: Boolean = false
     ): ScheduleFetchResult {
-        val kyivZone = ZoneId.of("Europe/Kyiv")
+        val kyivZone = KYIV_ZONE
         val today = LocalDate.now(kyivZone)
         val todayStr = today.format(DateTimeFormatter.ISO_LOCAL_DATE)
 
@@ -277,7 +277,7 @@ object ZtoeParser {
     fun parseDocumentFull(
         doc: Document,
         queue: String,
-        today: LocalDate = LocalDate.now(ZoneId.of("Europe/Kyiv"))
+        today: LocalDate = LocalDate.now(KYIV_ZONE)
     ): ScheduleFetchResult {
         val tomorrow = today.plusDays(1)
         val todayStr = today.format(DateTimeFormatter.ISO_LOCAL_DATE)
@@ -352,7 +352,7 @@ object ZtoeParser {
 
     fun fetchAndParse(url: String, queue: String, date: LocalDate): List<BlackoutSlot> {
         val result = fetchFullSchedule(url, queue)
-        val today = LocalDate.now(ZoneId.of("Europe/Kyiv"))
+        val today = LocalDate.now(KYIV_ZONE)
         return if (date == today) {
             result.todaySlots
         } else if (date == today.plusDays(1) && result.tomorrowSlots != null) {

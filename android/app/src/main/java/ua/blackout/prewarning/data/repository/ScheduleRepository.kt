@@ -7,7 +7,7 @@ import ua.blackout.prewarning.data.model.SlotStatus
 import ua.blackout.prewarning.data.parser.ZtoeParser
 import java.time.LocalDate
 import java.time.LocalTime
-import java.time.ZoneId
+import ua.blackout.prewarning.data.KYIV_ZONE
 import java.time.format.DateTimeFormatter
 
 data class ScheduleStatusInfo(
@@ -216,7 +216,7 @@ class ScheduleRepository(context: Context) {
 
     fun saveSchedule(queue: String, todaySlots: List<BlackoutSlot>, tomorrowSlots: List<BlackoutSlot>?) {
         val editor = prefs.edit()
-        val kyivZone = ZoneId.of("Europe/Kyiv")
+        val kyivZone = KYIV_ZONE
         val today = LocalDate.now(kyivZone)
         val todayStr = today.format(DateTimeFormatter.ISO_LOCAL_DATE)
         val tomorrowStr = today.plusDays(1).format(DateTimeFormatter.ISO_LOCAL_DATE)
@@ -252,7 +252,7 @@ class ScheduleRepository(context: Context) {
     ) {
         if (schedules.isEmpty()) return
         val editor = prefs.edit()
-        val kyivZone = ZoneId.of("Europe/Kyiv")
+        val kyivZone = KYIV_ZONE
         val today = LocalDate.now(kyivZone)
         val todayStr = today.format(DateTimeFormatter.ISO_LOCAL_DATE)
         val tomorrowStr = today.plusDays(1).format(DateTimeFormatter.ISO_LOCAL_DATE)
@@ -288,7 +288,7 @@ class ScheduleRepository(context: Context) {
     }
 
     fun getEncodedTodaySlots(queue: String): String {
-        val todayStr = LocalDate.now(ZoneId.of("Europe/Kyiv")).format(DateTimeFormatter.ISO_LOCAL_DATE)
+        val todayStr = LocalDate.now(KYIV_ZONE).format(DateTimeFormatter.ISO_LOCAL_DATE)
         val cachedDate = prefs.getString("cache_today_date_$queue", prefs.getString("cache_today_date", null))
         val cachedEncoded = prefs.getString("cache_today_slots_$queue", null)
         if (cachedDate == todayStr && !cachedEncoded.isNullOrEmpty()) {
@@ -298,14 +298,14 @@ class ScheduleRepository(context: Context) {
     }
 
     fun hasValidTodayCache(queue: String): Boolean {
-        val todayStr = LocalDate.now(ZoneId.of("Europe/Kyiv")).format(DateTimeFormatter.ISO_LOCAL_DATE)
+        val todayStr = LocalDate.now(KYIV_ZONE).format(DateTimeFormatter.ISO_LOCAL_DATE)
         val cachedDate = prefs.getString("cache_today_date_$queue", prefs.getString("cache_today_date", null))
         val cachedEncoded = prefs.getString("cache_today_slots_$queue", null)
         return cachedDate == todayStr && !cachedEncoded.isNullOrEmpty() && cachedEncoded.length >= 24
     }
 
     fun getTodaySlots(queue: String): List<BlackoutSlot> {
-        val kyivZone = ZoneId.of("Europe/Kyiv")
+        val kyivZone = KYIV_ZONE
         val today = LocalDate.now(kyivZone)
         val todayStr = today.format(DateTimeFormatter.ISO_LOCAL_DATE)
         val cachedDate = prefs.getString("cache_today_date_$queue", prefs.getString("cache_today_date", null))
@@ -321,7 +321,7 @@ class ScheduleRepository(context: Context) {
     }
 
     fun getTomorrowSlots(queue: String): List<BlackoutSlot>? {
-        val kyivZone = ZoneId.of("Europe/Kyiv")
+        val kyivZone = KYIV_ZONE
         val today = LocalDate.now(kyivZone)
         val todayStr = today.format(DateTimeFormatter.ISO_LOCAL_DATE)
         val tomorrowStr = today.plusDays(1).format(DateTimeFormatter.ISO_LOCAL_DATE)
@@ -396,7 +396,7 @@ class ScheduleRepository(context: Context) {
     fun getCurrentStatusAndCountdown(queue: String): ScheduleStatusInfo {
         val slots = getTodaySlots(queue)
         val tomorrowSlots = getTomorrowSlots(queue)
-        val now = LocalTime.now(ZoneId.of("Europe/Kyiv"))
+        val now = LocalTime.now(KYIV_ZONE)
         return calculateStatusAndCountdown(slots, tomorrowSlots, now)
     }
 
@@ -407,7 +407,7 @@ class ScheduleRepository(context: Context) {
      * If no future blackout interval remains today, checks tomorrow's schedule if available.
      */
     fun getNextUpcomingIntervalText(queue: String): String {
-        val now = LocalTime.now(ZoneId.of("Europe/Kyiv"))
+        val now = LocalTime.now(KYIV_ZONE)
         val currentMinutes = now.hour * 60 + now.minute
         val todayIntervals = getDetailedIntervals(getTodaySlots(queue))
 

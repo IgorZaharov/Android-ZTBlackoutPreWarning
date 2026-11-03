@@ -55,7 +55,7 @@ import ua.blackout.prewarning.data.repository.SettingsRepository
 import ua.blackout.prewarning.notification.AlarmScheduler
 import ua.blackout.prewarning.ui.AppStrings
 import java.time.LocalTime
-import java.time.ZoneId
+import ua.blackout.prewarning.data.KYIV_ZONE
 
 class BlackoutGlanceWidget : GlanceAppWidget() {
 
@@ -354,7 +354,7 @@ class BlackoutGlanceWidget : GlanceAppWidget() {
                         .padding(12.dp)
                 ) {
                     if (isBigWidget) {
-                        val now = LocalTime.now(ZoneId.of("Europe/Kyiv"))
+                        val now = LocalTime.now(KYIV_ZONE)
                         val chartBitmap = renderAnalogCounterBitmap(slots, now.hour, now.minute)
 
                         // ----------------- 3x2 BIG WIDGET -----------------

@@ -13,7 +13,7 @@ import ua.blackout.prewarning.widget.BlackoutGlanceWidget
 import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.LocalTime
-import java.time.ZoneId
+import ua.blackout.prewarning.data.KYIV_ZONE
 
 class AlarmReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
@@ -43,7 +43,7 @@ class AlarmReceiver : BroadcastReceiver() {
                     return@launch
                 }
 
-                val kyivZone = ZoneId.of("Europe/Kyiv")
+                val kyivZone = KYIV_ZONE
                 val today = LocalDate.now(kyivZone)
                 if (!slotId.startsWith("block_${today}_")) {
                     return@launch

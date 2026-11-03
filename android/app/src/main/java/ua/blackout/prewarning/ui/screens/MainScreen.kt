@@ -38,7 +38,7 @@ import ua.blackout.prewarning.data.repository.ScheduleRepository
 import ua.blackout.prewarning.ui.AppStrings
 import ua.blackout.prewarning.ui.components.TimelineBar
 import java.time.LocalTime
-import java.time.ZoneId
+import ua.blackout.prewarning.data.KYIV_ZONE
 import java.time.format.DateTimeFormatter
 
 @Composable
@@ -97,7 +97,7 @@ fun MainScreen(
     }
 
     val kyivNow = remember(countdownText) {
-        LocalTime.now(ZoneId.of("Europe/Kyiv"))
+        LocalTime.now(KYIV_ZONE)
     }
     val currentTimeStr = remember(kyivNow.hour, kyivNow.minute) {
         kyivNow.format(DateTimeFormatter.ofPattern("HH:mm"))

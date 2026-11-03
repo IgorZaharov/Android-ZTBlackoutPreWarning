@@ -1,5 +1,10 @@
 # Changelog
 
+## [1.3.2] - 2026-11-03
+
+### Fixed
+- **Crash on Devices With Outdated Time Zone Data (`KyivZone.kt`, `ZtoeParser.kt`, `ScheduleRepository.kt`, `AlarmReceiver.kt`, `AlarmScheduler.kt`, `BlackoutAppNavigation.kt`, `MainScreen.kt`, `TimeOfDayPalette.kt`, `BlackoutGlanceWidget.kt`)**: Fixed the app crashing on launch with `ZoneRulesException: Unknown time-zone ID: Europe/Kyiv` on devices whose tzdata predates 2022b (e.g. Android 10 without Mainline time zone updates). All Kyiv time calculations now use a shared `KYIV_ZONE` that falls back to the legacy `Europe/Kiev` ID, then to the system default zone.
+
 ## [1.3.1] - 2026-11-02
 
 ### Fixed

@@ -3,7 +3,7 @@ package ua.blackout.prewarning.ui.theme
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.lerp
 import java.time.LocalTime
-import java.time.ZoneId
+import ua.blackout.prewarning.data.KYIV_ZONE
 
 data class TimeOfDayColors(
     val primary: Color,    // 60% weight
@@ -71,7 +71,7 @@ object TimeOfDayPalette {
         Anchor(26.0f, NIGHT)
     )
 
-    fun getInterpolatedColors(time: LocalTime = LocalTime.now(ZoneId.of("Europe/Kyiv"))): TimeOfDayColors {
+    fun getInterpolatedColors(time: LocalTime = LocalTime.now(KYIV_ZONE)): TimeOfDayColors {
         val h = time.hour + (time.minute / 60f) + (time.second / 3600f)
         val adjustedH = if (h < 2.0f) h + 24.0f else h
 
