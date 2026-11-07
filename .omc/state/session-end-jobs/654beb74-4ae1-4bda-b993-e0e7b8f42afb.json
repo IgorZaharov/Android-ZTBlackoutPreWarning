@@ -1,0 +1,241 @@
+{
+  "version": 1,
+  "jobId": "0de62867-9f1d-4539-936b-4db12981503d",
+  "sessionId": "654beb74-4ae1-4bda-b993-e0e7b8f42afb",
+  "scopeKey": "ae2c5516b15d547a34506a21e099d8cd0b1b53fab48739d1c5fcac48a6deabe9",
+  "revision": 0,
+  "createdAt": "2026-11-03T09:18:55.704Z",
+  "updatedAt": "2026-11-03T09:18:55.704Z",
+  "producerGraceExpiresAt": "2026-11-03T09:19:25.705Z",
+  "bestEffortDeadlineAt": "2026-11-03T09:20:18.705Z",
+  "producers": {
+    "core": {
+      "state": "prepared",
+      "intentKey": "7d61fc9b8b3fa3d6153dfec39670d213e51223b3c9bd87939f754c27aa268a6b",
+      "payloadDigest": "7d61fc9b8b3fa3d6153dfec39670d213e51223b3c9bd87939f754c27aa268a6b"
+    },
+    "wiki": {
+      "state": "absent"
+    }
+  },
+  "actions": {
+    "foreground-cleanup": {
+      "class": "required",
+      "phase": "deferred-required",
+      "status": "pending",
+      "attempts": 0,
+      "idempotencyKey": "4992fa8e51a0e1fb1aaf35ef91d42683f1d3b32b7239f11f611303859e3705e3",
+      "payload": {
+        "transcriptPath": "C:\\Users\\igorz\\.claude\\projects\\D--Projects-Android-ZTBlackoutPreWarning\\654beb74-4ae1-4bda-b993-e0e7b8f42afb.jsonl",
+        "cwd": "D:\\Projects\\Android-ZTBlackoutPreWarning",
+        "reason": "other",
+        "input": {
+          "session_id": "654beb74-4ae1-4bda-b993-e0e7b8f42afb",
+          "transcript_path": "C:\\Users\\igorz\\.claude\\projects\\D--Projects-Android-ZTBlackoutPreWarning\\654beb74-4ae1-4bda-b993-e0e7b8f42afb.jsonl",
+          "cwd": "D:\\Projects\\Android-ZTBlackoutPreWarning",
+          "scratchpad_dir": "C:\\Users\\igorz\\AppData\\Local\\Temp\\claude\\D--Projects-Android-ZTBlackoutPreWarning\\654beb74-4ae1-4bda-b993-e0e7b8f42afb\\scratchpad",
+          "prompt_id": "819751e4-c03c-4771-a97e-66087d530c52",
+          "hook_event_name": "SessionEnd",
+          "reason": "other"
+        },
+        "initialTeamNames": [],
+        "openClawRouting": {}
+      },
+      "budgetMs": 9000
+    },
+    "wiki-capture": {
+      "class": "required",
+      "phase": "deferred-required",
+      "status": "pending",
+      "attempts": 0,
+      "idempotencyKey": "bbfc80b422dad37b9a1d7c821142b8db01877f37b115ad222822bd498779821d",
+      "payload": {
+        "transcriptPath": "C:\\Users\\igorz\\.claude\\projects\\D--Projects-Android-ZTBlackoutPreWarning\\654beb74-4ae1-4bda-b993-e0e7b8f42afb.jsonl",
+        "cwd": "D:\\Projects\\Android-ZTBlackoutPreWarning",
+        "reason": "other",
+        "input": {
+          "session_id": "654beb74-4ae1-4bda-b993-e0e7b8f42afb",
+          "transcript_path": "C:\\Users\\igorz\\.claude\\projects\\D--Projects-Android-ZTBlackoutPreWarning\\654beb74-4ae1-4bda-b993-e0e7b8f42afb.jsonl",
+          "cwd": "D:\\Projects\\Android-ZTBlackoutPreWarning",
+          "scratchpad_dir": "C:\\Users\\igorz\\AppData\\Local\\Temp\\claude\\D--Projects-Android-ZTBlackoutPreWarning\\654beb74-4ae1-4bda-b993-e0e7b8f42afb\\scratchpad",
+          "prompt_id": "819751e4-c03c-4771-a97e-66087d530c52",
+          "hook_event_name": "SessionEnd",
+          "reason": "other"
+        },
+        "initialTeamNames": [],
+        "openClawRouting": {}
+      },
+      "budgetMs": 9000
+    },
+    "team-cleanup": {
+      "class": "required",
+      "phase": "deferred-required",
+      "status": "pending",
+      "attempts": 0,
+      "idempotencyKey": "ea3d68b02b9a183f28774d25e63e78004150b17c7235c57303f1b5706d76a657",
+      "payload": {
+        "transcriptPath": "C:\\Users\\igorz\\.claude\\projects\\D--Projects-Android-ZTBlackoutPreWarning\\654beb74-4ae1-4bda-b993-e0e7b8f42afb.jsonl",
+        "cwd": "D:\\Projects\\Android-ZTBlackoutPreWarning",
+        "reason": "other",
+        "input": {
+          "session_id": "654beb74-4ae1-4bda-b993-e0e7b8f42afb",
+          "transcript_path": "C:\\Users\\igorz\\.claude\\projects\\D--Projects-Android-ZTBlackoutPreWarning\\654beb74-4ae1-4bda-b993-e0e7b8f42afb.jsonl",
+          "cwd": "D:\\Projects\\Android-ZTBlackoutPreWarning",
+          "scratchpad_dir": "C:\\Users\\igorz\\AppData\\Local\\Temp\\claude\\D--Projects-Android-ZTBlackoutPreWarning\\654beb74-4ae1-4bda-b993-e0e7b8f42afb\\scratchpad",
+          "prompt_id": "819751e4-c03c-4771-a97e-66087d530c52",
+          "hook_event_name": "SessionEnd",
+          "reason": "other"
+        },
+        "initialTeamNames": [],
+        "openClawRouting": {}
+      },
+      "budgetMs": 9000
+    },
+    "python-cleanup": {
+      "class": "required",
+      "phase": "deferred-required",
+      "status": "pending",
+      "attempts": 0,
+      "idempotencyKey": "664dc418644c8b9e2c079ed4a24cea4db2dbe10ea16159c6e80363954aee421c",
+      "payload": {
+        "transcriptPath": "C:\\Users\\igorz\\.claude\\projects\\D--Projects-Android-ZTBlackoutPreWarning\\654beb74-4ae1-4bda-b993-e0e7b8f42afb.jsonl",
+        "cwd": "D:\\Projects\\Android-ZTBlackoutPreWarning",
+        "reason": "other",
+        "input": {
+          "session_id": "654beb74-4ae1-4bda-b993-e0e7b8f42afb",
+          "transcript_path": "C:\\Users\\igorz\\.claude\\projects\\D--Projects-Android-ZTBlackoutPreWarning\\654beb74-4ae1-4bda-b993-e0e7b8f42afb.jsonl",
+          "cwd": "D:\\Projects\\Android-ZTBlackoutPreWarning",
+          "scratchpad_dir": "C:\\Users\\igorz\\AppData\\Local\\Temp\\claude\\D--Projects-Android-ZTBlackoutPreWarning\\654beb74-4ae1-4bda-b993-e0e7b8f42afb\\scratchpad",
+          "prompt_id": "819751e4-c03c-4771-a97e-66087d530c52",
+          "hook_event_name": "SessionEnd",
+          "reason": "other"
+        },
+        "initialTeamNames": [],
+        "openClawRouting": {}
+      },
+      "budgetMs": 9000
+    },
+    "reply-cleanup": {
+      "class": "required",
+      "phase": "deferred-required",
+      "status": "pending",
+      "attempts": 0,
+      "idempotencyKey": "48a5af5b4ae34670326d13014ef99061529fcae5cadef5ec4c6a1f6ebdd7c5db",
+      "payload": {
+        "transcriptPath": "C:\\Users\\igorz\\.claude\\projects\\D--Projects-Android-ZTBlackoutPreWarning\\654beb74-4ae1-4bda-b993-e0e7b8f42afb.jsonl",
+        "cwd": "D:\\Projects\\Android-ZTBlackoutPreWarning",
+        "reason": "other",
+        "input": {
+          "session_id": "654beb74-4ae1-4bda-b993-e0e7b8f42afb",
+          "transcript_path": "C:\\Users\\igorz\\.claude\\projects\\D--Projects-Android-ZTBlackoutPreWarning\\654beb74-4ae1-4bda-b993-e0e7b8f42afb.jsonl",
+          "cwd": "D:\\Projects\\Android-ZTBlackoutPreWarning",
+          "scratchpad_dir": "C:\\Users\\igorz\\AppData\\Local\\Temp\\claude\\D--Projects-Android-ZTBlackoutPreWarning\\654beb74-4ae1-4bda-b993-e0e7b8f42afb\\scratchpad",
+          "prompt_id": "819751e4-c03c-4771-a97e-66087d530c52",
+          "hook_event_name": "SessionEnd",
+          "reason": "other"
+        },
+        "initialTeamNames": [],
+        "openClawRouting": {}
+      },
+      "budgetMs": 9000
+    },
+    "callback": {
+      "class": "best-effort",
+      "phase": "deferred-best-effort",
+      "status": "pending",
+      "attempts": 0,
+      "idempotencyKey": "36151b4603c99aba121acb37c9c1017903773efe2ff65a0f509952dd73204ec6",
+      "payload": {
+        "transcriptPath": "C:\\Users\\igorz\\.claude\\projects\\D--Projects-Android-ZTBlackoutPreWarning\\654beb74-4ae1-4bda-b993-e0e7b8f42afb.jsonl",
+        "cwd": "D:\\Projects\\Android-ZTBlackoutPreWarning",
+        "reason": "other",
+        "input": {
+          "session_id": "654beb74-4ae1-4bda-b993-e0e7b8f42afb",
+          "transcript_path": "C:\\Users\\igorz\\.claude\\projects\\D--Projects-Android-ZTBlackoutPreWarning\\654beb74-4ae1-4bda-b993-e0e7b8f42afb.jsonl",
+          "cwd": "D:\\Projects\\Android-ZTBlackoutPreWarning",
+          "scratchpad_dir": "C:\\Users\\igorz\\AppData\\Local\\Temp\\claude\\D--Projects-Android-ZTBlackoutPreWarning\\654beb74-4ae1-4bda-b993-e0e7b8f42afb\\scratchpad",
+          "prompt_id": "819751e4-c03c-4771-a97e-66087d530c52",
+          "hook_event_name": "SessionEnd",
+          "reason": "other"
+        },
+        "initialTeamNames": [],
+        "openClawRouting": {}
+      },
+      "budgetMs": 2000
+    },
+    "notification": {
+      "class": "best-effort",
+      "phase": "deferred-best-effort",
+      "status": "pending",
+      "attempts": 0,
+      "idempotencyKey": "b80b28151f4d5d57b6e397d56d91774257a4f25f03b81008a43ace00016ec90d",
+      "payload": {
+        "transcriptPath": "C:\\Users\\igorz\\.claude\\projects\\D--Projects-Android-ZTBlackoutPreWarning\\654beb74-4ae1-4bda-b993-e0e7b8f42afb.jsonl",
+        "cwd": "D:\\Projects\\Android-ZTBlackoutPreWarning",
+        "reason": "other",
+        "input": {
+          "session_id": "654beb74-4ae1-4bda-b993-e0e7b8f42afb",
+          "transcript_path": "C:\\Users\\igorz\\.claude\\projects\\D--Projects-Android-ZTBlackoutPreWarning\\654beb74-4ae1-4bda-b993-e0e7b8f42afb.jsonl",
+          "cwd": "D:\\Projects\\Android-ZTBlackoutPreWarning",
+          "scratchpad_dir": "C:\\Users\\igorz\\AppData\\Local\\Temp\\claude\\D--Projects-Android-ZTBlackoutPreWarning\\654beb74-4ae1-4bda-b993-e0e7b8f42afb\\scratchpad",
+          "prompt_id": "819751e4-c03c-4771-a97e-66087d530c52",
+          "hook_event_name": "SessionEnd",
+          "reason": "other"
+        },
+        "initialTeamNames": [],
+        "openClawRouting": {}
+      },
+      "budgetMs": 2000
+    },
+    "openclaw": {
+      "class": "best-effort",
+      "phase": "deferred-best-effort",
+      "status": "pending",
+      "attempts": 0,
+      "idempotencyKey": "a7b65a24d90f31ac9c8637f931dc3fa02dc117522057bab57b855df6fa25ef7a",
+      "payload": {
+        "transcriptPath": "C:\\Users\\igorz\\.claude\\projects\\D--Projects-Android-ZTBlackoutPreWarning\\654beb74-4ae1-4bda-b993-e0e7b8f42afb.jsonl",
+        "cwd": "D:\\Projects\\Android-ZTBlackoutPreWarning",
+        "reason": "other",
+        "input": {
+          "session_id": "654beb74-4ae1-4bda-b993-e0e7b8f42afb",
+          "transcript_path": "C:\\Users\\igorz\\.claude\\projects\\D--Projects-Android-ZTBlackoutPreWarning\\654beb74-4ae1-4bda-b993-e0e7b8f42afb.jsonl",
+          "cwd": "D:\\Projects\\Android-ZTBlackoutPreWarning",
+          "scratchpad_dir": "C:\\Users\\igorz\\AppData\\Local\\Temp\\claude\\D--Projects-Android-ZTBlackoutPreWarning\\654beb74-4ae1-4bda-b993-e0e7b8f42afb\\scratchpad",
+          "prompt_id": "819751e4-c03c-4771-a97e-66087d530c52",
+          "hook_event_name": "SessionEnd",
+          "reason": "other"
+        },
+        "initialTeamNames": [],
+        "openClawRouting": {}
+      },
+      "budgetMs": 2000
+    },
+    "spawn-next": {
+      "class": "best-effort",
+      "phase": "deferred-best-effort",
+      "status": "pending",
+      "attempts": 0,
+      "idempotencyKey": "15e310115ccc65170f39b9c6c8acd63106daab04c5569e7cc50130cb47a8bd44",
+      "payload": {
+        "transcriptPath": "C:\\Users\\igorz\\.claude\\projects\\D--Projects-Android-ZTBlackoutPreWarning\\654beb74-4ae1-4bda-b993-e0e7b8f42afb.jsonl",
+        "cwd": "D:\\Projects\\Android-ZTBlackoutPreWarning",
+        "reason": "other",
+        "input": {
+          "session_id": "654beb74-4ae1-4bda-b993-e0e7b8f42afb",
+          "transcript_path": "C:\\Users\\igorz\\.claude\\projects\\D--Projects-Android-ZTBlackoutPreWarning\\654beb74-4ae1-4bda-b993-e0e7b8f42afb.jsonl",
+          "cwd": "D:\\Projects\\Android-ZTBlackoutPreWarning",
+          "scratchpad_dir": "C:\\Users\\igorz\\AppData\\Local\\Temp\\claude\\D--Projects-Android-ZTBlackoutPreWarning\\654beb74-4ae1-4bda-b993-e0e7b8f42afb\\scratchpad",
+          "prompt_id": "819751e4-c03c-4771-a97e-66087d530c52",
+          "hook_event_name": "SessionEnd",
+          "reason": "other"
+        },
+        "initialTeamNames": [],
+        "openClawRouting": {}
+      },
+      "budgetMs": 2000
+    }
+  },
+  "owner": null,
+  "phase": "collecting"
+}

@@ -18,7 +18,7 @@ import {
   CheckCircle2,
   Bell
 } from 'lucide-react';
-import { DaySchedule, UserSettings, NotificationRecord, Language } from '../types';
+import { DaySchedule, UserSettings, NotificationRecord, Language } from './types';
 import { fetchFullSchedules } from './services/ztoeParser';
 import { 
   loadUserSettings, 
@@ -36,6 +36,7 @@ import { CodeExplorer } from './components/CodeExplorer';
 import { PlayStoreGuide } from './components/PlayStoreGuide';
 import { WidgetSimulator } from './components/WidgetSimulator';
 import { BuildAndDownloadView } from './components/BuildAndDownloadView';
+import { addPowerPoints, resetAllRouletteProgress, resetSavedPowerPoints } from './services/rouletteGame';
 
 export default function App() {
   const [settings, setSettings] = useState<UserSettings>(() => loadUserSettings());
@@ -457,6 +458,76 @@ export default function App() {
                     >
                       <RotateCcw className={`w-4 h-4 ${isRefreshing ? 'animate-spin text-[#FF5E3A]' : ''}`} />
                       <span>{resolvedLang === 'uk' ? 'Оновити дані' : 'Refresh Data'}</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      data-testid="emulator-add-power-points-100"
+                      onClick={() => {
+                        const updated = addPowerPoints(100);
+                        if (typeof window !== 'undefined') {
+                          window.dispatchEvent(
+                            new CustomEvent('zt-roulette-power-points-updated', {
+                              detail: { powerPoints: updated },
+                            })
+                          );
+                        }
+                      }}
+                      className="col-span-2 flex items-center justify-center gap-2 p-3 rounded-2xl bg-[#141A29] hover:bg-white/15 text-[#F5D061] font-bold text-xs transition-all border border-[#D8B467]/60 active:scale-95 shadow-md cursor-pointer"
+                    >
+                      <Zap className="w-4 h-4 fill-current" />
+                      <span>
+                        {resolvedLang === 'uk'
+                          ? '+100 Балів Потужності'
+                          : '+100 Power Points'}
+                      </span>
+                    </button>
+
+                    <button
+                      type="button"
+                      data-testid="emulator-set-power-points-9999"
+                      onClick={() => {
+                        const updated = resetSavedPowerPoints(9999);
+                        if (typeof window !== 'undefined') {
+                          window.dispatchEvent(
+                            new CustomEvent('zt-roulette-power-points-updated', {
+                              detail: { powerPoints: updated },
+                            })
+                          );
+                        }
+                      }}
+                      className="col-span-2 flex items-center justify-center gap-2 p-3 rounded-2xl bg-[#141A29] hover:bg-white/15 text-[#F5D061] font-bold text-xs transition-all border border-[#D8B467]/60 active:scale-95 shadow-md cursor-pointer"
+                    >
+                      <Zap className="w-4 h-4 fill-current" />
+                      <span>
+                        {resolvedLang === 'uk'
+                          ? 'Встановити Бали Потужності: 9999'
+                          : 'Set Power Points to 9999'}
+                      </span>
+                    </button>
+
+                    <button
+                      type="button"
+                      data-testid="emulator-reset-game-progress"
+                      onClick={() => {
+                        resetAllRouletteProgress();
+                        if (typeof window !== 'undefined') {
+                          window.dispatchEvent(new CustomEvent('zt-roulette-progress-reset'));
+                          window.dispatchEvent(
+                            new CustomEvent('zt-roulette-power-points-updated', {
+                              detail: { powerPoints: 0 },
+                            })
+                          );
+                        }
+                      }}
+                      className="col-span-2 flex items-center justify-center gap-2 p-3 rounded-2xl bg-rose-950/70 hover:bg-rose-900/70 text-rose-200 font-bold text-xs transition-all border border-rose-500/40 active:scale-95 shadow-md cursor-pointer"
+                    >
+                      <RotateCcw className="w-4 h-4" />
+                      <span>
+                        {resolvedLang === 'uk'
+                          ? 'Скинути весь прогрес гри (монети, покращення, Бали Потужності)'
+                          : 'Reset All Game Progress (Coins, Upgrades, Power Points)'}
+                      </span>
                     </button>
                   </div>
 

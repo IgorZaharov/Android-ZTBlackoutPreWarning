@@ -1,0 +1,221 @@
+{
+  "version": "1.0.0",
+  "lastScanned": 1793810210923,
+  "projectRoot": "D:\\Projects\\Android-ZTBlackoutPreWarning",
+  "techStack": {
+    "languages": [
+      {
+        "name": "JavaScript/TypeScript",
+        "version": null,
+        "confidence": "high",
+        "markers": [
+          "package.json"
+        ]
+      },
+      {
+        "name": "TypeScript",
+        "version": null,
+        "confidence": "high",
+        "markers": [
+          "tsconfig.json"
+        ]
+      }
+    ],
+    "frameworks": [
+      {
+        "name": "react",
+        "version": "19.0.1",
+        "category": "frontend"
+      },
+      {
+        "name": "react-dom",
+        "version": "19.0.1",
+        "category": "frontend"
+      },
+      {
+        "name": "vite",
+        "version": "8.3.0",
+        "category": "build"
+      },
+      {
+        "name": "express",
+        "version": "4.21.2",
+        "category": "backend"
+      },
+      {
+        "name": "esbuild",
+        "version": "0.25.0",
+        "category": "build"
+      }
+    ],
+    "packageManager": "npm",
+    "runtime": null
+  },
+  "build": {
+    "buildCommand": "npm run build",
+    "testCommand": "npm test",
+    "lintCommand": "npm run lint",
+    "devCommand": "npm run dev",
+    "scripts": {
+      "dev": "vite --port=3000 --host=0.0.0.0",
+      "build": "vite build",
+      "preview": "vite preview",
+      "clean": "rm -rf dist server.js",
+      "lint": "tsc --noEmit",
+      "test": "tsx tests/unit.test.ts"
+    }
+  },
+  "conventions": {
+    "namingStyle": null,
+    "importStyle": null,
+    "testPattern": "*.test.ts",
+    "fileOrganization": "type-based"
+  },
+  "structure": {
+    "isMonorepo": false,
+    "workspaces": [],
+    "mainDirectories": [
+      "docs",
+      "public",
+      "scripts",
+      "src",
+      "tests"
+    ],
+    "gitBranches": {
+      "defaultBranch": "main",
+      "branchingStrategy": null
+    }
+  },
+  "customNotes": [],
+  "directoryMap": {
+    "android": {
+      "path": "android",
+      "purpose": null,
+      "fileCount": 5,
+      "lastAccessed": 1793810210729,
+      "keyFiles": [
+        "build.gradle.kts",
+        "gradle.properties",
+        "gradlew",
+        "gradlew.bat",
+        "settings.gradle.kts"
+      ]
+    },
+    "docs": {
+      "path": "docs",
+      "purpose": "Documentation",
+      "fileCount": 0,
+      "lastAccessed": 1793810210730,
+      "keyFiles": []
+    },
+    "public": {
+      "path": "public",
+      "purpose": "Public files",
+      "fileCount": 3,
+      "lastAccessed": 1793810210730,
+      "keyFiles": [
+        "Android-ZTBlackoutPreWarning.zip",
+        "donations.json",
+        "valid-urls.json"
+      ]
+    },
+    "scripts": {
+      "path": "scripts",
+      "purpose": "Build/utility scripts",
+      "fileCount": 1,
+      "lastAccessed": 1793810210731,
+      "keyFiles": [
+        "generate_android_project.cjs"
+      ]
+    },
+    "src": {
+      "path": "src",
+      "purpose": "Source code",
+      "fileCount": 4,
+      "lastAccessed": 1793810210731,
+      "keyFiles": [
+        "App.tsx",
+        "index.css",
+        "main.tsx",
+        "types.ts"
+      ]
+    },
+    "tests": {
+      "path": "tests",
+      "purpose": "Test files",
+      "fileCount": 1,
+      "lastAccessed": 1793810210732,
+      "keyFiles": [
+        "unit.test.ts"
+      ]
+    },
+    "android\\app": {
+      "path": "android\\app",
+      "purpose": "Application code",
+      "fileCount": 2,
+      "lastAccessed": 1793810210732,
+      "keyFiles": [
+        "build.gradle.kts",
+        "proguard-rules.pro"
+      ]
+    },
+    "src\\components": {
+      "path": "src\\components",
+      "purpose": "UI components",
+      "fileCount": 8,
+      "lastAccessed": 1793810210733,
+      "keyFiles": [
+        "AboutView.tsx",
+        "BuildAndDownloadView.tsx",
+        "CodeExplorer.tsx"
+      ]
+    },
+    "src\\data": {
+      "path": "src\\data",
+      "purpose": "Data files",
+      "fileCount": 1,
+      "lastAccessed": 1793810210733,
+      "keyFiles": [
+        "androidProjectFiles.ts"
+      ]
+    },
+    "src\\services": {
+      "path": "src\\services",
+      "purpose": "Business logic services",
+      "fileCount": 5,
+      "lastAccessed": 1793810210733,
+      "keyFiles": [
+        "alertManager.ts",
+        "donationsService.ts",
+        "i18n.ts"
+      ]
+    }
+  },
+  "hotPaths": [
+    {
+      "path": "CLAUDE.md",
+      "accessCount": 1,
+      "lastAccessed": 1793654074869,
+      "type": "file"
+    },
+    {
+      "path": "",
+      "accessCount": 1,
+      "lastAccessed": 1793697621312,
+      "type": "directory"
+    },
+    {
+      "path": "android/app/src/main/java/ua/blackout/prewarning/data/KyivZone.kt",
+      "accessCount": 1.9998447599186022,
+      "lastAccessed": 1793697684482,
+      "type": "file"
+    },
+    {
+      "path": "CHANGELOG.md",
+      "accessCount": 1,
+      "lastAccessed": 1793697700716,
+      "type": "file"
+    }
+  ],
+  "userDirectives": []
+}

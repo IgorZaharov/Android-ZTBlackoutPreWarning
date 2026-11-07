@@ -18,6 +18,8 @@ object AppStrings {
     fun queue(lang: String) = if (lang == "uk") "Черга" else "Queue"
     fun powerOn(lang: String) = if (lang == "uk") "ЗАРАЗ СВІТЛО Є" else "POWER IS ON"
     fun powerOff(lang: String) = if (lang == "uk") "ЗАРАЗ НЕМАЄ СВІТЛА" else "POWER IS OFF"
+    fun powerUnclear(lang: String) = if (lang == "uk") "Невідомо" else "Unclear"
+    fun outagesUnclear(lang: String) = if (lang == "uk") "Графіки не діють" else "Outages unclear"
     fun powerOnIn(lang: String) = if (lang == "uk") "Світло увімкнуть через:" else "Power on in:"
     fun powerOffIn(lang: String) = if (lang == "uk") "До відключення залишилось:" else "Time until outage:"
     fun outagePeriod(lang: String) = if (lang == "uk") "Період відключення:" else "Outage period:"
@@ -34,6 +36,8 @@ object AppStrings {
     fun errorNoQueuesFound(lang: String) = if (lang == "uk") "На сайті не знайдено черг" else "No queues found on site"
     fun emergencyOutagesLabel(lang: String) = if (lang == "uk") "Інформація про аварійні відключення:" else "Emergency outages info:"
     const val EMERGENCY_OUTAGES_URL = "https://www.facebook.com/ztoe.com.ua"
+    fun siteSchedulesLabel(lang: String) = "Графіки відключень на сайті"
+    const val SITE_SCHEDULES_URL = "https://www.ztoe.com.ua/unhooking-search.php"
 
     // Settings Screen Texts
     fun settingsTitle(lang: String) = if (lang == "uk") "Налаштування" else "Settings"
@@ -95,6 +99,39 @@ object AppStrings {
     fun aboutDonationsTitle(lang: String) = "Donations / Благодійність і Пожертви"
     fun devProfile(lang: String) = if (lang == "uk") "Профіль розробника" else "Developer profile"
     fun repoIssues(lang: String) = if (lang == "uk") "Повідомити про проблему (Issues)" else "Report an issue (Issues)"
-    fun desktopApp(lang: String) = if (lang == "uk") "Оригінальний застосунок для Windows" else "Original Windows desktop app"
+    fun desktopApp(lang: String) = "Світло в Житомирі на Github"
+    const val ABOUT_GITHUB_README_URL = "https://github.com/IgorZaharov/Android-ZTBlackoutPreWarning/blob/main/README.md"
     fun disclaimerText(lang: String) = if (lang == "uk") "Дані про графіки завантажуються безпосередньо з сайту ztoe.com.ua. Застосунок не є офіційним сервісом АТ «Житомиробленерго» та не несе відповідальності за раптові зміни або аварійні відключення з боку НЕК «Укренерго»." else "Data loaded directly from ztoe.com.ua. App is not an official service of JSC Zhytomyroblenergo and is not responsible for sudden emergency cuts."
+
+    // Zhytomyr Roulette Mini-Game Texts (Ukrainian / English depending on Main Application settings)
+    fun rouletteLaunchButton(lang: String = "uk") = if (lang == "en") "Zhytomyr Roulette" else "Житомирська Рулетка"
+    fun rouletteTitle(lang: String) = if (lang == "uk") "Житомирська Рулетка" else "Zhytomyr Roulette"
+    fun rouletteSubtitle(lang: String) = if (lang == "uk") {
+        "Стирайте захисний шар із 48 півгодинних білетів графіка відключень. Кожен світлий білет із цілою лампочкою збільшує рахунок (+1, +2, +3...), білет X2 подвоює бали, а червоний білет викликає блекаут!"
+    } else {
+        "Scratch off the 48 half-hour blackout timeslot tickets. Each beige ticket with an intact lightbulb increases your score (+1, +2, +3...), an X2 ticket doubles your score, while a red ticket triggers a blackout!"
+    }
+    fun rouletteStartBtn(lang: String) = if (lang == "uk") "Почати гру" else "Start"
+    fun rouletteCloseBtn(lang: String) = if (lang == "uk") "Закрити гру" else "Close Game"
+    fun roulettePowerPointsLabel(lang: String) = if (lang == "uk") "Бали Потужності" else "Power Points"
+    fun roulettePowerShopBtn(lang: String) = if (lang == "uk") "Магазин Потужності" else "Power Shop"
+    fun rouletteBackBtn(lang: String) = if (lang == "uk") "Назад" else "Back"
+    fun roulettePointsLabel(lang: String) = if (lang == "uk") "Бали" else "Points"
+    fun rouletteStreakLabel(lang: String) = if (lang == "uk") "Серія" else "Streak"
+    fun rouletteRestartBtn(lang: String) = if (lang == "uk") "Спочатку" else "Restart Game"
+    fun rouletteNewTicketsBtn(lang: String) = if (lang == "uk") "Нові білети" else "Get New Tickets"
+    fun formatRouletteNewTicketsBtnWithCost(lang: String, refreshCount: Int): String {
+        val base = rouletteNewTicketsBtn(lang)
+        val cost = refreshCount.coerceAtLeast(0)
+        val costStr = if (cost == 0) "0" else "-$cost"
+        return "$base ($costStr)"
+    }
+    fun rouletteGameOverTitle(lang: String) = if (lang == "uk") "БЛЕКАУТ! ГРУ ЗАКІНЧЕНО" else "GAME OVER"
+    fun rouletteFinalScoreLabel(lang: String) = if (lang == "uk") "Фінальний рахунок" else "Final Score"
+    fun rouletteAllTimeBestScoreLabel(lang: String) = if (lang == "uk") "Найкращий Результат" else "All time best score"
+    fun rouletteMainMenuBtn(lang: String) = if (lang == "uk") "Головне Меню" else "Main Menu"
+    fun rouletteShareBtn(lang: String = "uk") = if (lang == "uk") "Поділитися" else "Share"
+    fun rouletteSoundLabel(lang: String = "uk") = if (lang == "uk") "Звук" else "Sound"
+    fun rouletteLoadingText(lang: String) = if (lang == "uk") "Роздача білетів..." else "Dealing tickets..."
 }
+

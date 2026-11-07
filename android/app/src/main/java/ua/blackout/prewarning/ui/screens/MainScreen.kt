@@ -38,8 +38,8 @@ import ua.blackout.prewarning.data.repository.ScheduleRepository
 import ua.blackout.prewarning.ui.AppStrings
 import ua.blackout.prewarning.ui.components.TimelineBar
 import java.time.LocalTime
-import ua.blackout.prewarning.data.KYIV_ZONE
 import java.time.format.DateTimeFormatter
+import ua.blackout.prewarning.data.KYIV_ZONE
 
 @Composable
 fun MainScreen(
@@ -70,6 +70,8 @@ fun MainScreen(
 
     val isTomorrowSelected = selectedDayTab == "tomorrow" && hasTomorrowSchedule && tomorrowSlots != null
     val activeSlots = if (isTomorrowSelected) tomorrowSlots!! else slots
+    val isUnclear = activeSlots.isEmpty()
+    val isStatusUnclear = slots.isEmpty()
     val activeSlotsSignature = activeSlots.joinToString("") {
         if (it.status == ua.blackout.prewarning.data.model.SlotStatus.POWER_OFF) "1" else "0"
     }
@@ -80,7 +82,7 @@ fun MainScreen(
     }
 
     // Pulse animation for status dot — only active during an active blackout to avoid 60fps idle CPU/battery drain
-    val pulseScale = if (isBlackoutNow) {
+    val pulseScale = if (!isStatusUnclear && isBlackoutNow) {
         val infiniteTransition = rememberInfiniteTransition(label = "pulse")
         val scale by infiniteTransition.animateFloat(
             initialValue = 0.85f,
@@ -181,12 +183,22 @@ fun MainScreen(
                         Box(
                             modifier = Modifier
                                 .size(10.dp)
-                                .scale(if (isBlackoutNow) pulseScale else 1f)
+                                .scale(if (!isStatusUnclear && isBlackoutNow) pulseScale else 1f)
                                 .clip(CircleShape)
-                                .background(if (isBlackoutNow) Color(0xFFFF5E3A) else Color(0xFF34D399))
+                                .background(
+                                    when {
+                                        isStatusUnclear -> Color(0xFF9CA3AF)
+                                        isBlackoutNow -> Color(0xFFFF5E3A)
+                                        else -> Color(0xFF34D399)
+                                    }
+                                )
                         )
                         Text(
-                            text = if (isBlackoutNow) AppStrings.powerOff(lang) else AppStrings.powerOn(lang),
+                            text = when {
+                                isStatusUnclear -> AppStrings.powerUnclear(lang)
+                                isBlackoutNow -> AppStrings.powerOff(lang)
+                                else -> AppStrings.powerOn(lang)
+                            },
                             fontSize = 13.sp,
                             fontWeight = FontWeight.Bold,
                             color = Color.White
@@ -221,7 +233,7 @@ fun MainScreen(
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
                     Text(
-                        text = if (isBlackoutNow) AppStrings.powerOnIn(lang) else AppStrings.powerOffIn(lang),
+                        text = if (!isStatusUnclear && isBlackoutNow) AppStrings.powerOnIn(lang) else AppStrings.powerOffIn(lang),
                         fontSize = 11.sp,
                         fontWeight = FontWeight.SemiBold,
                         color = Color(0xB3BAE6FD)
@@ -236,7 +248,8 @@ fun MainScreen(
                     )
                 }
 
-                if (slotTimeText.isNotEmpty() && slotTimeText != "Відключень немає") {
+                val effectiveSlotTimeText = if (isStatusUnclear) "--:-- - --:--" else slotTimeText
+                if (effectiveSlotTimeText.isNotEmpty() && effectiveSlotTimeText != "Відключень немає") {
                     Spacer(modifier = Modifier.height(14.dp))
                     Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(Color(0x1AFFFFFF)))
                     Spacer(modifier = Modifier.height(10.dp))
@@ -246,7 +259,7 @@ fun MainScreen(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            text = if (isBlackoutNow) AppStrings.outagePeriod(lang) else AppStrings.nextPeriod(lang),
+                            text = if (!isStatusUnclear && isBlackoutNow) AppStrings.outagePeriod(lang) else AppStrings.nextPeriod(lang),
                             fontSize = 13.sp,
                             color = Color(0xB3BAE6FD)
                         )
@@ -257,7 +270,7 @@ fun MainScreen(
                                 .padding(horizontal = 10.dp, vertical = 4.dp)
                         ) {
                             Text(
-                                text = slotTimeText,
+                                text = effectiveSlotTimeText,
                                 fontSize = 14.sp,
                                 fontWeight = FontWeight.Bold,
                                 fontFamily = FontFamily.Monospace,
@@ -350,84 +363,87 @@ fun MainScreen(
                         slots = activeSlots,
                         currentHour = kyivNow.hour,
                         currentMinute = kyivNow.minute,
-                        showNeedle = selectedDayTab == "today"
+                        showNeedle = selectedDayTab == "today",
+                        lang = lang
                     )
 
-                    // List of Outage Hours for this day
-                    Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(Color(0x1AFFFFFF)))
+                    // List of Outage Hours for this day (removed when outages are unclear)
+                    if (!isUnclear) {
+                        Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(Color(0x1AFFFFFF)))
 
-                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Text(
-                            text = AppStrings.blackoutHoursHeader(lang),
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Color(0xB3BAE6FD)
-                        )
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text(
+                                text = AppStrings.blackoutHoursHeader(lang),
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xB3BAE6FD)
+                            )
 
-                        if (intervals.isNotEmpty()) {
-                            intervals.forEach { interval ->
-                                val start = interval.startStr
-                                val end = interval.endStr
-                                val dur = interval.durationHours
-                                val durStr = if (dur % 1.0 == 0.0) "${dur.toInt()} ${AppStrings.hourShort(lang)}" else "${String.format(java.util.Locale.US, "%.1f", dur)} ${AppStrings.hourShort(lang)}"
-                                Row(
+                            if (intervals.isNotEmpty()) {
+                                intervals.forEach { interval ->
+                                    val start = interval.startStr
+                                    val end = interval.endStr
+                                    val dur = interval.durationHours
+                                    val durStr = if (dur % 1.0 == 0.0) "${dur.toInt()} ${AppStrings.hourShort(lang)}" else "${String.format(java.util.Locale.US, "%.1f", dur)} ${AppStrings.hourShort(lang)}"
+                                    Row(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .clip(RoundedCornerShape(14.dp))
+                                            .background(Color(0x14FFFFFF))
+                                            .padding(horizontal = 14.dp, vertical = 10.dp),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                        ) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(8.dp)
+                                                    .clip(CircleShape)
+                                                    .background(Color(0xFFFF5E3A))
+                                            )
+                                            Text(
+                                                text = "$start – $end",
+                                                fontSize = 15.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                fontFamily = FontFamily.Monospace,
+                                                color = Color.White
+                                            )
+                                        }
+
+                                        Box(
+                                            modifier = Modifier
+                                                .clip(RoundedCornerShape(8.dp))
+                                                .background(Color(0x26FF5E3A))
+                                                .padding(horizontal = 8.dp, vertical = 3.dp)
+                                        ) {
+                                            Text(
+                                                text = durStr,
+                                                fontSize = 11.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                fontFamily = FontFamily.Monospace,
+                                                color = Color(0xFFFF5E3A)
+                                            )
+                                        }
+                                    }
+                                }
+                            } else {
+                                Box(
                                     modifier = Modifier
                                         .fillMaxWidth()
                                         .clip(RoundedCornerShape(14.dp))
                                         .background(Color(0x14FFFFFF))
-                                        .padding(horizontal = 14.dp, vertical = 10.dp),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
+                                        .padding(14.dp),
+                                    contentAlignment = Alignment.Center
                                 ) {
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(10.dp)
-                                    ) {
-                                        Box(
-                                            modifier = Modifier
-                                                .size(8.dp)
-                                                .clip(CircleShape)
-                                                .background(Color(0xFFFF5E3A))
-                                        )
-                                        Text(
-                                            text = "$start – $end",
-                                            fontSize = 15.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            fontFamily = FontFamily.Monospace,
-                                            color = Color.White
-                                        )
-                                    }
-
-                                    Box(
-                                        modifier = Modifier
-                                            .clip(RoundedCornerShape(8.dp))
-                                            .background(Color(0x26FF5E3A))
-                                            .padding(horizontal = 8.dp, vertical = 3.dp)
-                                    ) {
-                                        Text(
-                                            text = durStr,
-                                            fontSize = 11.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            fontFamily = FontFamily.Monospace,
-                                            color = Color(0xFFFF5E3A)
-                                        )
-                                    }
+                                    Text(
+                                        text = AppStrings.noBlackoutsScheduled(lang),
+                                        fontSize = 13.sp,
+                                        color = Color(0xB3BAE6FD)
+                                    )
                                 }
-                            }
-                        } else {
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clip(RoundedCornerShape(14.dp))
-                                    .background(Color(0x14FFFFFF))
-                                    .padding(14.dp),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Text(
-                                    text = AppStrings.noBlackoutsScheduled(lang),
-                                    fontSize = 13.sp,
-                                    color = Color(0xB3BAE6FD)
-                                )
                             }
                         }
                     }
@@ -533,6 +549,75 @@ fun MainScreen(
                         )
                         Text(
                             text = AppStrings.EMERGENCY_OUTAGES_URL,
+                            fontSize = 10.sp,
+                            fontFamily = FontFamily.Monospace,
+                            color = Color(0x99BAE6FD),
+                            maxLines = 1,
+                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                        )
+                    }
+                }
+                Icon(
+                    imageVector = Icons.Default.OpenInNew,
+                    contentDescription = null,
+                    tint = Color(0x99BAE6FD),
+                    modifier = Modifier.size(16.dp)
+                )
+            }
+        }
+
+        // 7. Blackout Schedules on ZTOE Website Link ("Графіки відключень на сайті") at very bottom after Facebook link
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(24.dp))
+                .background(Color(0xBF141A29))
+                .padding(14.dp)
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(Color(0x14FFFFFF))
+                    .clickable {
+                        try {
+                            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(AppStrings.SITE_SCHEDULES_URL))
+                            context.startActivity(intent)
+                        } catch (_: Exception) {}
+                    }
+                    .padding(12.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(36.dp)
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(Color(0xFFFF5E3A)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Language,
+                            contentDescription = "Графіки відключень на сайті",
+                            tint = Color.White,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = AppStrings.siteSchedulesLabel(lang),
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White,
+                            softWrap = true
+                        )
+                        Text(
+                            text = AppStrings.SITE_SCHEDULES_URL,
                             fontSize = 10.sp,
                             fontFamily = FontFamily.Monospace,
                             color = Color(0x99BAE6FD),

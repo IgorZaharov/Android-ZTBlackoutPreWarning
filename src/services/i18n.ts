@@ -14,6 +14,8 @@ export const translations = {
     now: 'Зараз',
     statusPowerOn: 'Світло є',
     statusPowerOff: 'Немає світла',
+    statusUnclear: 'Невідомо',
+    outagesUnclear: 'Графіки не діють',
     nextBlackoutIn: 'До відключення',
     blackoutActiveNow: 'Зараз немає світла',
     powerRestoresIn: 'Світло увімкнуть через',
@@ -44,6 +46,7 @@ export const translations = {
     errorNoQueuesFound: 'На сайті не знайдено черг',
     refreshSuccessToast: 'Сайт доступний, графік оновлено',
     emergencyOutagesLabel: 'Інформація про аварійні відключення:',
+    siteSchedulesLabel: 'Графіки відключень на сайті',
     
     // Navigation
     navSchedule: 'Графік',
@@ -87,7 +90,7 @@ export const translations = {
     aboutDonations: 'Donations / Благодійність і Пожертви',
     aboutGithubProfile: 'Мій головний GitHub профіль',
     aboutRepoIssues: 'Повідомити про помилку / Пропозиції (GitHub Issues)',
-    aboutDesktopRepo: 'Оригінальний Windows Desktop додаток',
+    aboutDesktopRepo: 'Світло в Житомирі на Github',
     aboutDisclaimer: 'Додаток використовує відкриті загальнодоступні дані офіційного веб-сайту ztoe.com.ua. Не є офіційним представником компанії.',
 
     // Widget
@@ -115,6 +118,8 @@ export const translations = {
     statusPowerOn: 'Power ON',
     statusPowerOff: 'Blackout (Power OFF)',
     statusMaybeOff: 'Possible Outage',
+    statusUnclear: 'Unclear',
+    outagesUnclear: 'Outages unclear',
     nextBlackoutIn: 'Closest Power Outage In',
     blackoutActiveNow: 'Power Outage is Active Right Now!',
     powerRestoresIn: 'Power expected to restore in',
@@ -145,6 +150,7 @@ export const translations = {
     errorNoQueuesFound: 'No queues found on site',
     refreshSuccessToast: 'Site reachable, schedule updated',
     emergencyOutagesLabel: 'Emergency outages info:',
+    siteSchedulesLabel: 'Графіки відключень на сайті',
 
     // Navigation
     navSchedule: 'Schedule',
@@ -188,7 +194,7 @@ export const translations = {
     aboutDonations: 'Donations / Благодійність і Пожертви',
     aboutGithubProfile: 'My Main GitHub Profile',
     aboutRepoIssues: 'Report Issues & Requests (GitHub Issues)',
-    aboutDesktopRepo: 'Original Windows Desktop Application',
+    aboutDesktopRepo: 'Світло в Житомирі на Github',
     aboutDisclaimer: 'This application uses public schedule information from ztoe.com.ua. Not an official affiliate of the utility company.',
 
     // Widget

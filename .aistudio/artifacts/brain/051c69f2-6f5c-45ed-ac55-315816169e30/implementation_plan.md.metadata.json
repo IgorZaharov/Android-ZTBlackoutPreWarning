@@ -1,6 +1,6 @@
 {
-  "summary":  "Updated implementation plan for Світло в Житомирі incorporating the 4 additional requirements: round Refresh button on both widgets (Small 2x1 and Big 3x2/4x2), adding https://example.com to /valid-urls.json in Chapter 10, adding the emergency outages Facebook link at the bottom of the Main Window after the refresh block, and fixing the standard Android icon appearing when the Refresh button is pressed in Settings.",
-  "updatedAt":  "2026-10-31T06:54:49.233196444Z",
-  "requestFeedback":  true,
-  "userFacing":  true
+  "summary": "Updated implementation plan for Житомирська Рулетка adding full Ukrainian (uk) and English (en) game interface localization synchronized with the Main Application's language setting.",
+  "updatedAt": "2026-11-06T21:47:25.567900968Z",
+  "requestFeedback": true,
+  "userFacing": true
 }

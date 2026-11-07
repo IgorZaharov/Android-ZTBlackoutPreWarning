@@ -30,9 +30,11 @@ class ScheduleSyncWorker(
             val scheduleRepo = ScheduleRepository(appContext)
             val fetchRes = ZtoeParser.fetchFullSchedule(settings.cityUrl, settings.queue, appContext)
 
-            // Only save schedule when live fetch succeeded so fallback schedules are not persisted as valid cache
+            // Only save schedule when live fetch succeeded; clear cached results if unreachable or no queues found
             if (fetchRes.status == FetchStatus.SUCCESS) {
                 scheduleRepo.saveSchedule(settings.queue, fetchRes.todaySlots, fetchRes.tomorrowSlots)
+            } else {
+                scheduleRepo.clearScheduleCache()
             }
 
             val hasWidgets = try {

@@ -65,6 +65,10 @@ export const MainView: React.FC<MainViewProps> = ({
     [schedule, now, tomorrowSchedule]
   );
 
+  const isUnclear = activeSchedule.slots.length === 0 || Boolean(activeSchedule.isUnclear);
+  const isStatusUnclear =
+    schedule.slots.length === 0 || Boolean(schedule.isUnclear) || Boolean(countdown.isUnclear);
+
   const currentHour = now.getHours();
   const currentMinute = now.getMinutes();
 
@@ -159,14 +163,22 @@ export const MainView: React.FC<MainViewProps> = ({
         <div className="flex items-center justify-between mb-3">
           <div className="flex items-center gap-2.5">
             <span
+              data-testid="power-status-indicator"
               className={`w-3 h-3 rounded-full ${
-                countdown.isCurrentlyBlackout
+                isStatusUnclear
+                  ? 'bg-zinc-400 shadow-md shadow-zinc-400/40'
+                  : countdown.isCurrentlyBlackout
                   ? 'bg-[#FF5E3A] shadow-md shadow-[#FF5E3A]/60 animate-pulse'
                   : 'bg-emerald-400 shadow-md shadow-emerald-400/40'
               }`}
             />
-            <span className="text-sm font-bold tracking-wide uppercase text-white">
-              {countdown.isCurrentlyBlackout
+            <span
+              data-testid="power-status-text"
+              className="text-sm font-bold tracking-wide uppercase text-white"
+            >
+              {isStatusUnclear
+                ? t.statusUnclear
+                : countdown.isCurrentlyBlackout
                 ? (lang === 'uk' ? 'Зараз немає світла' : 'Power is OFF')
                 : (lang === 'uk' ? 'Зараз світло є' : 'Power is ON')}
             </span>
@@ -181,7 +193,9 @@ export const MainView: React.FC<MainViewProps> = ({
         {/* Big Countdown Digits */}
         <div className="my-4 text-center">
           <div className="text-xs uppercase tracking-wider text-sky-200/70 font-semibold mb-1">
-            {countdown.isCurrentlyBlackout
+            {isStatusUnclear
+              ? (lang === 'uk' ? 'До відключення залишилось:' : 'Time until next outage:')
+              : countdown.isCurrentlyBlackout
               ? (lang === 'uk' ? 'Світло увімкнуть через:' : 'Power on in:')
               : countdown.closestBlackoutSlot
               ? (lang === 'uk' ? 'До відключення залишилось:' : 'Time until next outage:')
@@ -196,12 +210,15 @@ export const MainView: React.FC<MainViewProps> = ({
         {countdown.slotDescription && countdown.slotDescription !== 'Відключень немає' && (
           <div className="mt-4 pt-3.5 border-t border-white/10 flex items-center justify-between text-sm">
             <span className="text-sky-200/70">
-              {countdown.isCurrentlyBlackout 
+              {!isStatusUnclear && countdown.isCurrentlyBlackout 
                 ? (lang === 'uk' ? 'Період відключення:' : 'Outage period:') 
                 : (lang === 'uk' ? 'Найближчий період:' : 'Next period:')}
             </span>
-            <span className="text-base font-bold text-white font-mono bg-white/10 backdrop-blur-md px-3 py-1 rounded-xl border border-white/15">
-              {countdown.slotDescription}
+            <span
+              data-testid="next-period-value"
+              className="text-base font-bold text-white font-mono bg-white/10 backdrop-blur-md px-3 py-1 rounded-xl border border-white/15"
+            >
+              {isStatusUnclear ? '--:-- - --:--' : countdown.slotDescription}
             </span>
           </div>
         )}
@@ -250,106 +267,133 @@ export const MainView: React.FC<MainViewProps> = ({
             
             {/* Recessed metallic counter drum slot */}
             <div className="bg-[#4E514E] p-1.5 rounded-lg border-2 border-[#6E716B] shadow-[inset_0_3px_6px_rgba(0,0,0,0.85)]">
-              {/* The 24 hours with 1-2px light gray hour separators and no half-hour separators */}
-              <div className="flex w-full items-center justify-between gap-[1.5px] bg-[#C8C6BC] rounded-[2px] overflow-visible">
-                {chartBlocks.map(({ hour: h, half1Off, half2Off }) => {
-                  const hStr = h.toString().padStart(2, '0');
-                  const nextHStr = (h + 1 === 24 ? 24 : h + 1).toString().padStart(2, '0');
-                  const isCurrentHour = selectedDayTab === 'today' && h === currentHour;
-
-                  return (
+              {isUnclear ? (
+                <div
+                  data-testid="drum-chart-unclear"
+                  className="relative flex w-full h-8 items-center justify-center bg-gradient-to-b from-[#7E8287] via-[#94989E] to-[#6E7277] rounded-[2px] overflow-visible"
+                >
+                  <span className="text-xs font-extrabold tracking-wide text-white drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)] z-10">
+                    {t.outagesUnclear}
+                  </span>
+                  {selectedDayTab === 'today' && (
                     <div
-                      key={`${selectedDayTab}_hour_${h}`}
-                      className="relative flex-1"
-                    >
-                      {/* Two 30-min vertical drum blocks with no half-hour separator */}
-                      <div className="flex w-full items-center gap-0">
-                        {/* 00 - 30 */}
-                        <div
-                          className={`flex-1 h-8 transition-colors cursor-pointer ${
-                            half1Off 
-                              ? 'bg-gradient-to-b from-[#9E1E18] via-[#D62E26] to-[#8C1914]' 
-                              : 'bg-gradient-to-b from-[#D8D6CC] via-[#FCFBF7] to-[#CCC9BE]'
-                          }`}
-                          title={`${hStr}:00 – ${hStr}:30: ${half1Off ? 'Немає світла (відключення)' : 'Світло є'}`}
-                        />
-                        {/* 30 - 60 */}
-                        <div
-                          className={`flex-1 h-8 transition-colors cursor-pointer ${
-                            half2Off 
-                              ? 'bg-gradient-to-b from-[#9E1E18] via-[#D62E26] to-[#8C1914]' 
-                              : 'bg-gradient-to-b from-[#D8D6CC] via-[#FCFBF7] to-[#CCC9BE]'
-                          }`}
-                          title={`${hStr}:30 – ${nextHStr}:00: ${half2Off ? 'Немає світла (відключення)' : 'Світло є'}`}
-                        />
+                      className="absolute -top-3 -bottom-3 w-[3px] bg-[#0B0B0A] rounded-full shadow-[0_0_2px_rgba(255,255,255,0.9)] pointer-events-none z-20 -translate-x-1/2"
+                      style={{ left: `${((currentHour * 60 + currentMinute) / 1440) * 100}%` }}
+                    />
+                  )}
+                </div>
+              ) : (
+                /* The 24 hours with 1-2px light gray hour separators and no half-hour separators */
+                <div className="flex w-full items-center justify-between gap-[1.5px] bg-[#C8C6BC] rounded-[2px] overflow-visible">
+                  {chartBlocks.map(({ hour: h, half1Off, half2Off }) => {
+                    const hStr = h.toString().padStart(2, '0');
+                    const nextHStr = (h + 1 === 24 ? 24 : h + 1).toString().padStart(2, '0');
+                    const isCurrentHour = selectedDayTab === 'today' && h === currentHour;
+
+                    return (
+                      <div
+                        key={`${selectedDayTab}_hour_${h}`}
+                        className="relative flex-1"
+                      >
+                        {/* Two 30-min vertical drum blocks with no half-hour separator */}
+                        <div className="flex w-full items-center gap-0">
+                          {/* 00 - 30 */}
+                          <div
+                            className={`flex-1 h-8 transition-colors cursor-pointer ${
+                              half1Off 
+                                ? 'bg-gradient-to-b from-[#9E1E18] via-[#D62E26] to-[#8C1914]' 
+                                : 'bg-gradient-to-b from-[#D8D6CC] via-[#FCFBF7] to-[#CCC9BE]'
+                            }`}
+                            title={`${hStr}:00 – ${hStr}:30: ${half1Off ? 'Немає світла (відключення)' : 'Світло є'}`}
+                          />
+                          {/* 30 - 60 */}
+                          <div
+                            className={`flex-1 h-8 transition-colors cursor-pointer ${
+                              half2Off 
+                                ? 'bg-gradient-to-b from-[#9E1E18] via-[#D62E26] to-[#8C1914]' 
+                                : 'bg-gradient-to-b from-[#D8D6CC] via-[#FCFBF7] to-[#CCC9BE]'
+                            }`}
+                            title={`${hStr}:30 – ${nextHStr}:00: ${half2Off ? 'Немає світла (відключення)' : 'Світло є'}`}
+                          />
+                        </div>
+
+                        {/* Exact Current Time Position (black needle protruding 4px above and below dark-grey contour) */}
+                        {isCurrentHour && (
+                          <div
+                            className="absolute -top-3 -bottom-3 w-[3px] bg-[#0B0B0A] rounded-full shadow-[0_0_2px_rgba(255,255,255,0.9)] pointer-events-none z-20 -translate-x-1/2"
+                            style={{ left: `${(currentMinute / 60) * 100}%` }}
+                          />
+                        )}
+
+                        {/* Stamped black tick mark and hour label at the left boundary of every even hour (00, 02..22) */}
+                        {h % 2 === 0 && (
+                          <div className="absolute top-[46px] left-0 -translate-x-1/2 flex flex-col items-center pointer-events-none z-10">
+                            <div className="w-[1.5px] h-[5px] bg-[#1C1B18]" />
+                            <span className="text-[10px] sm:text-[11px] font-mono text-[#1C1B18] font-bold mt-0.5 leading-none">
+                              {hStr}
+                            </span>
+                          </div>
+                        )}
+
+                        {/* Stamped black tick mark and label 24 at the right boundary of hour 23 */}
+                        {h === 23 && (
+                          <div className="absolute top-[46px] right-0 translate-x-1/2 flex flex-col items-center pointer-events-none z-10">
+                            <div className="w-[1.5px] h-[5px] bg-[#1C1B18]" />
+                            <span className="text-[10px] sm:text-[11px] font-mono text-[#1C1B18] font-bold mt-0.5 leading-none">
+                              24
+                            </span>
+                          </div>
+                        )}
                       </div>
-
-                      {/* Exact Current Time Position (black needle protruding 4px above and below dark-grey contour) */}
-                      {isCurrentHour && (
-                        <div
-                          className="absolute -top-3 -bottom-3 w-[3px] bg-[#0B0B0A] rounded-full shadow-[0_0_2px_rgba(255,255,255,0.9)] pointer-events-none z-20 -translate-x-1/2"
-                          style={{ left: `${(currentMinute / 60) * 100}%` }}
-                        />
-                      )}
-
-                      {/* Stamped black tick mark and hour label at the left boundary of every even hour (00, 02..22) */}
-                      {h % 2 === 0 && (
-                        <div className="absolute top-[46px] left-0 -translate-x-1/2 flex flex-col items-center pointer-events-none z-10">
-                          <div className="w-[1.5px] h-[5px] bg-[#1C1B18]" />
-                          <span className="text-[10px] sm:text-[11px] font-mono text-[#1C1B18] font-bold mt-0.5 leading-none">
-                            {hStr}
-                          </span>
-                        </div>
-                      )}
-
-                      {/* Stamped black tick mark and label 24 at the right boundary of hour 23 */}
-                      {h === 23 && (
-                        <div className="absolute top-[46px] right-0 translate-x-1/2 flex flex-col items-center pointer-events-none z-10">
-                          <div className="w-[1.5px] h-[5px] bg-[#1C1B18]" />
-                          <span className="text-[10px] sm:text-[11px] font-mono text-[#1C1B18] font-bold mt-0.5 leading-none">
-                            24
-                          </span>
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
+
+            {isUnclear && (
+              <div className="flex justify-between text-[10px] sm:text-[11px] font-mono text-[#1C1B18] font-bold mt-1.5 px-0.5">
+                {['00', '02', '04', '06', '08', '10', '12', '14', '16', '18', '20', '22', '24'].map((lbl) => (
+                  <span key={lbl}>{lbl}</span>
+                ))}
+              </div>
+            )}
           </div>
         </div>
 
-        {/* Clear List of Outage Hours for this day */}
-        <div className="pt-3 border-t border-white/10 flex flex-col gap-2">
-          <div className="text-xs font-bold text-sky-200/70 uppercase tracking-wider">
-            {lang === 'uk' ? 'Години без світла на цей день:' : 'Outage hours for this day:'}
-          </div>
+        {/* Clear List of Outage Hours for this day (removed when outages are unclear) */}
+        {!isUnclear && (
+          <div className="pt-3 border-t border-white/10 flex flex-col gap-2">
+            <div className="text-xs font-bold text-sky-200/70 uppercase tracking-wider">
+              {lang === 'uk' ? 'Години без світла на цей день:' : 'Outage hours for this day:'}
+            </div>
 
-          {blackoutIntervals.length > 0 ? (
-            <div className="flex flex-col gap-2">
-              {blackoutIntervals.map((interval, idx) => (
-                <div
-                  key={`${selectedDayTab}_${interval.start}_${interval.end}_${idx}`}
-                  className="flex items-center justify-between p-3 rounded-xl bg-white/[0.06] backdrop-blur-md border border-white/10"
-                >
-                  <div className="flex items-center gap-3">
-                    <span className="w-2.5 h-2.5 rounded-full bg-[#FF5E3A] shadow-[0_0_8px_#FF5E3A]" />
-                    <span className="text-base font-black text-white font-mono tracking-tight">
-                      {interval.start} – {interval.end}
+            {blackoutIntervals.length > 0 ? (
+              <div className="flex flex-col gap-2">
+                {blackoutIntervals.map((interval, idx) => (
+                  <div
+                    key={`${selectedDayTab}_${interval.start}_${interval.end}_${idx}`}
+                    className="flex items-center justify-between p-3 rounded-xl bg-white/[0.06] backdrop-blur-md border border-white/10"
+                  >
+                    <div className="flex items-center gap-3">
+                      <span className="w-2.5 h-2.5 rounded-full bg-[#FF5E3A] shadow-[0_0_8px_#FF5E3A]" />
+                      <span className="text-base font-black text-white font-mono tracking-tight">
+                        {interval.start} – {interval.end}
+                      </span>
+                    </div>
+                    <span className="text-xs font-bold px-3 py-1 rounded-full bg-[#FF5E3A]/15 text-[#FF5E3A] font-mono border border-[#FF5E3A]/30">
+                      {interval.durationHours} {lang === 'uk' ? 'год' : 'h'}
                     </span>
                   </div>
-                  <span className="text-xs font-bold px-3 py-1 rounded-full bg-[#FF5E3A]/15 text-[#FF5E3A] font-mono border border-[#FF5E3A]/30">
-                    {interval.durationHours} {lang === 'uk' ? 'год' : 'h'}
-                  </span>
-                </div>
-              ))}
-            </div>
-          ) : (
-            <div className="p-4 rounded-xl bg-emerald-500/10 text-emerald-300 font-bold text-center text-sm border border-emerald-400/20">
-              {lang === 'uk' ? 'Відключень не заплановано' : 'No blackouts scheduled'}
-            </div>
-          )}
-        </div>
+                ))}
+              </div>
+            ) : (
+              <div className="p-4 rounded-xl bg-emerald-500/10 text-emerald-300 font-bold text-center text-sm border border-emerald-400/20">
+                {lang === 'uk' ? 'Відключень не заплановано' : 'No blackouts scheduled'}
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Last Updated, Next Refresh & Circular Refresh Button */}
@@ -401,6 +445,32 @@ export const MainView: React.FC<MainViewProps> = ({
               </div>
               <div className="text-[11px] text-sky-200/70 font-mono truncate mt-0.5">
                 https://www.facebook.com/ztoe.com.ua
+              </div>
+            </div>
+          </div>
+          <ExternalLink className="w-4 h-4 text-sky-200/70 group-hover:text-white transition-colors shrink-0" />
+        </a>
+      </div>
+
+      {/* Blackout Schedules on ZTOE Website Link at very bottom after Facebook link */}
+      <div className="bg-[#141A29]/75 backdrop-blur-2xl rounded-3xl p-4 border border-white/15 shadow-[0_12px_40px_rgba(0,0,0,0.45)]">
+        <a
+          href="https://www.ztoe.com.ua/unhooking-search.php"
+          target="_blank"
+          rel="noopener noreferrer"
+          title="https://www.ztoe.com.ua/unhooking-search.php"
+          className="flex items-center justify-between p-3.5 rounded-2xl bg-white/[0.06] hover:bg-white/[0.12] border border-white/10 transition-all group overflow-hidden"
+        >
+          <div className="flex items-center gap-3.5 min-w-0 flex-1 mr-2">
+            <div className="w-10 h-10 rounded-2xl bg-[#FF5E3A] text-white flex items-center justify-center shrink-0 shadow-sm">
+              <Zap className="w-5 h-5 fill-current" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="text-xs font-bold text-white group-hover:text-[#FF5E3A] transition-colors whitespace-normal break-words leading-snug">
+                Графіки відключень на сайті
+              </div>
+              <div className="text-[11px] text-sky-200/70 font-mono truncate mt-0.5">
+                https://www.ztoe.com.ua/unhooking-search.php
               </div>
             </div>
           </div>

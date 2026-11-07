@@ -34,7 +34,10 @@ import ua.blackout.prewarning.data.repository.DonationsRepository
 import ua.blackout.prewarning.ui.AppStrings
 
 @Composable
-fun AboutScreen(lang: String = "uk") {
+fun AboutScreen(
+    lang: String = "uk",
+    onOpenRoulette: (() -> Unit)? = null
+) {
     val context = LocalContext.current
     val appContext = remember { context.applicationContext }
     var donationLinks by remember {
@@ -42,6 +45,9 @@ fun AboutScreen(lang: String = "uk") {
     }
     var faviconBitmaps by remember {
         mutableStateOf<Map<String, Bitmap>>(emptyMap())
+    }
+    var showRouletteDialog by remember {
+        mutableStateOf(false)
     }
 
     val currentBuildVersion = remember {
@@ -56,7 +62,7 @@ fun AboutScreen(lang: String = "uk") {
         val resolved = when {
             !rawVersion.isNullOrBlank() && rawVersion.matches(semverRegex) -> rawVersion
             buildCfgVersion.matches(semverRegex) -> buildCfgVersion
-            else -> "1.3.2"
+            else -> "1.3.3"
         }
         "v$resolved"
     }
@@ -244,7 +250,42 @@ fun AboutScreen(lang: String = "uk") {
                     Icon(Icons.Default.OpenInNew, contentDescription = null, tint = Color(0x99BAE6FD), modifier = Modifier.size(16.dp))
                 }
 
-                // Link 2: Issues & Requests
+                // Link 2: Світло в Житомирі на Github
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(Color(0x14FFFFFF))
+                        .clickable {
+                            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(AppStrings.ABOUT_GITHUB_README_URL))
+                            context.startActivity(intent)
+                        }
+                        .padding(12.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(36.dp)
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(Color(0x26FFFFFF)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(Icons.Default.Computer, contentDescription = null, tint = Color.White, modifier = Modifier.size(18.dp))
+                        }
+                        Column {
+                            Text(AppStrings.desktopApp(lang), fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                            Text("github.com/IgorZaharov/Android-ZTBlackoutPreWarning/blob/main/README.md", fontSize = 10.sp, fontFamily = FontFamily.Monospace, color = Color(0x99BAE6FD))
+                        }
+                    }
+                    Icon(Icons.Default.OpenInNew, contentDescription = null, tint = Color(0x99BAE6FD), modifier = Modifier.size(16.dp))
+                }
+
+                // Link 3: Issues & Requests
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -274,41 +315,6 @@ fun AboutScreen(lang: String = "uk") {
                         Column {
                             Text(AppStrings.repoIssues(lang), fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.White)
                             Text("github.com/IgorZaharov/.../issues", fontSize = 10.sp, fontFamily = FontFamily.Monospace, color = Color(0x99BAE6FD))
-                        }
-                    }
-                    Icon(Icons.Default.OpenInNew, contentDescription = null, tint = Color(0x99BAE6FD), modifier = Modifier.size(16.dp))
-                }
-
-                // Link 3: Original Windows Desktop App
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(14.dp))
-                        .background(Color(0x14FFFFFF))
-                        .clickable {
-                            val intent = Intent(Intent.ACTION_VIEW, Uri.parse("https://github.com/IgorZaharov/UABlackoutPreWarning"))
-                            context.startActivity(intent)
-                        }
-                        .padding(12.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(36.dp)
-                                .clip(RoundedCornerShape(10.dp))
-                                .background(Color(0x26FFFFFF)),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(Icons.Default.Computer, contentDescription = null, tint = Color.White, modifier = Modifier.size(18.dp))
-                        }
-                        Column {
-                            Text(AppStrings.desktopApp(lang), fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.White)
-                            Text("github.com/IgorZaharov/UABlackoutPreWarning", fontSize = 10.sp, fontFamily = FontFamily.Monospace, color = Color(0x99BAE6FD))
                         }
                     }
                     Icon(Icons.Default.OpenInNew, contentDescription = null, tint = Color(0x99BAE6FD), modifier = Modifier.size(16.dp))
@@ -393,6 +399,37 @@ fun AboutScreen(lang: String = "uk") {
                     }
                 }
             }
+        }
+
+        // Житомирська Рулетка Button (after Donations block)
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(24.dp))
+                .background(Color(0xBF141A29))
+                .clickable {
+                    if (onOpenRoulette != null) {
+                        onOpenRoulette()
+                    } else {
+                        showRouletteDialog = true
+                    }
+                }
+                .padding(16.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                text = AppStrings.rouletteLaunchButton(lang),
+                fontSize = 14.sp,
+                fontWeight = FontWeight.Bold,
+                color = Color(0xFFFDE68A)
+            )
+        }
+
+        if (showRouletteDialog && onOpenRoulette == null) {
+            ZhytomyrRouletteDialog(
+                lang = lang,
+                onDismiss = { showRouletteDialog = false }
+            )
         }
 
         // 5. Disclaimer Card about ztoe.com.ua

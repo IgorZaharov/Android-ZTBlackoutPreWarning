@@ -24,6 +24,7 @@ import androidx.compose.ui.unit.sp
 import ua.blackout.prewarning.data.model.BlackoutSlot
 import ua.blackout.prewarning.data.model.SlotStatus
 import ua.blackout.prewarning.data.parser.ZtoeParser
+import ua.blackout.prewarning.ui.AppStrings
 import java.time.LocalDate
 
 @Composable
@@ -32,6 +33,7 @@ fun TimelineBar(
     currentHour: Int = 12,
     currentMinute: Int = 0,
     showNeedle: Boolean = true,
+    lang: String = "uk",
     modifier: Modifier = Modifier,
     onHourClick: (Int) -> Unit = {}
 ) {
@@ -59,6 +61,15 @@ fun TimelineBar(
                 Color(0xFFD8D6CC),
                 Color(0xFFFCFBF7),
                 Color(0xFFCCC9BE)
+            )
+        )
+    }
+    val unclearBlockBrush = remember {
+        Brush.verticalGradient(
+            colors = listOf(
+                Color(0xFF7E8287),
+                Color(0xFF94989E),
+                Color(0xFF6E7277)
             )
         )
     }
@@ -115,53 +126,72 @@ fun TimelineBar(
                         .border(2.dp, Color(0xFF6E716B), RoundedCornerShape(8.dp))
                         .padding(6.dp)
                 ) {
-                    // 24 Hours with 1.5dp light-gray (#C8C6BC) hour separators and 0dp half-hour separators
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(2.dp))
-                            .background(Color(0xFFC8C6BC)),
-                        horizontalArrangement = Arrangement.spacedBy(1.5.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        val is48Slots = slots.size >= 48
-                        (0 until 24).forEach { hour ->
-                            val half1Off = if (is48Slots) {
-                                slots.getOrNull(hour * 2)?.status == SlotStatus.POWER_OFF
-                            } else {
-                                slots.getOrNull(hour)?.status == SlotStatus.POWER_OFF
-                            }
-                            val half2Off = if (is48Slots) {
-                                slots.getOrNull(hour * 2 + 1)?.status == SlotStatus.POWER_OFF
-                            } else {
-                                slots.getOrNull(hour)?.status == SlotStatus.POWER_OFF
-                            }
+                    if (slots.isEmpty()) {
+                        // Grey drum chart with "Графіки не діють" / "Outages unclear" when site is unreachable or no queues found
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(32.dp)
+                                .clip(RoundedCornerShape(2.dp))
+                                .background(unclearBlockBrush),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = AppStrings.outagesUnclear(lang),
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.ExtraBold,
+                                color = Color.White
+                            )
+                        }
+                    } else {
+                        // 24 Hours with 1.5dp light-gray (#C8C6BC) hour separators and 0dp half-hour separators
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(2.dp))
+                                .background(Color(0xFFC8C6BC)),
+                            horizontalArrangement = Arrangement.spacedBy(1.5.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            val is48Slots = slots.size >= 48
+                            (0 until 24).forEach { hour ->
+                                val half1Off = if (is48Slots) {
+                                    slots.getOrNull(hour * 2)?.status == SlotStatus.POWER_OFF
+                                } else {
+                                    slots.getOrNull(hour)?.status == SlotStatus.POWER_OFF
+                                }
+                                val half2Off = if (is48Slots) {
+                                    slots.getOrNull(hour * 2 + 1)?.status == SlotStatus.POWER_OFF
+                                } else {
+                                    slots.getOrNull(hour)?.status == SlotStatus.POWER_OFF
+                                }
 
-                            Box(
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .clickable { onHourClick(hour) }
-                            ) {
-                                // Two 30-min cylindrical blocks for this hour with NO half-hour separator
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.spacedBy(0.dp),
-                                    verticalAlignment = Alignment.CenterVertically
+                                Box(
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .clickable { onHourClick(hour) }
                                 ) {
-                                    // Half 1: XX:00 - XX:30
-                                    Box(
-                                        modifier = Modifier
-                                            .weight(1f)
-                                            .height(32.dp)
-                                            .background(if (half1Off) offBlockBrush else onBlockBrush)
-                                    )
-                                    // Half 2: XX:30 - (XX+1):00
-                                    Box(
-                                        modifier = Modifier
-                                            .weight(1f)
-                                            .height(32.dp)
-                                            .background(if (half2Off) offBlockBrush else onBlockBrush)
-                                    )
+                                    // Two 30-min cylindrical blocks for this hour with NO half-hour separator
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.spacedBy(0.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        // Half 1: XX:00 - XX:30
+                                        Box(
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .height(32.dp)
+                                                .background(if (half1Off) offBlockBrush else onBlockBrush)
+                                        )
+                                        // Half 2: XX:30 - (XX+1):00
+                                        Box(
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .height(32.dp)
+                                                .background(if (half2Off) offBlockBrush else onBlockBrush)
+                                        )
+                                    }
                                 }
                             }
                         }

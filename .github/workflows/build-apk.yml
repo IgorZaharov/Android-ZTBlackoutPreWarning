@@ -34,6 +34,20 @@ jobs:
             npm test
           fi
 
+      - name: Resolve Release Tag & Version
+        id: release_meta
+        run: |
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            TAG_NAME="${GITHUB_REF#refs/tags/}"
+          elif [ -f package.json ]; then
+            PKG_VER=$(node -p "require('./package.json').version")
+            TAG_NAME="v${PKG_VER}"
+          else
+            TAG_NAME="v1.3.3"
+          fi
+          echo "tag_name=${TAG_NAME}" >> "$GITHUB_OUTPUT"
+          echo "APP_VERSION_NAME=${TAG_NAME}" >> "$GITHUB_ENV"
+
       - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
@@ -109,25 +123,14 @@ jobs:
           if-no-files-found: warn
 
       - name: Publish GitHub Release
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: (startsWith(github.ref, 'refs/tags/v') || github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' || github.event_name == 'workflow_dispatch') && github.actor != 'github-actions[bot]'
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ steps.release_meta.outputs.tag_name }}
+          name: ${{ steps.release_meta.outputs.tag_name }}
           body_path: CHANGELOG.md
           files: |
             android/app/build/outputs/apk/release/*.apk
             android/app/build/outputs/apk/debug/*.apk
             android/app/build/outputs/bundle/release/*.aab
           generate_release_notes: false
-
-      - name: Update README.md Latest Release Link
-        if: startsWith(github.ref, 'refs/tags/v')
-        run: |
-          TAG_NAME="${GITHUB_REF#refs/tags/}"
-          sed -i -E "s|\[Завантажити останню версію APK \([^)]*\)\]\([^)]*\)|[Завантажити останню версію APK (${TAG_NAME})](https://github.com/${GITHUB_REPOSITORY}/releases/latest/download/app-release.apk)|g" README.md
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          if ! git diff --quiet README.md; then
-            git add README.md
-            git commit -m "Update latest release download link in README.md to ${TAG_NAME}"
-            git push origin HEAD:main || true
-          fi

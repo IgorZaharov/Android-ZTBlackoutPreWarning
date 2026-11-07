@@ -7,14 +7,15 @@ import ua.blackout.prewarning.data.model.SlotStatus
 import ua.blackout.prewarning.data.parser.ZtoeParser
 import java.time.LocalDate
 import java.time.LocalTime
-import ua.blackout.prewarning.data.KYIV_ZONE
 import java.time.format.DateTimeFormatter
+import ua.blackout.prewarning.data.KYIV_ZONE
 
 data class ScheduleStatusInfo(
     val isBlackoutNow: Boolean,
     val countdownText: String,
     val nextSlotTime: String,
-    val totalBlackoutHours: Double = 0.0
+    val totalBlackoutHours: Double = 0.0,
+    val isUnclear: Boolean = false
 )
 
 data class OutageInterval(
@@ -94,7 +95,9 @@ class ScheduleRepository(context: Context) {
                 return ScheduleStatusInfo(
                     isBlackoutNow = false,
                     countdownText = "--:--:--",
-                    nextSlotTime = "Відключень немає"
+                    nextSlotTime = "--:-- - --:--",
+                    totalBlackoutHours = 0.0,
+                    isUnclear = true
                 )
             }
 
@@ -304,6 +307,10 @@ class ScheduleRepository(context: Context) {
         return cachedDate == todayStr && !cachedEncoded.isNullOrEmpty() && cachedEncoded.length >= 24
     }
 
+    fun clearScheduleCache() {
+        prefs.edit().clear().apply()
+    }
+
     fun getTodaySlots(queue: String): List<BlackoutSlot> {
         val kyivZone = KYIV_ZONE
         val today = LocalDate.now(kyivZone)
@@ -314,10 +321,7 @@ class ScheduleRepository(context: Context) {
         if (cachedDate == todayStr && !cachedEncoded.isNullOrEmpty() && cachedEncoded.length >= 24) {
             return decodeSlotsCached(cachedEncoded, queue, todayStr)
         }
-        val fallbackKey = "fallback_${todayStr}_$queue"
-        return decodedSlotsCache.getOrPut(fallbackKey) {
-            ZtoeParser.generateFallbackSchedule(queue, todayStr)
-        }
+        return emptyList()
     }
 
     fun getTomorrowSlots(queue: String): List<BlackoutSlot>? {
@@ -407,9 +411,13 @@ class ScheduleRepository(context: Context) {
      * If no future blackout interval remains today, checks tomorrow's schedule if available.
      */
     fun getNextUpcomingIntervalText(queue: String): String {
+        val todaySlots = getTodaySlots(queue)
+        if (todaySlots.isEmpty()) {
+            return "--:-- - --:--"
+        }
         val now = LocalTime.now(KYIV_ZONE)
         val currentMinutes = now.hour * 60 + now.minute
-        val todayIntervals = getDetailedIntervals(getTodaySlots(queue))
+        val todayIntervals = getDetailedIntervals(todaySlots)
 
         val nextToday = todayIntervals.firstOrNull { interval ->
             interval.startMinuteOfDay > currentMinutes

@@ -21,9 +21,10 @@ export interface DaySchedule {
   dayLabel: string; // "Сьогодні (30 жовтня)" or "Завтра (31 жовтня)"
   queue: string; // "1.1"
   city: string; // "Житомир (ZTOE)"
-  slots: BlackoutSlot[]; // 48 half-hour slots (or 24 1-hour slots)
+  slots: BlackoutSlot[]; // 48 half-hour slots (or 24 1-hour slots), or empty when unclear
   lastUpdated: string;
   sourceUrl: string;
+  isUnclear?: boolean;
 }
 
 export type ThemeMode = 'system' | 'dark' | 'light';

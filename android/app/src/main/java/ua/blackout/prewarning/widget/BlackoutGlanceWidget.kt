@@ -74,6 +74,7 @@ class BlackoutGlanceWidget : GlanceAppWidget() {
         val KEY_LANGUAGE = stringPreferencesKey("glance_language")
         val KEY_REFRESH_TICK = longPreferencesKey("glance_refresh_tick")
         val KEY_IS_BLACKOUT_NOW = booleanPreferencesKey("glance_is_blackout_now")
+        val KEY_IS_UNCLEAR = booleanPreferencesKey("glance_is_unclear")
         val KEY_COUNTDOWN_TEXT = stringPreferencesKey("glance_countdown_text")
         val KEY_NEXT_SLOT_TIME = stringPreferencesKey("glance_next_slot_time")
         val KEY_NEXT_BLACKOUT_TEXT = stringPreferencesKey("glance_next_blackout_text")
@@ -127,6 +128,7 @@ class BlackoutGlanceWidget : GlanceAppWidget() {
                         this[KEY_LANGUAGE] = resolvedLang
                         this[KEY_REFRESH_TICK] = nowMs
                         this[KEY_IS_BLACKOUT_NOW] = info.isBlackoutNow
+                        this[KEY_IS_UNCLEAR] = info.isUnclear
                         this[KEY_COUNTDOWN_TEXT] = formattedCountdown
                         this[KEY_NEXT_SLOT_TIME] = info.nextSlotTime
                         this[KEY_NEXT_BLACKOUT_TEXT] = nextBlackoutText
@@ -144,14 +146,19 @@ class BlackoutGlanceWidget : GlanceAppWidget() {
         fun renderAnalogCounterBitmap(
             slots: List<BlackoutSlot>,
             currentH: Int,
-            currentM: Int
+            currentM: Int,
+            lang: String = "uk"
         ): Bitmap {
-            val slotSignature = buildString(slots.size) {
-                for (s in slots) {
-                    append(if (s.status == SlotStatus.POWER_OFF) '1' else '0')
+            val slotSignature = if (slots.isEmpty()) {
+                "UNCLEAR"
+            } else {
+                buildString(slots.size) {
+                    for (s in slots) {
+                        append(if (s.status == SlotStatus.POWER_OFF) '1' else '0')
+                    }
                 }
             }
-            val bitmapKey = "${slotSignature}_${currentH}_$currentM"
+            val bitmapKey = "${slotSignature}_${currentH}_${currentM}_$lang"
             val existingBmp = cachedChartBitmap
             if (cachedChartBitmapKey == bitmapKey && existingBmp != null && !existingBmp.isRecycled) {
                 return existingBmp
@@ -227,30 +234,54 @@ class BlackoutGlanceWidget : GlanceAppWidget() {
                 Shader.TileMode.CLAMP
             )
 
-            val is48 = slots.size >= 48
-            (0 until 24).forEach { hour ->
-                val half1Off = if (is48) {
-                    slots.getOrNull(hour * 2)?.status == SlotStatus.POWER_OFF
-                } else {
-                    slots.getOrNull(hour)?.status == SlotStatus.POWER_OFF
+            if (slots.isEmpty()) {
+                // Grey drum chart with "Графіки не діють" / "Outages unclear" when site is unreachable or no queues found
+                val unclearShader = LinearGradient(
+                    0f, trackTop, 0f, trackBottom,
+                    intArrayOf(0xFF7E8287.toInt(), 0xFF94989E.toInt(), 0xFF6E7277.toInt()),
+                    floatArrayOf(0f, 0.5f, 1f),
+                    Shader.TileMode.CLAMP
+                )
+                paint.shader = unclearShader
+                canvas.drawRoundRect(trackRect, 4f, 4f, paint)
+                paint.shader = null
+
+                val unclearText = AppStrings.outagesUnclear(lang)
+                val unclearTextPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                    color = 0xFFFFFFFF.toInt()
+                    typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
+                    textSize = 22f
                 }
-                val half2Off = if (is48) {
-                    slots.getOrNull(hour * 2 + 1)?.status == SlotStatus.POWER_OFF
-                } else {
-                    slots.getOrNull(hour)?.status == SlotStatus.POWER_OFF
+                val textWidth = unclearTextPaint.measureText(unclearText)
+                val textX = trackLeft + (trackWidth - textWidth) / 2f
+                val textYCenter = (trackTop + trackBottom) / 2f - (unclearTextPaint.descent() + unclearTextPaint.ascent()) / 2f
+                canvas.drawText(unclearText, textX, textYCenter, unclearTextPaint)
+            } else {
+                val is48 = slots.size >= 48
+                (0 until 24).forEach { hour ->
+                    val half1Off = if (is48) {
+                        slots.getOrNull(hour * 2)?.status == SlotStatus.POWER_OFF
+                    } else {
+                        slots.getOrNull(hour)?.status == SlotStatus.POWER_OFF
+                    }
+                    val half2Off = if (is48) {
+                        slots.getOrNull(hour * 2 + 1)?.status == SlotStatus.POWER_OFF
+                    } else {
+                        slots.getOrNull(hour)?.status == SlotStatus.POWER_OFF
+                    }
+
+                    val hLeft = trackLeft + hour * (hourWidth + sepPx)
+
+                    // Half 1: XX:00 - XX:30
+                    paint.shader = if (half1Off) offShader else onShader
+                    canvas.drawRect(hLeft, trackTop, hLeft + halfWidth, trackBottom, paint)
+
+                    // Half 2: XX:30 - (XX+1):00 (contiguous with Half 1, no half-hour separator)
+                    paint.shader = if (half2Off) offShader else onShader
+                    canvas.drawRect(hLeft + halfWidth, trackTop, hLeft + hourWidth, trackBottom, paint)
                 }
-
-                val hLeft = trackLeft + hour * (hourWidth + sepPx)
-
-                // Half 1: XX:00 - XX:30
-                paint.shader = if (half1Off) offShader else onShader
-                canvas.drawRect(hLeft, trackTop, hLeft + halfWidth, trackBottom, paint)
-
-                // Half 2: XX:30 - (XX+1):00 (contiguous with Half 1, no half-hour separator)
-                paint.shader = if (half2Off) offShader else onShader
-                canvas.drawRect(hLeft + halfWidth, trackTop, hLeft + hourWidth, trackBottom, paint)
+                paint.shader = null
             }
-            paint.shader = null
 
             // 5. Black current-time needle (#0B0B0A) protruding above and below the dark-grey contour
             val fraction = ((currentH.coerceIn(0, 23) * 60 + currentM.coerceIn(0, 59)) / 1440f).coerceIn(0f, 1f)
@@ -314,8 +345,14 @@ class BlackoutGlanceWidget : GlanceAppWidget() {
             withContext(Dispatchers.IO) {
                 try {
                     val res = ZtoeParser.fetchFullSchedule(initialSettings.cityUrl, initialSettings.queue, appContext)
-                    scheduleRepo.saveSchedule(initialSettings.queue, res.todaySlots, res.tomorrowSlots)
-                } catch (_: Exception) {}
+                    if (res.status == ua.blackout.prewarning.data.parser.FetchStatus.SUCCESS) {
+                        scheduleRepo.saveSchedule(initialSettings.queue, res.todaySlots, res.tomorrowSlots)
+                    } else {
+                        scheduleRepo.clearScheduleCache()
+                    }
+                } catch (_: Exception) {
+                    scheduleRepo.clearScheduleCache()
+                }
             }
         }
 
@@ -331,19 +368,28 @@ class BlackoutGlanceWidget : GlanceAppWidget() {
             // Always use Today's schedule for the widget
             val slots = scheduleRepo.getTodaySlots(activeQueue)
             val liveInfo = scheduleRepo.getCurrentStatusAndCountdown(activeQueue)
-            val isBlackoutNow = if (refreshTick > 0L) (prefs[KEY_IS_BLACKOUT_NOW] ?: liveInfo.isBlackoutNow) else liveInfo.isBlackoutNow
-            val rawCountdownText = prefs[KEY_COUNTDOWN_TEXT]?.takeIf { it.isNotBlank() && refreshTick > 0L } ?: liveInfo.countdownText
+            val isUnclear = slots.isEmpty() || (if (refreshTick > 0L) (prefs[KEY_IS_UNCLEAR] ?: liveInfo.isUnclear) else liveInfo.isUnclear)
+            val isBlackoutNow = !isUnclear && (if (refreshTick > 0L) (prefs[KEY_IS_BLACKOUT_NOW] ?: liveInfo.isBlackoutNow) else liveInfo.isBlackoutNow)
+            val rawCountdownText = if (isUnclear) "--:--:--" else (prefs[KEY_COUNTDOWN_TEXT]?.takeIf { it.isNotBlank() && refreshTick > 0L } ?: liveInfo.countdownText)
             val countdownText = formatWidgetCountdown(rawCountdownText, resolvedLang)
-            val nextSlotTime = prefs[KEY_NEXT_SLOT_TIME]?.takeIf { it.isNotBlank() && refreshTick > 0L } ?: liveInfo.nextSlotTime
-            val nextBlackoutText = scheduleRepo.getNextUpcomingIntervalText(activeQueue).ifBlank {
+            val nextSlotTime = if (isUnclear) "--:-- - --:--" else (prefs[KEY_NEXT_SLOT_TIME]?.takeIf { it.isNotBlank() && refreshTick > 0L } ?: liveInfo.nextSlotTime)
+            val nextBlackoutText = if (isUnclear) "--:-- - --:--" else scheduleRepo.getNextUpcomingIntervalText(activeQueue).ifBlank {
                 prefs[KEY_NEXT_BLACKOUT_TEXT] ?: "Сьогодні більше немає"
             }
 
             val size = LocalSize.current
             val isBigWidget = size.height >= 115.dp || size.width >= 230.dp
 
-            val statusText = if (isBlackoutNow) "СВІТЛА НЕМАЄ" else "СВІТЛО Є"
-            val statusColor = if (isBlackoutNow) Color(0xFFFF5E3A) else Color(0xFF34D399)
+            val statusText = when {
+                isUnclear -> AppStrings.powerUnclear(resolvedLang)
+                isBlackoutNow -> "СВІТЛА НЕМАЄ"
+                else -> "СВІТЛО Є"
+            }
+            val statusColor = when {
+                isUnclear -> Color(0xFF9CA3AF)
+                isBlackoutNow -> Color(0xFFFF5E3A)
+                else -> Color(0xFF34D399)
+            }
 
             GlanceTheme {
                 Box(
@@ -355,7 +401,7 @@ class BlackoutGlanceWidget : GlanceAppWidget() {
                 ) {
                     if (isBigWidget) {
                         val now = LocalTime.now(KYIV_ZONE)
-                        val chartBitmap = renderAnalogCounterBitmap(slots, now.hour, now.minute)
+                        val chartBitmap = renderAnalogCounterBitmap(slots, now.hour, now.minute, resolvedLang)
 
                         // ----------------- 3x2 BIG WIDGET -----------------
                         Column(
@@ -659,11 +705,14 @@ class RefreshWidgetActionCallback : ActionCallback {
                 val res = ZtoeParser.fetchFullSchedule(current.cityUrl, current.queue, appContext, forceNetwork = true)
                 if (res.status == ua.blackout.prewarning.data.parser.FetchStatus.SUCCESS) {
                     scheduleRepo.saveSchedule(current.queue, res.todaySlots, res.tomorrowSlots)
+                } else {
+                    scheduleRepo.clearScheduleCache()
                 }
                 AlarmScheduler.syncAlarms(appContext)
                 BlackoutGlanceWidget.syncAllWidgets(appContext)
             } catch (_: Exception) {
                 try {
+                    scheduleRepo.clearScheduleCache()
                     AlarmScheduler.syncAlarms(appContext)
                     BlackoutGlanceWidget.syncAllWidgets(appContext)
                 } catch (_: Exception) {}

@@ -427,9 +427,10 @@ export async function fetchFullSchedules(
         dayLabel: todayLabel,
         queue,
         city: 'Житомир (ZTOE)',
-        slots: generateTypicalScheduleForQueue(queue, todayDate),
+        slots: [],
         lastUpdated: nowTimeStr,
-        sourceUrl: url
+        sourceUrl: url,
+        isUnclear: true
       },
       tomorrowSchedule: null,
       status: 'NO_INTERNET'
@@ -443,9 +444,10 @@ export async function fetchFullSchedules(
         dayLabel: todayLabel,
         queue,
         city: 'Житомир (ZTOE)',
-        slots: generateTypicalScheduleForQueue(queue, todayDate),
+        slots: [],
         lastUpdated: nowTimeStr,
-        sourceUrl: url
+        sourceUrl: url,
+        isUnclear: true
       },
       tomorrowSchedule: null,
       status: 'NO_QUEUES_FOUND'
@@ -463,9 +465,10 @@ export async function fetchFullSchedules(
           dayLabel: todayLabel,
           queue,
           city: 'Житомир (ZTOE)',
-          slots: generateTypicalScheduleForQueue(queue, todayDate),
+          slots: [],
           lastUpdated: nowTimeStr,
-          sourceUrl: url
+          sourceUrl: url,
+          isUnclear: true
         },
         tomorrowSchedule: null,
         status: 'NO_QUEUES_FOUND'
@@ -479,7 +482,8 @@ export async function fetchFullSchedules(
       city: 'Житомир (ZTOE)',
       slots: parsed.todaySlots,
       lastUpdated: nowTimeStr,
-      sourceUrl: url
+      sourceUrl: url,
+      isUnclear: false
     };
 
     const tomorrowSchedule: DaySchedule | null =
@@ -491,7 +495,8 @@ export async function fetchFullSchedules(
             city: 'Житомир (ZTOE)',
             slots: parsed.tomorrowSlots,
             lastUpdated: nowTimeStr,
-            sourceUrl: url
+            sourceUrl: url,
+            isUnclear: false
           }
         : null;
 
@@ -507,9 +512,10 @@ export async function fetchFullSchedules(
         dayLabel: todayLabel,
         queue,
         city: 'Житомир (ZTOE)',
-        slots: generateTypicalScheduleForQueue(queue, todayDate),
+        slots: [],
         lastUpdated: nowTimeStr,
-        sourceUrl: url
+        sourceUrl: url,
+        isUnclear: true
       },
       tomorrowSchedule: null,
       status: 'NO_INTERNET'
@@ -606,11 +612,12 @@ export function getBlackoutIntervals(slots: BlackoutSlot[]): BlackoutInterval[] 
 
 export interface OutageCountdownInfo {
   isCurrentlyBlackout: boolean;
+  isUnclear?: boolean;
   currentSlot: BlackoutSlot | null;
   closestBlackoutSlot: BlackoutSlot | null;
   minutesUntilNextBlackout: number | null;
   formattedTimeLeft: string; // "01:35:12"
-  slotDescription: string; // e.g. "14:00 – 18:00"
+  slotDescription: string; // e.g. "14:00 – 18:00" or "--:-- - --:--"
   intervals: BlackoutInterval[];
 }
 
@@ -630,14 +637,15 @@ export function calculateOutageCountdown(
   const slots = schedule.slots || [];
   const intervals = getBlackoutIntervals(slots);
 
-  if (slots.length === 0) {
+  if (slots.length === 0 || schedule.isUnclear) {
     return {
       isCurrentlyBlackout: false,
+      isUnclear: true,
       currentSlot: null,
       closestBlackoutSlot: null,
       minutesUntilNextBlackout: null,
       formattedTimeLeft: '--:--:--',
-      slotDescription: 'Відключень немає',
+      slotDescription: '--:-- - --:--',
       intervals
     };
   }

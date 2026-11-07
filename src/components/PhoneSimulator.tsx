@@ -16,6 +16,8 @@ import { MainView } from './MainView';
 import { SettingsView } from './SettingsView';
 import { AboutView } from './AboutView';
 import { WidgetSimulator } from './WidgetSimulator';
+import { ZhytomyrRouletteModal } from './ZhytomyrRouletteModal';
+import { cacheQueueSlotsForRoulette } from '../services/rouletteGame';
 
 interface PhoneSimulatorProps {
   schedule: DaySchedule;
@@ -53,6 +55,20 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
   now = new Date()
 }) => {
   const t = translations[lang];
+  const [isRouletteOpen, setIsRouletteOpen] = React.useState(false);
+  const [imitatedNotification, setImitatedNotification] = React.useState<NotificationRecord | null>(null);
+
+  React.useEffect(() => {
+    if (schedule?.queue && schedule?.slots?.length) {
+      cacheQueueSlotsForRoulette(schedule.queue, schedule.slots);
+    }
+  }, [schedule]);
+
+  React.useEffect(() => {
+    if (activeTab !== 'about') {
+      setIsRouletteOpen(false);
+    }
+  }, [activeTab]);
 
   const currentTimeStr = React.useMemo(() => {
     const h = now.getHours().toString().padStart(2, '0');
@@ -73,6 +89,8 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
       scrollContainerRef.current.scrollTop = 0;
     }
   }, [activeTab]);
+
+  const displayedNotification = imitatedNotification || activeNotification;
 
   return (
     <div className="relative mx-auto w-[416px] max-w-full rounded-[52px] bg-[#07090E] p-3.5 shadow-[0_25px_60px_rgba(0,0,0,0.8)] ring-1 ring-white/10 select-none">
@@ -128,8 +146,8 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
         </div>
 
         {/* Heads-up Notification Toast with Application Icon */}
-        {activeNotification && (
-          <div className="absolute top-12 left-4 right-4 z-50 animate-slide-down">
+        {displayedNotification && (
+          <div className="absolute top-12 left-4 right-4 z-[60] animate-slide-down">
             <div className="bg-[#141A29]/90 text-white backdrop-blur-2xl rounded-2xl p-4 shadow-2xl border border-white/20 flex items-start justify-between gap-3">
               <div className="flex items-start gap-3">
                 <div className="w-9 h-9 rounded-xl bg-[#FF5E3A] flex items-center justify-center text-white shrink-0 mt-0.5 shadow-md">
@@ -141,16 +159,22 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
                     <span className="text-[10px] text-sky-200/70 font-mono">· {t.now}</span>
                   </div>
                   <div className="text-xs font-bold text-white mt-0.5">
-                    {activeNotification.title}
+                    {displayedNotification.title}
                   </div>
                   <div className="text-[11px] text-zinc-300 leading-snug mt-0.5">
-                    {activeNotification.message}
+                    {displayedNotification.message}
                   </div>
                 </div>
               </div>
 
               <button
-                onClick={onDismissNotification}
+                onClick={() => {
+                  if (imitatedNotification) {
+                    setImitatedNotification(null);
+                  } else {
+                    onDismissNotification();
+                  }
+                }}
                 className="text-zinc-400 hover:text-white p-1 rounded-lg"
               >
                 <X className="w-4 h-4" />
@@ -202,67 +226,83 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
           )}
 
           {activeTab === 'about' && (
-            <AboutView lang={lang} />
+            <AboutView
+              lang={lang}
+              onOpenRoulette={() => setIsRouletteOpen(true)}
+            />
           )}
         </div>
 
-        {/* Floating Capsule Bottom Navigation Dock in Frosted Glass */}
-        <div className="absolute bottom-5 left-1/2 -translate-x-1/2 z-40 w-[84%] max-w-[320px]">
-          <div className="bg-[#141A29]/80 backdrop-blur-2xl rounded-full p-1.5 border border-white/20 shadow-2xl flex items-center justify-around">
-            
-            {/* 1. Schedule */}
-            <button
-              onClick={() => setActiveTab('schedule')}
-              className={`w-11 h-11 rounded-full flex items-center justify-center transition-all ${
-                activeTab === 'schedule'
-                  ? 'bg-white text-black shadow-lg scale-105'
-                  : 'text-sky-200/70 hover:text-white'
-              }`}
-              title={t.navSchedule}
-            >
-              <Home className="w-5 h-5" />
-            </button>
+        {/* Zhytomyr Roulette Full-Screen Overlay (positioned below Android Status Bar, hiding Navigation Bar) */}
+        <ZhytomyrRouletteModal
+          isOpen={isRouletteOpen}
+          onClose={() => setIsRouletteOpen(false)}
+          lang={lang}
+          providerUrl={settings.url}
+          queue={settings.queue}
+          now={now}
+          onImitatedNotification={(record) => setImitatedNotification(record)}
+        />
 
-            {/* 2. Widget Preview */}
-            <button
-              onClick={() => setActiveTab('widget')}
-              className={`w-11 h-11 rounded-full flex items-center justify-center transition-all ${
-                activeTab === 'widget'
-                  ? 'bg-white text-black shadow-lg scale-105'
-                  : 'text-sky-200/70 hover:text-white'
-              }`}
-              title={t.navWidget}
-            >
-              <Layers className="w-5 h-5" />
-            </button>
+        {/* Floating Capsule Bottom Navigation Dock in Frosted Glass (hidden while Zhytomyr Roulette is open) */}
+        {!isRouletteOpen && (
+          <div className="absolute bottom-5 left-1/2 -translate-x-1/2 z-40 w-[84%] max-w-[320px]">
+            <div className="bg-[#141A29]/80 backdrop-blur-2xl rounded-full p-1.5 border border-white/20 shadow-2xl flex items-center justify-around">
+              
+              {/* 1. Schedule */}
+              <button
+                onClick={() => setActiveTab('schedule')}
+                className={`w-11 h-11 rounded-full flex items-center justify-center transition-all ${
+                  activeTab === 'schedule'
+                    ? 'bg-white text-black shadow-lg scale-105'
+                    : 'text-sky-200/70 hover:text-white'
+                }`}
+                title={t.navSchedule}
+              >
+                <Home className="w-5 h-5" />
+              </button>
 
-            {/* 3. Settings */}
-            <button
-              onClick={() => setActiveTab('settings')}
-              className={`w-11 h-11 rounded-full flex items-center justify-center transition-all ${
-                activeTab === 'settings'
-                  ? 'bg-white text-black shadow-lg scale-105'
-                  : 'text-sky-200/70 hover:text-white'
-              }`}
-              title={t.navSettings}
-            >
-              <Settings className="w-5 h-5" />
-            </button>
+              {/* 2. Widget Preview */}
+              <button
+                onClick={() => setActiveTab('widget')}
+                className={`w-11 h-11 rounded-full flex items-center justify-center transition-all ${
+                  activeTab === 'widget'
+                    ? 'bg-white text-black shadow-lg scale-105'
+                    : 'text-sky-200/70 hover:text-white'
+                }`}
+                title={t.navWidget}
+              >
+                <Layers className="w-5 h-5" />
+              </button>
 
-            {/* 4. About */}
-            <button
-              onClick={() => setActiveTab('about')}
-              className={`w-11 h-11 rounded-full flex items-center justify-center transition-all ${
-                activeTab === 'about'
-                  ? 'bg-white text-black shadow-lg scale-105'
-                  : 'text-sky-200/70 hover:text-white'
-              }`}
-              title={t.navAbout}
-            >
-              <Info className="w-5 h-5" />
-            </button>
+              {/* 3. Settings */}
+              <button
+                onClick={() => setActiveTab('settings')}
+                className={`w-11 h-11 rounded-full flex items-center justify-center transition-all ${
+                  activeTab === 'settings'
+                    ? 'bg-white text-black shadow-lg scale-105'
+                    : 'text-sky-200/70 hover:text-white'
+                }`}
+                title={t.navSettings}
+              >
+                <Settings className="w-5 h-5" />
+              </button>
+
+              {/* 4. About */}
+              <button
+                onClick={() => setActiveTab('about')}
+                className={`w-11 h-11 rounded-full flex items-center justify-center transition-all ${
+                  activeTab === 'about'
+                    ? 'bg-white text-black shadow-lg scale-105'
+                    : 'text-sky-200/70 hover:text-white'
+                }`}
+                title={t.navAbout}
+              >
+                <Info className="w-5 h-5" />
+              </button>
+            </div>
           </div>
-        </div>
+        )}
 
         {/* Android Gesture Bar */}
         <div className="shrink-0 flex justify-center pb-2 bg-transparent z-10">

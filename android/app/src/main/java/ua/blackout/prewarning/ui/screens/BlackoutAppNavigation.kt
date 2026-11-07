@@ -50,8 +50,8 @@ import ua.blackout.prewarning.ui.AppStrings
 import ua.blackout.prewarning.ui.theme.TimeOfDayPalette
 import ua.blackout.prewarning.widget.BlackoutGlanceWidget
 import java.time.LocalTime
-import ua.blackout.prewarning.data.KYIV_ZONE
 import java.time.format.DateTimeFormatter
+import ua.blackout.prewarning.data.KYIV_ZONE
 
 private fun smoothGaussianRadialBrush(
     color: Color,
@@ -95,6 +95,7 @@ fun BlackoutAppNavigation(
     var soundEnabled by remember { mutableStateOf(initialSettings.soundEnabled) }
     var vibrationEnabled by remember { mutableStateOf(initialSettings.vibrationEnabled) }
     var currentLanguage by remember { mutableStateOf(initialSettings.language) }
+    var isRouletteOpen by remember { mutableStateOf(false) }
 
     // Custom In-App Banner with Application Icon (replaces raw OS Toast so Android robot icon never appears)
     var appBannerMessage by remember { mutableStateOf<String?>(null) }
@@ -257,9 +258,12 @@ fun BlackoutAppNavigation(
                 scheduleRepo.saveSchedule(activeQ, res.todaySlots, res.tomorrowSlots)
             }
         } else {
-            slots = scheduleRepo.getTodaySlots(activeQ)
-            tomorrowSlots = scheduleRepo.getTomorrowSlots(activeQ)
-            hasTomorrowSchedule = scheduleRepo.hasTomorrowSchedule(activeQ)
+            slots = emptyList()
+            tomorrowSlots = null
+            hasTomorrowSchedule = false
+            withContext(Dispatchers.IO) {
+                scheduleRepo.clearScheduleCache()
+            }
         }
         val now = LocalTime.now(KYIV_ZONE)
         statusInfo = ScheduleRepository.calculateStatusAndCountdown(
@@ -310,11 +314,32 @@ fun BlackoutAppNavigation(
                     }
                     showAppBanner(AppStrings.refreshSuccessToast(resolvedLang))
                 }
-                FetchStatus.NO_INTERNET -> {
-                    showAppBanner(AppStrings.errorNoInternet(resolvedLang))
-                }
-                FetchStatus.NO_QUEUES_FOUND -> {
-                    showAppBanner(AppStrings.errorNoQueuesFound(resolvedLang))
+                FetchStatus.NO_INTERNET, FetchStatus.NO_QUEUES_FOUND -> {
+                    val now = LocalTime.now(KYIV_ZONE)
+                    lastUpdated = now.format(DateTimeFormatter.ofPattern("HH:mm"))
+                    nextUpdated = now.plusMinutes(refreshMinutes.toLong()).format(DateTimeFormatter.ofPattern("HH:mm"))
+                    slots = emptyList()
+                    tomorrowSlots = null
+                    hasTomorrowSchedule = false
+                    statusInfo = ScheduleRepository.calculateStatusAndCountdown(
+                        slots = emptyList(),
+                        tomorrowSlots = null,
+                        now = now
+                    )
+                    withContext(Dispatchers.IO) {
+                        scheduleRepo.clearScheduleCache()
+                        try {
+                            AlarmScheduler.syncAlarms(appContext)
+                        } catch (_: Exception) {}
+                        try {
+                            BlackoutGlanceWidget.syncAllWidgets(appContext)
+                        } catch (_: Exception) {}
+                    }
+                    if (res.status == FetchStatus.NO_INTERNET) {
+                        showAppBanner(AppStrings.errorNoInternet(resolvedLang))
+                    } else {
+                        showAppBanner(AppStrings.errorNoQueuesFound(resolvedLang))
+                    }
                 }
             }
         }
@@ -416,6 +441,7 @@ fun BlackoutAppNavigation(
         HorizontalPager(
             state = pagerState,
             beyondViewportPageCount = 2,
+            userScrollEnabled = !isRouletteOpen,
             modifier = Modifier.fillMaxSize()
         ) { page ->
             when (page) {
@@ -596,9 +622,22 @@ fun BlackoutAppNavigation(
                     )
                 }
                 2 -> {
-                    AboutScreen(lang = resolvedLang)
+                    AboutScreen(
+                        lang = resolvedLang,
+                        onOpenRoulette = { isRouletteOpen = true }
+                    )
                 }
             }
+        }
+
+        if (isRouletteOpen) {
+            ZhytomyrRouletteDialog(
+                lang = resolvedLang,
+                providerUrl = siteUrl,
+                queue = queue,
+                onShowAppBanner = showAppBanner,
+                onDismiss = { isRouletteOpen = false }
+            )
         }
 
         // Top In-App Notification Banner with Application Icon (white lightning on #FF5E3A rounded square)
@@ -645,81 +684,83 @@ fun BlackoutAppNavigation(
             }
         }
 
-        // Floating Capsule Bottom Navigation Dock matching emulator
-        Box(
-            modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .navigationBarsPadding()
-                .padding(bottom = 16.dp)
-        ) {
+        // Floating Capsule Bottom Navigation Dock matching emulator (hidden when Житомирська Рулетка is open)
+        if (!isRouletteOpen) {
             Box(
                 modifier = Modifier
-                    .clip(CircleShape)
-                    .background(Color(0xCC141A29))
-                    .padding(6.dp)
+                    .align(Alignment.BottomCenter)
+                    .navigationBarsPadding()
+                    .padding(bottom = 16.dp)
             ) {
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                Box(
+                    modifier = Modifier
+                        .clip(CircleShape)
+                        .background(Color(0xCC141A29))
+                        .padding(6.dp)
                 ) {
-                    // Schedule Tab
-                    val isSchedule = pagerState.currentPage == 0
-                    Box(
-                        modifier = Modifier
-                            .size(44.dp)
-                            .clip(CircleShape)
-                            .background(if (isSchedule) Color.White else Color.Transparent)
-                            .clickable {
-                                coroutineScope.launch { pagerState.animateScrollToPage(0) }
-                            },
-                        contentAlignment = Alignment.Center
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Icon(
-                            Icons.Default.Home,
-                            contentDescription = "Графік",
-                            tint = if (isSchedule) Color.Black else Color(0xB3BAE6FD),
-                            modifier = Modifier.size(20.dp)
-                        )
-                    }
+                        // Schedule Tab
+                        val isSchedule = pagerState.currentPage == 0
+                        Box(
+                            modifier = Modifier
+                                .size(44.dp)
+                                .clip(CircleShape)
+                                .background(if (isSchedule) Color.White else Color.Transparent)
+                                .clickable {
+                                    coroutineScope.launch { pagerState.animateScrollToPage(0) }
+                                },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                Icons.Default.Home,
+                                contentDescription = "Графік",
+                                tint = if (isSchedule) Color.Black else Color(0xB3BAE6FD),
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
 
-                    // Settings Tab
-                    val isSettings = pagerState.currentPage == 1
-                    Box(
-                        modifier = Modifier
-                            .size(44.dp)
-                            .clip(CircleShape)
-                            .background(if (isSettings) Color.White else Color.Transparent)
-                            .clickable {
-                                coroutineScope.launch { pagerState.animateScrollToPage(1) }
-                            },
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            Icons.Default.Settings,
-                            contentDescription = "Налаштування",
-                            tint = if (isSettings) Color.Black else Color(0xB3BAE6FD),
-                            modifier = Modifier.size(20.dp)
-                        )
-                    }
+                        // Settings Tab
+                        val isSettings = pagerState.currentPage == 1
+                        Box(
+                            modifier = Modifier
+                                .size(44.dp)
+                                .clip(CircleShape)
+                                .background(if (isSettings) Color.White else Color.Transparent)
+                                .clickable {
+                                    coroutineScope.launch { pagerState.animateScrollToPage(1) }
+                                },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                Icons.Default.Settings,
+                                contentDescription = "Налаштування",
+                                tint = if (isSettings) Color.Black else Color(0xB3BAE6FD),
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
 
-                    // About Tab
-                    val isAbout = pagerState.currentPage == 2
-                    Box(
-                        modifier = Modifier
-                            .size(44.dp)
-                            .clip(CircleShape)
-                            .background(if (isAbout) Color.White else Color.Transparent)
-                            .clickable {
-                                coroutineScope.launch { pagerState.animateScrollToPage(2) }
-                            },
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            Icons.Default.Info,
-                            contentDescription = "Про додаток",
-                            tint = if (isAbout) Color.Black else Color(0xB3BAE6FD),
-                            modifier = Modifier.size(20.dp)
-                        )
+                        // About Tab
+                        val isAbout = pagerState.currentPage == 2
+                        Box(
+                            modifier = Modifier
+                                .size(44.dp)
+                                .clip(CircleShape)
+                                .background(if (isAbout) Color.White else Color.Transparent)
+                                .clickable {
+                                    coroutineScope.launch { pagerState.animateScrollToPage(2) }
+                                },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                Icons.Default.Info,
+                                contentDescription = "Про додаток",
+                                tint = if (isAbout) Color.Black else Color(0xB3BAE6FD),
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
                     }
                 }
             }

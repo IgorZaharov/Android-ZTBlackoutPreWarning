@@ -46,12 +46,21 @@ export const WidgetSimulator: React.FC<WidgetSimulatorProps> = ({
   };
 
   const isUk = lang === 'uk';
+  const isUnclear =
+    schedule.slots.length === 0 || Boolean(schedule.isUnclear) || Boolean(countdown.isUnclear);
   const queueLabel = isUk ? `Черга ${settings.queue}` : `Queue ${settings.queue}`;
-  const statusLabel = countdown.isCurrentlyBlackout 
+  const statusLabel = isUnclear
+    ? t.statusUnclear
+    : countdown.isCurrentlyBlackout 
     ? (isUk ? 'СВІТЛА НЕМАЄ' : 'POWER OFF')
     : (isUk ? 'СВІТЛО Є' : 'POWER ON');
+  const statusColorClass = isUnclear
+    ? 'text-zinc-400'
+    : countdown.isCurrentlyBlackout
+    ? 'text-[#FF5E3A]'
+    : 'text-emerald-400';
   
-  const countdownLabel = countdown.isCurrentlyBlackout
+  const countdownLabel = !isUnclear && countdown.isCurrentlyBlackout
     ? (isUk ? 'До увімкнення:' : 'Power on in:')
     : (isUk ? 'До відключення:' : 'Time to blackout:');
 
@@ -74,7 +83,9 @@ export const WidgetSimulator: React.FC<WidgetSimulatorProps> = ({
     const [h, m] = iv.start.split(':').map(Number);
     return h * 60 + m > currentMinutes;
   });
-  const nextBlackoutText = nextUpcomingInterval
+  const nextBlackoutText = isUnclear
+    ? '--:-- - --:--'
+    : nextUpcomingInterval
     ? `${nextUpcomingInterval.start} – ${nextUpcomingInterval.end}`
     : blackoutIntervals.length === 0
       ? (isUk ? 'Відключень немає' : 'No blackouts')
@@ -152,7 +163,7 @@ export const WidgetSimulator: React.FC<WidgetSimulatorProps> = ({
                 {queueLabel}
               </span>
 
-              <span className={`text-xs font-bold drop-shadow-sm ${countdown.isCurrentlyBlackout ? 'text-[#FF5E3A]' : 'text-emerald-400'}`}>
+              <span className={`text-xs font-bold drop-shadow-sm ${statusColorClass}`}>
                 {statusLabel}
               </span>
             </div>
@@ -217,7 +228,7 @@ export const WidgetSimulator: React.FC<WidgetSimulatorProps> = ({
                 <span className="text-lg font-bold text-white tracking-tight drop-shadow-sm">
                   {queueLabel}
                 </span>
-                <div className={`text-xs font-bold ${countdown.isCurrentlyBlackout ? 'text-[#FF5E3A]' : 'text-emerald-400'}`}>
+                <div className={`text-xs font-bold ${statusColorClass}`}>
                   {statusLabel}
                 </div>
               </div>
@@ -272,7 +283,7 @@ export const WidgetSimulator: React.FC<WidgetSimulatorProps> = ({
               <div className="text-right">
                 <div className="text-[10px] text-sky-200/70">{periodLabel}</div>
                 <div className="text-xs font-mono font-bold text-white">
-                  {countdown.slotDescription}
+                  {isUnclear ? '--:-- - --:--' : countdown.slotDescription}
                 </div>
               </div>
             </div>
@@ -280,35 +291,50 @@ export const WidgetSimulator: React.FC<WidgetSimulatorProps> = ({
             {/* 24-Hour Timeline Bar matching MainView analog electricity meter style */}
             <div className="bg-gradient-to-b from-[#DFDDD0] via-[#D4D1C1] to-[#C6C2B0] rounded-xl px-2.5 pt-3 pb-2.5 border-2 border-[#7A7768] shadow-[inset_0_2px_5px_rgba(0,0,0,0.3)]">
               <div className="bg-[#4E514E] p-1 rounded-md border border-[#6E716B] shadow-[inset_0_2px_4px_rgba(0,0,0,0.85)]">
-                <div className="flex w-full items-center justify-between gap-[1.5px] bg-[#C8C6BC] rounded-[2px] overflow-visible">
-                  {chartBlocks.map(({ hour: h, half1Off, half2Off }) => {
-                    const isCurrentH = h === currentHour;
-                    return (
-                      <div key={`widget_hour_${h}`} className="relative flex-1 flex items-center gap-0">
-                        <div
-                          className={`flex-1 h-4 ${
-                            half1Off
-                              ? 'bg-gradient-to-b from-[#9E1E18] via-[#D62E26] to-[#8C1914]'
-                              : 'bg-gradient-to-b from-[#D8D6CC] via-[#FCFBF7] to-[#CCC9BE]'
-                          }`}
-                        />
-                        <div
-                          className={`flex-1 h-4 ${
-                            half2Off
-                              ? 'bg-gradient-to-b from-[#9E1E18] via-[#D62E26] to-[#8C1914]'
-                              : 'bg-gradient-to-b from-[#D8D6CC] via-[#FCFBF7] to-[#CCC9BE]'
-                          }`}
-                        />
-                        {isCurrentH && (
+                {isUnclear ? (
+                  <div
+                    data-testid="widget-drum-chart-unclear"
+                    className="relative flex w-full h-4 items-center justify-center bg-gradient-to-b from-[#7E8287] via-[#94989E] to-[#6E7277] rounded-[2px] overflow-visible"
+                  >
+                    <span className="text-[10px] font-extrabold tracking-wide text-white drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)] z-10 leading-none">
+                      {t.outagesUnclear}
+                    </span>
+                    <div
+                      className="absolute -top-[9px] -bottom-[9px] w-[2.5px] bg-[#0B0B0A] rounded-full shadow-[0_0_2px_rgba(255,255,255,0.9)] pointer-events-none z-20 -translate-x-1/2"
+                      style={{ left: `${((currentHour * 60 + currentMinute) / 1440) * 100}%` }}
+                    />
+                  </div>
+                ) : (
+                  <div className="flex w-full items-center justify-between gap-[1.5px] bg-[#C8C6BC] rounded-[2px] overflow-visible">
+                    {chartBlocks.map(({ hour: h, half1Off, half2Off }) => {
+                      const isCurrentH = h === currentHour;
+                      return (
+                        <div key={`widget_hour_${h}`} className="relative flex-1 flex items-center gap-0">
                           <div
-                            className="absolute -top-[9px] -bottom-[9px] w-[2.5px] bg-[#0B0B0A] rounded-full shadow-[0_0_2px_rgba(255,255,255,0.9)] pointer-events-none z-20 -translate-x-1/2"
-                            style={{ left: `${(currentMinute / 60) * 100}%` }}
+                            className={`flex-1 h-4 ${
+                              half1Off
+                                ? 'bg-gradient-to-b from-[#9E1E18] via-[#D62E26] to-[#8C1914]'
+                                : 'bg-gradient-to-b from-[#D8D6CC] via-[#FCFBF7] to-[#CCC9BE]'
+                            }`}
                           />
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
+                          <div
+                            className={`flex-1 h-4 ${
+                              half2Off
+                                ? 'bg-gradient-to-b from-[#9E1E18] via-[#D62E26] to-[#8C1914]'
+                                : 'bg-gradient-to-b from-[#D8D6CC] via-[#FCFBF7] to-[#CCC9BE]'
+                            }`}
+                          />
+                          {isCurrentH && (
+                            <div
+                              className="absolute -top-[9px] -bottom-[9px] w-[2.5px] bg-[#0B0B0A] rounded-full shadow-[0_0_2px_rgba(255,255,255,0.9)] pointer-events-none z-20 -translate-x-1/2"
+                              style={{ left: `${(currentMinute / 60) * 100}%` }}
+                            />
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
               </div>
 
               {/* 24-Hour Stamped Markers */}

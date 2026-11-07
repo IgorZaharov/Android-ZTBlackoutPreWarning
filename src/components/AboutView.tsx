@@ -17,9 +17,10 @@ import {
   getDonationsWithDailyRefresh,
   getFaviconCandidateUrls,
 } from '../services/donationsService';
+import { ZhytomyrRouletteModal } from './ZhytomyrRouletteModal';
 
 declare const __APP_VERSION__: string | undefined;
-const CURRENT_BUILD_VERSION = `v${typeof __APP_VERSION__ !== 'undefined' && /^[0-9]+\.[0-9]+/.test(__APP_VERSION__) ? __APP_VERSION__ : '1.3.2'}`;
+const CURRENT_BUILD_VERSION = `v${typeof __APP_VERSION__ !== 'undefined' && /^[0-9]+\.[0-9]+/.test(__APP_VERSION__) ? __APP_VERSION__ : '1.3.3'}`;
 
 const DonationFavicon: React.FC<{ url: string; title: string }> = ({ url, title }) => {
   const candidates = getFaviconCandidateUrls(url);
@@ -41,11 +42,13 @@ const DonationFavicon: React.FC<{ url: string; title: string }> = ({ url, title 
 
 interface AboutViewProps {
   lang: 'uk' | 'en';
+  onOpenRoulette?: () => void;
 }
 
-export const AboutView: React.FC<AboutViewProps> = ({ lang }) => {
+export const AboutView: React.FC<AboutViewProps> = ({ lang, onOpenRoulette }) => {
   const t = translations[lang];
   const [donations, setDonations] = useState<DonationLink[]>(() => getCachedDonations());
+  const [isRouletteOpen, setIsRouletteOpen] = useState(false);
 
   useEffect(() => {
     let mounted = true;
@@ -127,7 +130,31 @@ export const AboutView: React.FC<AboutViewProps> = ({ lang }) => {
           <ExternalLink className="w-4 h-4 text-sky-200/70 group-hover:text-white transition-colors shrink-0" />
         </a>
 
-        {/* 2. Project Issues & Requests */}
+        {/* 2. Світло в Житомирі на Github */}
+        <a
+          href="https://github.com/IgorZaharov/Android-ZTBlackoutPreWarning/blob/main/README.md"
+          target="_blank"
+          rel="noopener noreferrer"
+          title="https://github.com/IgorZaharov/Android-ZTBlackoutPreWarning/blob/main/README.md"
+          className="flex items-center justify-between p-3.5 rounded-2xl bg-white/[0.06] hover:bg-white/[0.12] border border-white/10 transition-all group overflow-hidden"
+        >
+          <div className="flex items-center gap-3.5 min-w-0 flex-1 mr-2">
+            <div className="w-10 h-10 rounded-2xl bg-white/10 text-white flex items-center justify-center shrink-0 border border-white/20">
+              <Monitor className="w-5 h-5" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="text-xs font-bold text-white group-hover:text-[#FF5E3A] transition-colors truncate">
+                {t.aboutDesktopRepo}
+              </div>
+              <div className="text-[11px] text-sky-200/70 font-mono truncate">
+                github.com/IgorZaharov/Android-ZTBlackoutPreWarning/blob/main/README.md
+              </div>
+            </div>
+          </div>
+          <ExternalLink className="w-4 h-4 text-sky-200/70 group-hover:text-white transition-colors shrink-0" />
+        </a>
+
+        {/* 3. Project Issues & Requests */}
         <a
           href="https://github.com/IgorZaharov/Android-ZTBlackoutPreWarning/issues"
           target="_blank"
@@ -145,30 +172,6 @@ export const AboutView: React.FC<AboutViewProps> = ({ lang }) => {
               </div>
               <div className="text-[11px] text-sky-200/70 font-mono truncate">
                 github.com/IgorZaharov/Android-ZTBlackoutPreWarning/issues
-              </div>
-            </div>
-          </div>
-          <ExternalLink className="w-4 h-4 text-sky-200/70 group-hover:text-white transition-colors shrink-0" />
-        </a>
-
-        {/* 3. Original Windows Desktop App */}
-        <a
-          href="https://github.com/IgorZaharov/UABlackoutPreWarning"
-          target="_blank"
-          rel="noopener noreferrer"
-          title="https://github.com/IgorZaharov/UABlackoutPreWarning"
-          className="flex items-center justify-between p-3.5 rounded-2xl bg-white/[0.06] hover:bg-white/[0.12] border border-white/10 transition-all group overflow-hidden"
-        >
-          <div className="flex items-center gap-3.5 min-w-0 flex-1 mr-2">
-            <div className="w-10 h-10 rounded-2xl bg-white/10 text-white flex items-center justify-center shrink-0 border border-white/20">
-              <Monitor className="w-5 h-5" />
-            </div>
-            <div className="min-w-0 flex-1">
-              <div className="text-xs font-bold text-white group-hover:text-[#FF5E3A] transition-colors truncate">
-                {t.aboutDesktopRepo}
-              </div>
-              <div className="text-[11px] text-sky-200/70 font-mono truncate">
-                github.com/IgorZaharov/UABlackoutPreWarning
               </div>
             </div>
           </div>
@@ -208,6 +211,30 @@ export const AboutView: React.FC<AboutViewProps> = ({ lang }) => {
           </a>
         ))}
       </div>
+
+      {/* Житомирська Рулетка / Zhytomyr Roulette Button (after Donations block) */}
+      <button
+        type="button"
+        data-testid="open-zhytomyr-roulette-btn"
+        onClick={() => {
+          if (onOpenRoulette) {
+            onOpenRoulette();
+          } else {
+            setIsRouletteOpen(true);
+          }
+        }}
+        className="w-full bg-[#141A29]/75 hover:bg-[#1B2338]/85 backdrop-blur-2xl rounded-3xl p-4 border border-amber-300/35 shadow-[0_12px_40px_rgba(0,0,0,0.45)] flex items-center justify-center text-sm font-bold text-amber-200 transition-all cursor-pointer active:scale-[0.99]"
+      >
+        {lang === 'en' ? 'Zhytomyr Roulette' : 'Житомирська Рулетка'}
+      </button>
+
+      {!onOpenRoulette && (
+        <ZhytomyrRouletteModal
+          isOpen={isRouletteOpen}
+          onClose={() => setIsRouletteOpen(false)}
+          lang={lang}
+        />
+      )}
 
       {/* Google Play Console Status Card */}
       <div className="bg-[#141A29]/75 backdrop-blur-2xl rounded-3xl p-5 border border-white/15 shadow-[0_12px_40px_rgba(0,0,0,0.45)] flex items-center gap-3.5">

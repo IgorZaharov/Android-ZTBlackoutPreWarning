@@ -13,8 +13,8 @@ import java.net.UnknownHostException
 import java.net.SocketTimeoutException
 import java.net.ConnectException
 import java.time.LocalDate
-import ua.blackout.prewarning.data.KYIV_ZONE
 import java.time.format.DateTimeFormatter
+import ua.blackout.prewarning.data.KYIV_ZONE
 
 enum class FetchStatus {
     SUCCESS,
@@ -110,20 +110,21 @@ object ZtoeParser {
         val today = LocalDate.now(kyivZone)
         val todayStr = today.format(DateTimeFormatter.ISO_LOCAL_DATE)
 
-        if (!isValidUrl(url, context)) {
-            return ScheduleFetchResult(
-                todaySlots = generateFallbackSchedule(queue, todayStr),
-                tomorrowSlots = null,
-                hasTomorrowSchedule = false,
-                status = FetchStatus.NO_QUEUES_FOUND
-            )
-        }
-
         val cleanUrl = url.trim()
         val repo = if (context != null) {
             ua.blackout.prewarning.data.repository.ScheduleRepository(context.applicationContext)
         } else {
             null
+        }
+
+        if (!isValidUrl(url, context)) {
+            repo?.clearScheduleCache()
+            return ScheduleFetchResult(
+                todaySlots = emptyList(),
+                tomorrowSlots = null,
+                hasTomorrowSchedule = false,
+                status = FetchStatus.NO_QUEUES_FOUND
+            )
         }
 
         return try {
@@ -146,7 +147,7 @@ object ZtoeParser {
             }
 
             // HTTP 304 Not Modified: reuse already-cached schedule with zero HTML transfer or Jsoup parsing
-            if (doc == null && repo != null && repo.hasValidTodayCache(queue)) {
+            if (doc == null && canUseConditionalHeaders && repo != null && repo.hasValidTodayCache(queue)) {
                 val cachedToday = repo.getTodaySlots(queue)
                 val cachedTomorrow = repo.getTomorrowSlots(queue)
                 return ScheduleFetchResult(
@@ -157,12 +158,15 @@ object ZtoeParser {
                 )
             }
 
-            val effectiveDoc = doc ?: return ScheduleFetchResult(
-                todaySlots = generateFallbackSchedule(queue, todayStr),
-                tomorrowSlots = null,
-                hasTomorrowSchedule = false,
-                status = FetchStatus.NO_QUEUES_FOUND
-            )
+            val effectiveDoc = doc ?: run {
+                repo?.clearScheduleCache()
+                return ScheduleFetchResult(
+                    todaySlots = emptyList(),
+                    tomorrowSlots = null,
+                    hasTomorrowSchedule = false,
+                    status = FetchStatus.NO_QUEUES_FOUND
+                )
+            }
 
             // Single-pass DOM table lookup for all 12 queues + single batched asynchronous SharedPreferences write
             val allQueueResults = parseAllQueuesSinglePass(effectiveDoc, today)
@@ -175,38 +179,47 @@ object ZtoeParser {
                 } catch (_: Exception) {}
             }
 
-            allQueueResults[queue] ?: parseDocumentFull(effectiveDoc, queue, today)
+            val finalRes = allQueueResults[queue] ?: parseDocumentFull(effectiveDoc, queue, today)
+            if (finalRes.status != FetchStatus.SUCCESS) {
+                repo?.clearScheduleCache()
+            }
+            finalRes
         } catch (e: UnknownHostException) {
+            repo?.clearScheduleCache()
             ScheduleFetchResult(
-                todaySlots = generateFallbackSchedule(queue, todayStr),
+                todaySlots = emptyList(),
                 tomorrowSlots = null,
                 hasTomorrowSchedule = false,
                 status = FetchStatus.NO_INTERNET
             )
         } catch (e: ConnectException) {
+            repo?.clearScheduleCache()
             ScheduleFetchResult(
-                todaySlots = generateFallbackSchedule(queue, todayStr),
+                todaySlots = emptyList(),
                 tomorrowSlots = null,
                 hasTomorrowSchedule = false,
                 status = FetchStatus.NO_INTERNET
             )
         } catch (e: SocketTimeoutException) {
+            repo?.clearScheduleCache()
             ScheduleFetchResult(
-                todaySlots = generateFallbackSchedule(queue, todayStr),
+                todaySlots = emptyList(),
                 tomorrowSlots = null,
                 hasTomorrowSchedule = false,
                 status = FetchStatus.NO_INTERNET
             )
         } catch (e: IOException) {
+            repo?.clearScheduleCache()
             ScheduleFetchResult(
-                todaySlots = generateFallbackSchedule(queue, todayStr),
+                todaySlots = emptyList(),
                 tomorrowSlots = null,
                 hasTomorrowSchedule = false,
                 status = FetchStatus.NO_INTERNET
             )
         } catch (e: Exception) {
+            repo?.clearScheduleCache()
             ScheduleFetchResult(
-                todaySlots = generateFallbackSchedule(queue, todayStr),
+                todaySlots = emptyList(),
                 tomorrowSlots = null,
                 hasTomorrowSchedule = false,
                 status = FetchStatus.NO_QUEUES_FOUND
@@ -285,7 +298,7 @@ object ZtoeParser {
 
         if (todayTable == null) {
             return ScheduleFetchResult(
-                todaySlots = generateFallbackSchedule(queue, todayStr),
+                todaySlots = emptyList(),
                 tomorrowSlots = null,
                 hasTomorrowSchedule = false,
                 status = FetchStatus.NO_QUEUES_FOUND
@@ -295,7 +308,7 @@ object ZtoeParser {
         val todaySlots = parseTableForQueue(todayTable, queue, today)
         if (todaySlots == null) {
             return ScheduleFetchResult(
-                todaySlots = generateFallbackSchedule(queue, todayStr),
+                todaySlots = emptyList(),
                 tomorrowSlots = null,
                 hasTomorrowSchedule = false,
                 status = FetchStatus.NO_QUEUES_FOUND
