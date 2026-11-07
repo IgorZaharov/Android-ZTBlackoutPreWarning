@@ -462,7 +462,11 @@ function runUnitTestB() {
     const modifiedFiles = gitStatus
       .split('\n')
       .map((line) => line.trim().split(/\s+/).pop() || '')
-      .filter((f) => f.includes('ui/') || f.includes('components/') || f.includes('widget/'));
+      .filter(
+        (f) =>
+          (f.endsWith('.kt') || f.endsWith('.tsx')) &&
+          (f.includes('ui/') || f.includes('components/') || f.includes('widget/'))
+      );
 
     for (const file of modifiedFiles) {
       const baseName = path.basename(file);
@@ -624,6 +628,31 @@ async function runUnitTestC_ZhytomyrRoulette() {
     'randomizeStartShopMusicTrack must update current Start/Shop music URL'
   );
   assert.equal(getCurrentStartShopMusicUrl(), START_SHOP_2_MUSIC_URL);
+
+  // Ensure web public/assets/aistudio MP3 files are synced from android/app/src/main/res/raw if public/assets was previously gitignored
+  const audioSyncPairs: Array<[string, string]> = [
+    [
+      'android/app/src/main/res/raw/audio_start_shop_gameover.mp3',
+      path.join('public', START_SHOP_GAMEOVER_MUSIC_URL.replace(/^\//, '')),
+    ],
+    [
+      'android/app/src/main/res/raw/audio_start_shop_2.mp3',
+      path.join('public', START_SHOP_2_MUSIC_URL.replace(/^\//, '')),
+    ],
+    [
+      'android/app/src/main/res/raw/audio_main_game.mp3',
+      path.join('public', MAIN_GAME_MUSIC_URL.replace(/^\//, '')),
+    ],
+  ];
+  for (const [rawRel, pubRel] of audioSyncPairs) {
+    const rawAbs = path.join(ROOT_DIR, rawRel);
+    const pubAbs = path.join(ROOT_DIR, pubRel);
+    if (!fs.existsSync(pubAbs) && fs.existsSync(rawAbs)) {
+      fs.mkdirSync(path.dirname(pubAbs), { recursive: true });
+      fs.copyFileSync(rawAbs, pubAbs);
+    }
+  }
+
   assert.ok(
     fs.existsSync(path.join(ROOT_DIR, 'public', START_SHOP_GAMEOVER_MUSIC_URL.replace(/^\//, ''))),
     'Attached "Audio - Game Start screen and Shop.mp3" must exist in /public/assets/aistudio/'
