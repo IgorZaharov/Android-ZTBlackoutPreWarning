@@ -342,7 +342,7 @@ class ZtoeParserTest {
 
         // Verify Power Shop upgrades (11 total including Daily Streak & Perseverance), "Секрет" / "Secret" descriptions, Nocturnal Creature (10), and Депозит Потужність+ (100)
         assertEquals(11, ua.blackout.prewarning.ui.screens.ZhytomyrRouletteEngine.UPGRADES.size)
-        assertEquals(1.15, ua.blackout.prewarning.ui.screens.RouletteSoundEngine.SCRATCH_VOLUME_SCALE, 0.001)
+        assertEquals(0.575, ua.blackout.prewarning.ui.screens.RouletteSoundEngine.SCRATCH_VOLUME_SCALE, 0.001)
         assertEquals(0.75, ua.blackout.prewarning.ui.screens.RouletteSoundEngine.COIN_VOLUME_SCALE, 0.001)
         assertEquals(0.60, ua.blackout.prewarning.ui.screens.RouletteSoundEngine.GAMEOVER_UPGRADE_VOLUME_SCALE, 0.001)
         assertEquals(0.10, ua.blackout.prewarning.ui.screens.RouletteSoundEngine.FLICKER_BUZZ_VOLUME_SCALE, 0.001)
@@ -388,7 +388,8 @@ class ZtoeParserTest {
             "1.1",
             false,
             controlledTickets,
-            explicitUpgrades = nocOn.nextState.purchasedUpgrades
+            explicitUpgrades = nocOn.nextState.purchasedUpgrades,
+            random = kotlin.random.Random(12345)
         )
         assertEquals(2, nocGame.streakIncrement)
         nocGame = ua.blackout.prewarning.ui.screens.ZhytomyrRouletteEngine.revealTicket(nocGame, 40).nextState // Red ticket adds +2

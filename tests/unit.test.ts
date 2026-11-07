@@ -1793,6 +1793,15 @@ async function runUnitTestC_ZhytomyrRoulette() {
       !rouletteScreenKt.includes('import android.graphics.Path') &&
       !rouletteScreenKt.includes('import android.graphics.Color') &&
       rouletteScreenKt.includes('androidx.compose.ui.graphics.Paint()') &&
+      !fs
+        .readFileSync(
+          path.join(
+            ROOT_DIR,
+            'android/app/src/test/java/ua/blackout/prewarning/ZtoeParserTest.kt'
+          ),
+          'utf-8'
+        )
+        .includes('assertEquals(1.15') &&
       rouletteScreenKt.includes('android.graphics.Color.parseColor(g.colorHex)') &&
       rouletteScreenKt.includes('ClipData.newRawUri') &&
       rouletteScreenKt.includes('rememberLazyListState()') &&
