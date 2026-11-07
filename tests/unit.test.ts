@@ -1788,6 +1788,11 @@ async function runUnitTestC_ZhytomyrRoulette() {
       rouletteScreenKt.includes('size(width = 24.dp, height = 20.dp)') &&
       rouletteScreenKt.includes('rouletteDownloadImageBtn') &&
       rouletteScreenKt.includes('saveShareCardBitmapToMediaStore') &&
+      !rouletteScreenKt.includes('import android.graphics.Paint') &&
+      !rouletteScreenKt.includes('import android.graphics.Canvas') &&
+      !rouletteScreenKt.includes('import android.graphics.Path') &&
+      !rouletteScreenKt.includes('import android.graphics.Color') &&
+      rouletteScreenKt.includes('androidx.compose.ui.graphics.Paint()') &&
       rouletteScreenKt.includes('android.graphics.Color.parseColor(g.colorHex)') &&
       rouletteScreenKt.includes('ClipData.newRawUri') &&
       rouletteScreenKt.includes('rememberLazyListState()') &&

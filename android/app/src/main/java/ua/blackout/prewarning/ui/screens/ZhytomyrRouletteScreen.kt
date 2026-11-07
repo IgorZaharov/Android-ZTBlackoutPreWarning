@@ -5,7 +5,6 @@ import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
-import android.graphics.Paint
 import android.graphics.RectF
 import android.graphics.Typeface
 import android.media.AudioAttributes
@@ -1101,8 +1100,8 @@ object ZhytomyrRouletteEngine {
             val candidates = tickets.mapIndexedNotNull { idx, t ->
                 if (isSafe(t) && !t.isGolden && !chosenX2.contains(idx)) idx else null
             }
-            val pool = if (candidates.count { it >= 4 } >= targetX2Count - chosenX2.size) {
-                candidates.filter { it >= 4 }.toMutableList()
+            val pool = if (candidates.drop(4).size >= targetX2Count - chosenX2.size) {
+                candidates.drop(4).toMutableList()
             } else {
                 candidates.reversed().toMutableList()
             }
@@ -1686,20 +1685,20 @@ object ZhytomyrRouletteEngine {
     ): Bitmap {
         val bitmap = Bitmap.createBitmap(600, 800, Bitmap.Config.ARGB_8888)
         val canvas = android.graphics.Canvas(bitmap)
-        val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+        val paint = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG)
 
         // 1. Solid dark card background & golden border
-        paint.style = Paint.Style.FILL
+        paint.style = android.graphics.Paint.Style.FILL
         paint.color = android.graphics.Color.parseColor("#070A10")
         canvas.drawRect(0f, 0f, 600f, 800f, paint)
 
-        paint.style = Paint.Style.STROKE
+        paint.style = android.graphics.Paint.Style.STROKE
         paint.strokeWidth = 3f
         paint.color = android.graphics.Color.parseColor("#D8B467")
         canvas.drawRoundRect(RectF(18f, 18f, 582f, 782f), 28f, 28f, paint)
 
         // 2. Application Icon (#FF5E3A rounded square + white lightning bolt) & Name ("Світло в Житомирі")
-        paint.style = Paint.Style.FILL
+        paint.style = android.graphics.Paint.Style.FILL
         paint.color = android.graphics.Color.parseColor("#FF5E3A")
         canvas.drawRoundRect(RectF(145f, 48f, 193f, 96f), 12f, 12f, paint)
 
@@ -1718,14 +1717,14 @@ object ZhytomyrRouletteEngine {
         paint.color = android.graphics.Color.WHITE
         paint.textSize = 24f
         paint.typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
-        paint.textAlign = Paint.Align.LEFT
+        paint.textAlign = android.graphics.Paint.Align.LEFT
         canvas.drawText("Світло в Житомирі", 208f, 80f, paint)
 
         // 3. Game Logo (Lightbulb contour with inner filament & screw base)
-        paint.style = Paint.Style.STROKE
+        paint.style = android.graphics.Paint.Style.STROKE
         paint.strokeWidth = 4.5f
-        paint.strokeCap = Paint.Cap.ROUND
-        paint.strokeJoin = Paint.Join.ROUND
+        paint.strokeCap = android.graphics.Paint.Cap.ROUND
+        paint.strokeJoin = android.graphics.Paint.Join.ROUND
         paint.color = android.graphics.Color.parseColor("#F4D06F")
         canvas.drawCircle(300f, 232f, 64f, paint)
         val filamentPath = android.graphics.Path().apply {
@@ -1745,53 +1744,53 @@ object ZhytomyrRouletteEngine {
         }
 
         // 4. Game Name ("Zhytomyr Roulette")
-        paint.style = Paint.Style.FILL
+        paint.style = android.graphics.Paint.Style.FILL
         paint.color = android.graphics.Color.WHITE
         paint.textSize = 40f
-        paint.textAlign = Paint.Align.CENTER
+        paint.textAlign = android.graphics.Paint.Align.CENTER
         canvas.drawText("Zhytomyr Roulette", 300f, 446f, paint)
 
         // 5. Top Score Bar
-        paint.style = Paint.Style.FILL
+        paint.style = android.graphics.Paint.Style.FILL
         paint.color = android.graphics.Color.parseColor("#141A29")
         canvas.drawRoundRect(RectF(75f, 520f, 525f, 588f), 34f, 34f, paint)
-        paint.style = Paint.Style.STROKE
+        paint.style = android.graphics.Paint.Style.STROKE
         paint.strokeWidth = 2f
         paint.color = android.graphics.Color.parseColor("#D8B467")
         canvas.drawRoundRect(RectF(75f, 520f, 525f, 588f), 34f, 34f, paint)
 
-        paint.style = Paint.Style.FILL
+        paint.style = android.graphics.Paint.Style.FILL
         paint.color = android.graphics.Color.parseColor("#E5D5B5")
         paint.textSize = 20f
-        paint.textAlign = Paint.Align.LEFT
+        paint.textAlign = android.graphics.Paint.Align.LEFT
         canvas.drawText("${AppStrings.rouletteAllTimeBestScoreLabel(lang).uppercase()}:", 108f, 561f, paint)
 
         paint.color = android.graphics.Color.parseColor("#F5D061")
         paint.textSize = 28f
         paint.typeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
-        paint.textAlign = Paint.Align.RIGHT
+        paint.textAlign = android.graphics.Paint.Align.RIGHT
         canvas.drawText("$bestScore", 492f, 563f, paint)
 
         // 6. Power Points Bar
-        paint.style = Paint.Style.FILL
+        paint.style = android.graphics.Paint.Style.FILL
         paint.color = android.graphics.Color.parseColor("#141A29")
         canvas.drawRoundRect(RectF(75f, 608f, 525f, 676f), 34f, 34f, paint)
-        paint.style = Paint.Style.STROKE
+        paint.style = android.graphics.Paint.Style.STROKE
         paint.strokeWidth = 2f
         paint.color = android.graphics.Color.parseColor("#D8B467")
         canvas.drawRoundRect(RectF(75f, 608f, 525f, 676f), 34f, 34f, paint)
 
-        paint.style = Paint.Style.FILL
+        paint.style = android.graphics.Paint.Style.FILL
         paint.color = android.graphics.Color.parseColor("#E5D5B5")
         paint.textSize = 20f
         paint.typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
-        paint.textAlign = Paint.Align.LEFT
+        paint.textAlign = android.graphics.Paint.Align.LEFT
         canvas.drawText("${AppStrings.roulettePowerPointsLabel(lang).uppercase()}:", 108f, 649f, paint)
 
         paint.color = android.graphics.Color.parseColor("#F5D061")
         paint.textSize = 28f
         paint.typeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
-        paint.textAlign = Paint.Align.RIGHT
+        paint.textAlign = android.graphics.Paint.Align.RIGHT
         canvas.drawText("$powerPoints", 492f, 651f, paint)
 
         // 7. Bottom Centered Upgrade Glyphs (strictly #6B7280 or #F59E0B outline strokes)
@@ -1801,15 +1800,15 @@ object ZhytomyrRouletteEngine {
         val cy = 736f
         for ((idx, g) in glyphs.withIndex()) {
             val cx = startX + idx * glyphSpacing
-            paint.style = Paint.Style.STROKE
+            paint.style = android.graphics.Paint.Style.STROKE
             paint.strokeWidth = 2.2f
             paint.color = android.graphics.Color.parseColor(g.colorHex)
             when (g.kind) {
                 "x2" -> {
                     canvas.drawRoundRect(RectF(cx - 15f, cy - 11f, cx + 15f, cy + 11f), 5f, 5f, paint)
-                    paint.style = Paint.Style.FILL
+                    paint.style = android.graphics.Paint.Style.FILL
                     paint.textSize = 12f
-                    paint.textAlign = Paint.Align.CENTER
+                    paint.textAlign = android.graphics.Paint.Align.CENTER
                     canvas.drawText("X2", cx, cy + 4f, paint)
                 }
                 "person" -> {
@@ -1866,9 +1865,9 @@ object ZhytomyrRouletteEngine {
                 }
                 "deposit" -> {
                     canvas.drawRoundRect(RectF(cx - 18f, cy - 11f, cx + 18f, cy + 11f), 6f, 6f, paint)
-                    paint.style = Paint.Style.FILL
+                    paint.style = android.graphics.Paint.Style.FILL
                     paint.textSize = 11f
-                    paint.textAlign = Paint.Align.CENTER
+                    paint.textAlign = android.graphics.Paint.Align.CENTER
                     canvas.drawText("${g.depositPoints}", cx, cy + 4f, paint)
                 }
                 else -> {
@@ -3156,7 +3155,7 @@ private fun ScratchTicketComposable(
             if (!ticket.isRevealed) {
                 drawContext.canvas.saveLayer(
                     androidx.compose.ui.geometry.Rect(0f, 0f, w, h),
-                    Paint()
+                    androidx.compose.ui.graphics.Paint()
                 )
 
                 val placement = ticket.stainPlacement
