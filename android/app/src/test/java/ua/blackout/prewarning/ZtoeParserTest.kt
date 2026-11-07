@@ -226,7 +226,7 @@ class ZtoeParserTest {
         assertEquals("15:30-16:00", labels[31])
         assertEquals("23:30-24:00", labels[47])
 
-        assertEquals(0.20f, ua.blackout.prewarning.ui.screens.ZhytomyrRouletteEngine.TICKET_SCRATCH_REVEAL_THRESHOLD)
+        assertEquals(0.20f, ua.blackout.prewarning.ui.screens.ZhytomyrRouletteEngine.TICKET_SCRATCH_REVEAL_THRESHOLD, 0.0001f)
         assertEquals(false, ua.blackout.prewarning.ui.screens.ZhytomyrRouletteEngine.isTicketScratchedEnough(0.19f))
         assertEquals(true, ua.blackout.prewarning.ui.screens.ZhytomyrRouletteEngine.isTicketScratchedEnough(0.20f))
 
@@ -400,11 +400,11 @@ class ZtoeParserTest {
         assertEquals(ua.blackout.prewarning.ui.screens.TicketRevealOutcome.RED, nocBeigeOver.outcome)
 
         val nocOff = ua.blackout.prewarning.ui.screens.ZhytomyrRouletteEngine.purchaseUpgrade(
-            nocOn.nextState,
+            nocBeigeOver.nextState,
             ua.blackout.prewarning.ui.screens.RouletteUpgradeId.NOCTURNAL_CREATURE
         )
         assertEquals(true, nocOff.purchased)
-        assertEquals(4880, nocOff.nextState.powerPoints)
+        assertEquals(4886, nocOff.nextState.powerPoints)
         assertTrue(!nocOff.nextState.purchasedUpgrades.contains(ua.blackout.prewarning.ui.screens.RouletteUpgradeId.NOCTURNAL_CREATURE))
 
         // Deposit Power Points (100): repeatable, 10 / day per stack, FinMonitoring AntiCheat rollback detection & permanent disable of future payouts
@@ -415,7 +415,7 @@ class ZtoeParserTest {
             nowMs = t0
         )
         assertEquals(true, dep1.purchased)
-        assertEquals(4780, dep1.nextState.powerPoints)
+        assertEquals(4786, dep1.nextState.powerPoints)
         assertEquals(1, dep1.nextState.depositCount)
         val dep2 = ua.blackout.prewarning.ui.screens.ZhytomyrRouletteEngine.purchaseUpgrade(
             dep1.nextState,
@@ -423,14 +423,14 @@ class ZtoeParserTest {
             nowMs = t0 + 1000L
         )
         assertEquals(true, dep2.purchased)
-        assertEquals(4680, dep2.nextState.powerPoints)
+        assertEquals(4686, dep2.nextState.powerPoints)
         assertEquals(2, dep2.nextState.depositCount)
 
         val payoutAfter2Days = ua.blackout.prewarning.ui.screens.ZhytomyrRouletteEngine.processGameLaunchDepositPayout(
             t0 + 2L * ua.blackout.prewarning.ui.screens.ZhytomyrRouletteEngine.DAY_IN_MS
         )
         assertEquals(40, payoutAfter2Days.awardedPoints)
-        assertEquals(4720, payoutAfter2Days.powerPoints)
+        assertEquals(4726, payoutAfter2Days.powerPoints)
 
         // Clock rollback prior to recorded payoutDateMs -> FinMon AntiCheat lock, Power Points = 0, description "На розгляді ФінМоніторинга", and future 24h payouts disabled
         val rollback = ua.blackout.prewarning.ui.screens.ZhytomyrRouletteEngine.processGameLaunchDepositPayout(
@@ -541,7 +541,7 @@ class ZtoeParserTest {
         assertEquals("Share", AppStrings.rouletteShareBtn("en"))
         assertEquals("Звук", AppStrings.rouletteSoundLabel("uk"))
         assertEquals("Sound", AppStrings.rouletteSoundLabel("en"))
-        assertEquals(0.15f, ua.blackout.prewarning.ui.screens.RouletteSoundEngine.MUSIC_VOLUME_SCALE)
+        assertEquals(0.15f, ua.blackout.prewarning.ui.screens.RouletteSoundEngine.MUSIC_VOLUME_SCALE, 0.0001f)
         assertEquals(1200L, ua.blackout.prewarning.ui.screens.RouletteSoundEngine.MUSIC_FADE_DURATION_MS)
         assertEquals(2000L, ua.blackout.prewarning.ui.screens.RouletteSoundEngine.GAME_OVER_MUSIC_FADE_IN_DELAY_MS)
         assertEquals(2, ua.blackout.prewarning.ui.screens.RouletteSoundEngine.START_SHOP_MUSIC_OPTIONS.size)
