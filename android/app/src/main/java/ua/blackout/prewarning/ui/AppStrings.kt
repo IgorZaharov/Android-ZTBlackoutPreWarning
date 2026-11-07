@@ -131,7 +131,10 @@ object AppStrings {
     fun rouletteAllTimeBestScoreLabel(lang: String) = if (lang == "uk") "Найкращий Результат" else "All time best score"
     fun rouletteMainMenuBtn(lang: String) = if (lang == "uk") "Головне Меню" else "Main Menu"
     fun rouletteShareBtn(lang: String = "uk") = if (lang == "uk") "Поділитися" else "Share"
+    fun rouletteDownloadImageBtn(lang: String = "uk") = if (lang == "uk") "Завантажити зображення" else "Download Image"
+    fun rouletteImageSavedToast(lang: String = "uk") = if (lang == "uk") "Зображення збережено" else "Image saved"
     fun rouletteSoundLabel(lang: String = "uk") = if (lang == "uk") "Звук" else "Sound"
+    fun rouletteMusicLabel(lang: String = "uk") = if (lang == "uk") "Музика" else "Music"
     fun rouletteLoadingText(lang: String) = if (lang == "uk") "Роздача білетів..." else "Dealing tickets..."
 }
 

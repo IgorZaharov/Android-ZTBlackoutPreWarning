@@ -554,6 +554,7 @@ async function runUnitTestC_ZhytomyrRoulette() {
     SHARE_GLYPH_INACTIVE_COLOR,
     SHARE_GLYPH_ACTIVE_COLOR,
     getShareCardUpgradeGlyphStates,
+    convertShareDataUrlToFile,
   } = await import('../src/services/rouletteGame');
   const { fetchFullSchedules } = await import('../src/services/ztoeParser');
   const {
@@ -573,6 +574,11 @@ async function runUnitTestC_ZhytomyrRoulette() {
     isRouletteSoundEnabled,
     setRouletteSoundEnabled,
     toggleRouletteSoundEnabled,
+    isRouletteMusicEnabled,
+    setRouletteMusicEnabled,
+    toggleRouletteMusicEnabled,
+    isRouletteAppInForeground,
+    setRouletteAppInForeground,
     getTargetMusicTrackForScreen,
     syncRouletteBackgroundMusic,
     pickRandomStartShopMusicUrl,
@@ -589,8 +595,8 @@ async function runUnitTestC_ZhytomyrRoulette() {
     'Game Over event must have a 1 sec (1000ms) delay to let User realize scratching result'
   );
 
-  // Verify sound volume adjustments: Scratching +15% (1.15), Coin -25% (0.75), GameOver/UpgradePurchase -20% less (0.60), Flicker & 10s Game Blackout lamp breaking sound at 10% (0.10), Music at 15% (0.15) with fade-in/fade-out and 2s Game Over delay
-  assert.equal(SCRATCH_VOLUME_SCALE, 1.15, 'Scratching sound volume must be 15% higher (1.15)');
+  // Verify sound volume adjustments: Scratching 50% lower from 1.15 (0.575), Coin -25% (0.75), GameOver/UpgradePurchase -20% less (0.60), Flicker & 10s Game Blackout lamp breaking sound at 10% (0.10), Music at 15% (0.15) with fade-in/fade-out and 2s Game Over delay
+  assert.equal(SCRATCH_VOLUME_SCALE, 0.575, 'Scratching sound volume must be 50% lower from 1.15 (0.575)');
   assert.equal(COIN_VOLUME_SCALE, 0.75, 'Coin sound volume must be 25% lower (0.75)');
   assert.equal(
     GAMEOVER_UPGRADE_VOLUME_SCALE,
@@ -687,6 +693,7 @@ async function runUnitTestC_ZhytomyrRoulette() {
   assert.equal(getTargetMusicTrackForScreen('START', false), 'NONE');
 
   assert.equal(isRouletteSoundEnabled(), true, 'Sound must be enabled by default');
+  assert.equal(isRouletteMusicEnabled(), true, 'Music must be enabled by default');
   assert.equal(syncRouletteBackgroundMusic('START', true, true, () => 0.2), 'START_SHOP_GAMEOVER');
   assert.equal(getCurrentStartShopMusicUrl(), START_SHOP_GAMEOVER_MUSIC_URL);
   assert.equal(syncRouletteBackgroundMusic('SHOP', true, true, () => 0.9), 'START_SHOP_GAMEOVER');
@@ -703,10 +710,30 @@ async function runUnitTestC_ZhytomyrRoulette() {
     'Returning to Game Start Screen must randomize Start/Shop music track'
   );
   assert.equal(syncRouletteBackgroundMusic('GAME_OVER', true, true), 'START_SHOP_GAMEOVER');
-  assert.equal(setRouletteSoundEnabled(false), false, 'Sound switch must disable sound and music');
+  // Verify separate switches for Sound and Music
+  assert.equal(setRouletteSoundEnabled(false), false, 'Sound switch must disable sound independently');
   assert.equal(isRouletteSoundEnabled(), false);
-  assert.equal(syncRouletteBackgroundMusic('START', true), 'NONE', 'Music must be disabled when Sound switch is OFF');
-  assert.equal(toggleRouletteSoundEnabled(), true, 'Toggling Sound switch back ON must re-enable sound and music');
+  assert.equal(isRouletteMusicEnabled(), true, 'Disabling Sound switch must leave Music switch unaffected');
+  assert.equal(toggleRouletteSoundEnabled(), true, 'Toggling Sound switch back ON must re-enable sound');
+  assert.equal(setRouletteMusicEnabled(false), false, 'Music switch must disable music independently');
+  assert.equal(isRouletteMusicEnabled(), false);
+  assert.equal(syncRouletteBackgroundMusic('START', true), 'NONE', 'Music must be disabled when Music switch is OFF');
+  assert.equal(toggleRouletteMusicEnabled(), true, 'Toggling Music switch back ON must re-enable music');
+  assert.equal(syncRouletteBackgroundMusic('START', true, true), 'START_SHOP_GAMEOVER');
+  // Verify muting music & sounds when Application is minimized / sent to Home screen
+  assert.equal(isRouletteAppInForeground(), true);
+  assert.equal(setRouletteAppInForeground(false), false, 'Minimizing app must set foreground state to false');
+  assert.equal(
+    syncRouletteBackgroundMusic('START', true, true),
+    'NONE',
+    'Music must be muted (NONE) when Application is minimized'
+  );
+  assert.equal(setRouletteAppInForeground(true), true, 'Returning app to foreground must restore foreground state');
+  assert.equal(
+    syncRouletteBackgroundMusic('START', true, true),
+    'START_SHOP_GAMEOVER',
+    'Music must resume when Application returns to foreground'
+  );
   assert.equal(syncRouletteBackgroundMusic('START', false), 'NONE');
 
   // 1. Verify 48 timeslots sorted chronologically (00:00-00:30 .. 15:30-16:00 .. 23:30-24:00) and 2-column hourly pairing
@@ -792,8 +819,12 @@ async function runUnitTestC_ZhytomyrRoulette() {
   assert.equal(enStrings.mainMenuButton, 'Main Menu', 'English localization for Main Menu button must be "Main Menu"');
   assert.equal(ukStrings.shareButton, 'Поділитися', 'Ukrainian localization for Share button must be "Поділитися"');
   assert.equal(enStrings.shareButton, 'Share', 'English localization for Share button must be "Share"');
+  assert.equal(ukStrings.downloadImageButton, 'Завантажити зображення', 'Ukrainian localization for Download Image button must be "Завантажити зображення"');
+  assert.equal(enStrings.downloadImageButton, 'Download Image', 'English localization for Download Image button must be "Download Image"');
   assert.equal(ukStrings.soundLabel, 'Звук', 'Ukrainian localization for Sound switch must be "Звук"');
   assert.equal(enStrings.soundLabel, 'Sound', 'English localization for Sound switch must be "Sound"');
+  assert.equal(ukStrings.musicLabel, 'Музика', 'Ukrainian localization for Music switch must be "Музика"');
+  assert.equal(enStrings.musicLabel, 'Music', 'English localization for Music switch must be "Music"');
   assert.equal(ukStrings.powerPointsLabel, 'Бали Потужності');
   assert.equal(enStrings.powerPointsLabel, 'Power Points');
   assert.equal(ukStrings.powerShopButton, 'Магазин Потужності');
@@ -852,6 +883,9 @@ async function runUnitTestC_ZhytomyrRoulette() {
   );
   const shareDataUrl = generateRouletteShareImageDataUrl({ bestScore: 128, powerPoints: 9999, lang: 'uk' });
   assert.ok(shareDataUrl.startsWith('data:image/'), 'generateRouletteShareImageDataUrl must return a valid image data URL');
+  const shareImageFile = convertShareDataUrlToFile(shareDataUrl, 'zhytomyr-roulette-share.png');
+  assert.ok(shareImageFile !== null, 'convertShareDataUrlToFile must convert Share Card image data URL into a File object');
+  assert.ok(shareImageFile!.size > 0, 'Generated Share Card image File must be non-empty');
 
   // Verify randomized 15-30s screen flicker interval, slow 2-3s flicker duration, and 5-10m (300,000-600,000ms) 10s Game Blackout interval
   assert.equal(GAME_BLACKOUT_MIN_INTERVAL_MS, 300_000);
@@ -1221,6 +1255,28 @@ async function runUnitTestC_ZhytomyrRoulette() {
   assert.equal(nocturnalUpgrade.isToggleable, true, 'Nocturnal Creature must be toggleable');
   assert.equal(depositUpgrade.cost, 100, 'Deposit Power Points price must be 100');
   assert.equal(depositUpgrade.isRepeatable, true, 'Deposit Power Points must be repeatable');
+  const dailyStreakUpgrade = ROULETTE_UPGRADES.find((u) => u.id === 'daily_streak')!;
+  const perseveranceUpgrade = ROULETTE_UPGRADES.find((u) => u.id === 'perseverance')!;
+  assert.equal(
+    getUpgradeDescription(dailyStreakUpgrade, 'uk', false),
+    'Нагорода за рубіж 400: перша гра на день дає бонус X2 до балів перед завершенням гри.',
+    'Daily Streak Ukrainian description must mention Milestone 400 reward'
+  );
+  assert.equal(
+    getUpgradeDescription(dailyStreakUpgrade, 'en', false),
+    'Milestone 400 reward: first Game in a Day grants X2 bonus points before Game Over event.',
+    'Daily Streak English description must mention Milestone 400 reward'
+  );
+  assert.equal(
+    getUpgradeDescription(perseveranceUpgrade, 'uk', false),
+    'Нагорода за рубіж 1000: додає ще одне серце на головному екрані гри (до трьох життів разом із Другим шансом).',
+    'Perseverance Ukrainian description must mention Milestone 1000 reward'
+  );
+  assert.equal(
+    getUpgradeDescription(perseveranceUpgrade, 'en', false),
+    'Milestone 1000 reward: adds one more heart icon in Main Game screen. Cumulative with Second Life up to three lives.',
+    'Perseverance English description must mention Milestone 1000 reward'
+  );
 
   resetAllRouletteProgress();
   resetSavedPowerPoints(5000);
@@ -1279,17 +1335,18 @@ async function runUnitTestC_ZhytomyrRoulette() {
   assert.equal(getStreakStep(nocOn.nextState.purchasedUpgrades), 2, 'Nocturnal Creature must multiply streak step by x2 (+2, +4, +6...)');
 
   // Test reversed game logic when Nocturnal Creature is ON:
-  // Red tickets (index 41, 42, 43) increase score, while Beige ticket (index 0) triggers Game Over!
-  // Note: Friend in Zhytomyroblenergo is active so 1 Red ticket (safe in Nocturnal mode) is already opened at start (+2)!
+  // Red tickets (index 41, 42, 43) increase score, while Beige ticket (index 0) triggers Game Over (after consuming Second chance extra life)!
+  // Note: Friend in Zhytomyroblenergo is active so 1 Red ticket (safe in Nocturnal mode) is already opened at start (+2), and Second chance gives 1 extra life!
   let nocGameState = startRouletteGame(
     { queueId: '1.1', isOfflineRandomized: false, tickets: controlledTickets },
     nocOn.nextState.generationId,
-    () => 0, // picks first safe ticket in Nocturnal mode (index 40)
+    () => 0.1, // >= 0.05 (prevents 5% golden ticket roll) and picks first safe ticket in Nocturnal mode (index 40)
     0,
     nocOn.nextState.purchasedUpgrades
   );
   assert.equal(nocGameState.score, 2, 'Friend in Nocturnal mode opens 1 safe Red ticket for +2');
   assert.equal(nocGameState.streakIncrement, 4);
+  assert.equal(nocGameState.extraLivesTotal, 1, 'Second chance is active in Nocturnal game');
 
   const nocRed1 = revealRouletteTicket(nocGameState, 41);
   assert.equal(nocRed1.outcome, 'BEIGE', 'In Nocturnal Creature mode, scratching a Red ticket increases score');
@@ -1301,9 +1358,66 @@ async function runUnitTestC_ZhytomyrRoulette() {
   assert.equal(nocGameState.score, 12, 'Next consecutive Red ticket in Nocturnal Creature mode adds +6 (6 + 6 = 12)');
   assert.equal(nocGameState.streakIncrement, 8);
 
-  const nocBeigeGameOver = revealRouletteTicket(nocGameState, 0);
-  assert.equal(nocBeigeGameOver.outcome, 'RED', 'In Nocturnal Creature mode, scratching a Beige ticket triggers Game Over');
+  // 1st Beige ticket (index 0) in Nocturnal mode with Second chance consumes 1 extra life and counts as safe (+8 -> 20)!
+  const nocBeigeSavedBySecondChance = revealRouletteTicket(nocGameState, 0);
+  assert.equal(nocBeigeSavedBySecondChance.outcome, 'BEIGE', 'Second chance must save player when opening fatal ticket in Nocturnal mode');
+  nocGameState = nocBeigeSavedBySecondChance.nextState;
+  assert.equal(nocGameState.extraLivesUsed, 1);
+  assert.equal(nocGameState.score, 20);
+  assert.equal(nocGameState.streakIncrement, 10);
+
+  // Subtract 8 from score so earned score is 12 before final fatal Beige ticket (index 1) triggers Game Over
+  nocGameState = { ...nocGameState, score: 12 };
+  const nocBeigeGameOver = revealRouletteTicket(nocGameState, 1);
+  assert.equal(nocBeigeGameOver.outcome, 'RED', 'In Nocturnal Creature mode, scratching a Beige ticket after extra lives are used triggers Game Over');
   assert.equal(nocBeigeGameOver.nextState.screen, 'FADING_TO_BLACK');
+
+  // Also verify Nocturnal Creature with Second Chance + Perseverance (2 extra lives), X2 Red ticket multiplying points, and Golden Red ticket opening all Red tickets on field!
+  const nocSpecialTickets = labels.map((slotLabel, index) => ({
+    index,
+    slotLabel,
+    isRed: index >= 40, // 8 Red tickets (indices 40..47)
+    isGolden: index === 45, // Red Golden ticket
+    isX2: index === 43, // Red X2 ticket
+    isRevealed: false,
+    scratchProgress: 0,
+  }));
+  let nocComboState = startRouletteGame(
+    { queueId: '1.1', isOfflineRandomized: false, tickets: nocSpecialTickets },
+    99,
+    () => 0.5,
+    0,
+    ['nocturnal_creature', 'second_chance', 'perseverance']
+  );
+  assert.equal(nocComboState.extraLivesTotal, 2, 'Nocturnal Creature + Second Chance + Perseverance must grant 2 extra lives');
+  // Open normal Red ticket (index 40) -> +2 (score = 2, streak = 4)
+  nocComboState = revealRouletteTicket(nocComboState, 40).nextState;
+  assert.equal(nocComboState.score, 2);
+  assert.equal(nocComboState.streakIncrement, 4);
+  // Open X2 Red ticket (index 43) -> multiplies points by 2 (2 * 2 = 4, streak = 6)
+  const nocX2Reveal = revealRouletteTicket(nocComboState, 43);
+  assert.equal(nocX2Reveal.outcome, 'X2', 'Opening X2 Red ticket with Nocturnal Creature in effect must return outcome X2');
+  nocComboState = nocX2Reveal.nextState;
+  assert.equal(nocComboState.score, 4, 'X2 ticket with Nocturnal Creature in effect must multiply points by 2');
+  assert.equal(nocComboState.streakIncrement, 6);
+  // Open 2 fatal tickets -> Second Chance & Perseverance save player twice (+6 -> 10, +8 -> 18)
+  const nocLife1 = revealRouletteTicket(nocComboState, 0);
+  assert.equal(nocLife1.outcome, 'BEIGE');
+  assert.equal(nocLife1.nextState.extraLivesUsed, 1);
+  assert.equal(nocLife1.nextState.score, 10);
+  const nocLife2 = revealRouletteTicket(nocLife1.nextState, 1);
+  assert.equal(nocLife2.outcome, 'BEIGE');
+  assert.equal(nocLife2.nextState.extraLivesUsed, 2);
+  assert.equal(nocLife2.nextState.score, 18);
+  assert.equal(nocLife2.nextState.streakIncrement, 10);
+  // Open Golden Red ticket (index 45) -> opens all remaining 6 unrevealed Red tickets on field (41, 42, 44, 45, 46, 47) and adds 10+12+14+16+18+20 = 90 -> 108!
+  const nocGoldenReveal = revealRouletteTicket(nocLife2.nextState, 45);
+  assert.equal(nocGoldenReveal.outcome, 'GOLDEN', 'Gold ticket with Nocturnal Creature in effect must return outcome GOLDEN');
+  assert.ok(
+    nocGoldenReveal.nextState.tickets.filter((t) => t.isRed).every((t) => t.isRevealed),
+    'Gold ticket must open all Red tickets on field with Nocturnal Creature in effect'
+  );
+  assert.equal(nocGoldenReveal.nextState.score, 108, 'Gold ticket in Nocturnal Creature mode must award cumulative streak points for all unrevealed Red tickets');
 
   // Consecutive purchase of Nocturnal Creature (Cost: 10) turns it OFF and deducts 10 (from 1077 + 12 earned in Nocturnal game = 1089 -> 1079)
   const nocOff = purchaseRouletteUpgrade(nocBeigeGameOver.nextState, 'nocturnal_creature');
@@ -1636,14 +1750,24 @@ async function runUnitTestC_ZhytomyrRoulette() {
       rouletteModalTsx.includes('roulette-best-score') &&
       rouletteModalTsx.includes('roulette-power-points') &&
       rouletteModalTsx.includes('roulette-share-btn') &&
+      rouletteModalTsx.includes('roulette-audio-switches-left') &&
       rouletteModalTsx.includes('roulette-sound-switch') &&
       rouletteModalTsx.includes('roulette-sound-label') &&
+      rouletteModalTsx.includes('roulette-music-switch') &&
+      rouletteModalTsx.includes('roulette-music-label') &&
       rouletteModalTsx.indexOf('roulette-sound-switch') < rouletteModalTsx.indexOf('roulette-share-btn') &&
+      rouletteModalTsx.indexOf('roulette-music-switch') < rouletteModalTsx.indexOf('roulette-share-btn') &&
+      rouletteModalTsx.includes('roulette-ticket-scroll-container') &&
+      rouletteModalTsx.includes('convertShareDataUrlToFile') &&
+      rouletteModalTsx.includes('files: [shareFile]') &&
       rouletteModalTsx.includes('bg-[#FF5E3A] shadow-md shadow-[#FF5E3A]/30') &&
       rouletteModalTsx.includes('syncRouletteBackgroundMusic') &&
-      rouletteModalTsx.includes('roulette-share-to-app-dialog') &&
-      rouletteModalTsx.includes('Share to... Application') &&
+      !rouletteModalTsx.includes('roulette-share-to-app-dialog') &&
       rouletteModalTsx.includes('roulette-share-bottom-buttons') &&
+      rouletteModalTsx.includes('roulette-share-action-btn') &&
+      rouletteModalTsx.includes('roulette-share-download-btn') &&
+      rouletteModalTsx.includes('roulette-share-close-btn') &&
+      rouletteModalTsx.includes('e.stopPropagation()') &&
       rouletteModalTsx.includes('!sharePreviewDataUrl && (') &&
       rouletteModalTsx.includes('roulette-gameover-main-menu-btn') &&
       rouletteModalTsx.includes('roulette-upgrade-v-mark-') &&
@@ -1656,10 +1780,25 @@ async function runUnitTestC_ZhytomyrRoulette() {
       rouletteScreenKt.includes('PowerPointsMilestoneProgressBarComposable') &&
       rouletteScreenKt.includes('HeaderHeartIconComposable') &&
       rouletteScreenKt.includes('ShareCardUpgradeGlyphsRowComposable') &&
-      rouletteScreenKt.includes('Share to... Application') &&
+      !rouletteScreenKt.includes('Share to... Application') &&
       rouletteScreenKt.includes('if (!showSharePreview)') &&
+      rouletteScreenKt.includes('Icons.Default.Share') &&
+      rouletteScreenKt.includes('Icons.Default.Bolt') &&
+      rouletteScreenKt.includes('Color(0xFFFF5E3A)') &&
+      rouletteScreenKt.includes('size(width = 24.dp, height = 20.dp)') &&
+      rouletteScreenKt.includes('rouletteDownloadImageBtn') &&
+      rouletteScreenKt.includes('saveShareCardBitmapToMediaStore') &&
+      rouletteScreenKt.includes('android.graphics.Color.parseColor(g.colorHex)') &&
+      rouletteScreenKt.includes('ClipData.newRawUri') &&
+      rouletteScreenKt.includes('rememberLazyListState()') &&
+      rouletteScreenKt.includes('crossfadeTargetScreen') &&
+      rouletteScreenKt.includes('setAppInForeground') &&
+      rouletteScreenKt.includes('SCRATCH_VOLUME_SCALE = 0.575') &&
       rouletteScreenKt.includes('rouletteSoundLabel') &&
+      rouletteScreenKt.includes('rouletteMusicLabel') &&
       rouletteScreenKt.indexOf('AppStrings.rouletteSoundLabel(lang)') <
+        rouletteScreenKt.indexOf('AppStrings.rouletteShareBtn(lang)') &&
+      rouletteScreenKt.indexOf('AppStrings.rouletteMusicLabel(lang)') <
         rouletteScreenKt.indexOf('AppStrings.rouletteShareBtn(lang)') &&
       rouletteScreenKt.includes('checkedTrackColor = Color(0xFFFF5E3A)') &&
       rouletteScreenKt.includes('syncBackgroundMusic') &&
@@ -1670,6 +1809,10 @@ async function runUnitTestC_ZhytomyrRoulette() {
       rouletteScreenKt.includes('R.raw.audio_main_game') &&
       rouletteScreenKt.includes('DAILY_STREAK') &&
       rouletteScreenKt.includes('PERSEVERANCE') &&
+      rouletteScreenKt.includes('Нагорода за рубіж 400:') &&
+      rouletteScreenKt.includes('Milestone 400 reward:') &&
+      rouletteScreenKt.includes('Нагорода за рубіж 1000:') &&
+      rouletteScreenKt.includes('Milestone 1000 reward:') &&
       rouletteScreenKt.includes('playFlickerBuzzSound') &&
       rouletteScreenKt.includes('playGameBlackoutSound') &&
       rouletteScreenKt.includes('ticket_foil_pristine') &&
@@ -1696,12 +1839,16 @@ async function runUnitTestC_ZhytomyrRoulette() {
       appStringsKt.includes('Найкращий Результат') &&
       appStringsKt.includes('Головне Меню') &&
       appStringsKt.includes('Main Menu') &&
+      appStringsKt.includes('Завантажити зображення') &&
+      appStringsKt.includes('Download Image') &&
       appStringsKt.includes('Звук') &&
       appStringsKt.includes('Sound') &&
+      appStringsKt.includes('Музика') &&
+      appStringsKt.includes('Music') &&
       appStringsKt.includes('All time best score') &&
       appStringsKt.includes('Бали Потужності') &&
       appStringsKt.includes('Магазин Потужності'),
-    'Both Web and Android must include 1s Game Over delay, Milestone Progress Bar, Header Heart icons, Daily Streak & Perseverance, Share Card upgrade glyphs, standard mobile Share to... Application dialog without bottom button overlap, Sound switch under Share button, 15% volume background music with fade-in/fade-out, 10s Game Blackout, Flicker lamp breaking sound, Депозит Потужність+, AntiCheat, and all 9 generated ticket textures'
+    'Both Web and Android must include 1s Game Over delay, Milestone Progress Bar with outlined score pills and identical 24x20 reward icons, Header Heart icons, Daily Streak & Perseverance with Milestone reward descriptions, Share Card image sharing, unmodified App icon on Share Card, 3 Share screen buttons (Share, Download Image, Back) without middle share bar, touch consumption on empty space, separate Sound and Music switches on the left side, Game Over scroll preservation, 15% volume background music with fade-in/fade-out and background mute, 50% lower scratch volume (0.575), 10s Game Blackout, Flicker lamp breaking sound, Депозит Потужність+, AntiCheat, and all 9 generated ticket textures'
   );
   assert.ok(
     rouletteAudioTs.includes('playCardShuffleSound') &&

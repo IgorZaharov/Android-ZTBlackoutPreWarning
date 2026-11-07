@@ -539,8 +539,76 @@ class ZtoeParserTest {
         assertEquals("Main Menu", AppStrings.rouletteMainMenuBtn("en"))
         assertEquals("Поділитися", AppStrings.rouletteShareBtn("uk"))
         assertEquals("Share", AppStrings.rouletteShareBtn("en"))
+        assertEquals("Завантажити зображення", AppStrings.rouletteDownloadImageBtn("uk"))
+        assertEquals("Download Image", AppStrings.rouletteDownloadImageBtn("en"))
+        assertEquals("Зображення збережено", AppStrings.rouletteImageSavedToast("uk"))
+        assertEquals("Image saved", AppStrings.rouletteImageSavedToast("en"))
         assertEquals("Звук", AppStrings.rouletteSoundLabel("uk"))
         assertEquals("Sound", AppStrings.rouletteSoundLabel("en"))
+        assertEquals("Музика", AppStrings.rouletteMusicLabel("uk"))
+        assertEquals("Music", AppStrings.rouletteMusicLabel("en"))
+        val dailyStreakDef = ua.blackout.prewarning.ui.screens.ZhytomyrRouletteEngine.UPGRADES.first {
+            it.id == ua.blackout.prewarning.ui.screens.RouletteUpgradeId.DAILY_STREAK
+        }
+        val perseveranceDef = ua.blackout.prewarning.ui.screens.ZhytomyrRouletteEngine.UPGRADES.first {
+            it.id == ua.blackout.prewarning.ui.screens.RouletteUpgradeId.PERSEVERANCE
+        }
+        assertEquals(
+            "Нагорода за рубіж 400: перша гра на день дає бонус X2 до балів перед завершенням гри.",
+            ua.blackout.prewarning.ui.screens.ZhytomyrRouletteEngine.getUpgradeDescription(dailyStreakDef, "uk", false)
+        )
+        assertEquals(
+            "Milestone 400 reward: first Game in a Day grants X2 bonus points before Game Over event.",
+            ua.blackout.prewarning.ui.screens.ZhytomyrRouletteEngine.getUpgradeDescription(dailyStreakDef, "en", false)
+        )
+        assertEquals(
+            "Нагорода за рубіж 1000: додає ще одне серце на головному екрані гри (до трьох життів разом із Другим шансом).",
+            ua.blackout.prewarning.ui.screens.ZhytomyrRouletteEngine.getUpgradeDescription(perseveranceDef, "uk", false)
+        )
+        assertEquals(
+            "Milestone 1000 reward: adds one more heart icon in Main Game screen. Cumulative with Second Life up to three lives.",
+            ua.blackout.prewarning.ui.screens.ZhytomyrRouletteEngine.getUpgradeDescription(perseveranceDef, "en", false)
+        )
+        // Verify Nocturnal Creature + Second Chance / Perseverance / X2 / Golden ticket opening all Red tickets on field
+        val nocComboTickets = labels.mapIndexed { idx, label ->
+            ua.blackout.prewarning.ui.screens.RouletteTicketItem(
+                index = idx,
+                slotLabel = label,
+                isRed = idx >= 40,
+                isGolden = idx == 45,
+                isX2 = idx == 43,
+                isRevealed = false
+            )
+        }
+        var nocComboState = ua.blackout.prewarning.ui.screens.ZhytomyrRouletteEngine.startGame(
+            "1.1",
+            false,
+            nocComboTickets,
+            explicitUpgrades = setOf(
+                ua.blackout.prewarning.ui.screens.RouletteUpgradeId.NOCTURNAL_CREATURE,
+                ua.blackout.prewarning.ui.screens.RouletteUpgradeId.SECOND_CHANCE,
+                ua.blackout.prewarning.ui.screens.RouletteUpgradeId.PERSEVERANCE
+            )
+        )
+        assertEquals(2, nocComboState.extraLivesTotal)
+        nocComboState = ua.blackout.prewarning.ui.screens.ZhytomyrRouletteEngine.revealTicket(nocComboState, 40).nextState // +2 -> 2
+        val nocX2 = ua.blackout.prewarning.ui.screens.ZhytomyrRouletteEngine.revealTicket(nocComboState, 43) // X2 -> 4
+        assertEquals(ua.blackout.prewarning.ui.screens.TicketRevealOutcome.X2, nocX2.outcome)
+        assertEquals(4, nocX2.nextState.score)
+        val nocLife1 = ua.blackout.prewarning.ui.screens.ZhytomyrRouletteEngine.revealTicket(nocX2.nextState, 0) // saved by Second Chance -> +6 -> 10
+        assertEquals(ua.blackout.prewarning.ui.screens.TicketRevealOutcome.BEIGE, nocLife1.outcome)
+        assertEquals(1, nocLife1.nextState.extraLivesUsed)
+        assertEquals(10, nocLife1.nextState.score)
+        val nocLife2 = ua.blackout.prewarning.ui.screens.ZhytomyrRouletteEngine.revealTicket(nocLife1.nextState, 1) // saved by Perseverance -> +8 -> 18
+        assertEquals(ua.blackout.prewarning.ui.screens.TicketRevealOutcome.BEIGE, nocLife2.outcome)
+        assertEquals(2, nocLife2.nextState.extraLivesUsed)
+        assertEquals(18, nocLife2.nextState.score)
+        val nocGolden = ua.blackout.prewarning.ui.screens.ZhytomyrRouletteEngine.revealTicket(nocLife2.nextState, 45)
+        assertEquals(ua.blackout.prewarning.ui.screens.TicketRevealOutcome.GOLDEN, nocGolden.outcome)
+        assertTrue(nocGolden.nextState.tickets.filter { it.isRed }.all { it.isRevealed })
+        assertEquals(108, nocGolden.nextState.score)
+
+        assertEquals(0.575, ua.blackout.prewarning.ui.screens.RouletteSoundEngine.SCRATCH_VOLUME_SCALE, 0.0001)
         assertEquals(0.15f, ua.blackout.prewarning.ui.screens.RouletteSoundEngine.MUSIC_VOLUME_SCALE, 0.0001f)
         assertEquals(1200L, ua.blackout.prewarning.ui.screens.RouletteSoundEngine.MUSIC_FADE_DURATION_MS)
         assertEquals(2000L, ua.blackout.prewarning.ui.screens.RouletteSoundEngine.GAME_OVER_MUSIC_FADE_IN_DELAY_MS)
@@ -570,6 +638,35 @@ class ZtoeParserTest {
             "MAIN_GAME",
             ua.blackout.prewarning.ui.screens.RouletteSoundEngine.getTargetMusicTrackForScreen(
                 ua.blackout.prewarning.ui.screens.RouletteScreenMode.PLAYING,
+                true
+            )
+        )
+        // Verify separate Sound & Music switches and muting when Application is minimized / sent to Home screen
+        ua.blackout.prewarning.ui.screens.RouletteSoundEngine.setSoundEnabled(true)
+        ua.blackout.prewarning.ui.screens.RouletteSoundEngine.setMusicEnabled(false)
+        assertEquals(false, ua.blackout.prewarning.ui.screens.RouletteSoundEngine.isMusicEnabled())
+        assertEquals(true, ua.blackout.prewarning.ui.screens.RouletteSoundEngine.isSoundEnabled())
+        ua.blackout.prewarning.ui.screens.RouletteSoundEngine.setMusicEnabled(true)
+        assertEquals(true, ua.blackout.prewarning.ui.screens.RouletteSoundEngine.isMusicEnabled())
+        ua.blackout.prewarning.ui.screens.RouletteSoundEngine.setAppInForeground(false)
+        assertEquals(false, ua.blackout.prewarning.ui.screens.RouletteSoundEngine.isAppInForeground())
+        assertEquals(
+            "NONE",
+            ua.blackout.prewarning.ui.screens.RouletteSoundEngine.syncBackgroundMusic(
+                null,
+                ua.blackout.prewarning.ui.screens.RouletteScreenMode.START,
+                true,
+                true
+            )
+        )
+        ua.blackout.prewarning.ui.screens.RouletteSoundEngine.setAppInForeground(true)
+        assertEquals(true, ua.blackout.prewarning.ui.screens.RouletteSoundEngine.isAppInForeground())
+        assertEquals(
+            "START_SHOP_GAMEOVER",
+            ua.blackout.prewarning.ui.screens.RouletteSoundEngine.syncBackgroundMusic(
+                null,
+                ua.blackout.prewarning.ui.screens.RouletteScreenMode.START,
+                true,
                 true
             )
         )

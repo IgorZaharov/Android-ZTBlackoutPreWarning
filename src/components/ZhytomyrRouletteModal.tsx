@@ -24,6 +24,7 @@ import {
   canRefreshTickets,
   closePowerShopScreen,
   completeFadeToGameOver,
+  convertShareDataUrlToFile,
   createInitialRouletteState,
   doesScratchExposeRedCenterOutline,
   formatNewTicketsButtonWithCost,
@@ -53,6 +54,7 @@ import {
   startRouletteGame,
 } from '../services/rouletteGame';
 import {
+  isRouletteMusicEnabled,
   isRouletteSoundEnabled,
   playBulbExplosionSound,
   playCardShuffleSound,
@@ -63,6 +65,7 @@ import {
   playGameBlackoutSound,
   playScratchSound,
   resumeRouletteMusicIfNeeded,
+  setRouletteMusicEnabled,
   setRouletteSoundEnabled,
   syncRouletteBackgroundMusic,
 } from '../services/rouletteAudio';
@@ -886,7 +889,7 @@ const ScratchTicketCard: React.FC<ScratchTicketCardProps> = ({
     );
   }
 
-  const isGoldenRevealed = Boolean(ticket.isGolden && !ticket.isRed && ticket.isRevealed);
+  const isGoldenRevealed = Boolean(ticket.isGolden && ticket.isRevealed);
 
   return (
     <div
@@ -906,7 +909,43 @@ const ScratchTicketCard: React.FC<ScratchTicketCardProps> = ({
     >
       {/* Revealed Underlying Content */}
       <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
-        {ticket.isRed ? (
+        {ticket.isGolden ? (
+          /* Scratched Golden ticket (1% or 5% chance, on Beige or Red in Nocturnal Creature mode): radiant golden medallion & bulb */
+          <div
+            className={`w-12 h-12 rounded-full flex items-center justify-center shadow-inner ${
+              ticket.isRed ? 'border-2 border-[#EF4444]' : ''
+            }`}
+            style={{
+              background:
+                'radial-gradient(circle, rgba(251, 191, 36, 0.72) 0%, rgba(217, 119, 6, 0.35) 68%, rgba(254, 243, 199, 0) 100%)',
+            }}
+          >
+            <IntactLightbulbContourSvg className="w-8 h-8" strokeColor="#92400E" />
+          </div>
+        ) : ticket.isX2 ? (
+          /* Scratched X2 multiplier ticket (on Beige or Red in Nocturnal Creature mode): bold "X2" symbol */
+          <div
+            data-testid={`roulette-ticket-x2-symbol-${ticket.index}`}
+            className={`w-12 h-12 rounded-full flex items-center justify-center ${
+              ticket.isRed
+                ? 'border-2 border-[#EF4444]'
+                : 'border border-[#92400E]/35'
+            }`}
+            style={{
+              background: ticket.isRed
+                ? 'radial-gradient(circle, #D62E26 0%, #9E1E18 68%, rgba(216, 214, 204, 0) 100%)'
+                : 'radial-gradient(circle, rgba(245, 208, 97, 0.45) 0%, rgba(217, 119, 6, 0.15) 70%, rgba(216, 214, 204, 0) 100%)',
+            }}
+          >
+            <span
+              className={`text-xl font-black tracking-tighter font-mono ${
+                ticket.isRed ? 'text-[#FFF7F5]' : 'text-[#78350F]'
+              }`}
+            >
+              X2
+            </span>
+          </div>
+        ) : ticket.isRed ? (
           /* Scratched Red ticket: red color & red outline ONLY in the center medallion so it isn't revealed too soon */
           <div
             data-testid={`roulette-ticket-red-center-${ticket.index}`}
@@ -917,31 +956,6 @@ const ScratchTicketCard: React.FC<ScratchTicketCardProps> = ({
             }}
           >
             <ExplodedLightbulbContourSvg className="w-7 h-7" strokeColor="#FFF7F5" />
-          </div>
-        ) : ticket.isGolden ? (
-          /* Scratched Golden ticket (1% or 5% chance): radiant golden medallion & bulb */
-          <div
-            className="w-12 h-12 rounded-full flex items-center justify-center shadow-inner"
-            style={{
-              background:
-                'radial-gradient(circle, rgba(251, 191, 36, 0.55) 0%, rgba(217, 119, 6, 0.25) 68%, rgba(254, 243, 199, 0) 100%)',
-            }}
-          >
-            <IntactLightbulbContourSvg className="w-8 h-8" strokeColor="#92400E" />
-          </div>
-        ) : ticket.isX2 ? (
-          /* Scratched X2 multiplier beige ticket: bold "X2" symbol instead of lightbulb */
-          <div
-            data-testid={`roulette-ticket-x2-symbol-${ticket.index}`}
-            className="w-12 h-12 rounded-full flex items-center justify-center border border-[#92400E]/35"
-            style={{
-              background:
-                'radial-gradient(circle, rgba(245, 208, 97, 0.45) 0%, rgba(217, 119, 6, 0.15) 70%, rgba(216, 214, 204, 0) 100%)',
-            }}
-          >
-            <span className="text-xl font-black tracking-tighter text-[#78350F] font-mono">
-              X2
-            </span>
           </div>
         ) : (
           /* Scratched Beige ticket: contour drawing of an intact lightbulb */
@@ -1015,9 +1029,12 @@ export const ZhytomyrRouletteModal: React.FC<ZhytomyrRouletteModalProps> = ({
   const [isFadeOverlayOpaque, setIsFadeOverlayOpaque] = useState(false);
   // 10-second Main Game Screen blackout state (triggered every 5-10 minutes during PLAYING)
   const [isGameBlackoutActive, setIsGameBlackoutActive] = useState(false);
-  // Sound & Music On/Off switch state on Game Start Screen (persisted in localStorage)
+  // Separate Sound & Music On/Off switch states on Game Start Screen (persisted in localStorage)
   const [soundEnabled, setSoundEnabledState] = useState<boolean>(() =>
     isRouletteSoundEnabled()
+  );
+  const [musicEnabled, setMusicEnabledState] = useState<boolean>(() =>
+    isRouletteMusicEnabled()
   );
 
   const realizationTimerRef = useRef<number | null>(null);
@@ -1026,6 +1043,7 @@ export const ZhytomyrRouletteModal: React.FC<ZhytomyrRouletteModalProps> = ({
   const screenTransitionTimerRef = useRef<number | null>(null);
   const blackCatTimerRef = useRef<number | null>(null);
   const gameBlackoutEndTimerRef = useRef<number | null>(null);
+  const ticketScrollContainerRef = useRef<HTMLDivElement | null>(null);
   const nowRef = useRef<Date | undefined>(now);
   nowRef.current = now;
 
@@ -1066,6 +1084,7 @@ export const ZhytomyrRouletteModal: React.FC<ZhytomyrRouletteModalProps> = ({
     const handleProgressReset = () => {
       setIsGameBlackoutActive(false);
       setSoundEnabledState(isRouletteSoundEnabled());
+      setMusicEnabledState(isRouletteMusicEnabled());
       setGameState(createInitialRouletteState());
     };
     const handleTriggerGameBlackout = () => {
@@ -1098,16 +1117,17 @@ export const ZhytomyrRouletteModal: React.FC<ZhytomyrRouletteModalProps> = ({
       setSharePreviewDataUrl(null);
       setIsGameBlackoutActive(false);
       setSoundEnabledState(isRouletteSoundEnabled());
+      setMusicEnabledState(isRouletteMusicEnabled());
       const effectiveNowMs = nowRef.current ? nowRef.current.getTime() : Date.now();
       setGameState((prev) => applyCloseGame(prev, effectiveNowMs));
     }
   }, [isOpen]);
 
   // Synchronize background music with current screen ('START'/'SHOP'/'GAME_OVER' vs 'PLAYING'/'FADING_TO_BLACK'),
-  // modal open state, and Sound On/Off switch using smooth fade-in / fade-out at 15% volume.
+  // modal open state, and Music On/Off switch using smooth fade-in / fade-out at 15% volume.
   useEffect(() => {
-    syncRouletteBackgroundMusic(gameState.screen, isOpen, soundEnabled);
-  }, [gameState.screen, isOpen, soundEnabled]);
+    syncRouletteBackgroundMusic(gameState.screen, isOpen, musicEnabled);
+  }, [gameState.screen, isOpen, musicEnabled]);
 
   // Ensure music fades out cleanly if the modal component unmounts
   useEffect(() => {
@@ -1119,6 +1139,13 @@ export const ZhytomyrRouletteModal: React.FC<ZhytomyrRouletteModalProps> = ({
   const handleToggleSound = useCallback(() => {
     setSoundEnabledState((prev) => {
       const next = setRouletteSoundEnabled(!prev);
+      return next;
+    });
+  }, []);
+
+  const handleToggleMusic = useCallback(() => {
+    setMusicEnabledState((prev) => {
+      const next = setRouletteMusicEnabled(!prev);
       return next;
     });
   }, []);
@@ -1250,12 +1277,10 @@ export const ZhytomyrRouletteModal: React.FC<ZhytomyrRouletteModalProps> = ({
     onClose();
   }, [onClose]);
 
-  const [selectedShareApp, setSelectedShareApp] = useState<string | null>(null);
-
   // Share button on top-right corner of Game Start Screen: generates image with Application logo and name,
   // Game logo from Game Start Screen (lightbulb), name "Zhytomyr Roulette", bars with top score & power points,
-  // and bottom centered grey/golden outline glyphs for bought upgrades, and opens the Share Card with the
-  // standard mobile "Share to... Application" dialog.
+  // and bottom centered grey/golden outline glyphs for bought upgrades, and opens the Share screen with 3 buttons:
+  // Share (mobile standard action), Download Image, and Back.
   const handleShareScoreCard = useCallback(() => {
     const bestScore = Math.max(gameState.bestScore ?? 0, getSavedBestScore());
     const powerPoints = Math.max(gameState.powerPoints ?? 0, getSavedPowerPoints());
@@ -1268,7 +1293,6 @@ export const ZhytomyrRouletteModal: React.FC<ZhytomyrRouletteModalProps> = ({
       purchasedUpgrades,
       depositCount,
     });
-    setSelectedShareApp(null);
     setSharePreviewDataUrl(dataUrl);
   }, [
     gameState.bestScore,
@@ -1278,45 +1302,47 @@ export const ZhytomyrRouletteModal: React.FC<ZhytomyrRouletteModalProps> = ({
     lang,
   ]);
 
-  const handleShareToApplication = useCallback(
-    async (appName: string) => {
-      setSelectedShareApp(appName);
-      if (!sharePreviewDataUrl) return;
+  const handleDownloadShareImage = useCallback(() => {
+    if (!sharePreviewDataUrl || typeof document === 'undefined') return;
+    try {
+      const link = document.createElement('a');
+      link.href = sharePreviewDataUrl;
+      link.download = 'zhytomyr-roulette-score.png';
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    } catch {
+      // Ignore download errors in headless environments
+    }
+  }, [sharePreviewDataUrl]);
 
-      const bestScore = Math.max(gameState.bestScore ?? 0, getSavedBestScore());
-      const powerPoints = Math.max(gameState.powerPoints ?? 0, getSavedPowerPoints());
-      const shareText =
-        lang === 'en'
-          ? `Zhytomyr Roulette — Best Score: ${bestScore}, Power Points: ${powerPoints}`
-          : `Житомирська Рулетка — Найкращий Результат: ${bestScore}, Бали Потужності: ${powerPoints}`;
+  const handleShareStandardAction = useCallback(async () => {
+    if (!sharePreviewDataUrl) return;
 
-      if (typeof navigator !== 'undefined' && typeof navigator.share === 'function') {
-        try {
+    const shareFile = convertShareDataUrlToFile(
+      sharePreviewDataUrl,
+      'zhytomyr-roulette-score.png'
+    );
+
+    if (typeof navigator !== 'undefined' && typeof navigator.share === 'function' && shareFile) {
+      try {
+        const canShareFiles =
+          typeof navigator.canShare !== 'function' ||
+          navigator.canShare({ files: [shareFile] });
+        if (canShareFiles) {
           await navigator.share({
+            files: [shareFile],
             title: 'Zhytomyr Roulette',
-            text: shareText,
           });
           return;
-        } catch {
-          // Fall back to downloading the share card image if Web Share API is cancelled or unsupported
         }
+      } catch {
+        // Fall back to downloading the generated share card image if Web Share API is cancelled or unsupported
       }
+    }
 
-      if (typeof document !== 'undefined') {
-        try {
-          const link = document.createElement('a');
-          link.href = sharePreviewDataUrl;
-          link.download = 'zhytomyr-roulette-score.png';
-          document.body.appendChild(link);
-          link.click();
-          document.body.removeChild(link);
-        } catch {
-          // Ignore download errors in headless environments
-        }
-      }
-    },
-    [sharePreviewDataUrl, gameState.bestScore, gameState.powerPoints, lang]
-  );
+    handleDownloadShareImage();
+  }, [sharePreviewDataUrl, handleDownloadShareImage]);
 
   // Open Power Shop screen ("Магазин Потужності" / "Power Shop")
   const handleOpenShop = useCallback(() => {
@@ -1543,7 +1569,11 @@ export const ZhytomyrRouletteModal: React.FC<ZhytomyrRouletteModalProps> = ({
   return (
     <div
       data-testid="zhytomyr-roulette-modal"
-      onPointerDown={() => resumeRouletteMusicIfNeeded()}
+      onPointerDown={(e) => {
+        e.stopPropagation();
+        resumeRouletteMusicIfNeeded();
+      }}
+      onClick={(e) => e.stopPropagation()}
       className="absolute inset-0 top-9 z-50 flex flex-col bg-[#070A10] text-white select-none overflow-hidden"
     >
       {/* Preloaded generated ticket texture assets */}
@@ -1577,38 +1607,74 @@ export const ZhytomyrRouletteModal: React.FC<ZhytomyrRouletteModalProps> = ({
               testIdPrefix="roulette-start"
             />
 
-            {/* Top Bar: Sound On/Off Switch on Left side across from Share Button on Right side */}
+            {/* Top Bar: Separate Sound & Music On/Off Switches on Left side across from Share Button on Right side */}
             <div className="w-full flex items-center justify-between shrink-0 mt-1">
-              {/* Sound On/Off Switch (en: Sound / uk: Звук) on Left side using exact same design and colors as notification switches in main application */}
+              {/* Separate Sound & Music Switches on Left side where 1 switch previously existed */}
               <div
-                data-testid="roulette-sound-control"
-                className="flex items-center gap-2 pl-0.5"
+                data-testid="roulette-audio-switches-left"
+                className="flex flex-col items-start gap-1.5 pl-0.5"
               >
-                <span
-                  data-testid="roulette-sound-label"
-                  className="text-xs font-medium text-white/90"
+                <div
+                  data-testid="roulette-sound-control"
+                  className="flex items-center gap-2"
                 >
-                  {strings.soundLabel}
-                </span>
-                <button
-                  type="button"
-                  role="switch"
-                  aria-checked={soundEnabled}
-                  aria-label={strings.soundLabel}
-                  data-testid="roulette-sound-switch"
-                  onClick={handleToggleSound}
-                  className={`w-12 h-6 rounded-full transition-all duration-300 relative cursor-pointer ${
-                    soundEnabled
-                      ? 'bg-[#FF5E3A] shadow-md shadow-[#FF5E3A]/30'
-                      : 'bg-white/10 border border-white/10'
-                  }`}
-                >
-                  <div
-                    className={`w-5 h-5 rounded-full bg-white shadow-md absolute top-0.5 transition-transform duration-300 ${
-                      soundEnabled ? 'translate-x-6' : 'translate-x-0.5'
+                  <span
+                    data-testid="roulette-sound-label"
+                    className="text-xs font-medium text-white/90 min-w-[44px] text-left"
+                  >
+                    {strings.soundLabel}
+                  </span>
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={soundEnabled}
+                    aria-label={strings.soundLabel}
+                    data-testid="roulette-sound-switch"
+                    onClick={handleToggleSound}
+                    className={`w-12 h-6 rounded-full transition-all duration-300 relative cursor-pointer ${
+                      soundEnabled
+                        ? 'bg-[#FF5E3A] shadow-md shadow-[#FF5E3A]/30'
+                        : 'bg-white/10 border border-white/10'
                     }`}
-                  />
-                </button>
+                  >
+                    <div
+                      className={`w-5 h-5 rounded-full bg-white shadow-md absolute top-0.5 transition-transform duration-300 ${
+                        soundEnabled ? 'translate-x-6' : 'translate-x-0.5'
+                      }`}
+                    />
+                  </button>
+                </div>
+
+                <div
+                  data-testid="roulette-music-control"
+                  className="flex items-center gap-2"
+                >
+                  <span
+                    data-testid="roulette-music-label"
+                    className="text-xs font-medium text-white/90 min-w-[44px] text-left"
+                  >
+                    {strings.musicLabel}
+                  </span>
+                  <button
+                    type="button"
+                    role="switch"
+                    aria-checked={musicEnabled}
+                    aria-label={strings.musicLabel}
+                    data-testid="roulette-music-switch"
+                    onClick={handleToggleMusic}
+                    className={`w-12 h-6 rounded-full transition-all duration-300 relative cursor-pointer ${
+                      musicEnabled
+                        ? 'bg-[#FF5E3A] shadow-md shadow-[#FF5E3A]/30'
+                        : 'bg-white/10 border border-white/10'
+                    }`}
+                  >
+                    <div
+                      className={`w-5 h-5 rounded-full bg-white shadow-md absolute top-0.5 transition-transform duration-300 ${
+                        musicEnabled ? 'translate-x-6' : 'translate-x-0.5'
+                      }`}
+                    />
+                  </button>
+                </div>
               </div>
 
               <button
@@ -1717,17 +1783,15 @@ export const ZhytomyrRouletteModal: React.FC<ZhytomyrRouletteModalProps> = ({
               </div>
             )}
 
-            {/* Share Printed Image Modal Overlay with Standard Mobile "Share to... Application" Dialog and Non-Overlapping Bottom Buttons */}
+            {/* Share Printed Image Modal Overlay with 3 Bottom Action Buttons: Share (mobile standard action), Download Image, Back */}
             {sharePreviewDataUrl && (
               <div
                 data-testid="roulette-share-modal"
-                className="absolute inset-0 z-50 bg-[#070A10] flex flex-col items-center justify-between px-4 pt-3 pb-4 overflow-y-auto gap-2.5"
+                onPointerDown={(e) => e.stopPropagation()}
+                onClick={(e) => e.stopPropagation()}
+                className="absolute inset-0 z-50 bg-[#070A10] flex flex-col items-center justify-between px-4 pt-3 pb-4 overflow-y-auto gap-3"
               >
-                <div className="shrink-0 text-xs font-extrabold text-[#F5D061] uppercase tracking-wider">
-                  Zhytomyr Roulette — Share Card
-                </div>
-
-                <div className="flex-1 min-h-[160px] max-h-[260px] w-full flex items-center justify-center overflow-hidden">
+                <div className="flex-1 min-h-[220px] max-h-[380px] w-full flex items-center justify-center overflow-hidden">
                   <img
                     data-testid="roulette-share-image"
                     src={sharePreviewDataUrl}
@@ -1736,81 +1800,41 @@ export const ZhytomyrRouletteModal: React.FC<ZhytomyrRouletteModalProps> = ({
                   />
                 </div>
 
-                {/* Standard Mobile "Share to... Application" Dialog Sheet (positioned in flex flow above bottom buttons so they never overlap) */}
-                <div
-                  data-testid="roulette-share-to-app-dialog"
-                  role="dialog"
-                  aria-label="Share to... Application"
-                  className="shrink-0 w-full rounded-2xl bg-[#141A29]/95 border border-[#D8B467]/50 px-3 py-2.5 shadow-xl"
-                >
-                  <div className="w-8 h-1 rounded-full bg-zinc-500/60 mx-auto mb-1.5" />
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="text-[11px] font-bold text-[#E5D5B5] tracking-wide">
-                      {lang === 'en'
-                        ? 'Share to... Application'
-                        : 'Поділитися... (Share to... Application)'}
-                    </span>
-                    {selectedShareApp && (
-                      <span
-                        data-testid="roulette-share-app-status"
-                        className="text-[10px] font-bold text-emerald-400"
-                      >
-                        {lang === 'en'
-                          ? `Shared: ${selectedShareApp}`
-                          : `Обрано: ${selectedShareApp}`}
-                      </span>
-                    )}
-                  </div>
-                  <div className="grid grid-cols-5 gap-1.5">
-                    {[
-                      { id: 'telegram', label: 'Telegram', badge: 'TG', color: '#229ED9' },
-                      { id: 'viber', label: 'Viber', badge: 'VB', color: '#7360F2' },
-                      { id: 'whatsapp', label: 'WhatsApp', badge: 'WA', color: '#25D366' },
-                      { id: 'instagram', label: 'Instagram', badge: 'IG', color: '#E1306C' },
-                      { id: 'messages', label: 'Messages', badge: 'SMS', color: '#3B82F6' },
-                    ].map((app) => (
-                      <button
-                        key={app.id}
-                        type="button"
-                        data-testid={`roulette-share-app-${app.id}`}
-                        onClick={() => handleShareToApplication(app.label)}
-                        className="flex flex-col items-center gap-1 py-1.5 px-1 rounded-xl hover:bg-white/10 active:scale-95 transition-all cursor-pointer"
-                      >
-                        <span
-                          className="w-8 h-8 rounded-full flex items-center justify-center text-[10px] font-extrabold text-white shadow-md border border-white/20"
-                          style={{ backgroundColor: app.color }}
-                        >
-                          {app.badge}
-                        </span>
-                        <span className="text-[9px] font-semibold text-zinc-200 truncate max-w-full">
-                          {app.label}
-                        </span>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Non-overlapping Bottom Action Buttons */}
+                {/* 3 Non-overlapping Bottom Action Buttons: Share, Download Image, Back */}
                 <div
                   data-testid="roulette-share-bottom-buttons"
-                  className="shrink-0 w-full flex flex-col gap-2 pt-0.5"
+                  className="shrink-0 w-full flex flex-col gap-2.5 pt-1"
                 >
-                  <a
-                    href={sharePreviewDataUrl}
-                    download="zhytomyr-roulette-score.png"
-                    className="w-full py-2.5 px-4 rounded-full font-bold text-xs text-white text-center shadow-lg"
+                  <button
+                    type="button"
+                    data-testid="roulette-share-action-btn"
+                    onClick={handleShareStandardAction}
+                    className="w-full py-3 px-5 rounded-full font-bold text-xs text-white text-center shadow-lg transition-transform active:scale-[0.98] cursor-pointer"
                     style={{
                       background: 'linear-gradient(90deg, #A3221C 0%, #C93B2B 50%, #9E1E18 100%)',
                       border: '1.5px solid #D8B467',
                     }}
                   >
-                    {lang === 'en' ? 'Download Image' : 'Завантажити зображення'}
+                    {strings.shareButton}
+                  </button>
+
+                  <a
+                    data-testid="roulette-share-download-btn"
+                    href={sharePreviewDataUrl}
+                    download="zhytomyr-roulette-score.png"
+                    className="w-full py-3 px-5 rounded-full font-bold text-xs text-[#E5D5B5] bg-[#141A29]/85 hover:bg-white/10 text-center transition-all cursor-pointer"
+                    style={{
+                      border: '1.3px solid rgba(216, 180, 103, 0.75)',
+                    }}
+                  >
+                    {strings.downloadImageButton}
                   </a>
+
                   <button
                     type="button"
                     data-testid="roulette-share-close-btn"
                     onClick={() => setSharePreviewDataUrl(null)}
-                    className="w-full py-2.5 px-4 rounded-full font-bold text-xs text-[#E5D5B5] border border-[#D8B467]/55 bg-transparent hover:bg-white/10 cursor-pointer"
+                    className="w-full py-3 px-5 rounded-full font-bold text-xs text-[#E5D5B5] border border-[#D8B467]/55 bg-transparent hover:bg-white/10 cursor-pointer"
                   >
                     {strings.backToStartButton}
                   </button>
@@ -1991,8 +2015,12 @@ export const ZhytomyrRouletteModal: React.FC<ZhytomyrRouletteModalProps> = ({
               </div>
             </div>
 
-            {/* Scrollable 2-Column Hourly Grid of 48 Timeslot Tickets with Top-to-Bottom Dealing Animation */}
-            <div className="flex-1 overflow-y-auto px-3.5 py-3 space-y-2.5">
+            {/* Scrollable 2-Column Hourly Grid of 48 Timeslot Tickets with Top-to-Bottom Dealing Animation (scroll position preserved on Game Over FADING_TO_BLACK) */}
+            <div
+              ref={ticketScrollContainerRef}
+              data-testid="roulette-ticket-scroll-container"
+              className="flex-1 overflow-y-auto px-3.5 py-3 space-y-2.5"
+            >
               {hourlyPairs.map(([leftTicket, rightTicket], rowIndex) => {
                 const isDealt = rowIndex < dealtRowsCount;
                 return (

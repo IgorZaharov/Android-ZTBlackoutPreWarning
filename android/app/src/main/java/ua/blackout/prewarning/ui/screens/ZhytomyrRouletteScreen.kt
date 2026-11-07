@@ -1,11 +1,21 @@
 package ua.blackout.prewarning.ui.screens
 
+import android.content.ClipData
+import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
+import android.graphics.Bitmap
+import android.graphics.Paint
+import android.graphics.RectF
+import android.graphics.Typeface
 import android.media.AudioAttributes
 import android.media.AudioFormat
 import android.media.AudioTrack
 import android.media.MediaPlayer
+import android.net.Uri
+import android.os.Build
+import android.os.Environment
+import android.provider.MediaStore
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.*
 import androidx.compose.foundation.Canvas
@@ -18,10 +28,13 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Bolt
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
@@ -30,6 +43,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.*
@@ -40,6 +54,7 @@ import androidx.compose.ui.graphics.drawscope.scale
 import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.res.imageResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -48,6 +63,9 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.repeatOnLifecycle
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import ua.blackout.prewarning.R
@@ -369,8 +387,8 @@ object ZhytomyrRouletteEngine {
             cost = 0,
             nameUk = "Щоденна серія",
             nameEn = "Daily Streak",
-            descriptionUk = "Перша гра за день дає бонус X2 до очок перед завершенням гри.",
-            descriptionEn = "First Game in a Day grants X2 bonus points before Game Over event.",
+            descriptionUk = "Нагорода за рубіж 400: перша гра на день дає бонус X2 до балів перед завершенням гри.",
+            descriptionEn = "Milestone 400 reward: first Game in a Day grants X2 bonus points before Game Over event.",
             hideDescription = false,
             requiredMilestone = 400
         ),
@@ -379,8 +397,8 @@ object ZhytomyrRouletteEngine {
             cost = 0,
             nameUk = "Наполегливість",
             nameEn = "Perseverance",
-            descriptionUk = "Додає ще одне серце на екрані гри. Сумується з Другим шансом до трьох життів.",
-            descriptionEn = "Adds one more heart icon in Main Game screen. Works like Second Life and raises cap to three lives.",
+            descriptionUk = "Нагорода за рубіж 1000: додає ще одне серце на головному екрані гри (до трьох життів разом із Другим шансом).",
+            descriptionEn = "Milestone 1000 reward: adds one more heart icon in Main Game screen. Cumulative with Second Life up to three lives.",
             hideDescription = false,
             requiredMilestone = 1000
         )
@@ -762,6 +780,7 @@ object ZhytomyrRouletteEngine {
         resetPurchasedUpgrades(emptySet(), context)
         resetDepositState(context)
         RouletteSoundEngine.setSoundEnabled(true, context)
+        RouletteSoundEngine.setMusicEnabled(true, context)
     }
 
     fun processGameLaunchDepositPayout(
@@ -963,27 +982,29 @@ object ZhytomyrRouletteEngine {
         random: Random = Random.Default,
         purchasedUpgrades: Set<RouletteUpgradeId> = getPurchasedUpgrades()
     ): List<RouletteTicketItem> {
-        val beigeIndices = tickets.mapIndexedNotNull { idx, item -> if (!item.isRed) idx else null }
+        val nocturnal = isNocturnalModeActive(purchasedUpgrades)
+        val isSafeTicket: (RouletteTicketItem) -> Boolean = { if (nocturnal) it.isRed else !it.isRed }
+        val safeIndices = tickets.mapIndexedNotNull { idx, item -> if (isSafeTicket(item)) idx else null }
         val goldenProb = getGoldenTicketProbability(purchasedUpgrades)
-        val existingGoldenIdx = tickets.indexOfFirst { !it.isRed && it.isGolden }
-        val hasGolden = existingGoldenIdx >= 0 || (beigeIndices.isNotEmpty() && random.nextDouble() < goldenProb)
+        val existingGoldenIdx = tickets.indexOfFirst { isSafeTicket(it) && it.isGolden }
+        val hasGolden = existingGoldenIdx >= 0 || (safeIndices.isNotEmpty() && random.nextDouble() < goldenProb)
         val chosenGoldenIdx = when {
             existingGoldenIdx >= 0 -> existingGoldenIdx
-            hasGolden -> beigeIndices[random.nextInt(beigeIndices.size)]
+            hasGolden -> safeIndices[random.nextInt(safeIndices.size)]
             else -> -1
         }
 
         val targetX2Count = getTargetX2TicketCount(purchasedUpgrades)
         val chosenX2Indices = mutableSetOf<Int>()
         tickets.forEachIndexed { idx, item ->
-            if (!item.isRed && idx != chosenGoldenIdx && item.isX2) {
+            if (isSafeTicket(item) && idx != chosenGoldenIdx && item.isX2) {
                 chosenX2Indices.add(idx)
             }
         }
 
-        val candidateX2Pool = beigeIndices.filter { it != chosenGoldenIdx && !chosenX2Indices.contains(it) }
-        val preferredPool = if (candidateX2Pool.count { it >= 4 } >= targetX2Count - chosenX2Indices.size) {
-            candidateX2Pool.filter { it >= 4 }.toMutableList()
+        val candidateX2Pool = safeIndices.filter { it != chosenGoldenIdx && !chosenX2Indices.contains(it) }
+        val preferredPool = if (candidateX2Pool.drop(4).size >= targetX2Count - chosenX2Indices.size) {
+            candidateX2Pool.drop(4).toMutableList()
         } else {
             candidateX2Pool.reversed().toMutableList()
         }
@@ -996,8 +1017,8 @@ object ZhytomyrRouletteEngine {
         return tickets.mapIndexed { idx, item ->
             val variant = VISUAL_VARIANTS[random.nextInt(VISUAL_VARIANTS.size)]
             val placement = generateRandomStainPlacement(variant, random)
-            val isGolden = !item.isRed && idx == chosenGoldenIdx
-            val isX2 = !item.isRed && !isGolden && chosenX2Indices.contains(idx)
+            val isGolden = isSafeTicket(item) && idx == chosenGoldenIdx
+            val isX2 = isSafeTicket(item) && !isGolden && chosenX2Indices.contains(idx)
             item.copy(
                 isGolden = isGolden,
                 isX2 = isX2,
@@ -1056,21 +1077,29 @@ object ZhytomyrRouletteEngine {
         purchasedUpgrades: Set<RouletteUpgradeId>,
         random: Random = Random.Default
     ): List<RouletteTicketItem> {
+        val nocturnal = isNocturnalModeActive(purchasedUpgrades)
+        val isSafe: (RouletteTicketItem) -> Boolean = { if (nocturnal) it.isRed else !it.isRed }
         val targetX2Count = getTargetX2TicketCount(purchasedUpgrades)
-        val hasExplicitGolden = tickets.any { !it.isRed && it.isGolden }
-        val hasEnoughX2 = tickets.count { !it.isRed && !it.isGolden && it.isX2 } >= targetX2Count
+        val hasExplicitGolden = tickets.any { isSafe(it) && it.isGolden }
+        val hasEnoughX2 = tickets.count { isSafe(it) && !it.isGolden && it.isX2 } >= targetX2Count
 
         val prepared = if (hasEnoughX2) {
-            tickets.map { it.copy(isRevealed = false) }
+            tickets.map {
+                it.copy(
+                    isGolden = isSafe(it) && it.isGolden,
+                    isX2 = isSafe(it) && !it.isGolden && it.isX2,
+                    isRevealed = false
+                )
+            }
         } else if (!hasExplicitGolden) {
             assignGoldenTicketAndVariants(tickets, random, purchasedUpgrades).map { it.copy(isRevealed = false) }
         } else {
             val chosenX2 = mutableSetOf<Int>()
             tickets.forEachIndexed { idx, t ->
-                if (!t.isRed && !t.isGolden && t.isX2) chosenX2.add(idx)
+                if (isSafe(t) && !t.isGolden && t.isX2) chosenX2.add(idx)
             }
             val candidates = tickets.mapIndexedNotNull { idx, t ->
-                if (!t.isRed && !t.isGolden && !chosenX2.contains(idx)) idx else null
+                if (isSafe(t) && !t.isGolden && !chosenX2.contains(idx)) idx else null
             }
             val pool = if (candidates.count { it >= 4 } >= targetX2Count - chosenX2.size) {
                 candidates.filter { it >= 4 }.toMutableList()
@@ -1082,7 +1111,8 @@ object ZhytomyrRouletteEngine {
             }
             tickets.mapIndexed { idx, t ->
                 t.copy(
-                    isX2 = !t.isRed && !t.isGolden && chosenX2.contains(idx),
+                    isGolden = isSafe(t) && t.isGolden,
+                    isX2 = isSafe(t) && !t.isGolden && chosenX2.contains(idx),
                     isRevealed = false
                 )
             }
@@ -1162,20 +1192,21 @@ object ZhytomyrRouletteEngine {
             if (safeIndices.isNotEmpty()) {
                 val chosenSafeIdx = safeIndices[random.nextInt(safeIndices.size)]
                 val chosenTicket = normalized[chosenSafeIdx]
-                if (!nocturnal && chosenTicket.isGolden) {
-                    val unrevealedBeigeCount = normalized.count { !it.isRed && !it.isRevealed }
+                if (chosenTicket.isGolden) {
+                    val isSafeGroup: (RouletteTicketItem) -> Boolean = { if (nocturnal) it.isRed else !it.isRed }
+                    val unrevealedSafeCount = normalized.count { isSafeGroup(it) && !it.isRevealed }
                     val k = step
-                    val n = unrevealedBeigeCount
+                    val n = unrevealedSafeCount
                     initialScore = n * k + step * ((n * (n - 1)) / 2)
                     initialStreak = k + n * step
                     normalized = normalized.map { item ->
-                        if (!item.isRed) item.copy(isRevealed = true) else item
+                        if (isSafeGroup(item)) item.copy(isRevealed = true) else item
                     }
-                } else if (!nocturnal && chosenTicket.isX2) {
+                } else if (chosenTicket.isX2) {
                     normalized = normalized.mapIndexed { idx, item ->
                         if (idx == chosenSafeIdx) item.copy(isRevealed = true) else item
                     }
-                    initialScore = 0
+                    initialScore = step * 2
                     initialStreak = step * 2
                 } else {
                     normalized = normalized.mapIndexed { idx, item ->
@@ -1225,47 +1256,37 @@ object ZhytomyrRouletteEngine {
         val step = getStreakStep(activeUpgrades)
         val extraLivesTotal = max(state.extraLivesTotal, getExtraLivesCount(activeUpgrades))
 
-        if (nocturnal) {
-            // Nocturnal Creature (10) active: Beige tickets trigger Game Over; Red tickets increase score (+2, +4, +6...)
-            if (!target.isRed) {
-                val updatedTickets = state.tickets.mapIndexed { idx, item ->
-                    if (idx == ticketIndex) item.copy(isRevealed = true) else item
-                }
-                var finalScore = state.score
-                var dailyStreakApplied = state.dailyStreakApplied
-                if (activeUpgrades.contains(RouletteUpgradeId.DAILY_STREAK)) {
-                    val todayKey = formatLocalDayKey()
-                    if (getLastDailyStreakDateStr(context) != todayKey) {
-                        saveLastDailyStreakDateStr(todayKey, context)
-                        finalScore = state.score * 2
-                        dailyStreakApplied = true
-                    }
-                }
-                val nextBest = saveBestScoreIfHigher(max(state.bestScore, finalScore), context)
-                val nextPowerPoints = if (state.powerPointsAwarded) {
-                    state.powerPoints
-                } else {
-                    addPowerPoints(finalScore, context)
-                }
-                return RouletteRevealResult(
-                    nextState = state.copy(
-                        score = finalScore,
-                        bestScore = nextBest,
-                        powerPoints = nextPowerPoints,
-                        dailyStreakApplied = dailyStreakApplied,
-                        powerPointsAwarded = true,
-                        screen = RouletteScreenMode.FADING_TO_BLACK,
-                        tickets = updatedTickets
-                    ),
-                    outcome = TicketRevealOutcome.RED
-                )
+        // Golden Ticket (1% or 5% chance):
+        // - Normal mode: immediately scratches all Beige (!isRed) tickets on field and adds cumulative score
+        // - Nocturnal Creature mode: immediately scratches all Red (isRed) tickets on field and adds cumulative score
+        if (target.isGolden) {
+            val isTargetSafeGroup: (RouletteTicketItem) -> Boolean = { if (nocturnal) it.isRed else !it.isRed }
+            val unrevealedSafeCount = state.tickets.count { isTargetSafeGroup(it) && !it.isRevealed }
+            val k = state.streakIncrement
+            val n = unrevealedSafeCount
+            val cumulativeAdded = n * k + step * ((n * (n - 1)) / 2)
+            val nextScore = state.score + cumulativeAdded
+            val nextBest = saveBestScoreIfHigher(max(state.bestScore, nextScore), context)
+            val allSafeRevealed = state.tickets.mapIndexed { idx, item ->
+                if (isTargetSafeGroup(item) || idx == ticketIndex) item.copy(isRevealed = true) else item
             }
+            return RouletteRevealResult(
+                nextState = state.copy(
+                    score = nextScore,
+                    bestScore = nextBest,
+                    streakIncrement = k + n * step,
+                    tickets = allSafeRevealed
+                ),
+                outcome = TicketRevealOutcome.GOLDEN
+            )
+        }
 
-            // Red ticket in Nocturnal mode -> increases score by streakIncrement (+2, +4, +6...)
+        // X2 Multiplier ticket: multiplies current score by x2 in both Normal and Nocturnal Creature modes
+        if (target.isX2) {
             val updatedTickets = state.tickets.mapIndexed { idx, item ->
                 if (idx == ticketIndex) item.copy(isRevealed = true) else item
             }
-            val nextScore = state.score + state.streakIncrement
+            val nextScore = state.score * 2
             val nextBest = saveBestScoreIfHigher(max(state.bestScore, nextScore), context)
             return RouletteRevealResult(
                 nextState = state.copy(
@@ -1274,12 +1295,14 @@ object ZhytomyrRouletteEngine {
                     streakIncrement = state.streakIncrement + step,
                     tickets = updatedTickets
                 ),
-                outcome = TicketRevealOutcome.BEIGE
+                outcome = TicketRevealOutcome.X2
             )
         }
 
-        if (target.isRed) {
-            // Extra lives ("Second chance" + "Perseverance" cumulative up to 2 extra hearts = 3 lives total)
+        val isFatalTicket = if (nocturnal) !target.isRed else target.isRed
+
+        if (isFatalTicket) {
+            // Extra lives ("Second chance" + "Perseverance" cumulative up to 2 extra hearts = 3 lives total) work in both Normal and Nocturnal Creature modes
             if (extraLivesTotal > 0 && state.extraLivesUsed < extraLivesTotal) {
                 val updatedTickets = state.tickets.mapIndexed { idx, item ->
                     if (idx == ticketIndex) item.copy(isRevealed = true) else item
@@ -1331,46 +1354,6 @@ object ZhytomyrRouletteEngine {
                     tickets = updatedTickets
                 ),
                 outcome = TicketRevealOutcome.RED
-            )
-        }
-
-        // Golden Ticket (1% or 3% chance): immediately scratches all beige tickets on field and adds cumulative score
-        if (target.isGolden) {
-            val unrevealedBeigeCount = state.tickets.count { !it.isRed && !it.isRevealed }
-            val k = state.streakIncrement
-            val n = unrevealedBeigeCount
-            val cumulativeAdded = n * k + step * ((n * (n - 1)) / 2)
-            val nextScore = state.score + cumulativeAdded
-            val nextBest = saveBestScoreIfHigher(max(state.bestScore, nextScore), context)
-            val allBeigeRevealed = state.tickets.map { item ->
-                if (!item.isRed) item.copy(isRevealed = true) else item
-            }
-            return RouletteRevealResult(
-                nextState = state.copy(
-                    score = nextScore,
-                    bestScore = nextBest,
-                    streakIncrement = k + n * step,
-                    tickets = allBeigeRevealed
-                ),
-                outcome = TicketRevealOutcome.GOLDEN
-            )
-        }
-
-        // X2 Multiplier beige ticket: multiplies current score by x2
-        if (target.isX2) {
-            val updatedTickets = state.tickets.mapIndexed { idx, item ->
-                if (idx == ticketIndex) item.copy(isRevealed = true) else item
-            }
-            val nextScore = state.score * 2
-            val nextBest = saveBestScoreIfHigher(max(state.bestScore, nextScore), context)
-            return RouletteRevealResult(
-                nextState = state.copy(
-                    score = nextScore,
-                    bestScore = nextBest,
-                    streakIncrement = state.streakIncrement + step,
-                    tickets = updatedTickets
-                ),
-                outcome = TicketRevealOutcome.X2
             )
         }
 
@@ -1685,12 +1668,268 @@ object ZhytomyrRouletteEngine {
             generationId = state.generationId + 1
         )
     }
+
+    /**
+     * Renders the Share Card into an Android Bitmap (600x800) with:
+     * 1. Unmodified Application icon (#FF5E3A rounded box + white lightning bolt) and name ("Світло в Житомирі")
+     * 2. Game logo from Game Start Screen (glowing intact lightbulb contour)
+     * 3. Game name ("Zhytomyr Roulette")
+     * 4. Top Score and Power Points bars
+     * 5. Bottom centered upgrade outline glyphs (grey #6B7280 or golden #F59E0B)
+     */
+    fun renderShareCardBitmap(
+        bestScore: Int,
+        powerPoints: Int,
+        lang: String,
+        purchasedUpgrades: Set<RouletteUpgradeId>,
+        depositCount: Int
+    ): Bitmap {
+        val bitmap = Bitmap.createBitmap(600, 800, Bitmap.Config.ARGB_8888)
+        val canvas = android.graphics.Canvas(bitmap)
+        val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+
+        // 1. Solid dark card background & golden border
+        paint.style = Paint.Style.FILL
+        paint.color = android.graphics.Color.parseColor("#070A10")
+        canvas.drawRect(0f, 0f, 600f, 800f, paint)
+
+        paint.style = Paint.Style.STROKE
+        paint.strokeWidth = 3f
+        paint.color = android.graphics.Color.parseColor("#D8B467")
+        canvas.drawRoundRect(RectF(18f, 18f, 582f, 782f), 28f, 28f, paint)
+
+        // 2. Application Icon (#FF5E3A rounded square + white lightning bolt) & Name ("Світло в Житомирі")
+        paint.style = Paint.Style.FILL
+        paint.color = android.graphics.Color.parseColor("#FF5E3A")
+        canvas.drawRoundRect(RectF(145f, 48f, 193f, 96f), 12f, 12f, paint)
+
+        val boltPath = android.graphics.Path().apply {
+            moveTo(172f, 56f)
+            lineTo(157f, 74f)
+            lineTo(168f, 74f)
+            lineTo(165f, 88f)
+            lineTo(181f, 69f)
+            lineTo(170f, 69f)
+            close()
+        }
+        paint.color = android.graphics.Color.WHITE
+        canvas.drawPath(boltPath, paint)
+
+        paint.color = android.graphics.Color.WHITE
+        paint.textSize = 24f
+        paint.typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
+        paint.textAlign = Paint.Align.LEFT
+        canvas.drawText("Світло в Житомирі", 208f, 80f, paint)
+
+        // 3. Game Logo (Lightbulb contour with inner filament & screw base)
+        paint.style = Paint.Style.STROKE
+        paint.strokeWidth = 4.5f
+        paint.strokeCap = Paint.Cap.ROUND
+        paint.strokeJoin = Paint.Join.ROUND
+        paint.color = android.graphics.Color.parseColor("#F4D06F")
+        canvas.drawCircle(300f, 232f, 64f, paint)
+        val filamentPath = android.graphics.Path().apply {
+            moveTo(282f, 294f)
+            lineTo(282f, 250f)
+            lineTo(268f, 222f)
+            lineTo(300f, 237f)
+            lineTo(332f, 222f)
+            lineTo(318f, 250f)
+            lineTo(318f, 294f)
+        }
+        canvas.drawPath(filamentPath, paint)
+        for (row in 0..3) {
+            val y = 304f + row * 14f
+            val halfW = 28f - row * 4f
+            canvas.drawLine(300f - halfW, y, 300f + halfW, y, paint)
+        }
+
+        // 4. Game Name ("Zhytomyr Roulette")
+        paint.style = Paint.Style.FILL
+        paint.color = android.graphics.Color.WHITE
+        paint.textSize = 40f
+        paint.textAlign = Paint.Align.CENTER
+        canvas.drawText("Zhytomyr Roulette", 300f, 446f, paint)
+
+        // 5. Top Score Bar
+        paint.style = Paint.Style.FILL
+        paint.color = android.graphics.Color.parseColor("#141A29")
+        canvas.drawRoundRect(RectF(75f, 520f, 525f, 588f), 34f, 34f, paint)
+        paint.style = Paint.Style.STROKE
+        paint.strokeWidth = 2f
+        paint.color = android.graphics.Color.parseColor("#D8B467")
+        canvas.drawRoundRect(RectF(75f, 520f, 525f, 588f), 34f, 34f, paint)
+
+        paint.style = Paint.Style.FILL
+        paint.color = android.graphics.Color.parseColor("#E5D5B5")
+        paint.textSize = 20f
+        paint.textAlign = Paint.Align.LEFT
+        canvas.drawText("${AppStrings.rouletteAllTimeBestScoreLabel(lang).uppercase()}:", 108f, 561f, paint)
+
+        paint.color = android.graphics.Color.parseColor("#F5D061")
+        paint.textSize = 28f
+        paint.typeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
+        paint.textAlign = Paint.Align.RIGHT
+        canvas.drawText("$bestScore", 492f, 563f, paint)
+
+        // 6. Power Points Bar
+        paint.style = Paint.Style.FILL
+        paint.color = android.graphics.Color.parseColor("#141A29")
+        canvas.drawRoundRect(RectF(75f, 608f, 525f, 676f), 34f, 34f, paint)
+        paint.style = Paint.Style.STROKE
+        paint.strokeWidth = 2f
+        paint.color = android.graphics.Color.parseColor("#D8B467")
+        canvas.drawRoundRect(RectF(75f, 608f, 525f, 676f), 34f, 34f, paint)
+
+        paint.style = Paint.Style.FILL
+        paint.color = android.graphics.Color.parseColor("#E5D5B5")
+        paint.textSize = 20f
+        paint.typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
+        paint.textAlign = Paint.Align.LEFT
+        canvas.drawText("${AppStrings.roulettePowerPointsLabel(lang).uppercase()}:", 108f, 649f, paint)
+
+        paint.color = android.graphics.Color.parseColor("#F5D061")
+        paint.textSize = 28f
+        paint.typeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
+        paint.textAlign = Paint.Align.RIGHT
+        canvas.drawText("$powerPoints", 492f, 651f, paint)
+
+        // 7. Bottom Centered Upgrade Glyphs (strictly #6B7280 or #F59E0B outline strokes)
+        val glyphs = getShareCardUpgradeGlyphStates(purchasedUpgrades, depositCount)
+        val glyphSpacing = 48f
+        val startX = 300f - ((glyphs.size - 1) * glyphSpacing) / 2f
+        val cy = 736f
+        for ((idx, g) in glyphs.withIndex()) {
+            val cx = startX + idx * glyphSpacing
+            paint.style = Paint.Style.STROKE
+            paint.strokeWidth = 2.2f
+            paint.color = android.graphics.Color.parseColor(g.colorHex)
+            when (g.kind) {
+                "x2" -> {
+                    canvas.drawRoundRect(RectF(cx - 15f, cy - 11f, cx + 15f, cy + 11f), 5f, 5f, paint)
+                    paint.style = Paint.Style.FILL
+                    paint.textSize = 12f
+                    paint.textAlign = Paint.Align.CENTER
+                    canvas.drawText("X2", cx, cy + 4f, paint)
+                }
+                "person" -> {
+                    canvas.drawCircle(cx, cy - 5f, 4.5f, paint)
+                    canvas.drawArc(RectF(cx - 8f, cy + 1f, cx + 8f, cy + 17f), 180f, 180f, false, paint)
+                }
+                "heart" -> {
+                    val heartP = android.graphics.Path().apply {
+                        moveTo(cx, cy + 9f)
+                        lineTo(cx - 8f, cy + 1f)
+                        cubicTo(cx - 12f, cy - 3f, cx - 9f, cy - 9f, cx - 4f, cy - 9f)
+                        cubicTo(cx - 1f, cy - 9f, cx, cy - 6f, cx, cy - 6f)
+                        cubicTo(cx, cy - 6f, cx + 1f, cy - 9f, cx + 4f, cy - 9f)
+                        cubicTo(cx + 9f, cy - 9f, cx + 12f, cy - 3f, cx + 8f, cy + 1f)
+                        close()
+                    }
+                    canvas.drawPath(heartP, paint)
+                }
+                "flower" -> {
+                    canvas.drawCircle(cx, cy, 2.5f, paint)
+                    canvas.drawCircle(cx, cy - 6.5f, 3.2f, paint)
+                    canvas.drawCircle(cx + 6.5f, cy, 3.2f, paint)
+                    canvas.drawCircle(cx, cy + 6.5f, 3.2f, paint)
+                    canvas.drawCircle(cx - 6.5f, cy, 3.2f, paint)
+                }
+                "cat" -> {
+                    val catP = android.graphics.Path().apply {
+                        moveTo(cx - 9f, cy + 3f)
+                        lineTo(cx - 9f, cy - 9f)
+                        lineTo(cx - 3f, cy - 4f)
+                        lineTo(cx + 3f, cy - 4f)
+                        lineTo(cx + 9f, cy - 9f)
+                        lineTo(cx + 9f, cy + 3f)
+                        cubicTo(cx + 9f, cy + 10f, cx - 9f, cy + 10f, cx - 9f, cy + 3f)
+                        close()
+                    }
+                    canvas.drawPath(catP, paint)
+                }
+                "bat" -> {
+                    val batP = android.graphics.Path().apply {
+                        moveTo(cx - 12f, cy - 1f)
+                        lineTo(cx - 6f, cy - 7f)
+                        lineTo(cx - 2f, cy - 2f)
+                        lineTo(cx, cy - 5f)
+                        lineTo(cx + 2f, cy - 2f)
+                        lineTo(cx + 6f, cy - 7f)
+                        lineTo(cx + 12f, cy - 1f)
+                        lineTo(cx + 6f, cy + 6f)
+                        lineTo(cx, cy + 2f)
+                        lineTo(cx - 6f, cy + 6f)
+                        close()
+                    }
+                    canvas.drawPath(batP, paint)
+                }
+                "deposit" -> {
+                    canvas.drawRoundRect(RectF(cx - 18f, cy - 11f, cx + 18f, cy + 11f), 6f, 6f, paint)
+                    paint.style = Paint.Style.FILL
+                    paint.textSize = 11f
+                    paint.textAlign = Paint.Align.CENTER
+                    canvas.drawText("${g.depositPoints}", cx, cy + 4f, paint)
+                }
+                else -> {
+                    canvas.drawCircle(cx, cy, 9f, paint)
+                }
+            }
+        }
+
+        return bitmap
+    }
+
+    /**
+     * Saves the rendered Share Card PNG image into Android MediaStore (Pictures/ZhytomyrRoulette)
+     * and returns the saved image Uri, or null if saving failed.
+     */
+    fun saveShareCardBitmapToMediaStore(
+        context: Context,
+        bestScore: Int,
+        powerPoints: Int,
+        lang: String,
+        purchasedUpgrades: Set<RouletteUpgradeId>,
+        depositCount: Int
+    ): Uri? {
+        return try {
+            val bitmap = renderShareCardBitmap(
+                bestScore = bestScore,
+                powerPoints = powerPoints,
+                lang = lang,
+                purchasedUpgrades = purchasedUpgrades,
+                depositCount = depositCount
+            )
+            val filename = "zhytomyr_roulette_${System.currentTimeMillis()}.png"
+            val values = ContentValues().apply {
+                put(MediaStore.Images.Media.DISPLAY_NAME, filename)
+                put(MediaStore.Images.Media.MIME_TYPE, "image/png")
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    put(MediaStore.Images.Media.RELATIVE_PATH, "${Environment.DIRECTORY_PICTURES}/ZhytomyrRoulette")
+                    put(MediaStore.Images.Media.IS_PENDING, 1)
+                }
+            }
+            val resolver = context.contentResolver
+            val uri = resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values) ?: return null
+            resolver.openOutputStream(uri)?.use { outStream ->
+                bitmap.compress(Bitmap.CompressFormat.PNG, 100, outStream)
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                values.clear()
+                values.put(MediaStore.Images.Media.IS_PENDING, 0)
+                resolver.update(uri, values, null, null)
+            }
+            uri
+        } catch (_: Exception) {
+            null
+        }
+    }
 }
 
 /**
  * Procedural PCM AudioTrack synthesizer for:
  * 1. Card deck shuffling / dealing sound when tickets are placed from top to bottom
- * 2. Scratch sound on swipe & when ticket is scratched off (+15% higher volume)
+ * 2. Scratch sound on swipe & when ticket is scratched off (-50% lower volume from 1.15 -> 0.575)
  * 3. Cash register ("Cha-ching!") sound when buying an upgrade in the Power Shop (-25% lower volume)
  * 4. Coin sound on Beige/X2/Golden ticket reveal (-25% lower volume)
  * 5. Electric buzzing sound while screen fades to black on Red ticket reveal (-25% lower volume)
@@ -1700,7 +1939,8 @@ object RouletteSoundEngine {
     private const val SAMPLE_RATE = 22050
     private const val PREFS_NAME = "zt_roulette_prefs"
     private const val KEY_SOUND_ENABLED = "roulette_sound_enabled"
-    const val SCRATCH_VOLUME_SCALE = 1.15
+    private const val KEY_MUSIC_ENABLED = "roulette_music_enabled"
+    const val SCRATCH_VOLUME_SCALE = 0.575
     const val COIN_VOLUME_SCALE = 0.75
     const val GAMEOVER_UPGRADE_VOLUME_SCALE = 0.60
     const val COIN_GAMEOVER_UPGRADE_VOLUME_SCALE = 0.75
@@ -1716,6 +1956,12 @@ object RouletteSoundEngine {
 
     @Volatile
     private var inMemorySoundEnabled: Boolean = true
+
+    @Volatile
+    private var inMemoryMusicEnabled: Boolean = true
+
+    @Volatile
+    private var isAppInForegroundState: Boolean = true
 
     @Volatile
     private var activeMusicTrack: String = "NONE"
@@ -1740,6 +1986,38 @@ object RouletteSoundEngine {
 
     @Volatile
     private var lastScratchMs = 0L
+
+    fun isAppInForeground(): Boolean = isAppInForegroundState
+
+    fun setAppInForeground(inForeground: Boolean, context: Context? = null): Boolean {
+        isAppInForegroundState = inForeground
+        if (!inForeground) {
+            ++fadeGenerationId
+            activeMusicTrack = "NONE"
+            startShopGameOverVol = 0f
+            mainGameVol = 0f
+            try {
+                startShopGameOverPlayer?.setVolume(0f, 0f)
+                if (startShopGameOverPlayer?.isPlaying == true) {
+                    startShopGameOverPlayer?.pause()
+                }
+            } catch (_: Exception) {}
+            try {
+                mainGamePlayer?.setVolume(0f, 0f)
+                if (mainGamePlayer?.isPlaying == true) {
+                    mainGamePlayer?.pause()
+                }
+            } catch (_: Exception) {}
+        } else {
+            syncBackgroundMusic(
+                context = context,
+                screen = lastRequestedScreen,
+                isOpen = isDialogCurrentlyOpen,
+                musicEnabled = isMusicEnabled(context)
+            )
+        }
+        return isAppInForegroundState
+    }
 
     fun pickRandomStartShopMusicRes(random: Random = Random.Default): Int {
         return if (random.nextBoolean()) START_SHOP_GAMEOVER_MUSIC_RES else START_SHOP_2_MUSIC_RES
@@ -1776,12 +2054,43 @@ object RouletteSoundEngine {
             } catch (_: Exception) {
             }
         }
-        syncBackgroundMusic(context, lastRequestedScreen, isDialogCurrentlyOpen, enabled)
         return inMemorySoundEnabled
     }
 
     fun toggleSoundEnabled(context: Context? = null): Boolean {
         return setSoundEnabled(!isSoundEnabled(context), context)
+    }
+
+    fun isMusicEnabled(context: Context? = null): Boolean {
+        if (context != null) {
+            try {
+                val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                if (prefs.contains(KEY_MUSIC_ENABLED)) {
+                    inMemoryMusicEnabled = prefs.getBoolean(KEY_MUSIC_ENABLED, true)
+                }
+            } catch (_: Exception) {
+            }
+        }
+        return inMemoryMusicEnabled
+    }
+
+    fun setMusicEnabled(enabled: Boolean, context: Context? = null): Boolean {
+        inMemoryMusicEnabled = enabled
+        if (context != null) {
+            try {
+                context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
+                    .edit()
+                    .putBoolean(KEY_MUSIC_ENABLED, enabled)
+                    .apply()
+            } catch (_: Exception) {
+            }
+        }
+        syncBackgroundMusic(context, lastRequestedScreen, isDialogCurrentlyOpen, enabled)
+        return inMemoryMusicEnabled
+    }
+
+    fun toggleMusicEnabled(context: Context? = null): Boolean {
+        return setMusicEnabled(!isMusicEnabled(context), context)
     }
 
     fun getTargetMusicTrackForScreen(screen: RouletteScreenMode, isOpen: Boolean = true): String {
@@ -1799,7 +2108,7 @@ object RouletteSoundEngine {
         context: Context?,
         screen: RouletteScreenMode,
         isOpen: Boolean,
-        soundEnabled: Boolean = isSoundEnabled(context),
+        musicEnabled: Boolean = isMusicEnabled(context),
         random: Random = Random.Default
     ): String {
         val prevScreen = lastRequestedScreen
@@ -1813,12 +2122,31 @@ object RouletteSoundEngine {
             randomizeStartShopMusicRes(random)
         }
 
-        val desiredTrack = if (soundEnabled) {
+        val desiredTrack = if (musicEnabled && isAppInForegroundState) {
             getTargetMusicTrackForScreen(screen, isOpen)
         } else {
             "NONE"
         }
         activeMusicTrack = desiredTrack
+
+        if (!isAppInForegroundState) {
+            ++fadeGenerationId
+            startShopGameOverVol = 0f
+            mainGameVol = 0f
+            try {
+                startShopGameOverPlayer?.setVolume(0f, 0f)
+                if (startShopGameOverPlayer?.isPlaying == true) {
+                    startShopGameOverPlayer?.pause()
+                }
+            } catch (_: Exception) {}
+            try {
+                mainGamePlayer?.setVolume(0f, 0f)
+                if (mainGamePlayer?.isPlaying == true) {
+                    mainGamePlayer?.pause()
+                }
+            } catch (_: Exception) {}
+            return desiredTrack
+        }
 
         if (context == null) {
             return desiredTrack
@@ -1860,7 +2188,7 @@ object RouletteSoundEngine {
                     val stepOutDelayMs = (MUSIC_FADE_DURATION_MS / stepsOut).coerceAtLeast(15L)
                     val initialMain = mainGameVol
                     for (step in 1..stepsOut) {
-                        if (fadeGenerationId != currentFadeGen) return@Thread
+                        if (fadeGenerationId != currentFadeGen || !isAppInForegroundState) return@Thread
                         val progress = step.toFloat() / stepsOut.toFloat()
                         mainGameVol = (initialMain * (1f - progress)).coerceIn(0f, MUSIC_VOLUME_SCALE)
                         try {
@@ -1877,14 +2205,14 @@ object RouletteSoundEngine {
                     if (remainingDelayMs > 0L) {
                         Thread.sleep(remainingDelayMs)
                     }
-                    if (fadeGenerationId != currentFadeGen) return@Thread
+                    if (fadeGenerationId != currentFadeGen || !isAppInForegroundState) return@Thread
                 }
 
-                if (targetStartShopVol > 0f && startShopGameOverPlayer?.isPlaying == false) {
+                if (targetStartShopVol > 0f && startShopGameOverPlayer?.isPlaying == false && isAppInForegroundState) {
                     startShopGameOverPlayer?.setVolume(startShopGameOverVol, startShopGameOverVol)
                     startShopGameOverPlayer?.start()
                 }
-                if (targetMainGameVol > 0f && mainGamePlayer?.isPlaying == false) {
+                if (targetMainGameVol > 0f && mainGamePlayer?.isPlaying == false && isAppInForegroundState) {
                     mainGamePlayer?.setVolume(mainGameVol, mainGameVol)
                     mainGamePlayer?.start()
                 }
@@ -1895,7 +2223,7 @@ object RouletteSoundEngine {
                 val initialMainGameVol = mainGameVol
 
                 for (step in 1..steps) {
-                    if (fadeGenerationId != currentFadeGen) return@Thread
+                    if (fadeGenerationId != currentFadeGen || !isAppInForegroundState) return@Thread
                     val progress = step.toFloat() / steps.toFloat()
                     startShopGameOverVol = (initialStartShopVol + (targetStartShopVol - initialStartShopVol) * progress)
                         .coerceIn(0f, MUSIC_VOLUME_SCALE)
@@ -1932,10 +2260,11 @@ object RouletteSoundEngine {
     }
 
     private fun playPcmSamples(samples: ShortArray) {
-        if (!isSoundEnabled()) return
+        if (!isSoundEnabled() || !isAppInForegroundState) return
         Thread {
             var track: AudioTrack? = null
             try {
+                if (!isAppInForegroundState) return@Thread
                 val byteCount = samples.size * 2
                 track = AudioTrack.Builder()
                     .setAudioAttributes(
@@ -1955,6 +2284,7 @@ object RouletteSoundEngine {
                     .setTransferMode(AudioTrack.MODE_STATIC)
                     .build()
                 track.write(samples, 0, samples.size)
+                if (!isAppInForegroundState) return@Thread
                 track.play()
                 val sleepMs = (samples.size * 1000L / SAMPLE_RATE) + 80L
                 Thread.sleep(sleepMs)
@@ -1996,7 +2326,7 @@ object RouletteSoundEngine {
     }
 
     fun playScratchSound(force: Boolean = false) {
-        if (!isSoundEnabled()) return
+        if (!isSoundEnabled() || !isAppInForegroundState) return
         val now = System.currentTimeMillis()
         if (!force && now - lastScratchMs < 60L) return
         lastScratchMs = now
@@ -2382,7 +2712,17 @@ private fun PowerPointsMilestoneProgressBarComposable(
                 Column(
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
+                    // Outlined score pill under progress bar matching emulator
                     Row(
+                        modifier = Modifier
+                            .clip(CircleShape)
+                            .background(if (isReached) Color(0x3310B981) else Color(0xBF141A29))
+                            .border(
+                                1.dp,
+                                if (isReached) Color(0xFF34D399) else Color(0x4DD8B467),
+                                CircleShape
+                            )
+                            .padding(horizontal = 6.dp, vertical = 2.dp),
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(2.dp)
                     ) {
@@ -2391,45 +2731,73 @@ private fun PowerPointsMilestoneProgressBarComposable(
                             fontSize = 10.sp,
                             fontFamily = FontFamily.Monospace,
                             fontWeight = FontWeight.ExtraBold,
-                            color = if (isReached) Color(0xFF4ADE80) else Color(0xFF9CA3AF)
+                            color = if (isReached) Color(0xFF6EE7B7) else Color(0xA6E5D5B5)
                         )
                         if (isReached) {
                             Text(
                                 text = "V",
                                 fontSize = 9.sp,
                                 fontWeight = FontWeight.Black,
-                                color = Color(0xFF4ADE80)
+                                color = Color(0xFF34D399)
                             )
                         }
                     }
 
+                    // Upgrade Reward Icons below Milestone 400 (Daily Streak X2) and Milestone 1000 (Perseverance Heart) with identical size & outline
                     if (milestone == 400) {
                         Box(
                             modifier = Modifier
-                                .padding(top = 2.dp)
+                                .padding(top = 4.dp)
+                                .size(width = 24.dp, height = 20.dp)
                                 .clip(RoundedCornerShape(4.dp))
+                                .background(if (isReached) Color(0x26F5D061) else Color(0x9918181B))
                                 .border(
                                     1.dp,
-                                    if (isReached) Color(0xFFF59E0B) else Color(0xFF6B7280),
+                                    if (isReached) Color(0xFFF5D061) else Color(0xFF52525B),
                                     RoundedCornerShape(4.dp)
-                                )
-                                .padding(horizontal = 3.dp, vertical = 1.dp),
+                                ),
                             contentAlignment = Alignment.Center
                         ) {
                             Text(
                                 text = "X2",
-                                fontSize = 8.sp,
+                                fontSize = 9.sp,
                                 fontFamily = FontFamily.Monospace,
                                 fontWeight = FontWeight.Black,
-                                color = if (isReached) Color(0xFFF59E0B) else Color(0xFF6B7280)
+                                color = if (isReached) Color(0xFFF5D061) else Color(0xFF71717A)
                             )
                         }
                     } else if (milestone == 1000) {
                         Box(
-                            modifier = Modifier.padding(top = 2.dp),
+                            modifier = Modifier
+                                .padding(top = 4.dp)
+                                .size(width = 24.dp, height = 20.dp)
+                                .clip(RoundedCornerShape(4.dp))
+                                .background(if (isReached) Color(0x26F5D061) else Color(0x9918181B))
+                                .border(
+                                    1.dp,
+                                    if (isReached) Color(0xFFF5D061) else Color(0xFF52525B),
+                                    RoundedCornerShape(4.dp)
+                                ),
                             contentAlignment = Alignment.Center
                         ) {
-                            HeaderHeartIconComposable(used = !isReached, modifier = Modifier.size(12.dp))
+                            val heartStrokeColor = if (isReached) Color(0xFFF5D061) else Color(0xFF71717A)
+                            Canvas(modifier = Modifier.size(12.dp)) {
+                                val w = size.width
+                                val h = size.height
+                                val path = Path().apply {
+                                    moveTo(w * 0.5f, h * 0.88f)
+                                    cubicTo(w * 0.1f, h * 0.62f, w * 0.05f, h * 0.25f, w * 0.28f, h * 0.15f)
+                                    cubicTo(w * 0.42f, h * 0.10f, w * 0.5f, h * 0.22f, w * 0.5f, h * 0.28f)
+                                    cubicTo(w * 0.5f, h * 0.22f, w * 0.58f, h * 0.10f, w * 0.72f, h * 0.15f)
+                                    cubicTo(w * 0.95f, h * 0.25f, w * 0.9f, h * 0.62f, w * 0.5f, h * 0.88f)
+                                    close()
+                                }
+                                drawPath(
+                                    path = path,
+                                    color = heartStrokeColor,
+                                    style = Stroke(width = 1.6.dp.toPx(), join = StrokeJoin.Round)
+                                )
+                            }
                         }
                     }
                 }
@@ -2670,7 +3038,7 @@ private fun ScratchTicketComposable(
             val center = Offset(w / 2f, h / 2f)
 
             // 1. Underlying Ticket Base
-            val isGoldenRevealed = ticket.isGolden && !ticket.isRed && ticket.isRevealed
+            val isGoldenRevealed = ticket.isGolden && ticket.isRevealed
             drawRect(
                 brush = Brush.verticalGradient(
                     colors = if (isGoldenRevealed) {
@@ -2690,7 +3058,66 @@ private fun ScratchTicketComposable(
             )
 
             // 2. Center Medallion & Lightbulb / X2 Symbol
-            if (ticket.isRed) {
+            if (ticket.isGolden) {
+                val goldRadius = min(w, h) * 0.36f
+                drawCircle(
+                    brush = Brush.radialGradient(
+                        colors = listOf(
+                            Color(0xB8FBBF24),
+                            Color(0x66D97706),
+                            Color.Transparent
+                        ),
+                        center = center,
+                        radius = goldRadius * 1.2f
+                    ),
+                    radius = goldRadius * 1.2f,
+                    center = center
+                )
+                if (ticket.isRed) {
+                    drawCircle(
+                        color = Color(0xFFEF4444),
+                        radius = min(w, h) * 0.25f,
+                        center = center,
+                        style = Stroke(width = 2.dp.toPx())
+                    )
+                }
+                drawIntactLightbulbContour(
+                    center = center,
+                    radius = min(w, h) * 0.26f,
+                    strokeColor = Color(0xFF92400E)
+                )
+            } else if (ticket.isX2) {
+                val x2Radius = min(w, h) * 0.36f
+                drawCircle(
+                    brush = Brush.radialGradient(
+                        colors = if (ticket.isRed) {
+                            listOf(
+                                Color(0xFFD62E26),
+                                Color(0xFF9E1E18),
+                                Color(0x00D8D6CC)
+                            )
+                        } else {
+                            listOf(
+                                Color(0x73F5D061),
+                                Color(0x26D97706),
+                                Color.Transparent
+                            )
+                        },
+                        center = center,
+                        radius = x2Radius * 1.15f
+                    ),
+                    radius = x2Radius * 1.15f,
+                    center = center
+                )
+                if (ticket.isRed) {
+                    drawCircle(
+                        color = Color(0xFFEF4444),
+                        radius = min(w, h) * 0.25f,
+                        center = center,
+                        style = Stroke(width = 2.dp.toPx())
+                    )
+                }
+            } else if (ticket.isRed) {
                 val redRadius = min(w, h) * 0.36f
                 drawCircle(
                     brush = Brush.radialGradient(
@@ -2716,41 +3143,6 @@ private fun ScratchTicketComposable(
                     center = center,
                     radius = min(w, h) * 0.26f,
                     strokeColor = Color(0xFFFFF5F5)
-                )
-            } else if (ticket.isGolden) {
-                val goldRadius = min(w, h) * 0.36f
-                drawCircle(
-                    brush = Brush.radialGradient(
-                        colors = listOf(
-                            Color(0x99FBBF24),
-                            Color(0x44D97706),
-                            Color.Transparent
-                        ),
-                        center = center,
-                        radius = goldRadius * 1.2f
-                    ),
-                    radius = goldRadius * 1.2f,
-                    center = center
-                )
-                drawIntactLightbulbContour(
-                    center = center,
-                    radius = min(w, h) * 0.26f,
-                    strokeColor = Color(0xFF92400E)
-                )
-            } else if (ticket.isX2) {
-                val x2Radius = min(w, h) * 0.36f
-                drawCircle(
-                    brush = Brush.radialGradient(
-                        colors = listOf(
-                            Color(0x73F5D061),
-                            Color(0x26D97706),
-                            Color.Transparent
-                        ),
-                        center = center,
-                        radius = x2Radius * 1.15f
-                    ),
-                    radius = x2Radius * 1.15f,
-                    center = center
                 )
             } else {
                 drawIntactLightbulbContour(
@@ -2841,14 +3233,14 @@ private fun ScratchTicketComposable(
             }
         }
 
-        // Underlying X2 symbol when ticket is an X2 multiplier beige ticket
-        if (!ticket.isRed && !ticket.isGolden && ticket.isX2 && (ticket.isRevealed || scratchPoints.isNotEmpty())) {
+        // Underlying X2 symbol when ticket is an X2 multiplier ticket (on Beige or Red in Nocturnal Creature mode)
+        if (!ticket.isGolden && ticket.isX2 && (ticket.isRevealed || scratchPoints.isNotEmpty())) {
             Text(
                 text = "X2",
                 fontSize = 20.sp,
                 fontWeight = FontWeight.Black,
                 fontFamily = FontFamily.Monospace,
-                color = Color(0xFF78350F)
+                color = if (ticket.isRed) Color(0xFFFFF7F5) else Color(0xFF78350F)
             )
         }
 
@@ -2889,6 +3281,7 @@ fun ZhytomyrRouletteDialog(
     onDismiss: () -> Unit
 ) {
     val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
     val scheduleRepo = remember { ScheduleRepository(context.applicationContext) }
     val scope = rememberCoroutineScope()
     var gameState by remember { mutableStateOf(ZhytomyrRouletteEngine.createInitialState(context)) }
@@ -2897,24 +3290,45 @@ fun ZhytomyrRouletteDialog(
     var isFadeToBlackStarted by remember { mutableStateOf(false) }
     var isGameBlackoutActive by remember { mutableStateOf(false) }
     var soundEnabled by remember { mutableStateOf(RouletteSoundEngine.isSoundEnabled(context)) }
+    var musicEnabled by remember { mutableStateOf(RouletteSoundEngine.isMusicEnabled(context)) }
+    val ticketListState = rememberLazyListState()
 
-    // Synchronize background music with current screen and Sound On/Off switch using smooth fade-in / fade-out at 15% volume
-    LaunchedEffect(gameState.screen, soundEnabled) {
+    // Scroll to top ONLY when a new set of tickets is dealt (new game or Get New Tickets), NEVER when Game Over FADING_TO_BLACK is triggered
+    LaunchedEffect(gameState.generationId) {
+        ticketListState.scrollToItem(0)
+    }
+
+    // Synchronize background music with current screen and Music On/Off switch using smooth fade-in / fade-out at 15% volume
+    LaunchedEffect(gameState.screen, musicEnabled) {
         RouletteSoundEngine.syncBackgroundMusic(
             context = context,
             screen = gameState.screen,
             isOpen = true,
-            soundEnabled = soundEnabled
+            musicEnabled = musicEnabled
         )
     }
 
-    DisposableEffect(Unit) {
+    // Mute music & sounds immediately if Application is minimized / sent to Home screen, and restore when resumed
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_RESUME -> {
+                    RouletteSoundEngine.setAppInForeground(true, context)
+                }
+                Lifecycle.Event.ON_PAUSE, Lifecycle.Event.ON_STOP -> {
+                    RouletteSoundEngine.setAppInForeground(false, context)
+                }
+                else -> {}
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
         onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
             RouletteSoundEngine.syncBackgroundMusic(
                 context = context,
                 screen = RouletteScreenMode.START,
                 isOpen = false,
-                soundEnabled = false
+                musicEnabled = false
             )
         }
     }
@@ -2971,46 +3385,50 @@ fun ZhytomyrRouletteDialog(
         onDismiss()
     }
 
-    // Slow 2-3s screen flickering every 15-30 seconds on all screens EXCEPT Game Over, with 20% volume electric buzz sound
-    LaunchedEffect(gameState.screen) {
+    // Slow 2-3s screen flickering every 15-30 seconds on all screens EXCEPT Game Over, only when app is in foreground (RESUMED)
+    LaunchedEffect(gameState.screen, lifecycleOwner) {
         if (gameState.screen == RouletteScreenMode.GAME_OVER) {
             targetFlickerAlpha = 0f
             return@LaunchedEffect
         }
-        while (true) {
-            val waitMs = ZhytomyrRouletteEngine.getNextFlickerDelayMs()
-            delay(waitMs)
-            if (gameState.screen != RouletteScreenMode.GAME_OVER) {
-                val totalDurationMs = ZhytomyrRouletteEngine.getFlickerDurationMs()
-                RouletteSoundEngine.playFlickerBuzzSound(totalDurationMs.toInt())
-                targetFlickerAlpha = 0.45f
-                delay((totalDurationMs * 0.25f).toLong())
-                targetFlickerAlpha = 0.16f
-                delay((totalDurationMs * 0.27f).toLong())
-                targetFlickerAlpha = 0.55f
-                delay((totalDurationMs * 0.26f).toLong())
-                targetFlickerAlpha = 0.22f
-                delay((totalDurationMs * 0.22f).toLong())
-                targetFlickerAlpha = 0f
+        lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+            while (true) {
+                val waitMs = ZhytomyrRouletteEngine.getNextFlickerDelayMs()
+                delay(waitMs)
+                if (gameState.screen != RouletteScreenMode.GAME_OVER && RouletteSoundEngine.isAppInForeground()) {
+                    val totalDurationMs = ZhytomyrRouletteEngine.getFlickerDurationMs()
+                    RouletteSoundEngine.playFlickerBuzzSound(totalDurationMs.toInt())
+                    targetFlickerAlpha = 0.45f
+                    delay((totalDurationMs * 0.25f).toLong())
+                    targetFlickerAlpha = 0.16f
+                    delay((totalDurationMs * 0.27f).toLong())
+                    targetFlickerAlpha = 0.55f
+                    delay((totalDurationMs * 0.26f).toLong())
+                    targetFlickerAlpha = 0.22f
+                    delay((totalDurationMs * 0.22f).toLong())
+                    targetFlickerAlpha = 0f
+                }
             }
         }
     }
 
-    // 10-second "Game Blackout" on Main Game Screen every 5–10 minutes
-    LaunchedEffect(gameState.screen) {
+    // 10-second "Game Blackout" on Main Game Screen every 5–10 minutes, only when app is in foreground (RESUMED)
+    LaunchedEffect(gameState.screen, lifecycleOwner) {
         if (gameState.screen != RouletteScreenMode.PLAYING) {
             isGameBlackoutActive = false
             return@LaunchedEffect
         }
-        while (true) {
-            val waitMs = ZhytomyrRouletteEngine.getNextGameBlackoutDelayMs()
-            delay(waitMs)
-            if (gameState.screen == RouletteScreenMode.PLAYING) {
-                isGameBlackoutActive = true
-                RouletteSoundEngine.playGameBlackoutSound()
-                delay(ZhytomyrRouletteEngine.GAME_BLACKOUT_DURATION_MS)
-                isGameBlackoutActive = false
-                RouletteSoundEngine.playFlickerBuzzSound(550)
+        lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
+            while (true) {
+                val waitMs = ZhytomyrRouletteEngine.getNextGameBlackoutDelayMs()
+                delay(waitMs)
+                if (gameState.screen == RouletteScreenMode.PLAYING && RouletteSoundEngine.isAppInForeground()) {
+                    isGameBlackoutActive = true
+                    RouletteSoundEngine.playGameBlackoutSound()
+                    delay(ZhytomyrRouletteEngine.GAME_BLACKOUT_DURATION_MS)
+                    isGameBlackoutActive = false
+                    RouletteSoundEngine.playFlickerBuzzSound(550)
+                }
             }
         }
     }
@@ -3114,11 +3532,20 @@ fun ZhytomyrRouletteDialog(
         modifier = Modifier
             .fillMaxSize()
             .background(Color(0xFF070A10))
+            .pointerInput(Unit) {
+                detectTapGestures { /* Consume taps on empty space so they never pass through to Main Application behind Game */ }
+            }
             .statusBarsPadding()
             .navigationBarsPadding()
     ) {
+        val crossfadeTargetScreen = if (gameState.screen == RouletteScreenMode.FADING_TO_BLACK) {
+            RouletteScreenMode.PLAYING
+        } else {
+            gameState.screen
+        }
+
         Crossfade(
-            targetState = gameState.screen,
+            targetState = crossfadeTargetScreen,
             animationSpec = tween(durationMillis = 280),
             label = "rouletteScreenCrossfade"
         ) { currentScreen ->
@@ -3153,46 +3580,90 @@ fun ZhytomyrRouletteDialog(
                                     reachedMilestones = reachedMilestonesVal
                                 )
 
-                                // Top Bar: Sound On/Off Switch on Left side across from "Share" button on Right side on Game Start Screen
+                                // Top Bar: Separate Sound & Music On/Off Switches on Left side across from "Share" button on Right side on Game Start Screen
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
                                     horizontalArrangement = Arrangement.SpaceBetween,
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    // Sound On/Off Switch (en: Sound / uk: Звук) on Left side using same design and colors as notification switches in main application
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    // Separate Sound & Music On/Off Switches placed on Left side where 1 switch previously existed
+                                    Column(
+                                        horizontalAlignment = Alignment.Start,
+                                        verticalArrangement = Arrangement.spacedBy(2.dp)
                                     ) {
-                                        Text(
-                                            text = AppStrings.rouletteSoundLabel(lang),
-                                            fontSize = 12.sp,
-                                            fontWeight = FontWeight.Medium,
-                                            color = Color.White.copy(alpha = 0.9f)
-                                        )
-                                        Switch(
-                                            checked = soundEnabled,
-                                            onCheckedChange = { checked ->
-                                                soundEnabled = RouletteSoundEngine.setSoundEnabled(checked, context)
-                                            },
-                                            colors = SwitchDefaults.colors(
-                                                checkedThumbColor = Color.White,
-                                                checkedTrackColor = Color(0xFFFF5E3A),
-                                                uncheckedThumbColor = Color.LightGray,
-                                                uncheckedTrackColor = Color(0x33FFFFFF)
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                        ) {
+                                            Text(
+                                                text = AppStrings.rouletteSoundLabel(lang),
+                                                fontSize = 12.sp,
+                                                fontWeight = FontWeight.Medium,
+                                                color = Color.White.copy(alpha = 0.9f),
+                                                modifier = Modifier.widthIn(min = 46.dp)
                                             )
-                                        )
+                                            Switch(
+                                                checked = soundEnabled,
+                                                onCheckedChange = { checked ->
+                                                    soundEnabled = RouletteSoundEngine.setSoundEnabled(checked, context)
+                                                },
+                                                modifier = Modifier
+                                                    .height(28.dp)
+                                                    .scale(0.85f),
+                                                colors = SwitchDefaults.colors(
+                                                    checkedThumbColor = Color.White,
+                                                    checkedTrackColor = Color(0xFFFF5E3A),
+                                                    uncheckedThumbColor = Color.LightGray,
+                                                    uncheckedTrackColor = Color(0x33FFFFFF)
+                                                )
+                                            )
+                                        }
+
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                        ) {
+                                            Text(
+                                                text = AppStrings.rouletteMusicLabel(lang),
+                                                fontSize = 12.sp,
+                                                fontWeight = FontWeight.Medium,
+                                                color = Color.White.copy(alpha = 0.9f),
+                                                modifier = Modifier.widthIn(min = 46.dp)
+                                            )
+                                            Switch(
+                                                checked = musicEnabled,
+                                                onCheckedChange = { checked ->
+                                                    musicEnabled = RouletteSoundEngine.setMusicEnabled(checked, context)
+                                                },
+                                                modifier = Modifier
+                                                    .height(28.dp)
+                                                    .scale(0.85f),
+                                                colors = SwitchDefaults.colors(
+                                                    checkedThumbColor = Color.White,
+                                                    checkedTrackColor = Color(0xFFFF5E3A),
+                                                    uncheckedThumbColor = Color.LightGray,
+                                                    uncheckedTrackColor = Color(0x33FFFFFF)
+                                                )
+                                            )
+                                        }
                                     }
 
-                                    Box(
+                                    Row(
                                         modifier = Modifier
                                             .clip(CircleShape)
                                             .background(Color(0xE6141A29))
                                             .border(1.2.dp, Color(0xBFD8B467), CircleShape)
                                             .clickable { showSharePreview = true }
                                             .padding(horizontal = 14.dp, vertical = 6.dp),
-                                        contentAlignment = Alignment.Center
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
                                     ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Share,
+                                            contentDescription = null,
+                                            tint = Color(0xFFF5D061),
+                                            modifier = Modifier.size(14.dp)
+                                        )
                                         Text(
                                             text = AppStrings.rouletteShareBtn(lang),
                                             fontSize = 12.sp,
@@ -3383,26 +3854,53 @@ fun ZhytomyrRouletteDialog(
                             }
                         }
 
-                        // Printable Share Card Modal with App Logo & Name ("Світло в Житомирі"), Game Logo (Lightbulb), "Zhytomyr Roulette", Top Score + Power Points bars, bottom centered upgrade glyphs, Standard Mobile "Share to... Application" Dialog, and Non-Overlapping Bottom Buttons
+                        // Printable Share Card Modal with unmodified App Icon (#FF5E3A + white Bolt) & Name ("Світло в Житомирі"), Game Logo (Lightbulb), "Zhytomyr Roulette", Top Score + Power Points bars, bottom centered upgrade glyphs, and 3 Bottom Buttons: Share (mobile standard action), Download Image, Back
                         if (showSharePreview) {
-                            val launchSystemShareToApp: (String?) -> Unit = { appLabel ->
+                            val currentUpgradesSet = gameState.purchasedUpgrades.ifEmpty {
+                                ZhytomyrRouletteEngine.getPurchasedUpgrades(context)
+                            }
+                            val currentDepositVal = max(
+                                gameState.depositCount,
+                                ZhytomyrRouletteEngine.getDepositCount(context)
+                            )
+
+                            val launchStandardShareAction: () -> Unit = {
                                 try {
-                                    val shareSummary = if (lang == "en") {
-                                        "Zhytomyr Roulette — Best Score: $bestScoreVal, Power Points: $powerPointsVal"
-                                    } else {
-                                        "Житомирська Рулетка — Найкращий Результат: $bestScoreVal, Бали Потужності: $powerPointsVal"
+                                    val imageUri = ZhytomyrRouletteEngine.saveShareCardBitmapToMediaStore(
+                                        context = context,
+                                        bestScore = bestScoreVal,
+                                        powerPoints = powerPointsVal,
+                                        lang = lang,
+                                        purchasedUpgrades = currentUpgradesSet,
+                                        depositCount = currentDepositVal
+                                    )
+                                    if (imageUri != null) {
+                                        val sendIntent = Intent(Intent.ACTION_SEND).apply {
+                                            type = "image/png"
+                                            putExtra(Intent.EXTRA_STREAM, imageUri)
+                                            clipData = ClipData.newRawUri("Zhytomyr Roulette", imageUri)
+                                            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                        }
+                                        val chooser = Intent.createChooser(sendIntent, AppStrings.rouletteShareBtn(lang)).apply {
+                                            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                        }
+                                        context.startActivity(chooser)
                                     }
-                                    val sendIntent = Intent(Intent.ACTION_SEND).apply {
-                                        type = "text/plain"
-                                        putExtra(Intent.EXTRA_SUBJECT, "Zhytomyr Roulette")
-                                        putExtra(
-                                            Intent.EXTRA_TEXT,
-                                            if (appLabel != null) "[$appLabel] $shareSummary" else shareSummary
-                                        )
-                                    }
-                                    val chooser = Intent.createChooser(sendIntent, "Share to... Application")
-                                    context.startActivity(chooser)
                                 } catch (_: Exception) {
+                                }
+                            }
+
+                            val handleDownloadImageAction: () -> Unit = {
+                                val savedUri = ZhytomyrRouletteEngine.saveShareCardBitmapToMediaStore(
+                                    context = context,
+                                    bestScore = bestScoreVal,
+                                    powerPoints = powerPointsVal,
+                                    lang = lang,
+                                    purchasedUpgrades = currentUpgradesSet,
+                                    depositCount = currentDepositVal
+                                )
+                                if (savedUri != null) {
+                                    onShowAppBanner?.invoke(AppStrings.rouletteImageSavedToast(lang))
                                 }
                             }
 
@@ -3410,7 +3908,10 @@ fun ZhytomyrRouletteDialog(
                                 modifier = Modifier
                                     .fillMaxSize()
                                     .background(Color(0xFF070A10))
-                                    .padding(horizontal = 16.dp, vertical = 12.dp)
+                                    .pointerInput(Unit) {
+                                        detectTapGestures { /* Consume taps on empty space on Share screen so buttons in Main App behind Game are never pressed */ }
+                                    }
+                                    .padding(horizontal = 24.dp, vertical = 14.dp)
                             ) {
                                 Column(
                                     modifier = Modifier.fillMaxSize(),
@@ -3424,27 +3925,27 @@ fun ZhytomyrRouletteDialog(
                                             .clip(RoundedCornerShape(22.dp))
                                             .background(Color(0xFF0B101C))
                                             .border(1.6.dp, Color(0xFFD8B467), RoundedCornerShape(22.dp))
-                                            .padding(14.dp),
+                                            .padding(16.dp),
                                         horizontalAlignment = Alignment.CenterHorizontally,
-                                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                                        verticalArrangement = Arrangement.spacedBy(10.dp)
                                     ) {
-                                        // Application Logo & Name ("Світло в Житомирі")
+                                        // Unmodified Application Icon (#FF5E3A rounded box + white lightning bolt) & Name ("Світло в Житомирі")
                                         Row(
                                             verticalAlignment = Alignment.CenterVertically,
                                             horizontalArrangement = Arrangement.spacedBy(10.dp)
                                         ) {
                                             Box(
                                                 modifier = Modifier
-                                                    .size(32.dp)
+                                                    .size(34.dp)
                                                     .clip(RoundedCornerShape(10.dp))
-                                                    .background(Color(0xFF141A29))
-                                                    .border(1.2.dp, Color(0xFFF5D061), RoundedCornerShape(10.dp)),
+                                                    .background(Color(0xFFFF5E3A)),
                                                 contentAlignment = Alignment.Center
                                             ) {
-                                                Text(
-                                                    text = "⚡",
-                                                    fontSize = 16.sp,
-                                                    color = Color(0xFFF5D061)
+                                                Icon(
+                                                    imageVector = Icons.Default.Bolt,
+                                                    contentDescription = null,
+                                                    tint = Color.White,
+                                                    modifier = Modifier.size(22.dp)
                                                 )
                                             }
                                             Text(
@@ -3457,7 +3958,7 @@ fun ZhytomyrRouletteDialog(
 
                                         // Game Logo from Game Start Screen (Lightbulb)
                                         Box(
-                                            modifier = Modifier.size(92.dp),
+                                            modifier = Modifier.size(96.dp),
                                             contentAlignment = Alignment.Center
                                         ) {
                                             Canvas(modifier = Modifier.fillMaxSize()) {
@@ -3544,90 +4045,15 @@ fun ZhytomyrRouletteDialog(
 
                                         // Bottom Centered Upgrade Glyphs (strictly grey #6B7280 or golden #F59E0B outline only)
                                         ShareCardUpgradeGlyphsRowComposable(
-                                            purchasedUpgrades = gameState.purchasedUpgrades.ifEmpty {
-                                                ZhytomyrRouletteEngine.getPurchasedUpgrades(context)
-                                            },
-                                            depositCount = max(
-                                                gameState.depositCount,
-                                                ZhytomyrRouletteEngine.getDepositCount(context)
-                                            )
+                                            purchasedUpgrades = currentUpgradesSet,
+                                            depositCount = currentDepositVal
                                         )
                                     }
 
-                                    // 2. Standard Mobile "Share to... Application" Dialog Sheet (positioned above bottom buttons so they never overlap)
-                                    Column(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .clip(RoundedCornerShape(16.dp))
-                                            .background(Color(0xF2141A29))
-                                            .border(1.dp, Color(0x80D8B467), RoundedCornerShape(16.dp))
-                                            .padding(horizontal = 12.dp, vertical = 10.dp),
-                                        horizontalAlignment = Alignment.CenterHorizontally,
-                                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                                    ) {
-                                        Box(
-                                            modifier = Modifier
-                                                .width(32.dp)
-                                                .height(4.dp)
-                                                .clip(CircleShape)
-                                                .background(Color(0x996B7280))
-                                        )
-                                        Text(
-                                            text = if (lang == "en") "Share to... Application" else "Поділитися... (Share to... Application)",
-                                            fontSize = 11.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            color = Color(0xFFE5D5B5)
-                                        )
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            horizontalArrangement = Arrangement.SpaceEvenly,
-                                            verticalAlignment = Alignment.CenterVertically
-                                        ) {
-                                            val shareApps = listOf(
-                                                Triple("Telegram", "TG", Color(0xFF229ED9)),
-                                                Triple("Viber", "VB", Color(0xFF7360F2)),
-                                                Triple("WhatsApp", "WA", Color(0xFF25D366)),
-                                                Triple("Instagram", "IG", Color(0xFFE1306C)),
-                                                Triple("Messages", "SMS", Color(0xFF3B82F6))
-                                            )
-                                            for ((appLabel, badge, badgeColor) in shareApps) {
-                                                Column(
-                                                    modifier = Modifier
-                                                        .clip(RoundedCornerShape(10.dp))
-                                                        .clickable { launchSystemShareToApp(appLabel) }
-                                                        .padding(horizontal = 6.dp, vertical = 4.dp),
-                                                    horizontalAlignment = Alignment.CenterHorizontally,
-                                                    verticalArrangement = Arrangement.spacedBy(3.dp)
-                                                ) {
-                                                    Box(
-                                                        modifier = Modifier
-                                                            .size(32.dp)
-                                                            .clip(CircleShape)
-                                                            .background(badgeColor),
-                                                        contentAlignment = Alignment.Center
-                                                    ) {
-                                                        Text(
-                                                            text = badge,
-                                                            fontSize = 10.sp,
-                                                            fontWeight = FontWeight.ExtraBold,
-                                                            color = Color.White
-                                                        )
-                                                    }
-                                                    Text(
-                                                        text = appLabel,
-                                                        fontSize = 9.sp,
-                                                        fontWeight = FontWeight.SemiBold,
-                                                        color = Color(0xFFE4E4E7)
-                                                    )
-                                                }
-                                            }
-                                        }
-                                    }
-
-                                    // 3. Non-Overlapping Bottom Buttons
+                                    // 2. 3 Bottom Action Buttons: Share (mobile standard action), Download Image, Back
                                     Column(
                                         modifier = Modifier.fillMaxWidth(),
-                                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                                        verticalArrangement = Arrangement.spacedBy(10.dp)
                                     ) {
                                         Box(
                                             modifier = Modifier
@@ -3639,15 +4065,33 @@ fun ZhytomyrRouletteDialog(
                                                     )
                                                 )
                                                 .border(1.5.dp, Color(0xFFD8B467), CircleShape)
-                                                .clickable { launchSystemShareToApp(null) }
-                                                .padding(vertical = 11.dp),
+                                                .clickable { launchStandardShareAction() }
+                                                .padding(vertical = 14.dp),
                                             contentAlignment = Alignment.Center
                                         ) {
                                             Text(
-                                                text = if (lang == "en") "Share to... Application" else AppStrings.rouletteShareBtn(lang),
-                                                fontSize = 13.sp,
+                                                text = AppStrings.rouletteShareBtn(lang),
+                                                fontSize = 15.sp,
                                                 fontWeight = FontWeight.Bold,
                                                 color = Color.White
+                                            )
+                                        }
+
+                                        Box(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .clip(CircleShape)
+                                                .background(Color(0xD9141A29))
+                                                .border(1.3.dp, Color(0xBFD8B467), CircleShape)
+                                                .clickable { handleDownloadImageAction() }
+                                                .padding(vertical = 14.dp),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Text(
+                                                text = AppStrings.rouletteDownloadImageBtn(lang),
+                                                fontSize = 15.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = Color(0xFFE5D5B5)
                                             )
                                         }
 
@@ -3658,12 +4102,12 @@ fun ZhytomyrRouletteDialog(
                                                 .background(Color.Transparent)
                                                 .border(1.2.dp, Color(0x8CD8B467), CircleShape)
                                                 .clickable { showSharePreview = false }
-                                                .padding(vertical = 11.dp),
+                                                .padding(vertical = 14.dp),
                                             contentAlignment = Alignment.Center
                                         ) {
                                             Text(
                                                 text = AppStrings.rouletteBackBtn(lang),
-                                                fontSize = 13.sp,
+                                                fontSize = 15.sp,
                                                 fontWeight = FontWeight.Bold,
                                                 color = Color(0xFFE5D5B5)
                                             )
@@ -3857,10 +4301,11 @@ fun ZhytomyrRouletteDialog(
                 }
 
                 RouletteScreenMode.PLAYING, RouletteScreenMode.FADING_TO_BLACK -> {
+                    val isFadingToBlack = gameState.screen == RouletteScreenMode.FADING_TO_BLACK
                     val hourlyPairs = remember(gameState.tickets) {
                         ZhytomyrRouletteEngine.getHourlyTicketPairs(gameState.tickets)
                     }
-                    val canRefresh = currentScreen == RouletteScreenMode.PLAYING &&
+                    val canRefresh = !isFadingToBlack &&
                         ZhytomyrRouletteEngine.canRefreshTickets(gameState.score, gameState.refreshCount)
 
                     Box(
@@ -3928,8 +4373,9 @@ fun ZhytomyrRouletteDialog(
                                 }
                             }
 
-                            // 2-Column Hourly Grid of 48 Timeslot Lottery Tickets
+                            // 2-Column Hourly Grid of 48 Timeslot Lottery Tickets (scroll position preserved on Game Over FADING_TO_BLACK via ticketListState)
                             LazyColumn(
+                                state = ticketListState,
                                 modifier = Modifier
                                     .weight(1f)
                                     .fillMaxWidth()
@@ -3947,7 +4393,7 @@ fun ZhytomyrRouletteDialog(
                                                 ScratchTicketComposable(
                                                     ticket = pair.first,
                                                     generationId = gameState.generationId,
-                                                    disabled = currentScreen == RouletteScreenMode.FADING_TO_BLACK || isGameBlackoutActive,
+                                                    disabled = isFadingToBlack || isGameBlackoutActive,
                                                     isBlackoutActive = isGameBlackoutActive,
                                                     foilBitmap = bitmapForVariant(pair.first.visualVariant),
                                                     onReveal = handleTicketReveal
@@ -3957,7 +4403,7 @@ fun ZhytomyrRouletteDialog(
                                                 ScratchTicketComposable(
                                                     ticket = pair.second,
                                                     generationId = gameState.generationId,
-                                                    disabled = currentScreen == RouletteScreenMode.FADING_TO_BLACK || isGameBlackoutActive,
+                                                    disabled = isFadingToBlack || isGameBlackoutActive,
                                                     isBlackoutActive = isGameBlackoutActive,
                                                     foilBitmap = bitmapForVariant(pair.second.visualVariant),
                                                     onReveal = handleTicketReveal

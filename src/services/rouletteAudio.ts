@@ -11,6 +11,7 @@ let sharedAudioCtx: AudioContext | null = null;
 let lastScratchSoundAt = 0;
 
 export const ROULETTE_SOUND_ENABLED_STORAGE_KEY = 'zt_roulette_sound_enabled_v1';
+export const ROULETTE_MUSIC_ENABLED_STORAGE_KEY = 'zt_roulette_music_enabled_v1';
 export const ROULETTE_MUSIC_VOLUME = 0.15;
 export const MUSIC_FADE_DURATION_MS = 1200;
 export const GAME_OVER_MUSIC_FADE_IN_DELAY_MS = 2000;
@@ -28,6 +29,18 @@ export const MAIN_GAME_MUSIC_URL =
 export type RouletteMusicTrack = 'NONE' | 'START_SHOP_GAMEOVER' | 'MAIN_GAME';
 
 let inMemoryRouletteSoundEnabled = true;
+let inMemoryRouletteMusicEnabled = true;
+let inMemoryAppInForeground = true;
+let visibilityListenersBound = false;
+
+export function isRouletteAppInForeground(): boolean {
+  if (typeof document !== 'undefined' && typeof document.visibilityState === 'string') {
+    if (document.visibilityState === 'hidden') {
+      return false;
+    }
+  }
+  return inMemoryAppInForeground;
+}
 
 export function isRouletteSoundEnabled(): boolean {
   try {
@@ -45,8 +58,24 @@ export function isRouletteSoundEnabled(): boolean {
   return inMemoryRouletteSoundEnabled;
 }
 
+export function isRouletteMusicEnabled(): boolean {
+  try {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      const raw = window.localStorage.getItem(ROULETTE_MUSIC_ENABLED_STORAGE_KEY);
+      if (raw === 'false') {
+        inMemoryRouletteMusicEnabled = false;
+      } else if (raw === 'true') {
+        inMemoryRouletteMusicEnabled = true;
+      }
+    }
+  } catch {
+    // Ignore storage errors
+  }
+  return inMemoryRouletteMusicEnabled;
+}
+
 function getAudioContext(): AudioContext | null {
-  if (!isRouletteSoundEnabled()) return null;
+  if (!isRouletteSoundEnabled() || !isRouletteAppInForeground()) return null;
   if (typeof window === 'undefined') return null;
   const AudioCtx =
     window.AudioContext ||
@@ -111,11 +140,11 @@ export function playCardShuffleSound(): void {
 
 /**
  * Volume multipliers:
- * - Scratching sound volume is 15% higher (1.15x)
+ * - Scratching sound volume is 50% lower from existing 1.15x value (1.15 * 0.5 = 0.575x)
  * - Coin sound is 25% lower (0.75x)
  * - Game Over screen sounds (electric buzz + bulb explosion) and Upgrade Purchase sound (cash register) have volume 20% less (0.75 * 0.8 = 0.60x)
  */
-export const SCRATCH_VOLUME_SCALE = 1.15;
+export const SCRATCH_VOLUME_SCALE = 0.575;
 export const COIN_VOLUME_SCALE = 0.75;
 export const GAMEOVER_UPGRADE_VOLUME_SCALE = 0.6;
 export const COIN_GAMEOVER_UPGRADE_VOLUME_SCALE = 0.75;
@@ -123,10 +152,10 @@ export const FLICKER_BUZZ_VOLUME_SCALE = 0.1;
 export const GAME_BLACKOUT_VOLUME_SCALE = 0.1;
 
 /**
- * 2. Scratching sound on swipe across lottery ticket foil and when a ticket is scratched off (volume +15%)
+ * 2. Scratching sound on swipe across lottery ticket foil and when a ticket is scratched off (volume -50% from 1.15 -> 0.575)
  */
 export function playScratchSound(force: boolean = false): void {
-  if (!isRouletteSoundEnabled()) return;
+  if (!isRouletteSoundEnabled() || !isRouletteAppInForeground()) return;
   const nowMs = Date.now();
   if (!force && nowMs - lastScratchSoundAt < 50) return;
   lastScratchSoundAt = nowMs;
@@ -662,7 +691,7 @@ function fadeChannelToVolume(
 }
 
 /**
- * Synchronizes Roulette background music with the current screen, modal open state, and Sound switch:
+ * Synchronizes Roulette background music with the current screen, modal open state, and Music switch:
  * - Uses smooth fade-in and fade-out (`MUSIC_FADE_DURATION_MS = 1200ms`) so music never starts or stops abruptly.
  * - Caps maximum music volume at `15%` (`ROULETTE_MUSIC_VOLUME = 0.15`).
  * - Uses dedicated `HTMLAudioElement` channels so sound effects (Web Audio API oscillators/buffers) never interrupt music.
@@ -670,7 +699,7 @@ function fadeChannelToVolume(
 export function syncRouletteBackgroundMusic(
   screen: 'START' | 'SHOP' | 'PLAYING' | 'FADING_TO_BLACK' | 'GAME_OVER',
   isOpen: boolean,
-  soundEnabled: boolean = isRouletteSoundEnabled(),
+  musicEnabled: boolean = isRouletteMusicEnabled(),
   randomFn: () => number = Math.random
 ): RouletteMusicTrack {
   const prevScreen = lastRequestedScreenState;
@@ -695,11 +724,44 @@ export function syncRouletteBackgroundMusic(
     setChannelUrl(musicChannels.START_SHOP_GAMEOVER, currentStartShopMusicUrl);
   }
 
-  const desiredTrack: RouletteMusicTrack = soundEnabled
-    ? getTargetMusicTrackForScreen(screen, isOpen)
-    : 'NONE';
+  const desiredTrack: RouletteMusicTrack =
+    musicEnabled && isRouletteAppInForeground()
+      ? getTargetMusicTrackForScreen(screen, isOpen)
+      : 'NONE';
 
   activeMusicTrack = desiredTrack;
+
+  if (!isRouletteAppInForeground()) {
+    [musicChannels.START_SHOP_GAMEOVER, musicChannels.MAIN_GAME].forEach((channel) => {
+      if (typeof window !== 'undefined' && channel.fadeTimer !== null) {
+        window.clearInterval(channel.fadeTimer);
+        channel.fadeTimer = null;
+      }
+      channel.targetVolume = 0;
+      channel.currentVolume = 0;
+      Object.values(channel.audioByUrl).forEach((el) => {
+        try {
+          el.volume = 0;
+          if (!el.paused) {
+            el.pause();
+          }
+        } catch {
+          // Ignore pause errors
+        }
+      });
+      if (channel.audio) {
+        try {
+          channel.audio.volume = 0;
+          if (!channel.audio.paused) {
+            channel.audio.pause();
+          }
+        } catch {
+          // Ignore pause errors
+        }
+      }
+    });
+    return activeMusicTrack;
+  }
 
   if (desiredTrack === 'START_SHOP_GAMEOVER') {
     fadeChannelToVolume(musicChannels.MAIN_GAME, 0, MUSIC_FADE_DURATION_MS);
@@ -709,7 +771,8 @@ export function syncRouletteBackgroundMusic(
         gameOverMusicDelayTimer = null;
         if (
           isRouletteModalCurrentlyOpen &&
-          isRouletteSoundEnabled() &&
+          isRouletteMusicEnabled() &&
+          isRouletteAppInForeground() &&
           lastRequestedScreenState === 'GAME_OVER'
         ) {
           fadeChannelToVolume(
@@ -742,11 +805,39 @@ export function syncRouletteBackgroundMusic(
 }
 
 /**
+ * Mutes all music and sound effects immediately when the Application is minimized / sent to background,
+ * and restores background music (if enabled and open) when the Application returns to foreground.
+ */
+export function setRouletteAppInForeground(inForeground: boolean): boolean {
+  inMemoryAppInForeground = Boolean(inForeground);
+  if (!inMemoryAppInForeground && sharedAudioCtx && sharedAudioCtx.state === 'running') {
+    try {
+      sharedAudioCtx.suspend();
+    } catch {
+      // Ignore suspend errors
+    }
+  }
+  syncRouletteBackgroundMusic(
+    lastRequestedScreenState,
+    isRouletteModalCurrentlyOpen,
+    isRouletteMusicEnabled()
+  );
+  return inMemoryAppInForeground;
+}
+
+if (typeof document !== 'undefined' && !visibilityListenersBound) {
+  visibilityListenersBound = true;
+  document.addEventListener('visibilitychange', () => {
+    setRouletteAppInForeground(document.visibilityState !== 'hidden');
+  });
+}
+
+/**
  * Ensures the currently active background music channel is playing if the browser blocked initial autoplay
  * prior to a user interaction inside the modal.
  */
 export function resumeRouletteMusicIfNeeded(): void {
-  if (!isRouletteModalCurrentlyOpen || !isRouletteSoundEnabled()) return;
+  if (!isRouletteModalCurrentlyOpen || !isRouletteMusicEnabled() || !isRouletteAppInForeground()) return;
   if (activeMusicTrack === 'NONE') return;
   const channel = musicChannels[activeMusicTrack];
   const audio = getOrCreateAudioElement(channel);
@@ -770,8 +861,7 @@ export function getActiveRouletteMusicTrack(): RouletteMusicTrack {
 }
 
 /**
- * Persists the Roulette Sound & Music On/Off switch state (`true` = enabled, `false` = muted)
- * and immediately fades background music in or out accordingly.
+ * Persists the Roulette Sound On/Off switch state (`true` = enabled, `false` = muted).
  */
 export function setRouletteSoundEnabled(enabled: boolean): boolean {
   inMemoryRouletteSoundEnabled = Boolean(enabled);
@@ -794,17 +884,42 @@ export function setRouletteSoundEnabled(enabled: boolean): boolean {
     }
   }
 
-  syncRouletteBackgroundMusic(
-    lastRequestedScreenState,
-    isRouletteModalCurrentlyOpen,
-    inMemoryRouletteSoundEnabled
-  );
-
   return inMemoryRouletteSoundEnabled;
 }
 
 export function toggleRouletteSoundEnabled(): boolean {
   return setRouletteSoundEnabled(!isRouletteSoundEnabled());
 }
+
+/**
+ * Persists the Roulette Music On/Off switch state (`true` = enabled, `false` = muted)
+ * and immediately fades background music in or out accordingly.
+ */
+export function setRouletteMusicEnabled(enabled: boolean): boolean {
+  inMemoryRouletteMusicEnabled = Boolean(enabled);
+  try {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      window.localStorage.setItem(
+        ROULETTE_MUSIC_ENABLED_STORAGE_KEY,
+        inMemoryRouletteMusicEnabled ? 'true' : 'false'
+      );
+    }
+  } catch {
+    // Ignore storage write errors
+  }
+
+  syncRouletteBackgroundMusic(
+    lastRequestedScreenState,
+    isRouletteModalCurrentlyOpen,
+    inMemoryRouletteMusicEnabled
+  );
+
+  return inMemoryRouletteMusicEnabled;
+}
+
+export function toggleRouletteMusicEnabled(): boolean {
+  return setRouletteMusicEnabled(!isRouletteMusicEnabled());
+}
+
 
 

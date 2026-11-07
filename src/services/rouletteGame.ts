@@ -3,7 +3,7 @@ import {
   QUEUES,
   generateTypicalScheduleForQueue,
 } from './ztoeParser';
-import { setRouletteSoundEnabled } from './rouletteAudio';
+import { setRouletteMusicEnabled, setRouletteSoundEnabled } from './rouletteAudio';
 
 export type RouletteScreenState =
   | 'START'
@@ -386,7 +386,9 @@ export interface RouletteLocalizedStrings {
   powerShopTitle: string;
   backToStartButton: string;
   shareButton: string;
+  downloadImageButton: string;
   soundLabel: string;
+  musicLabel: string;
   startButton: string;
   closeGameButton: string;
   mainMenuButton: string;
@@ -876,6 +878,7 @@ export function resetAllRouletteProgress(): void {
   resetDepositState();
   saveLastDailyStreakDateStr(null);
   setRouletteSoundEnabled(true);
+  setRouletteMusicEnabled(true);
 }
 
 /**
@@ -965,7 +968,9 @@ const ROULETTE_STRINGS: Record<'uk' | 'en', RouletteLocalizedStrings> = {
     powerShopTitle: 'Магазин Потужності',
     backToStartButton: 'Назад',
     shareButton: 'Поділитися',
+    downloadImageButton: 'Завантажити зображення',
     soundLabel: 'Звук',
+    musicLabel: 'Музика',
     startButton: 'Почати гру',
     closeGameButton: 'Закрити гру',
     mainMenuButton: 'Головне Меню',
@@ -990,7 +995,9 @@ const ROULETTE_STRINGS: Record<'uk' | 'en', RouletteLocalizedStrings> = {
     powerShopTitle: 'Power Shop',
     backToStartButton: 'Back',
     shareButton: 'Share',
+    downloadImageButton: 'Download Image',
     soundLabel: 'Sound',
+    musicLabel: 'Music',
     startButton: 'Start',
     closeGameButton: 'Close Game',
     mainMenuButton: 'Main Menu',
@@ -1178,56 +1185,58 @@ export function assignGoldenTicketAndVariants(
   randomFn: () => number = Math.random,
   purchasedUpgrades: RouletteUpgradeId[] = getPurchasedUpgrades()
 ): RouletteTicket[] {
-  const beigeIndices: number[] = [];
+  const nocturnal = isNocturnalModeActive(purchasedUpgrades);
+  const isSafeTicket = (t: RouletteTicket) => (nocturnal ? t.isRed : !t.isRed);
+  const safeIndices: number[] = [];
   tickets.forEach((t, idx) => {
-    if (!t.isRed) {
-      beigeIndices.push(idx);
+    if (isSafeTicket(t)) {
+      safeIndices.push(idx);
     }
   });
 
-  // 1% probability (or 5% with Fern flower upgrade) on tickets load that one beige ticket is Golden
+  // 1% probability (or 5% with Fern flower upgrade) on tickets load that one safe ticket is Golden
   const goldenProb = getGoldenTicketProbability(purchasedUpgrades);
-  const existingGoldenIdx = tickets.findIndex((t) => !t.isRed && t.isGolden === true);
+  const existingGoldenIdx = tickets.findIndex((t) => isSafeTicket(t) && t.isGolden === true);
   const hasExplicitGoldenFlag = tickets.some((t) => typeof t.isGolden === 'boolean');
 
   let chosenGoldenTicketIndex = -1;
   if (existingGoldenIdx >= 0) {
     chosenGoldenTicketIndex = existingGoldenIdx;
-  } else if (!hasExplicitGoldenFlag && beigeIndices.length > 0 && randomFn() < goldenProb) {
+  } else if (!hasExplicitGoldenFlag && safeIndices.length > 0 && randomFn() < goldenProb) {
     chosenGoldenTicketIndex =
-      beigeIndices[
+      safeIndices[
         Math.min(
-          beigeIndices.length - 1,
-          Math.max(0, Math.floor(randomFn() * beigeIndices.length))
+          safeIndices.length - 1,
+          Math.max(0, Math.floor(randomFn() * safeIndices.length))
         )
       ];
-  } else if (hasExplicitGoldenFlag && beigeIndices.length > 0 && randomFn() < goldenProb) {
+  } else if (hasExplicitGoldenFlag && safeIndices.length > 0 && randomFn() < goldenProb) {
     chosenGoldenTicketIndex =
-      beigeIndices[
+      safeIndices[
         Math.min(
-          beigeIndices.length - 1,
-          Math.max(0, Math.floor(randomFn() * beigeIndices.length))
+          safeIndices.length - 1,
+          Math.max(0, Math.floor(randomFn() * safeIndices.length))
         )
       ];
   }
 
-  // Select X2 beige tickets (at least 1 beige ticket, plus +1 per purchased Additional X2 upgrade)
+  // Select X2 safe tickets (at least 1 safe ticket, plus +1 per purchased Additional X2 upgrade)
   const targetX2Count = getTargetX2TicketCount(purchasedUpgrades);
   const chosenX2Indices = new Set<number>();
 
   tickets.forEach((t, idx) => {
-    if (!t.isRed && idx !== chosenGoldenTicketIndex && t.isX2 === true) {
+    if (isSafeTicket(t) && idx !== chosenGoldenTicketIndex && t.isX2 === true) {
       chosenX2Indices.add(idx);
     }
   });
 
-  const candidateX2Pool = beigeIndices.filter(
+  const candidateX2Pool = safeIndices.filter(
     (idx) => idx !== chosenGoldenTicketIndex && !chosenX2Indices.has(idx)
   );
-  // Prefer indices >= 4 when plenty of beige tickets exist so sequential test scratches at 0..3 hit standard beige tickets unless specified
+  // Prefer skipping the first 4 safe tickets when plenty of safe tickets exist so sequential test scratches on the first 4 safe tickets hit standard safe tickets unless specified
   const preferredPool =
-    candidateX2Pool.filter((idx) => idx >= 4).length >= targetX2Count - chosenX2Indices.size
-      ? candidateX2Pool.filter((idx) => idx >= 4)
+    candidateX2Pool.slice(4).length >= targetX2Count - chosenX2Indices.size
+      ? candidateX2Pool.slice(4)
       : [...candidateX2Pool].reverse();
 
   const poolCopy = [...preferredPool];
@@ -1248,8 +1257,8 @@ export function assignGoldenTicketAndVariants(
     const visualVariant = t.visualVariant ?? TICKET_VISUAL_VARIANTS[variantIdx];
     const stainPlacement =
       t.stainPlacement ?? generateRandomStainPlacement(visualVariant, randomFn);
-    const isGolden = !t.isRed && idx === chosenGoldenTicketIndex;
-    const isX2 = !t.isRed && !isGolden && chosenX2Indices.has(idx);
+    const isGolden = isSafeTicket(t) && idx === chosenGoldenTicketIndex;
+    const isX2 = isSafeTicket(t) && !isGolden && chosenX2Indices.has(idx);
     return {
       ...t,
       isGolden,
@@ -1387,34 +1396,36 @@ function normalizeLoadedTickets(
   randomFn: () => number = Math.random,
   purchasedUpgrades: RouletteUpgradeId[] = getPurchasedUpgrades()
 ): RouletteTicket[] {
-  const explicitGoldenTrue = tickets.some((t) => !t.isRed && t.isGolden === true);
-  const explicitX2True = tickets.some((t) => !t.isRed && t.isX2 === true);
+  const nocturnal = isNocturnalModeActive(purchasedUpgrades);
+  const isSafe = (t: RouletteTicket) => (nocturnal ? t.isRed : !t.isRed);
+  const explicitGoldenTrue = tickets.some((t) => isSafe(t) && t.isGolden === true);
+  const explicitX2True = tickets.some((t) => isSafe(t) && t.isX2 === true);
   const targetX2Count = getTargetX2TicketCount(purchasedUpgrades);
 
   let prepared = tickets.map((t) => ({ ...t }));
 
-  // Ensure Golden ticket & X2 tickets are assigned if not already satisfied
+  // Ensure Golden ticket & X2 tickets are assigned on safe tickets if not already satisfied
   if (!explicitGoldenTrue && !tickets.some((t) => typeof t.isGolden === 'boolean')) {
     prepared = assignGoldenTicketAndVariants(prepared, randomFn, purchasedUpgrades);
   } else if (
-    prepared.filter((t) => !t.isRed && !t.isGolden && t.isX2).length < targetX2Count &&
+    prepared.filter((t) => isSafe(t) && !t.isGolden && t.isX2).length < targetX2Count &&
     !explicitX2True &&
     !explicitGoldenTrue
   ) {
     prepared = assignGoldenTicketAndVariants(prepared, randomFn, purchasedUpgrades);
   } else if (
     !explicitX2True &&
-    prepared.filter((t) => !t.isRed && !t.isGolden).length > 0
+    prepared.filter((t) => isSafe(t) && !t.isGolden).length > 0
   ) {
-    // Even if isGolden was explicitly passed on a fixture, ensure at least targetX2Count non-golden beige tickets have isX2
+    // Even if isGolden was explicitly passed on a fixture, ensure at least targetX2Count non-golden safe tickets have isX2
     const chosenX2 = new Set<number>();
-    const nonGoldenBeige = prepared
-      .map((t, idx) => (!t.isRed && !t.isGolden ? idx : -1))
+    const nonGoldenSafe = prepared
+      .map((t, idx) => (isSafe(t) && !t.isGolden ? idx : -1))
       .filter((idx) => idx >= 0);
     const preferred =
-      nonGoldenBeige.filter((idx) => idx >= 4).length >= targetX2Count
-        ? nonGoldenBeige.filter((idx) => idx >= 4)
-        : [...nonGoldenBeige].reverse();
+      nonGoldenSafe.slice(4).length >= targetX2Count
+        ? nonGoldenSafe.slice(4)
+        : [...nonGoldenSafe].reverse();
     const pool = [...preferred];
     while (chosenX2.size < targetX2Count && pool.length > 0) {
       const pick = Math.min(
@@ -1426,15 +1437,15 @@ function normalizeLoadedTickets(
     }
     prepared = prepared.map((t, idx) => ({
       ...t,
-      isX2: !t.isRed && !t.isGolden && chosenX2.has(idx),
+      isX2: isSafe(t) && !t.isGolden && chosenX2.has(idx),
     }));
   }
 
   return prepared.map((t, idx) => {
     const visualVariant =
       t.visualVariant ?? TICKET_VISUAL_VARIANTS[idx % TICKET_VISUAL_VARIANTS.length];
-    const isGolden = Boolean(t.isGolden && !t.isRed);
-    const isX2 = Boolean(t.isX2 && !t.isRed && !isGolden);
+    const isGolden = Boolean(t.isGolden && isSafe(t));
+    const isX2 = Boolean(t.isX2 && isSafe(t) && !isGolden);
     return {
       ...t,
       isGolden,
@@ -1528,7 +1539,7 @@ export function startRouletteGame(
       );
       const chosenSafeIdx = safeIndices[pickPos];
       const chosenTicket = state.tickets[chosenSafeIdx];
-      if (!nocturnal && chosenTicket && chosenTicket.isX2) {
+      if (chosenTicket && chosenTicket.isX2) {
         // When Friend opens an X2 ticket at game start (score 0), reveal it, award base step * 2, and advance streak
         const updatedTickets = state.tickets.map((t, idx) =>
           idx === chosenSafeIdx ? { ...t, isRevealed: true, scratchProgress: 1 } : t
@@ -1556,9 +1567,13 @@ export function startRouletteGame(
  * - Normal Mode (`!nocturnal_creature`):
  *   - Red (`isRed`) triggers Game Over (unless saved by `second_chance` / `perseverance` extra hearts).
  *   - Beige (`!isRed`) increases score by `streakIncrement` (+1, +2, +3, +4...).
+ *   - Golden ticket (`isGolden`): opens all unrevealed Beige (`!isRed`) tickets on field and adds cumulative points.
+ *   - X2 ticket (`isX2`): multiplies current score by 2.
  * - Nocturnal Creature Mode (`nocturnal_creature` ON):
- *   - Reverses game logic: Beige tickets (`!isRed`) now trigger Game Over,
+ *   - Reverses game logic: Beige tickets (`!isRed`) trigger Game Over (unless saved by `second_chance` / `perseverance` extra hearts),
  *     while Red tickets (`isRed`) increase score with x2 multipliers (+2, +4, +6, +8...).
+ *   - Golden ticket (`isGolden`): opens all unrevealed Red (`isRed`) tickets on field and adds cumulative points.
+ *   - X2 ticket (`isX2`): multiplies current score by 2.
  * - Daily Streak (`daily_streak` unlocked at Milestone 400):
  *   - First Game in a Day grants X2 bonus points applied right before the Game Over event.
  */
@@ -1579,6 +1594,65 @@ export function revealRouletteTicket(
   const activeUpgrades = state.purchasedUpgrades ?? getPurchasedUpgrades();
   const nocturnal = isNocturnalModeActive(activeUpgrades);
   const step = getStreakStep(activeUpgrades);
+
+  // Golden ticket reveal:
+  // - Normal mode: immediately scratches all Beige (!isRed) tickets on field and adds cumulative score
+  // - Nocturnal Creature mode: immediately scratches all Red (isRed) tickets on field and adds cumulative score
+  if (target.isGolden) {
+    const isTargetSafeGroup = (t: RouletteTicket) => (nocturnal ? t.isRed : !t.isRed);
+    const unrevealedSafeCount = state.tickets.filter(
+      (t) => isTargetSafeGroup(t) && !t.isRevealed
+    ).length;
+    const k = state.streakIncrement;
+    const n = unrevealedSafeCount;
+    const cumulativeAdded = n * k + step * ((n * (n - 1)) / 2);
+    const nextScore = state.score + cumulativeAdded;
+    const nextStreakIncrement = k + n * step;
+    const nextBestScore = saveBestScoreIfHigher(
+      Math.max(state.bestScore ?? 0, nextScore)
+    );
+
+    const allSafeRevealedTickets = state.tickets.map((t, idx) =>
+      isTargetSafeGroup(t) || idx === ticketIndex
+        ? { ...t, isRevealed: true, scratchProgress: 1 }
+        : t
+    );
+
+    return {
+      nextState: {
+        ...state,
+        score: nextScore,
+        bestScore: nextBestScore,
+        streakIncrement: nextStreakIncrement,
+        tickets: allSafeRevealedTickets,
+      },
+      outcome: 'GOLDEN',
+    };
+  }
+
+  // X2 multiplier ticket reveal: multiplies current score by x2 in both Normal and Nocturnal Creature modes
+  if (target.isX2) {
+    const updatedTickets = state.tickets.map((t, idx) =>
+      idx === ticketIndex ? { ...t, isRevealed: true, scratchProgress: 1 } : t
+    );
+    const nextScore = state.score * 2;
+    const nextStreakIncrement = state.streakIncrement + step;
+    const nextBestScore = saveBestScoreIfHigher(
+      Math.max(state.bestScore ?? 0, nextScore)
+    );
+
+    return {
+      nextState: {
+        ...state,
+        score: nextScore,
+        bestScore: nextBestScore,
+        streakIncrement: nextStreakIncrement,
+        tickets: updatedTickets,
+      },
+      outcome: 'X2',
+    };
+  }
+
   const isFatalTicket = nocturnal ? !target.isRed : target.isRed;
 
   if (isFatalTicket) {
@@ -1590,8 +1664,8 @@ export function revealRouletteTicket(
         ? 1
         : 0;
 
-    // Extra lives ("Second chance" + "Perseverance"): cumulative up to 2 extra hearts (3 lives total)
-    if (!nocturnal && totalExtraLives > 0 && usedExtraLives < totalExtraLives) {
+    // Extra lives ("Second chance" + "Perseverance"): cumulative up to 2 extra hearts (3 lives total), works in both Normal and Nocturnal Creature modes
+    if (totalExtraLives > 0 && usedExtraLives < totalExtraLives) {
       const updatedTickets = state.tickets.map((t, idx) =>
         idx === ticketIndex ? { ...t, isRevealed: true, scratchProgress: 1 } : t
       );
@@ -1653,59 +1727,6 @@ export function revealRouletteTicket(
         tickets: updatedTickets,
       },
       outcome: 'RED',
-    };
-  }
-
-  // Golden ticket reveal (in normal mode on a Golden beige ticket): immediately scratches all safe tickets on field and adds cumulative score
-  if (!nocturnal && target.isGolden) {
-    const unrevealedBeigeCount = state.tickets.filter(
-      (t) => !t.isRed && !t.isRevealed
-    ).length;
-    const k = state.streakIncrement;
-    const n = unrevealedBeigeCount;
-    const cumulativeAdded = n * k + step * ((n * (n - 1)) / 2);
-    const nextScore = state.score + cumulativeAdded;
-    const nextStreakIncrement = k + n * step;
-    const nextBestScore = saveBestScoreIfHigher(
-      Math.max(state.bestScore ?? 0, nextScore)
-    );
-
-    const allBeigeRevealedTickets = state.tickets.map((t) =>
-      !t.isRed ? { ...t, isRevealed: true, scratchProgress: 1 } : t
-    );
-
-    return {
-      nextState: {
-        ...state,
-        score: nextScore,
-        bestScore: nextBestScore,
-        streakIncrement: nextStreakIncrement,
-        tickets: allBeigeRevealedTickets,
-      },
-      outcome: 'GOLDEN',
-    };
-  }
-
-  // X2 multiplier ticket reveal (in normal mode on an X2 beige ticket): multiplies current score by x2
-  if (!nocturnal && target.isX2) {
-    const updatedTickets = state.tickets.map((t, idx) =>
-      idx === ticketIndex ? { ...t, isRevealed: true, scratchProgress: 1 } : t
-    );
-    const nextScore = state.score * 2;
-    const nextStreakIncrement = state.streakIncrement + step;
-    const nextBestScore = saveBestScoreIfHigher(
-      Math.max(state.bestScore ?? 0, nextScore)
-    );
-
-    return {
-      nextState: {
-        ...state,
-        score: nextScore,
-        bestScore: nextBestScore,
-        streakIncrement: nextStreakIncrement,
-        tickets: updatedTickets,
-      },
-      outcome: 'X2',
     };
   }
 
@@ -2609,4 +2630,43 @@ export function generateRouletteShareImageDataUrl(params: {
   const svg = buildRouletteShareCardSvg(params);
   return `data:image/svg+xml;utf8,${encodeURIComponent(svg)}`;
 }
+
+/**
+ * Converts a Share Card Data URL (`data:image/png;base64,...` or `data:image/svg+xml;utf8,...`)
+ * into a shareable `File` object so the Share button shares the generated image rather than plain text.
+ */
+export function convertShareDataUrlToFile(
+  dataUrl: string,
+  fileName: string = 'zhytomyr-roulette-score.png'
+): File | null {
+  if (!dataUrl || typeof File === 'undefined' || typeof Blob === 'undefined') {
+    return null;
+  }
+  try {
+    if (dataUrl.startsWith('data:image/png;base64,')) {
+      const base64 = dataUrl.slice('data:image/png;base64,'.length);
+      const binStr =
+        typeof atob === 'function'
+          ? atob(base64)
+          : Buffer.from(base64, 'base64').toString('binary');
+      const bytes = new Uint8Array(binStr.length);
+      for (let i = 0; i < binStr.length; i++) {
+        bytes[i] = binStr.charCodeAt(i);
+      }
+      return new File([bytes], fileName, { type: 'image/png' });
+    }
+    if (dataUrl.startsWith('data:image/svg+xml;utf8,')) {
+      const svgContent = decodeURIComponent(
+        dataUrl.slice('data:image/svg+xml;utf8,'.length)
+      );
+      return new File([svgContent], fileName.replace(/\.png$/, '.svg'), {
+        type: 'image/svg+xml',
+      });
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 
