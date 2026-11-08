@@ -2382,7 +2382,7 @@ object RouletteSoundEngine {
     }
 
     private fun playPcmSamples(samples: ShortArray) {
-        if (!isSoundEnabled() || !isAppInForegroundState) return
+        if (!isSoundEnabled() || !isAppInForegroundState || appContextRef == null) return
         Thread {
             var track: AudioTrack? = null
             try {

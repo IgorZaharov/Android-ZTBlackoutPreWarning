@@ -2102,6 +2102,13 @@ async function runUnitTestC_ZhytomyrRoulette() {
     'Both Web and Android must use the 2-second top-border ticket shuffle animation, align Sound switch at same height as Share button with double vertical spacing between Sound and Music switches, and wait for scratch.mp3 before playing coin.mp3'
   );
 
+  assert.ok(
+    buildGradleKt.includes('import java.util.Base64') &&
+      buildGradleKt.includes('Base64.getDecoder().decode(embeddedKeystoreBase64)') &&
+      !buildGradleKt.includes('java.util.Base64.'),
+    'android/app/build.gradle.kts must import java.util.Base64 at top-level and not reference java.util.Base64.getDecoder() inside android { ... } where Project.java shadows the java package'
+  );
+
   resetAllRouletteProgress();
   console.log('Unit Test C PASSED: Житомирська Рулетка mechanics, 1s Game Over delay, Milestone Progress Bar, Daily Streak, Perseverance, Extra Lives Hearts, Power Shop, Депозит Потужність+, AntiCheat, Nocturnal Creature, Share Card Glyphs, 10s Game Blackout, Max Score 9999999, Score > 999 Shuffle, 2s Top-to-Bottom Deal Animation, Coin-after-Scratch Audio Sequencing, Wider Red Center Reveal, 7 MP3 SFX, and UI verified.');
 }
