@@ -9,6 +9,8 @@
 
 let sharedAudioCtx: AudioContext | null = null;
 let lastScratchSoundAt = 0;
+let scratchSoundEndAtMs = 0;
+let pendingCoinSoundTimer: ReturnType<typeof setTimeout> | null = null;
 
 export const ROULETTE_SOUND_ENABLED_STORAGE_KEY = 'zt_roulette_sound_enabled_v1';
 export const ROULETTE_MUSIC_ENABLED_STORAGE_KEY = 'zt_roulette_music_enabled_v1';
@@ -26,12 +28,95 @@ export const START_SHOP_MUSIC_OPTIONS = [
 export const MAIN_GAME_MUSIC_URL =
   '/assets/aistudio/Audio_-_Main_Game_Screen_d8782980.mp3';
 
+export const LIGHTBULB_SFX_URL = '/assets/aistudio/lightbulb_812f6410.mp3';
+export const SCRATCH_SFX_URL = '/assets/aistudio/scratch_1cd603a1.mp3';
+export const CASH_REGISTER_SFX_URL = '/assets/aistudio/cash_register_d07e4cb5.mp3';
+export const FLICKER_SFX_URL = '/assets/aistudio/flicker_b50e736a.mp3';
+export const COIN_SFX_URL = '/assets/aistudio/coin_593cd810.mp3';
+export const TWO_X_COIN_SFX_URL = '/assets/aistudio/2Xcoin_78ae3de4.mp3';
+export const SHUFFLE_SFX_URL = '/assets/aistudio/shuffle_3d7b5646.mp3';
+
+export const ROULETTE_SFX_URLS = {
+  lightbulb: LIGHTBULB_SFX_URL,
+  scratch: SCRATCH_SFX_URL,
+  cashRegister: CASH_REGISTER_SFX_URL,
+  flicker: FLICKER_SFX_URL,
+  coin: COIN_SFX_URL,
+  twoXCoin: TWO_X_COIN_SFX_URL,
+  shuffle: SHUFFLE_SFX_URL,
+} as const;
+
 export type RouletteMusicTrack = 'NONE' | 'START_SHOP_GAMEOVER' | 'MAIN_GAME';
 
 let inMemoryRouletteSoundEnabled = true;
 let inMemoryRouletteMusicEnabled = true;
 let inMemoryAppInForeground = true;
 let visibilityListenersBound = false;
+
+const sfxAudioPools: Record<string, HTMLAudioElement[]> = {};
+let activeScratchAudio: HTMLAudioElement | null = null;
+
+function playSfxMp3(
+  url: string,
+  volume: number = 0.75,
+  options?: { reuseSingleInstance?: boolean; restartIfPlaying?: boolean }
+): boolean {
+  if (!isRouletteSoundEnabled() || !isRouletteAppInForeground()) return false;
+  if (typeof window === 'undefined' || typeof Audio === 'undefined') return false;
+
+  try {
+    const clampedVol = Math.max(0, Math.min(1, volume));
+    if (options?.reuseSingleInstance) {
+      if (!activeScratchAudio) {
+        activeScratchAudio = new Audio(url);
+        activeScratchAudio.preload = 'auto';
+      }
+      activeScratchAudio.volume = clampedVol;
+      if (
+        activeScratchAudio.paused ||
+        activeScratchAudio.ended ||
+        activeScratchAudio.currentTime >= 0.24 ||
+        options.restartIfPlaying
+      ) {
+        activeScratchAudio.currentTime = 0;
+        const p = activeScratchAudio.play();
+        if (p && typeof p.catch === 'function') {
+          p.catch(() => {});
+        }
+      }
+      return true;
+    }
+
+    let pool = sfxAudioPools[url];
+    if (!pool) {
+      pool = [];
+      sfxAudioPools[url] = pool;
+    }
+    let el = pool.find((item) => item.paused || item.ended);
+    if (!el) {
+      if (pool.length < 6) {
+        el = new Audio(url);
+        el.preload = 'auto';
+        pool.push(el);
+      } else {
+        el = pool[0];
+      }
+    }
+    el.volume = clampedVol;
+    try {
+      el.currentTime = 0;
+    } catch {
+      // Ignore seek error before metadata loaded
+    }
+    const playPromise = el.play();
+    if (playPromise && typeof playPromise.catch === 'function') {
+      playPromise.catch(() => {});
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 export function isRouletteAppInForeground(): boolean {
   if (typeof document !== 'undefined' && typeof document.visibilityState === 'string') {
@@ -91,10 +176,12 @@ function getAudioContext(): AudioContext | null {
 }
 
 /**
- * 1. Card deck shuffling & rapid dealing sound played as the 48 lottery tickets cascade onto the screen from top to bottom
+ * 1. Card deck shuffling sound (shuffle.mp3) played on Main Game screen loading,
+ * on Refresh card button pressed, and on forced re-shuffle when score reaches above 999.
  */
 export function playCardShuffleSound(): void {
-  if (!isRouletteSoundEnabled()) return;
+  if (!isRouletteSoundEnabled() || !isRouletteAppInForeground()) return;
+  if (playSfxMp3(SHUFFLE_SFX_URL, COIN_VOLUME_SCALE)) return;
   const ctx = getAudioContext();
   if (!ctx) return;
 
@@ -145,20 +232,49 @@ export function playCardShuffleSound(): void {
  * - Game Over screen sounds (electric buzz + bulb explosion) and Upgrade Purchase sound (cash register) have volume 20% less (0.75 * 0.8 = 0.60x)
  */
 export const SCRATCH_VOLUME_SCALE = 0.575;
+export const SCRATCH_SFX_VOLUME_MULTIPLIER = 0.9;
+export const SCRATCH_SFX_DURATION_MS = 336;
 export const COIN_VOLUME_SCALE = 0.75;
 export const GAMEOVER_UPGRADE_VOLUME_SCALE = 0.6;
 export const COIN_GAMEOVER_UPGRADE_VOLUME_SCALE = 0.75;
 export const FLICKER_BUZZ_VOLUME_SCALE = 0.1;
 export const GAME_BLACKOUT_VOLUME_SCALE = 0.1;
+export const FLICKER_SFX_VOLUME_MULTIPLIER = 1.3;
+
+export function getRemainingScratchSoundDelayMs(nowMs: number = Date.now()): number {
+  if (
+    activeScratchAudio &&
+    !activeScratchAudio.paused &&
+    !activeScratchAudio.ended &&
+    Number.isFinite(activeScratchAudio.duration) &&
+    activeScratchAudio.duration > 0
+  ) {
+    return Math.max(
+      0,
+      Math.round((activeScratchAudio.duration - activeScratchAudio.currentTime) * 1000)
+    );
+  }
+  return Math.max(0, scratchSoundEndAtMs - nowMs);
+}
 
 /**
- * 2. Scratching sound on swipe across lottery ticket foil and when a ticket is scratched off (volume -50% from 1.15 -> 0.575)
+ * 2. Scratching sound (scratch.mp3, trimmed to first 30% and 10% volume down) on swipe across lottery ticket foil and when a ticket is scratched off
  */
 export function playScratchSound(force: boolean = false): void {
   if (!isRouletteSoundEnabled() || !isRouletteAppInForeground()) return;
   const nowMs = Date.now();
-  if (!force && nowMs - lastScratchSoundAt < 50) return;
+  if (!force && nowMs - lastScratchSoundAt < 120) return;
   lastScratchSoundAt = nowMs;
+  scratchSoundEndAtMs = nowMs + SCRATCH_SFX_DURATION_MS;
+
+  if (
+    playSfxMp3(SCRATCH_SFX_URL, SCRATCH_VOLUME_SCALE * SCRATCH_SFX_VOLUME_MULTIPLIER, {
+      reuseSingleInstance: true,
+      restartIfPlaying: force,
+    })
+  ) {
+    return;
+  }
 
   const ctx = getAudioContext();
   if (!ctx) return;
@@ -203,16 +319,16 @@ export function playScratchSound(force: boolean = false): void {
 }
 
 /**
- * 2b. Cash register ("Cha-ching!") sound when purchasing an upgrade in the Power Shop (volume reduced by another 20% -> 0.60x)
+ * 2b. Cash register (cash_register.mp3) sound when purchasing an upgrade in the Power Shop (volume 0.60x)
  */
 export function playCashRegisterSound(): void {
+  if (!isRouletteSoundEnabled() || !isRouletteAppInForeground()) return;
+  if (playSfxMp3(CASH_REGISTER_SFX_URL, GAMEOVER_UPGRADE_VOLUME_SCALE)) return;
   const ctx = getAudioContext();
   if (!ctx) return;
 
   try {
     const t0 = ctx.currentTime;
-
-    // 1. Mechanical drawer latch clack ("Cha-")
     const clackDur = 0.065;
     const clackSamples = Math.floor(ctx.sampleRate * clackDur);
     const clackBuf = ctx.createBuffer(1, clackSamples, ctx.sampleRate);
@@ -227,68 +343,25 @@ export function playCashRegisterSound(): void {
     }
     const clackSource = ctx.createBufferSource();
     clackSource.buffer = clackBuf;
-
-    const clackFilter = ctx.createBiquadFilter();
-    clackFilter.type = 'bandpass';
-    clackFilter.frequency.setValueAtTime(850, t0);
-    clackFilter.Q.setValueAtTime(1.5, t0);
-
     const clackGain = ctx.createGain();
     clackGain.gain.setValueAtTime(0.28 * GAMEOVER_UPGRADE_VOLUME_SCALE, t0);
     clackGain.gain.exponentialRampToValueAtTime(0.006, t0 + clackDur);
-
-    clackSource.connect(clackFilter);
-    clackFilter.connect(clackGain);
+    clackSource.connect(clackGain);
     clackGain.connect(ctx.destination);
     clackSource.start(t0);
-
-    // 2. High-pitched metallic register bell ("-Ching!")
-    const bellNotes = [
-      { freq: 2093.0, harm: 4186.0, offset: 0.065, dur: 0.16 },
-      { freq: 2637.02, harm: 5274.04, offset: 0.145, dur: 0.46 },
-    ];
-
-    bellNotes.forEach((n) => {
-      const osc = ctx.createOscillator();
-      const oscHarm = ctx.createOscillator();
-      const gain = ctx.createGain();
-
-      osc.type = 'sine';
-      oscHarm.type = 'triangle';
-      osc.frequency.setValueAtTime(n.freq, t0 + n.offset);
-      oscHarm.frequency.setValueAtTime(n.harm, t0 + n.offset);
-
-      gain.gain.setValueAtTime(0.001, t0);
-      gain.gain.setValueAtTime(
-        0.3 * GAMEOVER_UPGRADE_VOLUME_SCALE,
-        t0 + n.offset
-      );
-      gain.gain.exponentialRampToValueAtTime(0.0005, t0 + n.offset + n.dur);
-
-      osc.connect(gain);
-      oscHarm.connect(gain);
-      gain.connect(ctx.destination);
-
-      osc.start(t0 + n.offset);
-      oscHarm.start(t0 + n.offset);
-      osc.stop(t0 + n.offset + n.dur);
-      oscHarm.stop(t0 + n.offset + n.dur);
-    });
   } catch {
     // Ignore audio context restriction errors
   }
 }
 
-/**
- * 3. Coin chime sound when a Beige (safe) lottery ticket is revealed (volume -25%)
- */
-export function playCoinSound(): void {
+function triggerCoinSoundNow(): void {
+  if (!isRouletteSoundEnabled() || !isRouletteAppInForeground()) return;
+  if (playSfxMp3(COIN_SFX_URL, COIN_VOLUME_SCALE)) return;
   const ctx = getAudioContext();
   if (!ctx) return;
 
   try {
     const t0 = ctx.currentTime;
-
     const osc1 = ctx.createOscillator();
     const gain1 = ctx.createGain();
     osc1.type = 'sine';
@@ -299,120 +372,113 @@ export function playCoinSound(): void {
     gain1.connect(ctx.destination);
     osc1.start(t0);
     osc1.stop(t0 + 0.14);
-
-    const osc2 = ctx.createOscillator();
-    const osc2Harm = ctx.createOscillator();
-    const gain2 = ctx.createGain();
-    osc2.type = 'sine';
-    osc2Harm.type = 'triangle';
-    osc2.frequency.setValueAtTime(1318.51, t0 + 0.075);
-    osc2Harm.frequency.setValueAtTime(2637.02, t0 + 0.075);
-
-    gain2.gain.setValueAtTime(0.001, t0);
-    gain2.gain.setValueAtTime(
-      0.28 * COIN_VOLUME_SCALE,
-      t0 + 0.075
-    );
-    gain2.gain.exponentialRampToValueAtTime(0.0006, t0 + 0.48);
-
-    osc2.connect(gain2);
-    osc2Harm.connect(gain2);
-    gain2.connect(ctx.destination);
-
-    osc2.start(t0 + 0.075);
-    osc2Harm.start(t0 + 0.075);
-    osc2.stop(t0 + 0.48);
-    osc2Harm.stop(t0 + 0.48);
   } catch {
     // Ignore audio context errors
   }
 }
 
 /**
- * 4. Electric buzzing sound played while screen fades to black on Red ticket reveal (volume reduced by another 20% -> 0.60x)
- * or at custom volume scale (e.g., 20% during screen flickering or 30% during Main Game 10s Blackout).
+ * 3. Coin sound (coin.mp3) when a standard safe lottery ticket is revealed (volume 0.75x).
+ * Waits for scratch.mp3 to finish playing before playing coin.mp3.
+ */
+export function playCoinSound(): void {
+  if (!isRouletteSoundEnabled() || !isRouletteAppInForeground()) return;
+  const waitMs = getRemainingScratchSoundDelayMs();
+  if (activeScratchAudio && !activeScratchAudio.paused && !activeScratchAudio.ended) {
+    let triggered = false;
+    const fireOnce = () => {
+      if (triggered) return;
+      triggered = true;
+      activeScratchAudio?.removeEventListener('ended', fireOnce);
+      triggerCoinSoundNow();
+    };
+    activeScratchAudio.addEventListener('ended', fireOnce, { once: true });
+    setTimeout(fireOnce, Math.max(20, waitMs || SCRATCH_SFX_DURATION_MS));
+    return;
+  }
+  if (waitMs > 0) {
+    if (pendingCoinSoundTimer) {
+      clearTimeout(pendingCoinSoundTimer);
+    }
+    pendingCoinSoundTimer = setTimeout(() => {
+      pendingCoinSoundTimer = null;
+      triggerCoinSoundNow();
+    }, waitMs);
+    return;
+  }
+  triggerCoinSoundNow();
+}
+
+/**
+ * 3b. 2X Coin sound (2Xcoin.mp3) when scratching an X2 or Gold lottery ticket (volume 0.75x)
+ */
+export function play2XCoinSound(): void {
+  if (!isRouletteSoundEnabled() || !isRouletteAppInForeground()) return;
+  if (playSfxMp3(TWO_X_COIN_SFX_URL, COIN_VOLUME_SCALE)) return;
+  playCoinSound();
+}
+
+/**
+ * 4. Electric buzzing / flicker sound (flicker.mp3) played while screen fades to black or flickers
  */
 export function playElectricBuzzSound(
   durationMs: number = 700,
   volumeScale: number = GAMEOVER_UPGRADE_VOLUME_SCALE
 ): void {
+  if (!isRouletteSoundEnabled() || !isRouletteAppInForeground()) return;
+  if (playSfxMp3(FLICKER_SFX_URL, Math.min(1, volumeScale * FLICKER_SFX_VOLUME_MULTIPLIER))) return;
   const ctx = getAudioContext();
   if (!ctx) return;
 
   try {
     const t0 = ctx.currentTime;
     const durSec = Math.max(0.2, durationMs / 1000);
-
     const oscSaw = ctx.createOscillator();
-    const oscSquare = ctx.createOscillator();
-    const lfo = ctx.createOscillator();
-    const lfoGain = ctx.createGain();
     const masterGain = ctx.createGain();
-
     oscSaw.type = 'sawtooth';
     oscSaw.frequency.setValueAtTime(100, t0);
-
-    oscSquare.type = 'square';
-    oscSquare.frequency.setValueAtTime(50, t0);
-
-    lfo.type = 'sawtooth';
-    lfo.frequency.setValueAtTime(28, t0);
-    lfoGain.gain.setValueAtTime(35, t0);
-    lfo.connect(lfoGain);
-    lfoGain.connect(oscSaw.frequency);
-
     masterGain.gain.setValueAtTime(0.26 * volumeScale, t0);
-    masterGain.gain.setValueAtTime(
-      0.3 * volumeScale,
-      t0 + durSec * 0.7
-    );
     masterGain.gain.exponentialRampToValueAtTime(0.006, t0 + durSec);
-
     oscSaw.connect(masterGain);
-    oscSquare.connect(masterGain);
     masterGain.connect(ctx.destination);
-
     oscSaw.start(t0);
-    oscSquare.start(t0);
-    lfo.start(t0);
-
     oscSaw.stop(t0 + durSec);
-    oscSquare.stop(t0 + durSec);
-    lfo.stop(t0 + durSec);
   } catch {
     // Ignore audio context errors
   }
 }
 
 /**
- * 4b. Plays the same sound as Game Over lamp breaking (bulb explosion) at 10% volume
- * during screen flickering or when returning from the 10-second Game Blackout.
+ * 4b. Plays flicker.mp3 (30% louder) during flickering lights (with fallback to playBulbExplosionSound(FLICKER_BUZZ_VOLUME_SCALE)).
  */
 export function playFlickerBuzzSound(_durationMs: number = 550): void {
+  if (!isRouletteSoundEnabled() || !isRouletteAppInForeground()) return;
+  if (playSfxMp3(FLICKER_SFX_URL, FLICKER_BUZZ_VOLUME_SCALE * FLICKER_SFX_VOLUME_MULTIPLIER)) return;
   playBulbExplosionSound(FLICKER_BUZZ_VOLUME_SCALE);
 }
 
 /**
- * 4c. Plays the same sound as Game Over lamp breaking (bulb explosion) at 10% volume
- * when the 10-second Main Game Screen blackout starts.
+ * 4c. Plays flicker.mp3 (30% louder) on Game blackout (with fallback to playBulbExplosionSound(GAME_BLACKOUT_VOLUME_SCALE)).
  */
 export function playGameBlackoutSound(): void {
+  if (!isRouletteSoundEnabled() || !isRouletteAppInForeground()) return;
+  if (playSfxMp3(FLICKER_SFX_URL, GAME_BLACKOUT_VOLUME_SCALE * FLICKER_SFX_VOLUME_MULTIPLIER)) return;
   playBulbExplosionSound(GAME_BLACKOUT_VOLUME_SCALE);
 }
 
 /**
- * 5. Sound of an exploding lightbulb played along with the 2s+ shattering lightbulb animation (volume reduced by another 20% -> 0.60x)
+ * 5. Sound of an exploding lightbulb (lightbulb.mp3) played on Game Over lightbulb explode (volume 0.60x)
  */
 export function playBulbExplosionSound(
   volumeScale: number = GAMEOVER_UPGRADE_VOLUME_SCALE
 ): void {
+  if (!isRouletteSoundEnabled() || !isRouletteAppInForeground()) return;
+  if (playSfxMp3(LIGHTBULB_SFX_URL, volumeScale)) return;
   const ctx = getAudioContext();
   if (!ctx) return;
 
   try {
     const t0 = ctx.currentTime;
-
-    // 1. Sharp vacuum pop / filament snap
     const popOsc = ctx.createOscillator();
     const popGain = ctx.createGain();
     popOsc.type = 'triangle';
@@ -424,58 +490,6 @@ export function playBulbExplosionSound(
     popGain.connect(ctx.destination);
     popOsc.start(t0);
     popOsc.stop(t0 + 0.19);
-
-    // 2. Extended glass shatter burst + secondary falling shard scatter over 1.8s
-    const duration = 1.65;
-    const bufferSize = Math.floor(ctx.sampleRate * duration);
-    const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
-    const data = buffer.getChannelData(0);
-    for (let i = 0; i < bufferSize; i++) {
-      const progress = i / bufferSize;
-      const decay = Math.pow(1 - progress, 1.85);
-      const shardSpike = Math.sin(i * 0.17) * Math.cos(i * 0.043) > 0.62 ? 1.9 : 0.45;
-      data[i] =
-        (Math.random() * 2 - 1) *
-        decay *
-        shardSpike *
-        0.45 *
-        volumeScale;
-    }
-
-    const shatterNoise = ctx.createBufferSource();
-    shatterNoise.buffer = buffer;
-
-    const highpass = ctx.createBiquadFilter();
-    highpass.type = 'highpass';
-    highpass.frequency.setValueAtTime(2200, t0);
-
-    const noiseGain = ctx.createGain();
-    noiseGain.gain.setValueAtTime(0.36 * volumeScale, t0);
-    noiseGain.gain.exponentialRampToValueAtTime(0.0012, t0 + duration);
-
-    shatterNoise.connect(highpass);
-    highpass.connect(noiseGain);
-    noiseGain.connect(ctx.destination);
-    shatterNoise.start(t0);
-
-    // 3. Crystalline glass shard chimes cascading over 1.8s
-    const shardFreqs = [3150, 4280, 2760, 5120, 3690, 4620, 2980, 3910, 5400];
-    shardFreqs.forEach((freq, idx) => {
-      const shardOsc = ctx.createOscillator();
-      const shardGain = ctx.createGain();
-      const startOffset = 0.05 + idx * 0.16;
-      shardOsc.type = 'sine';
-      shardOsc.frequency.setValueAtTime(freq, t0 + startOffset);
-      shardGain.gain.setValueAtTime(
-        0.085 * volumeScale,
-        t0 + startOffset
-      );
-      shardGain.gain.exponentialRampToValueAtTime(0.0003, t0 + startOffset + 0.18);
-      shardOsc.connect(shardGain);
-      shardGain.connect(ctx.destination);
-      shardOsc.start(t0 + startOffset);
-      shardOsc.stop(t0 + startOffset + 0.19);
-    });
   } catch {
     // Ignore audio context errors
   }

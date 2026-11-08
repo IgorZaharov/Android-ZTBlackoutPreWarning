@@ -33,6 +33,13 @@ jobs:
           [ -f android/app/src/main/res/raw/audio_start_shop_gameover.mp3 ] && cp -f android/app/src/main/res/raw/audio_start_shop_gameover.mp3 public/assets/aistudio/Audio_-_Game_Start_screen_and_Shop_a8d903bf.mp3 || true
           [ -f android/app/src/main/res/raw/audio_start_shop_2.mp3 ] && cp -f android/app/src/main/res/raw/audio_start_shop_2.mp3 public/assets/aistudio/Audio_-_Game_Start_screen_and_Shop_2_4fe4d993.mp3 || true
           [ -f android/app/src/main/res/raw/audio_main_game.mp3 ] && cp -f android/app/src/main/res/raw/audio_main_game.mp3 public/assets/aistudio/Audio_-_Main_Game_Screen_d8782980.mp3 || true
+          [ -f android/app/src/main/res/raw/sfx_lightbulb.mp3 ] && cp -f android/app/src/main/res/raw/sfx_lightbulb.mp3 public/assets/aistudio/lightbulb_812f6410.mp3 || true
+          [ -f android/app/src/main/res/raw/sfx_scratch.mp3 ] && cp -f android/app/src/main/res/raw/sfx_scratch.mp3 public/assets/aistudio/scratch_1cd603a1.mp3 || true
+          [ -f android/app/src/main/res/raw/sfx_cash_register.mp3 ] && cp -f android/app/src/main/res/raw/sfx_cash_register.mp3 public/assets/aistudio/cash_register_d07e4cb5.mp3 || true
+          [ -f android/app/src/main/res/raw/sfx_flicker.mp3 ] && cp -f android/app/src/main/res/raw/sfx_flicker.mp3 public/assets/aistudio/flicker_b50e736a.mp3 || true
+          [ -f android/app/src/main/res/raw/sfx_coin.mp3 ] && cp -f android/app/src/main/res/raw/sfx_coin.mp3 public/assets/aistudio/coin_593cd810.mp3 || true
+          [ -f android/app/src/main/res/raw/sfx_2x_coin.mp3 ] && cp -f android/app/src/main/res/raw/sfx_2x_coin.mp3 public/assets/aistudio/2Xcoin_78ae3de4.mp3 || true
+          [ -f android/app/src/main/res/raw/sfx_shuffle.mp3 ] && cp -f android/app/src/main/res/raw/sfx_shuffle.mp3 public/assets/aistudio/shuffle_3d7b5646.mp3 || true
           if [ -f package.json ]; then
             npm install --legacy-peer-deps
             npm test

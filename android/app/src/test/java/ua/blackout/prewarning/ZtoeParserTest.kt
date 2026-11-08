@@ -145,7 +145,9 @@ class ZtoeParserTest {
         assertEquals("Немає доступу до Інтернету", AppStrings.errorNoInternet("uk"))
         assertEquals("На сайті не знайдено черг", AppStrings.errorNoQueuesFound("uk"))
         assertEquals("https://www.facebook.com/ztoe.com.ua", AppStrings.EMERGENCY_OUTAGES_URL)
-        assertEquals("Donations / Благодійність і Пожертви", AppStrings.aboutDonationsTitle("uk"))
+        assertEquals("Charity / Благодійність і Пожертви", AppStrings.aboutDonationsTitle("uk"))
+        assertEquals("Charity / Благодійність і Пожертви", AppStrings.aboutDonationsTitle("en"))
+        assertEquals("BLACKOUT HOURS FOR TODAY:", AppStrings.blackoutHoursHeader("en"))
         assertEquals(2, DonationsRepository.DEFAULT_DONATIONS.size)
         assertEquals("Допомога тваринам", DonationsRepository.DEFAULT_DONATIONS[0].title)
         assertEquals("https://send.monobank.ua/jar/7vJA5xrLoV", DonationsRepository.DEFAULT_DONATIONS[0].url)
@@ -343,10 +345,12 @@ class ZtoeParserTest {
         // Verify Power Shop upgrades (11 total including Daily Streak & Perseverance), "Секрет" / "Secret" descriptions, Nocturnal Creature (10), and Депозит Потужність+ (100)
         assertEquals(11, ua.blackout.prewarning.ui.screens.ZhytomyrRouletteEngine.UPGRADES.size)
         assertEquals(0.575, ua.blackout.prewarning.ui.screens.RouletteSoundEngine.SCRATCH_VOLUME_SCALE, 0.001)
+        assertEquals(0.9, ua.blackout.prewarning.ui.screens.RouletteSoundEngine.SCRATCH_SFX_VOLUME_MULTIPLIER, 0.001)
         assertEquals(0.75, ua.blackout.prewarning.ui.screens.RouletteSoundEngine.COIN_VOLUME_SCALE, 0.001)
         assertEquals(0.60, ua.blackout.prewarning.ui.screens.RouletteSoundEngine.GAMEOVER_UPGRADE_VOLUME_SCALE, 0.001)
         assertEquals(0.10, ua.blackout.prewarning.ui.screens.RouletteSoundEngine.FLICKER_BUZZ_VOLUME_SCALE, 0.001)
         assertEquals(0.10, ua.blackout.prewarning.ui.screens.RouletteSoundEngine.GAME_BLACKOUT_VOLUME_SCALE, 0.001)
+        assertEquals(1.3, ua.blackout.prewarning.ui.screens.RouletteSoundEngine.FLICKER_SFX_VOLUME_MULTIPLIER, 0.001)
         assertEquals(
             0.05,
             ua.blackout.prewarning.ui.screens.ZhytomyrRouletteEngine.getGoldenTicketProbability(
@@ -699,5 +703,48 @@ class ZtoeParserTest {
         val afterRestartToStart = ua.blackout.prewarning.ui.screens.ZhytomyrRouletteEngine.applyRestartGame(bestTestState)
         assertEquals(0, afterRestartToStart.score)
         assertEquals(6, afterRestartToStart.bestScore)
+
+        // Verify hardcoded maximum score 9999999
+        assertEquals(9_999_999, ua.blackout.prewarning.ui.screens.ZhytomyrRouletteEngine.MAX_ROULETTE_SCORE)
+        assertEquals(9_999_999, ua.blackout.prewarning.ui.screens.ZhytomyrRouletteEngine.clampRouletteScore(25_000_000))
+        assertEquals(9_999_999, ua.blackout.prewarning.ui.screens.ZhytomyrRouletteEngine.saveBestScoreIfHigher(15_000_000))
+        val capCheckState = bestTestState.copy(score = 6_000_000)
+        val capX2Res = ua.blackout.prewarning.ui.screens.ZhytomyrRouletteEngine.revealTicket(capCheckState, 10)
+        assertEquals(9_999_999, capX2Res.nextState.score)
+        assertEquals(9_999_999, capX2Res.nextState.bestScore)
+
+        // Verify ticket places shuffle when single-game score reaches above 999
+        assertEquals(999, ua.blackout.prewarning.ui.screens.ZhytomyrRouletteEngine.SCORE_SHUFFLE_THRESHOLD)
+        val preShuffleState = ua.blackout.prewarning.ui.screens.ZhytomyrRouletteEngine.startGame("1.1", false, controlledTickets)
+            .copy(score = 995, streakIncrement = 10, ticketsShuffledAbove999 = false)
+        val shuffleRes = ua.blackout.prewarning.ui.screens.ZhytomyrRouletteEngine.revealTicket(preShuffleState, 0)
+        assertEquals(1005, shuffleRes.nextState.score)
+        assertEquals(true, shuffleRes.shuffled)
+        assertEquals(true, shuffleRes.nextState.ticketsShuffledAbove999)
+        assertTrue(shuffleRes.nextState.tickets.map { it.slotLabel } != labels)
+
+        // Verify wider red ticket reveal area around center
+        assertEquals(
+            true,
+            ua.blackout.prewarning.ui.screens.ZhytomyrRouletteEngine.doesScratchExposeRedCenterOutline(
+                85f, 20f, 85f, 20f, 168f, 74f, 7.5f
+            )
+        )
+        assertEquals(
+            false,
+            ua.blackout.prewarning.ui.screens.ZhytomyrRouletteEngine.doesScratchExposeRedCenterOutline(
+                4f, 4f, 10f, 8f, 168f, 74f, 7.5f
+            )
+        )
+
+        // Verify 2s shuffle animation duration and coin waiting for scratch.mp3
+        assertEquals(2000L, ua.blackout.prewarning.ui.screens.ZhytomyrRouletteEngine.TICKET_SHUFFLE_ANIMATION_DURATION_MS)
+        assertEquals(24, ua.blackout.prewarning.ui.screens.ZhytomyrRouletteEngine.TICKET_SHUFFLE_ROW_COUNT)
+        assertEquals(336L, ua.blackout.prewarning.ui.screens.RouletteSoundEngine.SCRATCH_SFX_DURATION_MS)
+        ua.blackout.prewarning.ui.screens.RouletteSoundEngine.setSoundEnabled(true)
+        ua.blackout.prewarning.ui.screens.RouletteSoundEngine.setAppInForeground(true)
+        ua.blackout.prewarning.ui.screens.RouletteSoundEngine.playScratchSound(force = true)
+        assertTrue(ua.blackout.prewarning.ui.screens.RouletteSoundEngine.getRemainingScratchSoundDelayMs() > 0L)
     }
 }
+

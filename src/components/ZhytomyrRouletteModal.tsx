@@ -11,6 +11,8 @@ import {
   RouletteGameState,
   RouletteTicket,
   RouletteUpgradeId,
+  TICKET_SHUFFLE_ANIMATION_DURATION_MS,
+  TICKET_SHUFFLE_ROW_COUNT,
   TICKET_VISUAL_VARIANTS,
   TicketStainPlacement,
   TicketVisualVariant,
@@ -56,6 +58,7 @@ import {
 import {
   isRouletteMusicEnabled,
   isRouletteSoundEnabled,
+  play2XCoinSound,
   playBulbExplosionSound,
   playCardShuffleSound,
   playCashRegisterSound,
@@ -735,6 +738,7 @@ const ScratchTicketCard: React.FC<ScratchTicketCardProps> = ({
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const isDrawingRef = useRef(false);
   const lastPointRef = useRef<{ x: number; y: number } | null>(null);
+  const pointerStartRef = useRef<{ x: number; y: number; isScratching: boolean } | null>(null);
   const scratchedCellsRef = useRef<Set<number>>(new Set());
   const redCenterOutlineShownRef = useRef<boolean>(false);
 
@@ -900,7 +904,7 @@ const ScratchTicketCard: React.FC<ScratchTicketCardProps> = ({
       data-x2={ticket.isX2 ? 'true' : 'false'}
       data-stain-x={ticket.stainPlacement?.stainOffsetX ?? 0.5}
       data-stain-y={ticket.stainPlacement?.stainOffsetY ?? 0.5}
-      className="relative h-[74px] w-full rounded-xl overflow-hidden border border-[#C9A85C]/65 shadow-[0_4px_14px_rgba(0,0,0,0.5)] select-none touch-none"
+      className="relative h-[74px] w-full rounded-xl overflow-hidden border border-[#C9A85C]/65 shadow-[0_4px_14px_rgba(0,0,0,0.5)] select-none touch-pan-y"
       style={{
         background: isGoldenRevealed
           ? 'linear-gradient(180deg, #FDE68A 0%, #FFFBEB 48%, #F59E0B 100%)'
@@ -946,13 +950,13 @@ const ScratchTicketCard: React.FC<ScratchTicketCardProps> = ({
             </span>
           </div>
         ) : ticket.isRed ? (
-          /* Scratched Red ticket: red color & red outline ONLY in the center medallion so it isn't revealed too soon */
+          /* Scratched Red ticket: wider red color & red outline around center medallion so border scratching reveals it */
           <div
             data-testid={`roulette-ticket-red-center-${ticket.index}`}
-            className="w-12 h-12 rounded-full flex items-center justify-center shadow-inner border-2 border-[#EF4444]"
+            className="w-14 h-14 rounded-full flex items-center justify-center shadow-inner border-2 border-[#EF4444]"
             style={{
               background:
-                'radial-gradient(circle, #D62E26 0%, #9E1E18 68%, rgba(216, 214, 204, 0) 100%)',
+                'radial-gradient(circle, #D62E26 0%, #9E1E18 74%, rgba(216, 214, 204, 0) 100%)',
             }}
           >
             <ExplodedLightbulbContourSvg className="w-7 h-7" strokeColor="#FFF7F5" />
@@ -978,26 +982,44 @@ const ScratchTicketCard: React.FC<ScratchTicketCardProps> = ({
             if (disabled) return;
             isDrawingRef.current = true;
             lastPointRef.current = null;
-            try {
-              e.currentTarget.setPointerCapture(e.pointerId);
-            } catch {
-              // ignore pointer capture issues on synthetic events
-            }
-            scratchAtPoint(e.clientX, e.clientY);
+            pointerStartRef.current = { x: e.clientX, y: e.clientY, isScratching: false };
           }}
           onPointerMove={(e) => {
             if (!isDrawingRef.current || disabled) return;
+            const start = pointerStartRef.current;
+            if (start && !start.isScratching) {
+              const dx = Math.abs(e.clientX - start.x);
+              const dy = Math.abs(e.clientY - start.y);
+              if (dy > 8 && dy > dx * 1.25) {
+                isDrawingRef.current = false;
+                lastPointRef.current = null;
+                pointerStartRef.current = null;
+                return;
+              }
+              if (dx < 3 && dy < 3) {
+                return;
+              }
+              start.isScratching = true;
+              try {
+                e.currentTarget.setPointerCapture(e.pointerId);
+              } catch {
+                // ignore pointer capture issues on synthetic events
+              }
+              scratchAtPoint(start.x, start.y);
+            }
             scratchAtPoint(e.clientX, e.clientY);
           }}
           onPointerUp={() => {
             isDrawingRef.current = false;
             lastPointRef.current = null;
+            pointerStartRef.current = null;
           }}
           onPointerCancel={() => {
             isDrawingRef.current = false;
             lastPointRef.current = null;
+            pointerStartRef.current = null;
           }}
-          className="absolute inset-0 w-full h-full cursor-pointer touch-none"
+          className="absolute inset-0 w-full h-full cursor-pointer touch-pan-y"
         />
       )}
     </div>
@@ -1150,18 +1172,24 @@ export const ZhytomyrRouletteModal: React.FC<ZhytomyrRouletteModalProps> = ({
     });
   }, []);
 
-  // Trigger top-to-bottom ticket drawing animation + card deck shuffling sound
+  // Trigger 2-second (2000ms) top-to-bottom ticket dealing animation from top border + card deck shuffling sound
   const runTopToBottomDealAnimation = useCallback(() => {
     if (dealIntervalRef.current) {
       window.clearInterval(dealIntervalRef.current);
     }
+    if (ticketScrollContainerRef.current) {
+      ticketScrollContainerRef.current.scrollTop = 0;
+    }
     playCardShuffleSound();
     setDealtRowsCount(0);
     let currentRow = 0;
+    const stepMs = Math.round(
+      TICKET_SHUFFLE_ANIMATION_DURATION_MS / TICKET_SHUFFLE_ROW_COUNT
+    );
     dealIntervalRef.current = window.setInterval(() => {
-      currentRow += 2;
-      if (currentRow >= 24) {
-        setDealtRowsCount(24);
+      currentRow += 1;
+      if (currentRow >= TICKET_SHUFFLE_ROW_COUNT) {
+        setDealtRowsCount(TICKET_SHUFFLE_ROW_COUNT);
         if (dealIntervalRef.current) {
           window.clearInterval(dealIntervalRef.current);
           dealIntervalRef.current = null;
@@ -1169,7 +1197,7 @@ export const ZhytomyrRouletteModal: React.FC<ZhytomyrRouletteModalProps> = ({
       } else {
         setDealtRowsCount(currentRow);
       }
-    }, 24);
+    }, stepMs);
   }, []);
 
   // Slow 2-3 second voltage brownout flickering every 15-30 seconds on all screens EXCEPT Game Over
@@ -1494,44 +1522,50 @@ export const ZhytomyrRouletteModal: React.FC<ZhytomyrRouletteModalProps> = ({
     });
   }, [gameState.purchasedUpgrades, providerUrl, withScreenFadeTransition, runTopToBottomDealAnimation]);
 
-  const handleTicketReveal = useCallback((ticketIndex: number) => {
-    // Play scratching sound when ticket is scratched off
-    playScratchSound(true);
-    const effectiveNowMs = nowRef.current ? nowRef.current.getTime() : Date.now();
-    setGameState((prev) => {
-      const { nextState, outcome } = revealRouletteTicket(prev, ticketIndex, effectiveNowMs);
-      if (outcome === 'BEIGE' || outcome === 'X2' || outcome === 'GOLDEN') {
-        playCoinSound();
-        if (outcome === 'GOLDEN' || outcome === 'X2') {
-          window.setTimeout(() => playCoinSound(), 110);
-          if (outcome === 'GOLDEN') {
-            window.setTimeout(() => playCoinSound(), 220);
+  const handleTicketReveal = useCallback(
+    (ticketIndex: number) => {
+      // Play scratching sound when ticket is scratched off
+      playScratchSound(true);
+      const effectiveNowMs = nowRef.current ? nowRef.current.getTime() : Date.now();
+      setGameState((prev) => {
+        const { nextState, outcome, shuffled } = revealRouletteTicket(
+          prev,
+          ticketIndex,
+          effectiveNowMs
+        );
+        if (shuffled) {
+          runTopToBottomDealAnimation();
+        }
+        if (outcome === 'BEIGE') {
+          playCoinSound();
+        } else if (outcome === 'X2' || outcome === 'GOLDEN') {
+          play2XCoinSound();
+        } else if (outcome === 'RED') {
+          // 1-second realization delay to let User realize the scratching result before Game Over fade-to-black
+          setIsFadeOverlayOpaque(false);
+          if (realizationTimerRef.current) {
+            window.clearTimeout(realizationTimerRef.current);
           }
+          if (fadeTimerRef.current) {
+            window.clearTimeout(fadeTimerRef.current);
+          }
+          realizationTimerRef.current = window.setTimeout(() => {
+            // Stage 1: Electric buzzing while screen fades to black
+            setIsFadeOverlayOpaque(true);
+            playElectricBuzzSound(750);
+            fadeTimerRef.current = window.setTimeout(() => {
+              // Stage 2: Sound of exploding lightbulb along with 2s+ animation
+              playBulbExplosionSound();
+              setIsFadeOverlayOpaque(false);
+              setGameState((s) => completeFadeToGameOver(s));
+            }, 750);
+          }, GAME_OVER_REALIZATION_DELAY_MS);
         }
-      } else if (outcome === 'RED') {
-        // 1-second realization delay to let User realize the scratching result before Game Over fade-to-black
-        setIsFadeOverlayOpaque(false);
-        if (realizationTimerRef.current) {
-          window.clearTimeout(realizationTimerRef.current);
-        }
-        if (fadeTimerRef.current) {
-          window.clearTimeout(fadeTimerRef.current);
-        }
-        realizationTimerRef.current = window.setTimeout(() => {
-          // Stage 1: Electric buzzing while screen fades to black
-          setIsFadeOverlayOpaque(true);
-          playElectricBuzzSound(750);
-          fadeTimerRef.current = window.setTimeout(() => {
-            // Stage 2: Sound of exploding lightbulb along with 2s+ animation
-            playBulbExplosionSound();
-            setIsFadeOverlayOpaque(false);
-            setGameState((s) => completeFadeToGameOver(s));
-          }, 750);
-        }, GAME_OVER_REALIZATION_DELAY_MS);
-      }
-      return nextState;
-    });
-  }, []);
+        return nextState;
+      });
+    },
+    [runTopToBottomDealAnimation]
+  );
 
   if (!isOpen) return null;
 
@@ -1608,15 +1642,15 @@ export const ZhytomyrRouletteModal: React.FC<ZhytomyrRouletteModalProps> = ({
             />
 
             {/* Top Bar: Separate Sound & Music On/Off Switches on Left side across from Share Button on Right side */}
-            <div className="w-full flex items-center justify-between shrink-0 mt-1">
-              {/* Separate Sound & Music Switches on Left side where 1 switch previously existed */}
+            <div className="w-full flex items-start justify-between shrink-0 mt-1">
+              {/* Separate Sound & Music Switches on Left side: Sound switch on same height as Share button, double vertical spacing (gap-3) between Sound & Music */}
               <div
                 data-testid="roulette-audio-switches-left"
-                className="flex flex-col items-start gap-1.5 pl-0.5"
+                className="flex flex-col items-start gap-3 pl-0.5"
               >
                 <div
                   data-testid="roulette-sound-control"
-                  className="flex items-center gap-2"
+                  className="flex items-center gap-2 min-h-[28px]"
                 >
                   <span
                     data-testid="roulette-sound-label"
@@ -1647,7 +1681,7 @@ export const ZhytomyrRouletteModal: React.FC<ZhytomyrRouletteModalProps> = ({
 
                 <div
                   data-testid="roulette-music-control"
-                  className="flex items-center gap-2"
+                  className="flex items-center gap-2 min-h-[28px]"
                 >
                   <span
                     data-testid="roulette-music-label"
@@ -2026,10 +2060,14 @@ export const ZhytomyrRouletteModal: React.FC<ZhytomyrRouletteModalProps> = ({
                 return (
                   <div
                     key={`hour_row_${rowIndex}_${gameState.generationId}`}
-                    className="grid grid-cols-2 gap-2.5 transition-all duration-300 ease-out"
+                    data-testid={`roulette-ticket-row-${rowIndex}`}
+                    data-dealt={isDealt ? 'true' : 'false'}
+                    className="grid grid-cols-2 gap-2.5 transition-all duration-500 ease-out"
                     style={{
                       opacity: isDealt ? 1 : 0,
-                      transform: isDealt ? 'translateY(0px) scale(1)' : 'translateY(-22px) scale(0.95)',
+                      transform: isDealt
+                        ? 'translateY(0px) scale(1)'
+                        : `translateY(-${(rowIndex + 1) * 84}px) scale(0.96)`,
                     }}
                   >
                     <ScratchTicketCard

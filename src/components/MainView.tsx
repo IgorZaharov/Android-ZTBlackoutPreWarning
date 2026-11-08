@@ -365,7 +365,7 @@ export const MainView: React.FC<MainViewProps> = ({
         {!isUnclear && (
           <div className="pt-3 border-t border-white/10 flex flex-col gap-2">
             <div className="text-xs font-bold text-sky-200/70 uppercase tracking-wider">
-              {lang === 'uk' ? 'Години без світла на цей день:' : 'Outage hours for this day:'}
+              {lang === 'uk' ? 'Години без світла на цей день:' : 'Blackout hours for today:'}
             </div>
 
             {blackoutIntervals.length > 0 ? (

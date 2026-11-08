@@ -22,6 +22,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -207,7 +208,8 @@ data class RouletteStateModel(
     val queueId: String = "1.1",
     val isOfflineRandomized: Boolean = false,
     val tickets: List<RouletteTicketItem> = emptyList(),
-    val generationId: Int = 0
+    val generationId: Int = 0,
+    val ticketsShuffledAbove999: Boolean = false
 )
 
 data class ShareCardUpgradeGlyphState(
@@ -220,7 +222,8 @@ data class ShareCardUpgradeGlyphState(
 
 data class RouletteRevealResult(
     val nextState: RouletteStateModel,
-    val outcome: TicketRevealOutcome
+    val outcome: TicketRevealOutcome,
+    val shuffled: Boolean = false
 )
 
 data class RoulettePurchaseResult(
@@ -254,6 +257,10 @@ object ZhytomyrRouletteEngine {
     private const val KEY_DEPOSIT_FINMON_LOCKED = "deposit_finmon_locked"
 
     const val TICKET_SCRATCH_REVEAL_THRESHOLD = 0.20f
+    const val MAX_ROULETTE_SCORE = 9_999_999
+    const val SCORE_SHUFFLE_THRESHOLD = 999
+    const val TICKET_SHUFFLE_ANIMATION_DURATION_MS = 2000L
+    const val TICKET_SHUFFLE_ROW_COUNT = 24
     const val DEPOSIT_DAILY_REWARD_PER_STACK = 10
     const val DAY_IN_MS = 24L * 60L * 60L * 1000L
     const val GAME_OVER_REALIZATION_DELAY_MS = 1000L
@@ -262,6 +269,31 @@ object ZhytomyrRouletteEngine {
     const val GAME_BLACKOUT_DURATION_MS = 10L * 1000L
     const val SHARE_GLYPH_INACTIVE_COLOR = "#6B7280"
     const val SHARE_GLYPH_ACTIVE_COLOR = "#F59E0B"
+
+    fun clampRouletteScore(score: Int): Int {
+        return score.coerceIn(0, MAX_ROULETTE_SCORE)
+    }
+
+    fun shuffleTicketPlaces(
+        tickets: List<RouletteTicketItem>,
+        random: Random = Random.Default
+    ): List<RouletteTicketItem> {
+        if (tickets.size <= 1) return tickets
+        val copy = tickets.toMutableList()
+        for (i in copy.lastIndex downTo 1) {
+            val j = random.nextInt(i + 1)
+            val tmp = copy[i]
+            copy[i] = copy[j]
+            copy[j] = tmp
+        }
+        val isStillOrdered = copy.withIndex().all { (idx, t) -> t.slotLabel == tickets[idx].slotLabel }
+        if (isStillOrdered && copy.size >= 2) {
+            val first = copy[0]
+            copy[0] = copy[copy.lastIndex]
+            copy[copy.lastIndex] = first
+        }
+        return copy.mapIndexed { idx, item -> item.copy(index = idx) }
+    }
 
     val POWER_POINT_MILESTONES = listOf(100, 200, 400, 600, 1000)
 
@@ -439,7 +471,7 @@ object ZhytomyrRouletteEngine {
         if (canvasWidth <= 0f || canvasHeight <= 0f) return false
         val cx = canvasWidth / 2f
         val cy = canvasHeight / 2f
-        val redRadius = min(canvasWidth, canvasHeight) * 0.25f
+        val redRadius = min(canvasWidth, canvasHeight) * 0.42f
 
         val dx = x1 - x0
         val dy = y1 - y0
@@ -451,8 +483,11 @@ object ZhytomyrRouletteEngine {
         }
         val closestX = x0 + t * dx
         val closestY = y0 + t * dy
-        val distToCenter = hypot(cx - closestX, cy - closestY)
-        return distToCenter <= redRadius + brushRadius * 0.45f
+        val rx = max(redRadius, canvasWidth * 0.32f) + brushRadius * 0.75f
+        val ry = redRadius + brushRadius * 0.75f
+        val normX = (cx - closestX) / max(1f, rx)
+        val normY = (cy - closestY) / max(1f, ry)
+        return normX * normX + normY * normY <= 1f
     }
 
     fun isNocturnalModeActive(purchasedUpgrades: Set<RouletteUpgradeId> = getPurchasedUpgrades()): Boolean {
@@ -467,19 +502,19 @@ object ZhytomyrRouletteEngine {
         if (context != null) {
             try {
                 val prefs = context.applicationContext.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
-                val stored = prefs.getInt(KEY_BEST_SCORE, 0).coerceAtLeast(0)
+                val stored = clampRouletteScore(prefs.getInt(KEY_BEST_SCORE, 0))
                 if (stored > inMemoryBestScore) {
                     inMemoryBestScore = stored
                 }
             } catch (_: Exception) {}
         }
-        return inMemoryBestScore
+        return clampRouletteScore(inMemoryBestScore)
     }
 
     fun saveBestScoreIfHigher(candidateScore: Int, context: Context? = null): Int {
-        val sanitized = candidateScore.coerceAtLeast(0)
+        val sanitized = clampRouletteScore(candidateScore)
         val currentBest = getSavedBestScore(context)
-        val nextBest = max(currentBest, sanitized)
+        val nextBest = clampRouletteScore(max(currentBest, sanitized))
         inMemoryBestScore = nextBest
         if (context != null) {
             try {
@@ -491,7 +526,7 @@ object ZhytomyrRouletteEngine {
     }
 
     fun resetSavedBestScore(initialValue: Int = 0, context: Context? = null) {
-        val sanitized = initialValue.coerceAtLeast(0)
+        val sanitized = clampRouletteScore(initialValue)
         inMemoryBestScore = sanitized
         if (context != null) {
             try {
@@ -1217,10 +1252,11 @@ object ZhytomyrRouletteEngine {
             }
         }
 
-        val currentBest = saveBestScoreIfHigher(max(prevBestScore, initialScore), context)
+        val clampedInitialScore = clampRouletteScore(initialScore)
+        val currentBest = saveBestScoreIfHigher(max(prevBestScore, clampedInitialScore), context)
         return RouletteStateModel(
             screen = RouletteScreenMode.PLAYING,
-            score = initialScore,
+            score = clampedInitialScore,
             bestScore = currentBest,
             powerPoints = powerPts,
             purchasedUpgrades = upgrades,
@@ -1237,17 +1273,18 @@ object ZhytomyrRouletteEngine {
             queueId = queueId,
             isOfflineRandomized = isOfflineRandomized,
             tickets = normalized,
-            generationId = prevGenerationId + 1
+            generationId = prevGenerationId + 1,
+            ticketsShuffledAbove999 = false
         )
     }
 
     fun revealTicket(state: RouletteStateModel, ticketIndex: Int, context: Context? = null): RouletteRevealResult {
         if (state.screen != RouletteScreenMode.PLAYING) {
-            return RouletteRevealResult(state, TicketRevealOutcome.NONE)
+            return RouletteRevealResult(state, TicketRevealOutcome.NONE, shuffled = false)
         }
         val target = state.tickets.getOrNull(ticketIndex)
         if (target == null || target.isRevealed) {
-            return RouletteRevealResult(state, TicketRevealOutcome.NONE)
+            return RouletteRevealResult(state, TicketRevealOutcome.NONE, shuffled = false)
         }
 
         val activeUpgrades = state.purchasedUpgrades.ifEmpty { getPurchasedUpgrades(context) }
@@ -1264,19 +1301,23 @@ object ZhytomyrRouletteEngine {
             val k = state.streakIncrement
             val n = unrevealedSafeCount
             val cumulativeAdded = n * k + step * ((n * (n - 1)) / 2)
-            val nextScore = state.score + cumulativeAdded
+            val nextScore = clampRouletteScore(state.score + cumulativeAdded)
             val nextBest = saveBestScoreIfHigher(max(state.bestScore, nextScore), context)
             val allSafeRevealed = state.tickets.mapIndexed { idx, item ->
                 if (isTargetSafeGroup(item) || idx == ticketIndex) item.copy(isRevealed = true) else item
             }
+            val shouldShuffle = nextScore > SCORE_SHUFFLE_THRESHOLD && !state.ticketsShuffledAbove999
+            val finalTickets = if (shouldShuffle) shuffleTicketPlaces(allSafeRevealed) else allSafeRevealed
             return RouletteRevealResult(
                 nextState = state.copy(
                     score = nextScore,
                     bestScore = nextBest,
                     streakIncrement = k + n * step,
-                    tickets = allSafeRevealed
+                    tickets = finalTickets,
+                    ticketsShuffledAbove999 = state.ticketsShuffledAbove999 || shouldShuffle
                 ),
-                outcome = TicketRevealOutcome.GOLDEN
+                outcome = TicketRevealOutcome.GOLDEN,
+                shuffled = shouldShuffle
             )
         }
 
@@ -1285,16 +1326,20 @@ object ZhytomyrRouletteEngine {
             val updatedTickets = state.tickets.mapIndexed { idx, item ->
                 if (idx == ticketIndex) item.copy(isRevealed = true) else item
             }
-            val nextScore = state.score * 2
+            val nextScore = clampRouletteScore(state.score * 2)
             val nextBest = saveBestScoreIfHigher(max(state.bestScore, nextScore), context)
+            val shouldShuffle = nextScore > SCORE_SHUFFLE_THRESHOLD && !state.ticketsShuffledAbove999
+            val finalTickets = if (shouldShuffle) shuffleTicketPlaces(updatedTickets) else updatedTickets
             return RouletteRevealResult(
                 nextState = state.copy(
                     score = nextScore,
                     bestScore = nextBest,
                     streakIncrement = state.streakIncrement + step,
-                    tickets = updatedTickets
+                    tickets = finalTickets,
+                    ticketsShuffledAbove999 = state.ticketsShuffledAbove999 || shouldShuffle
                 ),
-                outcome = TicketRevealOutcome.X2
+                outcome = TicketRevealOutcome.X2,
+                shuffled = shouldShuffle
             )
         }
 
@@ -1306,9 +1351,11 @@ object ZhytomyrRouletteEngine {
                 val updatedTickets = state.tickets.mapIndexed { idx, item ->
                     if (idx == ticketIndex) item.copy(isRevealed = true) else item
                 }
-                val nextScore = state.score + state.streakIncrement
+                val nextScore = clampRouletteScore(state.score + state.streakIncrement)
                 val nextBest = saveBestScoreIfHigher(max(state.bestScore, nextScore), context)
                 val nextExtraLivesUsed = state.extraLivesUsed + 1
+                val shouldShuffle = nextScore > SCORE_SHUFFLE_THRESHOLD && !state.ticketsShuffledAbove999
+                val finalTickets = if (shouldShuffle) shuffleTicketPlaces(updatedTickets) else updatedTickets
                 return RouletteRevealResult(
                     nextState = state.copy(
                         score = nextScore,
@@ -1317,22 +1364,24 @@ object ZhytomyrRouletteEngine {
                         extraLivesTotal = extraLivesTotal,
                         extraLivesUsed = nextExtraLivesUsed,
                         streakIncrement = state.streakIncrement + step,
-                        tickets = updatedTickets
+                        tickets = finalTickets,
+                        ticketsShuffledAbove999 = state.ticketsShuffledAbove999 || shouldShuffle
                     ),
-                    outcome = TicketRevealOutcome.BEIGE
+                    outcome = TicketRevealOutcome.BEIGE,
+                    shuffled = shouldShuffle
                 )
             }
 
             val updatedTickets = state.tickets.mapIndexed { idx, item ->
                 if (idx == ticketIndex) item.copy(isRevealed = true) else item
             }
-            var finalScore = state.score
+            var finalScore = clampRouletteScore(state.score)
             var dailyStreakApplied = state.dailyStreakApplied
             if (activeUpgrades.contains(RouletteUpgradeId.DAILY_STREAK)) {
                 val todayKey = formatLocalDayKey()
                 if (getLastDailyStreakDateStr(context) != todayKey) {
                     saveLastDailyStreakDateStr(todayKey, context)
-                    finalScore = state.score * 2
+                    finalScore = clampRouletteScore(state.score * 2)
                     dailyStreakApplied = true
                 }
             }
@@ -1352,34 +1401,41 @@ object ZhytomyrRouletteEngine {
                     screen = RouletteScreenMode.FADING_TO_BLACK,
                     tickets = updatedTickets
                 ),
-                outcome = TicketRevealOutcome.RED
+                outcome = TicketRevealOutcome.RED,
+                shuffled = false
             )
         }
 
         val updatedTickets = state.tickets.mapIndexed { idx, item ->
             if (idx == ticketIndex) item.copy(isRevealed = true) else item
         }
-        val nextScore = state.score + state.streakIncrement
+        val nextScore = clampRouletteScore(state.score + state.streakIncrement)
         val nextBest = saveBestScoreIfHigher(max(state.bestScore, nextScore), context)
+        val shouldShuffle = nextScore > SCORE_SHUFFLE_THRESHOLD && !state.ticketsShuffledAbove999
+        val finalTickets = if (shouldShuffle) shuffleTicketPlaces(updatedTickets) else updatedTickets
         return RouletteRevealResult(
             nextState = state.copy(
                 score = nextScore,
                 bestScore = nextBest,
                 streakIncrement = state.streakIncrement + step,
-                tickets = updatedTickets
+                tickets = finalTickets,
+                ticketsShuffledAbove999 = state.ticketsShuffledAbove999 || shouldShuffle
             ),
-            outcome = TicketRevealOutcome.BEIGE
+            outcome = TicketRevealOutcome.BEIGE,
+            shuffled = shouldShuffle
         )
     }
 
     fun completeFadeToGameOver(state: RouletteStateModel, context: Context? = null): RouletteStateModel {
-        val nextBest = saveBestScoreIfHigher(max(state.bestScore, state.score), context)
+        val clampedScore = clampRouletteScore(state.score)
+        val nextBest = saveBestScoreIfHigher(max(state.bestScore, clampedScore), context)
         val nextPowerPoints = if (state.powerPointsAwarded) {
             state.powerPoints
         } else {
-            addPowerPoints(state.score, context)
+            addPowerPoints(clampedScore, context)
         }
         return state.copy(
+            score = clampedScore,
             bestScore = nextBest,
             powerPoints = nextPowerPoints,
             powerPointsAwarded = true,
@@ -1539,10 +1595,13 @@ object ZhytomyrRouletteEngine {
         if (!canRefreshTickets(state.score, currentCost)) {
             return state
         }
-        val clampedScore = (state.score - currentCost).coerceAtLeast(0)
+        val clampedScore = clampRouletteScore(state.score - currentCost)
         val nextBest = saveBestScoreIfHigher(max(state.bestScore, state.score), context)
         val upgrades = state.purchasedUpgrades.ifEmpty { getPurchasedUpgrades(context) }
         val step = getStreakStep(upgrades)
+        val preparedTickets = normalizeTicketsForGame(newTickets, upgrades)
+        val shouldShuffle = clampedScore > SCORE_SHUFFLE_THRESHOLD
+        val finalTickets = if (shouldShuffle) shuffleTicketPlaces(preparedTickets) else preparedTickets
         return state.copy(
             screen = RouletteScreenMode.PLAYING,
             score = clampedScore,
@@ -1551,8 +1610,9 @@ object ZhytomyrRouletteEngine {
             refreshCount = state.refreshCount + 1, // Next refresh costs 1 more
             queueId = queueId,
             isOfflineRandomized = isOfflineRandomized,
-            tickets = normalizeTicketsForGame(newTickets, upgrades),
-            generationId = state.generationId + 1
+            tickets = finalTickets,
+            generationId = state.generationId + 1,
+            ticketsShuffledAbove999 = shouldShuffle
         )
     }
 
@@ -1940,11 +2000,14 @@ object RouletteSoundEngine {
     private const val KEY_SOUND_ENABLED = "roulette_sound_enabled"
     private const val KEY_MUSIC_ENABLED = "roulette_music_enabled"
     const val SCRATCH_VOLUME_SCALE = 0.575
+    const val SCRATCH_SFX_VOLUME_MULTIPLIER = 0.9
+    const val SCRATCH_SFX_DURATION_MS = 336L
     const val COIN_VOLUME_SCALE = 0.75
     const val GAMEOVER_UPGRADE_VOLUME_SCALE = 0.60
     const val COIN_GAMEOVER_UPGRADE_VOLUME_SCALE = 0.75
     const val FLICKER_BUZZ_VOLUME_SCALE = 0.10
     const val GAME_BLACKOUT_VOLUME_SCALE = 0.10
+    const val FLICKER_SFX_VOLUME_MULTIPLIER = 1.3
     const val MUSIC_VOLUME_SCALE = 0.15f
     const val MUSIC_FADE_DURATION_MS = 1200L
     const val GAME_OVER_MUSIC_FADE_IN_DELAY_MS = 2000L
@@ -1952,6 +2015,16 @@ object RouletteSoundEngine {
     val START_SHOP_2_MUSIC_RES = R.raw.audio_start_shop_2
     val START_SHOP_MUSIC_OPTIONS = listOf(START_SHOP_GAMEOVER_MUSIC_RES, START_SHOP_2_MUSIC_RES)
     val MAIN_GAME_MUSIC_RES = R.raw.audio_main_game
+    val LIGHTBULB_SFX_RES = R.raw.sfx_lightbulb
+    val SCRATCH_SFX_RES = R.raw.sfx_scratch
+    val CASH_REGISTER_SFX_RES = R.raw.sfx_cash_register
+    val FLICKER_SFX_RES = R.raw.sfx_flicker
+    val COIN_SFX_RES = R.raw.sfx_coin
+    val TWO_X_COIN_SFX_RES = R.raw.sfx_2x_coin
+    val SHUFFLE_SFX_RES = R.raw.sfx_shuffle
+
+    @Volatile
+    private var appContextRef: Context? = null
 
     @Volatile
     private var inMemorySoundEnabled: Boolean = true
@@ -1986,9 +2059,19 @@ object RouletteSoundEngine {
     @Volatile
     private var lastScratchMs = 0L
 
+    @Volatile
+    private var scratchSoundEndAtMs = 0L
+
+    fun getRemainingScratchSoundDelayMs(nowMs: Long = System.currentTimeMillis()): Long {
+        return (scratchSoundEndAtMs - nowMs).coerceAtLeast(0L)
+    }
+
     fun isAppInForeground(): Boolean = isAppInForegroundState
 
     fun setAppInForeground(inForeground: Boolean, context: Context? = null): Boolean {
+        if (context != null) {
+            appContextRef = context.applicationContext ?: context
+        }
         isAppInForegroundState = inForeground
         if (!inForeground) {
             ++fadeGenerationId
@@ -2009,7 +2092,7 @@ object RouletteSoundEngine {
             } catch (_: Exception) {}
         } else {
             syncBackgroundMusic(
-                context = context,
+                context = context ?: appContextRef,
                 screen = lastRequestedScreen,
                 isOpen = isDialogCurrentlyOpen,
                 musicEnabled = isMusicEnabled(context)
@@ -2031,6 +2114,7 @@ object RouletteSoundEngine {
 
     fun isSoundEnabled(context: Context? = null): Boolean {
         if (context != null) {
+            appContextRef = context.applicationContext ?: context
             try {
                 val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
                 if (prefs.contains(KEY_SOUND_ENABLED)) {
@@ -2043,6 +2127,9 @@ object RouletteSoundEngine {
     }
 
     fun setSoundEnabled(enabled: Boolean, context: Context? = null): Boolean {
+        if (context != null) {
+            appContextRef = context.applicationContext ?: context
+        }
         inMemorySoundEnabled = enabled
         if (context != null) {
             try {
@@ -2062,6 +2149,7 @@ object RouletteSoundEngine {
 
     fun isMusicEnabled(context: Context? = null): Boolean {
         if (context != null) {
+            appContextRef = context.applicationContext ?: context
             try {
                 val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
                 if (prefs.contains(KEY_MUSIC_ENABLED)) {
@@ -2074,6 +2162,9 @@ object RouletteSoundEngine {
     }
 
     fun setMusicEnabled(enabled: Boolean, context: Context? = null): Boolean {
+        if (context != null) {
+            appContextRef = context.applicationContext ?: context
+        }
         inMemoryMusicEnabled = enabled
         if (context != null) {
             try {
@@ -2084,7 +2175,7 @@ object RouletteSoundEngine {
             } catch (_: Exception) {
             }
         }
-        syncBackgroundMusic(context, lastRequestedScreen, isDialogCurrentlyOpen, enabled)
+        syncBackgroundMusic(context ?: appContextRef, lastRequestedScreen, isDialogCurrentlyOpen, enabled)
         return inMemoryMusicEnabled
     }
 
@@ -2110,6 +2201,9 @@ object RouletteSoundEngine {
         musicEnabled: Boolean = isMusicEnabled(context),
         random: Random = Random.Default
     ): String {
+        if (context != null) {
+            appContextRef = context.applicationContext ?: context
+        }
         val prevScreen = lastRequestedScreen
         val prevOpen = isDialogCurrentlyOpen
         lastRequestedScreen = screen
@@ -2258,6 +2352,35 @@ object RouletteSoundEngine {
         return desiredTrack
     }
 
+    private fun playRawSfx(resId: Int, volume: Float, context: Context? = null): Boolean {
+        if (context != null) {
+            appContextRef = context.applicationContext ?: context
+        }
+        if (!isSoundEnabled() || !isAppInForegroundState) return false
+        val ctx = context?.applicationContext ?: context ?: appContextRef ?: return false
+        val clampedVol = volume.coerceIn(0f, 1f)
+        Thread {
+            try {
+                if (!isAppInForegroundState) return@Thread
+                val player = MediaPlayer.create(ctx, resId) ?: return@Thread
+                player.setVolume(clampedVol, clampedVol)
+                player.setOnCompletionListener { mp ->
+                    try {
+                        mp.release()
+                    } catch (_: Exception) {}
+                }
+                player.setOnErrorListener { mp, _, _ ->
+                    try {
+                        mp.release()
+                    } catch (_: Exception) {}
+                    true
+                }
+                player.start()
+            } catch (_: Exception) {}
+        }.start()
+        return true
+    }
+
     private fun playPcmSamples(samples: ShortArray) {
         if (!isSoundEnabled() || !isAppInForegroundState) return
         Thread {
@@ -2299,7 +2422,8 @@ object RouletteSoundEngine {
         }.start()
     }
 
-    fun playCardShuffleSound() {
+    fun playCardShuffleSound(context: Context? = null) {
+        if (playRawSfx(SHUFFLE_SFX_RES, 0.72f, context)) return
         val totalDurationSec = 0.52
         val count = (SAMPLE_RATE * totalDurationSec).toInt()
         val samples = ShortArray(count)
@@ -2324,11 +2448,14 @@ object RouletteSoundEngine {
         playPcmSamples(samples)
     }
 
-    fun playScratchSound(force: Boolean = false) {
+    fun playScratchSound(force: Boolean = false, context: Context? = null) {
         if (!isSoundEnabled() || !isAppInForegroundState) return
         val now = System.currentTimeMillis()
         if (!force && now - lastScratchMs < 60L) return
         lastScratchMs = now
+        scratchSoundEndAtMs = now + SCRATCH_SFX_DURATION_MS
+        val effectiveScratchScale = SCRATCH_VOLUME_SCALE * SCRATCH_SFX_VOLUME_MULTIPLIER
+        if (playRawSfx(SCRATCH_SFX_RES, (if (force) 0.55f else 0.42f) * effectiveScratchScale.toFloat(), context)) return
 
         val durSec = if (force) 0.085 else 0.045
         val count = (SAMPLE_RATE * durSec).toInt()
@@ -2336,13 +2463,14 @@ object RouletteSoundEngine {
         for (i in 0 until count) {
             val env = sin((i.toDouble() / count) * PI)
             val carrier = sin(2.0 * PI * 2100.0 * i / SAMPLE_RATE)
-            val noise = (Random.nextDouble(-1.0, 1.0) * 0.7 + carrier * 0.3) * env * (if (force) 0.32 else 0.25) * SCRATCH_VOLUME_SCALE
+            val noise = (Random.nextDouble(-1.0, 1.0) * 0.7 + carrier * 0.3) * env * (if (force) 0.32 else 0.25) * effectiveScratchScale
             samples[i] = (noise * Short.MAX_VALUE).toInt().coerceIn(Short.MIN_VALUE.toInt(), Short.MAX_VALUE.toInt()).toShort()
         }
         playPcmSamples(samples)
     }
 
-    fun playCashRegisterSound() {
+    fun playCashRegisterSound(context: Context? = null) {
+        if (playRawSfx(CASH_REGISTER_SFX_RES, GAMEOVER_UPGRADE_VOLUME_SCALE.toFloat(), context)) return
         val count = (SAMPLE_RATE * 0.56).toInt()
         val clackEnd = (SAMPLE_RATE * 0.065).toInt()
         val bell1Start = (SAMPLE_RATE * 0.065).toInt()
@@ -2370,7 +2498,8 @@ object RouletteSoundEngine {
         playPcmSamples(samples)
     }
 
-    fun playCoinSound() {
+    private fun playCoinSoundImmediate(context: Context? = null) {
+        if (playRawSfx(COIN_SFX_RES, COIN_VOLUME_SCALE.toFloat(), context)) return
         val count = (SAMPLE_RATE * 0.42).toInt()
         val switchIdx = (SAMPLE_RATE * 0.08).toInt()
         val samples = ShortArray(count)
@@ -2384,7 +2513,31 @@ object RouletteSoundEngine {
         playPcmSamples(samples)
     }
 
-    fun playElectricBuzzSound(durationMs: Int = 750, volumeScale: Double = GAMEOVER_UPGRADE_VOLUME_SCALE) {
+    fun playCoinSound(context: Context? = null) {
+        if (!isSoundEnabled() || !isAppInForegroundState) return
+        val waitMs = getRemainingScratchSoundDelayMs()
+        if (waitMs > 0L) {
+            Thread {
+                try {
+                    Thread.sleep(waitMs)
+                } catch (_: Exception) {}
+                if (isSoundEnabled() && isAppInForegroundState) {
+                    playCoinSoundImmediate(context)
+                }
+            }.start()
+            return
+        }
+        playCoinSoundImmediate(context)
+    }
+
+    fun play2XCoinSound(context: Context? = null) {
+        if (playRawSfx(TWO_X_COIN_SFX_RES, COIN_VOLUME_SCALE.toFloat(), context)) return
+        playCoinSound(context)
+    }
+
+    fun playElectricBuzzSound(durationMs: Int = 750, volumeScale: Double = GAMEOVER_UPGRADE_VOLUME_SCALE, context: Context? = null) {
+        val effectiveVol = volumeScale * FLICKER_SFX_VOLUME_MULTIPLIER
+        if (playRawSfx(FLICKER_SFX_RES, effectiveVol.toFloat(), context)) return
         val count = (SAMPLE_RATE * (durationMs / 1000.0)).toInt()
         val samples = ShortArray(count)
         for (i in 0 until count) {
@@ -2394,17 +2547,21 @@ object RouletteSoundEngine {
             val hum50 = if (sin(2.0 * PI * 50.0 * t) >= 0.0) 0.5 else -0.5
             val buzz100 = 2.0 * ((t * 100.0) - floor(0.5 + t * 100.0))
             val arcCrackle = if (Random.nextDouble() > 0.88) Random.nextDouble(-0.9, 0.9) else 0.0
-            val signal = (hum50 * 0.45 + buzz100 * 0.4 + arcCrackle * 0.35) * env * 0.38 * volumeScale
+            val signal = (hum50 * 0.45 + buzz100 * 0.4 + arcCrackle * 0.35) * env * 0.38 * effectiveVol
             samples[i] = (signal * Short.MAX_VALUE).toInt().coerceIn(Short.MIN_VALUE.toInt(), Short.MAX_VALUE.toInt()).toShort()
         }
         playPcmSamples(samples)
     }
 
-    fun playFlickerBuzzSound(durationMs: Int = 550) {
-        playBulbExplosionSound(FLICKER_BUZZ_VOLUME_SCALE)
+    fun playFlickerBuzzSound(durationMs: Int = 550, context: Context? = null) {
+        val effectiveVol = FLICKER_BUZZ_VOLUME_SCALE * FLICKER_SFX_VOLUME_MULTIPLIER
+        if (playRawSfx(FLICKER_SFX_RES, effectiveVol.toFloat(), context)) return
+        playBulbExplosionSound(effectiveVol)
     }
 
-    fun playBulbExplosionSound(volumeScale: Double = GAMEOVER_UPGRADE_VOLUME_SCALE) {
+    fun playBulbExplosionSound(volumeScale: Double = GAMEOVER_UPGRADE_VOLUME_SCALE, context: Context? = null) {
+        val targetRes = if (volumeScale <= FLICKER_BUZZ_VOLUME_SCALE * FLICKER_SFX_VOLUME_MULTIPLIER + 0.01) FLICKER_SFX_RES else LIGHTBULB_SFX_RES
+        if (playRawSfx(targetRes, volumeScale.toFloat(), context)) return
         val count = (SAMPLE_RATE * 1.65).toInt()
         val samples = ShortArray(count)
         val shardFreqs = doubleArrayOf(3150.0, 4280.0, 2760.0, 5120.0, 3690.0, 4620.0, 2980.0, 3910.0)
@@ -2430,8 +2587,10 @@ object RouletteSoundEngine {
         playPcmSamples(samples)
     }
 
-    fun playGameBlackoutSound() {
-        playBulbExplosionSound(GAME_BLACKOUT_VOLUME_SCALE)
+    fun playGameBlackoutSound(context: Context? = null) {
+        val effectiveVol = GAME_BLACKOUT_VOLUME_SCALE * FLICKER_SFX_VOLUME_MULTIPLIER
+        if (playRawSfx(FLICKER_SFX_RES, effectiveVol.toFloat(), context)) return
+        playBulbExplosionSound(effectiveVol)
     }
 }
 
@@ -2946,9 +3105,9 @@ private fun ScratchTicketComposable(
     foilBitmap: ImageBitmap,
     onReveal: (Int) -> Unit
 ) {
-    val scratchPoints = remember(ticket.index, generationId) { mutableStateListOf<Offset>() }
-    val scratchedCells = remember(ticket.index, generationId) { mutableSetOf<Int>() }
-    var redCenterOutlineShown by remember(ticket.index, generationId) { mutableStateOf(false) }
+    val scratchPoints = remember(ticket.index, ticket.slotLabel, generationId) { mutableStateListOf<Offset>() }
+    val scratchedCells = remember(ticket.index, ticket.slotLabel, generationId) { mutableSetOf<Int>() }
+    var redCenterOutlineShown by remember(ticket.index, ticket.slotLabel, generationId) { mutableStateOf(false) }
 
     val markGridAndCheckReveal: (Offset, Offset, Float, Float, Float) -> Unit = { prevPos, pos, widthPx, heightPx, brushRadiusPx ->
         if (widthPx > 0f && heightPx > 0f) {
@@ -3010,23 +3169,19 @@ private fun ScratchTicketComposable(
             .border(1.2.dp, Color(0xA6C9A85C), RoundedCornerShape(12.dp))
             .pointerInput(ticket.index, generationId, ticket.isRevealed, disabled) {
                 if (!ticket.isRevealed && !disabled) {
-                    detectTapGestures { offset ->
-                        scratchPoints.add(offset)
-                        RouletteSoundEngine.playScratchSound(false)
-                        markGridAndCheckReveal(offset, offset, size.width.toFloat(), size.height.toFloat(), 9.dp.toPx())
-                    }
-                }
-            }
-            .pointerInput(ticket.index, generationId, ticket.isRevealed, disabled) {
-                if (!ticket.isRevealed && !disabled) {
-                    detectDragGestures { change, _ ->
-                        change.consume()
-                        val pos = change.position
-                        val prevPos = scratchPoints.lastOrNull() ?: pos
-                        scratchPoints.add(pos)
-                        RouletteSoundEngine.playScratchSound(false)
-                        markGridAndCheckReveal(prevPos, pos, size.width.toFloat(), size.height.toFloat(), 9.dp.toPx())
-                    }
+                    detectHorizontalDragGestures(
+                        onDragStart = { startOffset ->
+                            scratchPoints.add(startOffset)
+                        },
+                        onHorizontalDrag = { change, _ ->
+                            change.consume()
+                            val pos = change.position
+                            val prevPos = scratchPoints.lastOrNull() ?: pos
+                            scratchPoints.add(pos)
+                            RouletteSoundEngine.playScratchSound(false)
+                            markGridAndCheckReveal(prevPos, pos, size.width.toFloat(), size.height.toFloat(), 9.dp.toPx())
+                        }
+                    )
                 }
             },
         contentAlignment = Alignment.Center
@@ -3117,7 +3272,7 @@ private fun ScratchTicketComposable(
                     )
                 }
             } else if (ticket.isRed) {
-                val redRadius = min(w, h) * 0.36f
+                val redRadius = min(w, h) * 0.42f
                 drawCircle(
                     brush = Brush.radialGradient(
                         colors = listOf(
@@ -3126,15 +3281,15 @@ private fun ScratchTicketComposable(
                             Color(0x00D8D6CC)
                         ),
                         center = center,
-                        radius = redRadius * 1.15f
+                        radius = redRadius * 1.22f
                     ),
-                    radius = redRadius * 1.15f,
+                    radius = redRadius * 1.22f,
                     center = center
                 )
-                // Red outline in center
+                // Wider red outline around center so border scratching exposes it
                 drawCircle(
                     color = Color(0xFFEF4444),
-                    radius = min(w, h) * 0.25f,
+                    radius = min(w, h) * 0.34f,
                     center = center,
                     style = Stroke(width = 2.dp.toPx())
                 )
@@ -3364,14 +3519,17 @@ fun ZhytomyrRouletteDialog(
     )
 
     val triggerDealAnimation: () -> Unit = {
-        RouletteSoundEngine.playCardShuffleSound()
+        RouletteSoundEngine.playCardShuffleSound(context)
         dealtRowsCount = 0
         scope.launch {
+            ticketListState.scrollToItem(0)
+            val stepDelayMs = ZhytomyrRouletteEngine.TICKET_SHUFFLE_ANIMATION_DURATION_MS /
+                ZhytomyrRouletteEngine.TICKET_SHUFFLE_ROW_COUNT
             var r = 0
-            while (r < 24) {
-                delay(24L)
-                r += 2
-                dealtRowsCount = r.coerceAtMost(24)
+            while (r < ZhytomyrRouletteEngine.TICKET_SHUFFLE_ROW_COUNT) {
+                delay(stepDelayMs)
+                r += 1
+                dealtRowsCount = r.coerceAtMost(ZhytomyrRouletteEngine.TICKET_SHUFFLE_ROW_COUNT)
             }
         }
     }
@@ -3461,22 +3619,18 @@ fun ZhytomyrRouletteDialog(
 
     val handleTicketReveal: (Int) -> Unit = { ticketIndex ->
         // Scratching sound when ticket is scratched off
-        RouletteSoundEngine.playScratchSound(force = true)
+        RouletteSoundEngine.playScratchSound(force = true, context = context)
         val result = ZhytomyrRouletteEngine.revealTicket(gameState, ticketIndex, context)
         gameState = result.nextState
+        if (result.shuffled) {
+            triggerDealAnimation()
+        }
         when (result.outcome) {
-            TicketRevealOutcome.BEIGE, TicketRevealOutcome.X2, TicketRevealOutcome.GOLDEN -> {
-                RouletteSoundEngine.playCoinSound()
-                if (result.outcome == TicketRevealOutcome.GOLDEN || result.outcome == TicketRevealOutcome.X2) {
-                    scope.launch {
-                        delay(110L)
-                        RouletteSoundEngine.playCoinSound()
-                        if (result.outcome == TicketRevealOutcome.GOLDEN) {
-                            delay(110L)
-                            RouletteSoundEngine.playCoinSound()
-                        }
-                    }
-                }
+            TicketRevealOutcome.BEIGE -> {
+                RouletteSoundEngine.playCoinSound(context)
+            }
+            TicketRevealOutcome.X2, TicketRevealOutcome.GOLDEN -> {
+                RouletteSoundEngine.play2XCoinSound(context)
             }
             TicketRevealOutcome.RED -> {
                 // 1-second realization delay to let User realize the scratching result before Game Over fade-to-black
@@ -3484,9 +3638,9 @@ fun ZhytomyrRouletteDialog(
                 scope.launch {
                     delay(ZhytomyrRouletteEngine.GAME_OVER_REALIZATION_DELAY_MS)
                     isFadeToBlackStarted = true
-                    RouletteSoundEngine.playElectricBuzzSound(750)
+                    RouletteSoundEngine.playElectricBuzzSound(750, context = context)
                     delay(750L)
-                    RouletteSoundEngine.playBulbExplosionSound()
+                    RouletteSoundEngine.playBulbExplosionSound(context = context)
                     isFadeToBlackStarted = false
                     gameState = ZhytomyrRouletteEngine.completeFadeToGameOver(gameState, context)
                 }
@@ -3583,12 +3737,12 @@ fun ZhytomyrRouletteDialog(
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
                                     horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
+                                    verticalAlignment = Alignment.Top
                                 ) {
-                                    // Separate Sound & Music On/Off Switches placed on Left side where 1 switch previously existed
+                                    // Separate Sound & Music On/Off Switches placed on Left side: Sound switch on same height as Share button, double vertical spacing between Sound & Music
                                     Column(
                                         horizontalAlignment = Alignment.Start,
-                                        verticalArrangement = Arrangement.spacedBy(2.dp)
+                                        verticalArrangement = Arrangement.spacedBy(12.dp)
                                     ) {
                                         Row(
                                             verticalAlignment = Alignment.CenterVertically,
@@ -4383,9 +4537,21 @@ fun ZhytomyrRouletteDialog(
                                 verticalArrangement = Arrangement.spacedBy(10.dp)
                             ) {
                                 itemsIndexed(hourlyPairs, key = { idx, _ -> "hour_pair_${idx}_${gameState.generationId}" }) { rowIndex, pair ->
-                                    if (rowIndex < dealtRowsCount) {
+                                    val isRowDealt = rowIndex < dealtRowsCount
+                                    val rowSlideProgress by animateFloatAsState(
+                                        targetValue = if (isRowDealt) 1f else 0f,
+                                        animationSpec = tween(durationMillis = 480, easing = FastOutSlowInEasing),
+                                        label = "ticketRowTopBorderSlide_$rowIndex"
+                                    )
+                                    if (isRowDealt || rowSlideProgress > 0.01f) {
+                                        val topBorderOffsetPx = -((rowIndex + 1) * 84f) * (1f - rowSlideProgress)
                                         Row(
-                                            modifier = Modifier.fillMaxWidth(),
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .graphicsLayer {
+                                                    alpha = rowSlideProgress
+                                                    translationY = topBorderOffsetPx
+                                                },
                                             horizontalArrangement = Arrangement.spacedBy(10.dp)
                                         ) {
                                             Box(modifier = Modifier.weight(1f)) {

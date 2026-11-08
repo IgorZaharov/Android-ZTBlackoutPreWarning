@@ -63,9 +63,24 @@ export function isTicketScratchedEnough(
   return scratchedFraction >= TICKET_SCRATCH_REVEAL_THRESHOLD;
 }
 
+export const MAX_ROULETTE_SCORE = 9_999_999;
+export const SCORE_SHUFFLE_THRESHOLD = 999;
+export const TICKET_SHUFFLE_ANIMATION_DURATION_MS = 2000;
+export const TICKET_SHUFFLE_ROW_COUNT = 24;
+export const TICKET_SHUFFLE_ROW_INTERVAL_MS = Math.round(
+  TICKET_SHUFFLE_ANIMATION_DURATION_MS / TICKET_SHUFFLE_ROW_COUNT
+);
+
+export function clampRouletteScore(score: number): number {
+  if (!Number.isFinite(score)) return 0;
+  return Math.max(0, Math.min(MAX_ROULETTE_SCORE, Math.floor(score)));
+}
+
 /**
  * Checks whether a scratch stroke segment `(x0, y0) -> (x1, y1)` exposes the center
  * red outline medallion of a Red ticket (`canvasWidth x canvasHeight`).
+ * Uses a wider elliptical area around the center (`0.42 * min(w, h)` vertically and `0.32 * w` horizontally)
+ * so players cannot peek at the outer border of the red tint without revealing the red ticket.
  */
 export function doesScratchExposeRedCenterOutline(
   x0: number,
@@ -78,7 +93,9 @@ export function doesScratchExposeRedCenterOutline(
 ): boolean {
   const cx = canvasWidth / 2;
   const cy = canvasHeight / 2 - 2;
-  const redOutlineRadius = Math.min(canvasWidth, canvasHeight) * 0.31;
+  const redOutlineRadius = Math.min(canvasWidth, canvasHeight) * 0.42;
+  const rx = Math.max(redOutlineRadius, canvasWidth * 0.32) + brushRadius * 0.75;
+  const ry = redOutlineRadius + brushRadius * 0.75;
 
   const segDx = x1 - x0;
   const segDy = y1 - y0;
@@ -89,8 +106,9 @@ export function doesScratchExposeRedCenterOutline(
   }
   const projX = x0 + t * segDx;
   const projY = y0 + t * segDy;
-  const dist = Math.hypot(cx - projX, cy - projY);
-  return dist <= redOutlineRadius + brushRadius * 0.6;
+  const normDx = (cx - projX) / Math.max(1, rx);
+  const normDy = (cy - projY) / Math.max(1, ry);
+  return normDx * normDx + normDy * normDy <= 1;
 }
 
 export type RouletteUpgradeId =
@@ -368,6 +386,7 @@ export interface RouletteGameState {
   extraLivesUsed?: number; // Number of extra hearts consumed in the current game (0..extraLivesTotal)
   dailyStreakApplied?: boolean; // True when "Daily Streak" (X2 bonus on first game of the day) was applied before Game Over
   powerPointsAwarded?: boolean; // Prevents double-adding score to powerPoints during a single Game Over transition
+  ticketsShuffledAbove999?: boolean; // True once ticket places have been shuffled when single-game score reaches above 999
   streakIncrement: number;
   refreshCount: number; // Number of times "Get New Tickets" has been used in current game (cost = refreshCount: 0, 1, 2, 3...)
   queueId: string;
@@ -435,24 +454,25 @@ export function getSavedBestScore(): number {
       if (raw !== null) {
         const parsed = parseInt(raw, 10);
         if (!Number.isNaN(parsed) && parsed >= 0) {
-          inMemoryBestScore = Math.max(inMemoryBestScore, parsed);
+          inMemoryBestScore = clampRouletteScore(Math.max(inMemoryBestScore, parsed));
         }
       }
     }
   } catch {
     // Ignore storage access errors in restricted environments
   }
+  inMemoryBestScore = clampRouletteScore(inMemoryBestScore);
   return inMemoryBestScore;
 }
 
 /**
  * Saves a candidate score if it exceeds the previously recorded all-time best score,
- * returning the updated all-time best score.
+ * returning the updated all-time best score (clamped to MAX_ROULETTE_SCORE = 9999999).
  */
 export function saveBestScoreIfHigher(candidateScore: number): number {
-  const sanitized = Math.max(0, Math.floor(candidateScore));
+  const sanitized = clampRouletteScore(candidateScore);
   const currentBest = getSavedBestScore();
-  const nextBest = Math.max(currentBest, sanitized);
+  const nextBest = clampRouletteScore(Math.max(currentBest, sanitized));
   inMemoryBestScore = nextBest;
   try {
     if (typeof window !== 'undefined' && window.localStorage) {
@@ -468,7 +488,7 @@ export function saveBestScoreIfHigher(candidateScore: number): number {
  * Resets the saved all-time best score (used for deterministic unit testing).
  */
 export function resetSavedBestScore(initialValue: number = 0): void {
-  const sanitized = Math.max(0, Math.floor(initialValue));
+  const sanitized = clampRouletteScore(initialValue);
   inMemoryBestScore = sanitized;
   try {
     if (typeof window !== 'undefined' && window.localStorage) {
@@ -1110,6 +1130,37 @@ export function getHourlyTicketPairs(
 }
 
 /**
+ * Shuffles the 48 tickets' places on the board so timeslot labels are in random positions
+ * instead of chronological order (triggered when single-game score reaches above 999).
+ */
+export function shuffleTicketPlaces(
+  tickets: RouletteTicket[],
+  randomFn: () => number = Math.random
+): RouletteTicket[] {
+  if (tickets.length <= 1) return tickets.map((t, idx) => ({ ...t, index: idx }));
+  const copy = tickets.map((t) => ({ ...t }));
+  for (let i = copy.length - 1; i > 0; i--) {
+    const j = Math.min(i, Math.max(0, Math.floor(randomFn() * (i + 1))));
+    const tmp = copy[i];
+    copy[i] = copy[j];
+    copy[j] = tmp;
+  }
+  // Ensure the order is genuinely non-chronological even if a deterministic test RNG returns constant values
+  const chronologicalLabels = generate48TimeslotLabels();
+  const isStillChronological = copy.every((t, idx) => t.slotLabel === chronologicalLabels[idx]);
+  if (isStillChronological && copy.length >= 4) {
+    const first = copy[0];
+    copy[0] = copy[2];
+    copy[2] = copy[copy.length - 1];
+    copy[copy.length - 1] = first;
+  }
+  return copy.map((t, idx) => ({
+    ...t,
+    index: idx,
+  }));
+}
+
+/**
  * Generates randomized stain & wrinkle placement parameters for a single ticket so that
  * stains (coffee rings, water blotches, tea splatters) and profound paper creases appear
  * at randomized coordinates, scales, and orientations across tickets.
@@ -1544,7 +1595,7 @@ export function startRouletteGame(
         const updatedTickets = state.tickets.map((t, idx) =>
           idx === chosenSafeIdx ? { ...t, isRevealed: true, scratchProgress: 1 } : t
         );
-        const nextScore = Math.max(step * 2, state.score * 2);
+        const nextScore = clampRouletteScore(Math.max(step * 2, state.score * 2));
         const nextBest = saveBestScoreIfHigher(Math.max(state.bestScore, nextScore));
         state = {
           ...state,
@@ -1564,36 +1615,51 @@ export function startRouletteGame(
 
 /**
  * Pure state transition when a user scratches and reveals a ticket at `ticketIndex`.
- * - Normal Mode (`!nocturnal_creature`):
- *   - Red (`isRed`) triggers Game Over (unless saved by `second_chance` / `perseverance` extra hearts).
- *   - Beige (`!isRed`) increases score by `streakIncrement` (+1, +2, +3, +4...).
- *   - Golden ticket (`isGolden`): opens all unrevealed Beige (`!isRed`) tickets on field and adds cumulative points.
- *   - X2 ticket (`isX2`): multiplies current score by 2.
- * - Nocturnal Creature Mode (`nocturnal_creature` ON):
- *   - Reverses game logic: Beige tickets (`!isRed`) trigger Game Over (unless saved by `second_chance` / `perseverance` extra hearts),
- *     while Red tickets (`isRed`) increase score with x2 multipliers (+2, +4, +6, +8...).
- *   - Golden ticket (`isGolden`): opens all unrevealed Red (`isRed`) tickets on field and adds cumulative points.
- *   - X2 ticket (`isX2`): multiplies current score by 2.
- * - Daily Streak (`daily_streak` unlocked at Milestone 400):
- *   - First Game in a Day grants X2 bonus points applied right before the Game Over event.
+ * - Hardcodes maximum score to `MAX_ROULETTE_SCORE` (`9999999`).
+ * - When player score in a single game reaches above `999` (`SCORE_SHUFFLE_THRESHOLD`),
+ *   shuffles tickets' places so timeslot slots appear in random positions instead of chronological order.
  */
 export function revealRouletteTicket(
   state: RouletteGameState,
   ticketIndex: number,
-  nowMs: number = Date.now()
-): { nextState: RouletteGameState; outcome: 'NONE' | 'BEIGE' | 'X2' | 'GOLDEN' | 'RED' } {
+  nowMs: number = Date.now(),
+  randomFn: () => number = Math.random
+): {
+  nextState: RouletteGameState;
+  outcome: 'NONE' | 'BEIGE' | 'X2' | 'GOLDEN' | 'RED';
+  shuffled?: boolean;
+} {
   if (state.screen !== 'PLAYING') {
-    return { nextState: state, outcome: 'NONE' };
+    return { nextState: state, outcome: 'NONE', shuffled: false };
   }
 
   const target = state.tickets[ticketIndex];
   if (!target || target.isRevealed) {
-    return { nextState: state, outcome: 'NONE' };
+    return { nextState: state, outcome: 'NONE', shuffled: false };
   }
 
   const activeUpgrades = state.purchasedUpgrades ?? getPurchasedUpgrades();
   const nocturnal = isNocturnalModeActive(activeUpgrades);
   const step = getStreakStep(activeUpgrades);
+
+  const maybeShuffleAbove999 = (
+    ticketsList: RouletteTicket[],
+    nextScoreVal: number
+  ): { tickets: RouletteTicket[]; shuffled: boolean; ticketsShuffledAbove999: boolean } => {
+    const alreadyShuffled = Boolean(state.ticketsShuffledAbove999);
+    if (nextScoreVal > SCORE_SHUFFLE_THRESHOLD && !alreadyShuffled) {
+      return {
+        tickets: shuffleTicketPlaces(ticketsList, randomFn),
+        shuffled: true,
+        ticketsShuffledAbove999: true,
+      };
+    }
+    return {
+      tickets: ticketsList,
+      shuffled: false,
+      ticketsShuffledAbove999: alreadyShuffled,
+    };
+  };
 
   // Golden ticket reveal:
   // - Normal mode: immediately scratches all Beige (!isRed) tickets on field and adds cumulative score
@@ -1606,7 +1672,7 @@ export function revealRouletteTicket(
     const k = state.streakIncrement;
     const n = unrevealedSafeCount;
     const cumulativeAdded = n * k + step * ((n * (n - 1)) / 2);
-    const nextScore = state.score + cumulativeAdded;
+    const nextScore = clampRouletteScore(state.score + cumulativeAdded);
     const nextStreakIncrement = k + n * step;
     const nextBestScore = saveBestScoreIfHigher(
       Math.max(state.bestScore ?? 0, nextScore)
@@ -1617,6 +1683,7 @@ export function revealRouletteTicket(
         ? { ...t, isRevealed: true, scratchProgress: 1 }
         : t
     );
+    const shuffleRes = maybeShuffleAbove999(allSafeRevealedTickets, nextScore);
 
     return {
       nextState: {
@@ -1624,9 +1691,11 @@ export function revealRouletteTicket(
         score: nextScore,
         bestScore: nextBestScore,
         streakIncrement: nextStreakIncrement,
-        tickets: allSafeRevealedTickets,
+        tickets: shuffleRes.tickets,
+        ticketsShuffledAbove999: shuffleRes.ticketsShuffledAbove999,
       },
       outcome: 'GOLDEN',
+      shuffled: shuffleRes.shuffled,
     };
   }
 
@@ -1635,11 +1704,12 @@ export function revealRouletteTicket(
     const updatedTickets = state.tickets.map((t, idx) =>
       idx === ticketIndex ? { ...t, isRevealed: true, scratchProgress: 1 } : t
     );
-    const nextScore = state.score * 2;
+    const nextScore = clampRouletteScore(state.score * 2);
     const nextStreakIncrement = state.streakIncrement + step;
     const nextBestScore = saveBestScoreIfHigher(
       Math.max(state.bestScore ?? 0, nextScore)
     );
+    const shuffleRes = maybeShuffleAbove999(updatedTickets, nextScore);
 
     return {
       nextState: {
@@ -1647,9 +1717,11 @@ export function revealRouletteTicket(
         score: nextScore,
         bestScore: nextBestScore,
         streakIncrement: nextStreakIncrement,
-        tickets: updatedTickets,
+        tickets: shuffleRes.tickets,
+        ticketsShuffledAbove999: shuffleRes.ticketsShuffledAbove999,
       },
       outcome: 'X2',
+      shuffled: shuffleRes.shuffled,
     };
   }
 
@@ -1669,12 +1741,13 @@ export function revealRouletteTicket(
       const updatedTickets = state.tickets.map((t, idx) =>
         idx === ticketIndex ? { ...t, isRevealed: true, scratchProgress: 1 } : t
       );
-      const nextScore = state.score + state.streakIncrement;
+      const nextScore = clampRouletteScore(state.score + state.streakIncrement);
       const nextStreakIncrement = state.streakIncrement + step;
       const nextBestScore = saveBestScoreIfHigher(
         Math.max(state.bestScore ?? 0, nextScore)
       );
       const nextUsed = usedExtraLives + 1;
+      const shuffleRes = maybeShuffleAbove999(updatedTickets, nextScore);
       return {
         nextState: {
           ...state,
@@ -1684,9 +1757,11 @@ export function revealRouletteTicket(
           extraLivesTotal: totalExtraLives,
           extraLivesUsed: nextUsed,
           streakIncrement: nextStreakIncrement,
-          tickets: updatedTickets,
+          tickets: shuffleRes.tickets,
+          ticketsShuffledAbove999: shuffleRes.ticketsShuffledAbove999,
         },
         outcome: 'BEIGE',
+        shuffled: shuffleRes.shuffled,
       };
     }
 
@@ -1695,7 +1770,7 @@ export function revealRouletteTicket(
     );
 
     // Milestone 400 reward: "Daily Streak (cost: 0)" - first Game in a Day grants X2 bonus points applied before Game Over event
-    let finalScore = state.score;
+    let finalScore = clampRouletteScore(state.score);
     let dailyStreakApplied = Boolean(state.dailyStreakApplied);
     const todayKey = formatLocalDayKey(nowMs);
     if (
@@ -1704,7 +1779,7 @@ export function revealRouletteTicket(
       getLastDailyStreakDateStr() !== todayKey
     ) {
       saveLastDailyStreakDateStr(todayKey);
-      finalScore = state.score * 2;
+      finalScore = clampRouletteScore(state.score * 2);
       dailyStreakApplied = true;
     }
 
@@ -1727,17 +1802,19 @@ export function revealRouletteTicket(
         tickets: updatedTickets,
       },
       outcome: 'RED',
+      shuffled: false,
     };
   }
 
   const updatedTickets = state.tickets.map((t, idx) =>
     idx === ticketIndex ? { ...t, isRevealed: true, scratchProgress: 1 } : t
   );
-  const nextScore = state.score + state.streakIncrement;
+  const nextScore = clampRouletteScore(state.score + state.streakIncrement);
   const nextStreakIncrement = state.streakIncrement + step;
   const nextBestScore = saveBestScoreIfHigher(
     Math.max(state.bestScore ?? 0, nextScore)
   );
+  const shuffleRes = maybeShuffleAbove999(updatedTickets, nextScore);
 
   return {
     nextState: {
@@ -1745,19 +1822,23 @@ export function revealRouletteTicket(
       score: nextScore,
       bestScore: nextBestScore,
       streakIncrement: nextStreakIncrement,
-      tickets: updatedTickets,
+      tickets: shuffleRes.tickets,
+      ticketsShuffledAbove999: shuffleRes.ticketsShuffledAbove999,
     },
     outcome: 'BEIGE',
+    shuffled: shuffleRes.shuffled,
   };
 }
 
 export function completeFadeToGameOver(state: RouletteGameState): RouletteGameState {
-  const bestScore = saveBestScoreIfHigher(Math.max(state.bestScore ?? 0, state.score));
+  const clampedScore = clampRouletteScore(state.score);
+  const bestScore = saveBestScoreIfHigher(Math.max(state.bestScore ?? 0, clampedScore));
   const powerPoints = state.powerPointsAwarded
     ? state.powerPoints ?? getSavedPowerPoints()
-    : addPowerPoints(state.score);
+    : addPowerPoints(clampedScore);
   return {
     ...state,
+    score: clampedScore,
     bestScore,
     powerPoints,
     accumulatedPowerPoints: getAccumulatedPowerPoints(),
@@ -2000,10 +2081,13 @@ export function applyGetNewTickets(
     return state;
   }
   const currentCost = Math.max(0, state.refreshCount);
-  const nextScore = Math.max(0, state.score - currentCost);
+  const nextScore = clampRouletteScore(Math.max(0, state.score - currentCost));
   const bestScore = saveBestScoreIfHigher(Math.max(state.bestScore ?? 0, state.score));
   const upgrades = state.purchasedUpgrades ?? getPurchasedUpgrades();
   const baseStep = getStreakStep(upgrades);
+  const normalized = normalizeLoadedTickets(loaded.tickets, randomFn, upgrades);
+  const shouldShuffle = nextScore > SCORE_SHUFFLE_THRESHOLD || Boolean(state.ticketsShuffledAbove999 && nextScore > SCORE_SHUFFLE_THRESHOLD);
+  const finalTickets = shouldShuffle ? shuffleTicketPlaces(normalized, randomFn) : normalized;
 
   return {
     ...state,
@@ -2014,7 +2098,8 @@ export function applyGetNewTickets(
     refreshCount: state.refreshCount + 1, // Next refresh costs 1 more (0 -> 1 -> 2 -> 3...)
     queueId: loaded.queueId,
     isOfflineRandomized: loaded.isOfflineRandomized,
-    tickets: normalizeLoadedTickets(loaded.tickets, randomFn, upgrades),
+    tickets: finalTickets,
+    ticketsShuffledAbove999: shouldShuffle,
     generationId: state.generationId + 1,
   };
 }

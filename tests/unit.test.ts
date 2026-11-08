@@ -281,7 +281,14 @@ function runUnitTestB() {
   assert.equal(donationsList[1].url, 'https://savelife.in.ua/donate/');
   assert.equal(DONATIONS_REFRESH_INTERVAL_MS, 24 * 60 * 60 * 1000, 'Donations must re-read 1 time per day (24h)');
   assert.deepEqual(DEFAULT_DONATIONS, donationsList);
-  assert.equal(translations.uk.aboutDonations, 'Donations / Благодійність і Пожертви');
+  assert.equal(translations.uk.aboutDonations, 'Charity / Благодійність і Пожертви');
+  assert.equal(translations.en.aboutDonations, 'Charity / Благодійність і Пожертви');
+  assert.ok(
+    appStringsKt.includes('Charity / Благодійність і Пожертви') &&
+      appStringsKt.includes('BLACKOUT HOURS FOR TODAY:') &&
+      mainViewTsx.includes('Blackout hours for today:'),
+    'Main Application must use "Blackout hours for today" in English and About Window must use "Charity / Благодійність і Пожертви"'
+  );
 
   // 8. Verify Time-of-Day Background Blurred Image Palettes
   assert.equal(TIME_OF_DAY_PALETTES.morning.primary, '#F4F9F9');
@@ -555,15 +562,24 @@ async function runUnitTestC_ZhytomyrRoulette() {
     SHARE_GLYPH_ACTIVE_COLOR,
     getShareCardUpgradeGlyphStates,
     convertShareDataUrlToFile,
+    MAX_ROULETTE_SCORE,
+    SCORE_SHUFFLE_THRESHOLD,
+    TICKET_SHUFFLE_ANIMATION_DURATION_MS,
+    TICKET_SHUFFLE_ROW_COUNT,
+    clampRouletteScore,
+    shuffleTicketPlaces,
   } = await import('../src/services/rouletteGame');
   const { fetchFullSchedules } = await import('../src/services/ztoeParser');
   const {
     SCRATCH_VOLUME_SCALE,
+    SCRATCH_SFX_VOLUME_MULTIPLIER,
+    SCRATCH_SFX_DURATION_MS,
     COIN_VOLUME_SCALE,
     GAMEOVER_UPGRADE_VOLUME_SCALE,
     COIN_GAMEOVER_UPGRADE_VOLUME_SCALE,
     FLICKER_BUZZ_VOLUME_SCALE,
     GAME_BLACKOUT_VOLUME_SCALE,
+    FLICKER_SFX_VOLUME_MULTIPLIER,
     ROULETTE_MUSIC_VOLUME,
     MUSIC_FADE_DURATION_MS,
     GAME_OVER_MUSIC_FADE_IN_DELAY_MS,
@@ -571,6 +587,14 @@ async function runUnitTestC_ZhytomyrRoulette() {
     START_SHOP_2_MUSIC_URL,
     START_SHOP_MUSIC_OPTIONS,
     MAIN_GAME_MUSIC_URL,
+    LIGHTBULB_SFX_URL,
+    SCRATCH_SFX_URL,
+    CASH_REGISTER_SFX_URL,
+    FLICKER_SFX_URL,
+    COIN_SFX_URL,
+    TWO_X_COIN_SFX_URL,
+    SHUFFLE_SFX_URL,
+    ROULETTE_SFX_URLS,
     isRouletteSoundEnabled,
     setRouletteSoundEnabled,
     toggleRouletteSoundEnabled,
@@ -584,6 +608,10 @@ async function runUnitTestC_ZhytomyrRoulette() {
     pickRandomStartShopMusicUrl,
     randomizeStartShopMusicTrack,
     getCurrentStartShopMusicUrl,
+    getRemainingScratchSoundDelayMs,
+    playScratchSound,
+    playCoinSound,
+    play2XCoinSound,
   } = await import('../src/services/rouletteAudio');
 
   resetAllRouletteProgress();
@@ -597,6 +625,7 @@ async function runUnitTestC_ZhytomyrRoulette() {
 
   // Verify sound volume adjustments: Scratching 50% lower from 1.15 (0.575), Coin -25% (0.75), GameOver/UpgradePurchase -20% less (0.60), Flicker & 10s Game Blackout lamp breaking sound at 10% (0.10), Music at 15% (0.15) with fade-in/fade-out and 2s Game Over delay
   assert.equal(SCRATCH_VOLUME_SCALE, 0.575, 'Scratching sound volume must be 50% lower from 1.15 (0.575)');
+  assert.equal(SCRATCH_SFX_VOLUME_MULTIPLIER, 0.9, 'scratch.mp3 volume multiplier must be 10% down (0.9)');
   assert.equal(COIN_VOLUME_SCALE, 0.75, 'Coin sound volume must be 25% lower (0.75)');
   assert.equal(
     GAMEOVER_UPGRADE_VOLUME_SCALE,
@@ -606,6 +635,7 @@ async function runUnitTestC_ZhytomyrRoulette() {
   assert.equal(COIN_GAMEOVER_UPGRADE_VOLUME_SCALE, 0.75);
   assert.equal(FLICKER_BUZZ_VOLUME_SCALE, 0.1, 'Screen flickering lamp breaking sound volume must be 10% (0.10)');
   assert.equal(GAME_BLACKOUT_VOLUME_SCALE, 0.1, '10-second Game Blackout lamp breaking sound volume must be 10% (0.10)');
+  assert.equal(FLICKER_SFX_VOLUME_MULTIPLIER, 1.3, 'flicker.mp3 volume multiplier must be 30% louder (1.3)');
   assert.equal(ROULETTE_MUSIC_VOLUME, 0.15, 'Background music must play at 15% volume (0.15)');
   assert.ok(MUSIC_FADE_DURATION_MS >= 500, 'Background music must use fade-in and fade-out duration');
   assert.equal(
@@ -649,6 +679,34 @@ async function runUnitTestC_ZhytomyrRoulette() {
       'android/app/src/main/res/raw/audio_main_game.mp3',
       path.join('public', MAIN_GAME_MUSIC_URL.replace(/^\//, '')),
     ],
+    [
+      'android/app/src/main/res/raw/sfx_lightbulb.mp3',
+      path.join('public', LIGHTBULB_SFX_URL.replace(/^\//, '')),
+    ],
+    [
+      'android/app/src/main/res/raw/sfx_scratch.mp3',
+      path.join('public', SCRATCH_SFX_URL.replace(/^\//, '')),
+    ],
+    [
+      'android/app/src/main/res/raw/sfx_cash_register.mp3',
+      path.join('public', CASH_REGISTER_SFX_URL.replace(/^\//, '')),
+    ],
+    [
+      'android/app/src/main/res/raw/sfx_flicker.mp3',
+      path.join('public', FLICKER_SFX_URL.replace(/^\//, '')),
+    ],
+    [
+      'android/app/src/main/res/raw/sfx_coin.mp3',
+      path.join('public', COIN_SFX_URL.replace(/^\//, '')),
+    ],
+    [
+      'android/app/src/main/res/raw/sfx_2x_coin.mp3',
+      path.join('public', TWO_X_COIN_SFX_URL.replace(/^\//, '')),
+    ],
+    [
+      'android/app/src/main/res/raw/sfx_shuffle.mp3',
+      path.join('public', SHUFFLE_SFX_URL.replace(/^\//, '')),
+    ],
   ];
   for (const [rawRel, pubRel] of audioSyncPairs) {
     const rawAbs = path.join(ROOT_DIR, rawRel);
@@ -683,6 +741,40 @@ async function runUnitTestC_ZhytomyrRoulette() {
     fs.existsSync(path.join(ROOT_DIR, 'android/app/src/main/res/raw/audio_main_game.mp3')),
     'Android raw resource audio_main_game.mp3 must exist'
   );
+  // Verify all 7 replaced MP3 sound effect files exist in both Web public/assets/aistudio and Android res/raw
+  for (const sfxUrl of Object.values(ROULETTE_SFX_URLS)) {
+    assert.ok(
+      fs.existsSync(path.join(ROOT_DIR, 'public', sfxUrl.replace(/^\//, ''))),
+      `Replaced SFX MP3 file ${sfxUrl} must exist in /public/`
+    );
+  }
+  for (const rawFile of [
+    'sfx_lightbulb.mp3',
+    'sfx_scratch.mp3',
+    'sfx_cash_register.mp3',
+    'sfx_flicker.mp3',
+    'sfx_coin.mp3',
+    'sfx_2x_coin.mp3',
+    'sfx_shuffle.mp3',
+  ]) {
+    assert.ok(
+      fs.existsSync(path.join(ROOT_DIR, 'android/app/src/main/res/raw', rawFile)),
+      `Android raw SFX resource ${rawFile} must exist`
+    );
+  }
+  const webCashRegSize = fs.statSync(path.join(ROOT_DIR, 'public', CASH_REGISTER_SFX_URL.replace(/^\//, ''))).size;
+  const androidCashRegSize = fs.statSync(path.join(ROOT_DIR, 'android/app/src/main/res/raw/sfx_cash_register.mp3')).size;
+  assert.ok(
+    webCashRegSize > 5000 && webCashRegSize < 16000 && webCashRegSize === androidCashRegSize,
+    'First half of cash_register.mp3 must be trimmed in both Web and Android assets'
+  );
+  const webScratchSize = fs.statSync(path.join(ROOT_DIR, 'public', SCRATCH_SFX_URL.replace(/^\//, ''))).size;
+  const androidScratchSize = fs.statSync(path.join(ROOT_DIR, 'android/app/src/main/res/raw/sfx_scratch.mp3')).size;
+  assert.ok(
+    webScratchSize > 4000 && webScratchSize < 12000 && webScratchSize === androidScratchSize,
+    'scratch.mp3 must be trimmed to leave only first 30% and 10% volume down in both Web and Android assets'
+  );
+  assert.equal(typeof play2XCoinSound, 'function', 'play2XCoinSound must be exported for X2 and Gold tickets');
 
   // Verify background music track assignment per screen, randomization on START, & Sound On/Off switch muting both music and sounds
   assert.equal(getTargetMusicTrackForScreen('START', true), 'START_SHOP_GAMEOVER');
@@ -1868,22 +1960,150 @@ async function runUnitTestC_ZhytomyrRoulette() {
     rouletteAudioTs.includes('playCardShuffleSound') &&
       rouletteAudioTs.includes('playScratchSound') &&
       rouletteAudioTs.includes('playCoinSound') &&
+      rouletteAudioTs.includes('play2XCoinSound') &&
       rouletteAudioTs.includes('playCashRegisterSound') &&
       rouletteAudioTs.includes('playElectricBuzzSound') &&
       rouletteAudioTs.includes('playFlickerBuzzSound') &&
       rouletteAudioTs.includes('playGameBlackoutSound') &&
-      rouletteAudioTs.includes('playBulbExplosionSound(FLICKER_BUZZ_VOLUME_SCALE)') &&
-      rouletteAudioTs.includes('playBulbExplosionSound(GAME_BLACKOUT_VOLUME_SCALE)') &&
+      rouletteAudioTs.includes('SCRATCH_SFX_VOLUME_MULTIPLIER = 0.9') &&
+      rouletteAudioTs.includes('FLICKER_SFX_VOLUME_MULTIPLIER = 1.3') &&
       rouletteModalTsx.includes('MultiFrameExplodingBulbAnimation') &&
+      rouletteModalTsx.includes('play2XCoinSound') &&
+      rouletteModalTsx.includes('touch-pan-y') &&
+      rouletteModalTsx.includes('pointerStartRef') &&
       rouletteScreenKt.includes('playCardShuffleSound') &&
       rouletteScreenKt.includes('playCashRegisterSound') &&
-      rouletteScreenKt.includes('playBulbExplosionSound(FLICKER_BUZZ_VOLUME_SCALE)') &&
-      rouletteScreenKt.includes('playBulbExplosionSound(GAME_BLACKOUT_VOLUME_SCALE)') &&
+      rouletteScreenKt.includes('play2XCoinSound') &&
+      rouletteScreenKt.includes('detectHorizontalDragGestures') &&
+      rouletteScreenKt.includes('R.raw.sfx_lightbulb') &&
+      rouletteScreenKt.includes('R.raw.sfx_scratch') &&
+      rouletteScreenKt.includes('R.raw.sfx_cash_register') &&
+      rouletteScreenKt.includes('R.raw.sfx_flicker') &&
+      rouletteScreenKt.includes('R.raw.sfx_coin') &&
+      rouletteScreenKt.includes('R.raw.sfx_2x_coin') &&
+      rouletteScreenKt.includes('R.raw.sfx_shuffle') &&
+      rouletteScreenKt.includes('SCRATCH_SFX_VOLUME_MULTIPLIER = 0.9') &&
+      rouletteScreenKt.includes('FLICKER_SFX_VOLUME_MULTIPLIER = 1.3') &&
       rouletteScreenKt.includes('MultiFrameExplodingBulbCanvas'),
-    'Both Web and Android roulette implementations must include card shuffle sound, scratch sound, cash register sound, 10% volume lamp-breaking sound for flicker and 10s game blackout, reveal sounds, and 2.4s+ multi-frame exploding bulb animation'
+    'Both Web and Android roulette implementations must include all 7 MP3 SFX replacements, play2XCoinSound on X2/Gold tickets, improved scroll vs scratch gesture handling, and 2.4s+ multi-frame exploding bulb animation'
   );
 
-  console.log('Unit Test C PASSED: Житомирська Рулетка mechanics, 1s Game Over delay, Milestone Progress Bar, Daily Streak, Perseverance, Extra Lives Hearts, Power Shop, Депозит Потужність+, AntiCheat, Nocturnal Creature, Share Card Glyphs, 10s Game Blackout, and UI verified.');
+  // 9. Verify Hardcoded Maximum Score 9999999, Ticket Shuffle Above Score 999, Wider Red Ticket Reveal Area, and 1.2.X APK Upgrade Compatibility
+  assert.equal(MAX_ROULETTE_SCORE, 9_999_999, 'Maximum score in game must be hardcoded to 9999999');
+  assert.equal(clampRouletteScore(12_345_678), 9_999_999, 'clampRouletteScore must cap scores above 9999999 to 9999999');
+  assert.equal(saveBestScoreIfHigher(25_000_000), 9_999_999, 'saveBestScoreIfHigher must cap bestScore at 9999999');
+  resetSavedBestScore(0);
+
+  let maxScoreGameState = startRouletteGame(
+    { queueId: '1.1', isOfflineRandomized: false, tickets: controlledTickets },
+    1,
+    () => 0.5
+  );
+  maxScoreGameState = { ...maxScoreGameState, score: 6_000_000 };
+  const cappedX2Reveal = revealRouletteTicket(maxScoreGameState, 10); // X2 ticket at index 10 -> 6,000,000 * 2 capped to 9,999,999
+  assert.equal(cappedX2Reveal.nextState.score, 9_999_999, 'Single game score must never exceed 9999999');
+  assert.equal(cappedX2Reveal.nextState.bestScore, 9_999_999, 'Best score must never exceed 9999999');
+
+  // Verify shuffling ticket places when player score in a single game reaches above 999
+  assert.equal(SCORE_SHUFFLE_THRESHOLD, 999, 'Ticket shuffle threshold must be 999 (score > 999)');
+  let preShuffleState = startRouletteGame(
+    { queueId: '1.1', isOfflineRandomized: false, tickets: controlledTickets },
+    2,
+    () => 0.5
+  );
+  preShuffleState = { ...preShuffleState, score: 995, streakIncrement: 10, ticketsShuffledAbove999: false };
+  const shuffleReveal = revealRouletteTicket(preShuffleState, 0); // 995 + 10 = 1005 > 999
+  assert.equal(shuffleReveal.nextState.score, 1005);
+  assert.equal(shuffleReveal.shuffled, true, 'Reaching score > 999 must trigger ticket shuffle (shuffled: true)');
+  assert.equal(shuffleReveal.nextState.ticketsShuffledAbove999, true);
+  assert.notDeepEqual(
+    shuffleReveal.nextState.tickets.map((t) => t.slotLabel),
+    labels,
+    'Tickets must be shuffled into random non-chronological places when score reaches above 999'
+  );
+  const directShuffled = shuffleTicketPlaces(controlledTickets);
+  assert.equal(directShuffled.length, 48);
+  assert.notDeepEqual(
+    directShuffled.map((t) => t.slotLabel),
+    labels,
+    'shuffleTicketPlaces must place timeslot tickets in random places instead of chronological order'
+  );
+
+  // Verify wider red ticket reveal area around center so border scratching of red tint reveals the ticket
+  assert.equal(
+    doesScratchExposeRedCenterOutline(85, 20, 85, 20, 168, 74, 7.5),
+    true,
+    'Scratching the outer border of the red tint around center must expose and reveal the red ticket'
+  );
+  assert.equal(
+    doesScratchExposeRedCenterOutline(4, 4, 10, 8, 168, 74, 7.5),
+    false,
+    'Scratching the extreme corner far from the red tint must not prematurely reveal the red ticket'
+  );
+
+  // Verify 1.2.X APK upgrade compatibility in build.gradle.kts and SettingsRepository.kt
+  const buildGradleKt = fs.readFileSync(path.join(ROOT_DIR, 'android/app/build.gradle.kts'), 'utf-8');
+  const settingsRepoKt = fs.readFileSync(
+    path.join(ROOT_DIR, 'android/app/src/main/java/ua/blackout/prewarning/data/repository/SettingsRepository.kt'),
+    'utf-8'
+  );
+  assert.ok(
+    buildGradleKt.includes('enableV1Signing = true') &&
+      buildGradleKt.includes('enableV2Signing = true') &&
+      buildGradleKt.includes('enableV3Signing = true') &&
+      buildGradleKt.includes('embeddedKeystoreBase64') &&
+      fs.existsSync(path.join(ROOT_DIR, 'android/app/keystore/debug.keystore')),
+    'build.gradle.kts must enforce the canonical v1.2.0 signing keystore and v1/v2/v3 signing so upgrading from 1.2.X never fails with INSTALL_FAILED_UPDATE_INCOMPATIBLE'
+  );
+  assert.ok(
+    settingsRepoKt.includes('readSafeInt') &&
+      settingsRepoKt.includes('readSafeLong') &&
+      settingsRepoKt.includes('readSafeBoolean') &&
+      settingsRepoKt.includes('readSafeString'),
+    'SettingsRepository.kt must use type-safe SharedPreferences readers so upgrading from older 1.2.X versions never throws ClassCastException'
+  );
+
+  // Verify coin.mp3 waits for scratch.mp3 to finish playing
+  assert.equal(SCRATCH_SFX_DURATION_MS, 336, 'scratch.mp3 duration constant must be 336ms');
+  setRouletteSoundEnabled(true);
+  setRouletteAppInForeground(true);
+  playScratchSound(true);
+  const remainingWaitAfterScratch = getRemainingScratchSoundDelayMs();
+  assert.ok(
+    remainingWaitAfterScratch > 0 && remainingWaitAfterScratch <= SCRATCH_SFX_DURATION_MS,
+    'getRemainingScratchSoundDelayMs must return positive remaining time while scratch.mp3 is playing so coin.mp3 waits for scratch.mp3 to finish'
+  );
+  playCoinSound();
+  assert.equal(
+    getRemainingScratchSoundDelayMs(Date.now() + SCRATCH_SFX_DURATION_MS + 50),
+    0,
+    'getRemainingScratchSoundDelayMs must return 0 once scratch.mp3 has finished playing'
+  );
+
+  // Verify 2-second (2000ms) ticket shuffle animation from top border on game start, refresh, and after 999 score, and Sound/Music switch placement
+  assert.equal(
+    TICKET_SHUFFLE_ANIMATION_DURATION_MS,
+    2000,
+    'Ticket shuffle animation duration on game start, refresh, and after >999 score must be 2000ms (2 seconds)'
+  );
+  assert.equal(TICKET_SHUFFLE_ROW_COUNT, 24, 'Ticket shuffle animation must deal 24 rows from top to bottom');
+  assert.ok(
+    rouletteModalTsx.includes('TICKET_SHUFFLE_ANIMATION_DURATION_MS') &&
+      rouletteModalTsx.includes('if (shuffled) {\n          runTopToBottomDealAnimation();') &&
+      rouletteModalTsx.includes('translateY(-${(rowIndex + 1) * 84}px)') &&
+      rouletteModalTsx.includes('w-full flex items-start justify-between shrink-0 mt-1') &&
+      rouletteModalTsx.includes('flex flex-col items-start gap-3 pl-0.5') &&
+      rouletteScreenKt.includes('TICKET_SHUFFLE_ANIMATION_DURATION_MS = 2000L') &&
+      rouletteScreenKt.includes('if (result.shuffled) {\n            triggerDealAnimation()') &&
+      rouletteScreenKt.includes('topBorderOffsetPx') &&
+      rouletteScreenKt.includes('verticalAlignment = Alignment.Top') &&
+      rouletteScreenKt.includes('verticalArrangement = Arrangement.spacedBy(12.dp)') &&
+      rouletteScreenKt.includes('getRemainingScratchSoundDelayMs'),
+    'Both Web and Android must use the 2-second top-border ticket shuffle animation, align Sound switch at same height as Share button with double vertical spacing between Sound and Music switches, and wait for scratch.mp3 before playing coin.mp3'
+  );
+
+  resetAllRouletteProgress();
+  console.log('Unit Test C PASSED: Житомирська Рулетка mechanics, 1s Game Over delay, Milestone Progress Bar, Daily Streak, Perseverance, Extra Lives Hearts, Power Shop, Депозит Потужність+, AntiCheat, Nocturnal Creature, Share Card Glyphs, 10s Game Blackout, Max Score 9999999, Score > 999 Shuffle, 2s Top-to-Bottom Deal Animation, Coin-after-Scratch Audio Sequencing, Wider Red Center Reveal, 7 MP3 SFX, and UI verified.');
 }
 
 async function main() {
