@@ -14,6 +14,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import ua.blackout.prewarning.notification.NotificationHelper
 import ua.blackout.prewarning.ui.screens.BlackoutAppNavigation
+import ua.blackout.prewarning.ui.screens.RouletteSoundEngine
 import ua.blackout.prewarning.ui.theme.ZTBlackoutTheme
 
 class MainActivity : ComponentActivity() {
@@ -23,11 +24,26 @@ class MainActivity : ComponentActivity() {
             // Notification permission granted or denied
         }
 
+    override fun onResume() {
+        super.onResume()
+        RouletteSoundEngine.setAppInForeground(true, this)
+    }
+
+    override fun onPause() {
+        RouletteSoundEngine.setAppInForeground(false, this)
+        super.onPause()
+    }
+
+    override fun onStop() {
+        RouletteSoundEngine.setAppInForeground(false, this)
+        super.onStop()
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
         // Initialize Notification Channels
-        NotificationHelper.createNotificationChannel(this)
+        NotificationHelper.createNotificationChannels(this)
 
         // Request runtime permission for Android 13+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {

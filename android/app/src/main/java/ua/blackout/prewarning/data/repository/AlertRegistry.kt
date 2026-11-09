@@ -4,8 +4,9 @@ import android.content.Context
 import android.content.SharedPreferences
 
 class AlertRegistry(context: Context) {
+    private val appContext: Context = context.applicationContext
     private val prefs: SharedPreferences =
-        context.getSharedPreferences("zt_notified_blackouts_v1", Context.MODE_PRIVATE)
+        appContext.getSharedPreferences("zt_notified_blackouts_v1", Context.MODE_PRIVATE)
 
     /**
      * Checks if this specific blackout slot has already been notified.
@@ -16,25 +17,52 @@ class AlertRegistry(context: Context) {
     }
 
     /**
-     * Marks the slot as notified with timestamp
+     * Marks the slot as notified with timestamp and prunes entries older than 7 days
+     * to prevent unbounded SharedPreferences memory growth.
      */
     fun markNotified(slotId: String) {
-        prefs.edit()
+        val now = System.currentTimeMillis()
+        val cutoff = now - 7L * 24L * 60L * 60L * 1000L
+        val editor = prefs.edit()
+        for ((key, value) in prefs.all) {
+            if (key.startsWith("ts_") && value is Long && value < cutoff) {
+                val oldSlotId = key.removePrefix("ts_")
+                editor.remove(key)
+                editor.remove("notified_$oldSlotId")
+            }
+        }
+        editor
             .putBoolean("notified_$slotId", true)
-            .putLong("ts_$slotId", System.currentTimeMillis())
+            .putLong("ts_$slotId", now)
             .apply()
     }
 
     /**
-     * Resets notified flags for future slots on time changes
+     * When system clock is adjusted backward on mobile, clears notified flags for slots
+     * whose alert time is now in the future again or whose recorded notification timestamp
+     * is ahead of current wall-clock time.
      */
-    fun resetFutureSlotsOnTimeChange(currentTimeMillis: Long, futureSlotIds: Set<String>) {
+    fun resetFutureSlotsOnTimeChange(nowMs: Long, futureBlockIds: Set<String>) {
         val editor = prefs.edit()
-        for (slotId in futureSlotIds) {
-            editor.remove("notified_$slotId")
-            editor.remove("ts_$slotId")
+        var modified = false
+        for ((key, value) in prefs.all) {
+            if (key.startsWith("ts_") && value is Long && value > nowMs) {
+                val slotId = key.removePrefix("ts_")
+                editor.remove(key)
+                editor.remove("notified_$slotId")
+                modified = true
+            }
         }
-        editor.apply()
+        for (blockId in futureBlockIds) {
+            if (prefs.contains("notified_$blockId") || prefs.contains("ts_$blockId")) {
+                editor.remove("notified_$blockId")
+                editor.remove("ts_$blockId")
+                modified = true
+            }
+        }
+        if (modified) {
+            editor.apply()
+        }
     }
 
     /**

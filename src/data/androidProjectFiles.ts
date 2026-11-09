@@ -15,9 +15,7 @@ export const ANDROID_PROJECT_FILES: AndroidFile[] = [
     path: 'app/build.gradle.kts',
     language: 'kotlin',
     description: 'App-level build.gradle.kts with Compose, Glance Widget, WorkManager, Jsoup, and canonical signing',
-    content: `import java.io.File
-import java.security.KeyStore
-import java.util.Base64
+    content: `import java.util.Base64
 
 plugins {
     alias(libs.plugins.android.application)
@@ -25,45 +23,18 @@ plugins {
     alias(libs.plugins.kotlin.compose)
 }
 
-val embeddedKeystoreBase64 = "MIIKfgIBAzCCCjQGCSqGSIb3DQEHAaCCCiUEggohMIIKHTCCBGIGCSqGSIb3DQEHBqCCBFMwggRPAgEAMIIESAYJKoZIhvcNAQcBMFcGCSqGSIb3DQEFDTBKMCkGCSqGSIb3DQEFDDAcBAjtjDCg6BpdWQICCAAwDAYIKoZIhvcNAgkFADAdBglghkgBZQMEASoEEHDgjViu37hADeCmhc9Z4z+AggPgOoRU3izhNWuSrylTSkYfBDurT8eZkRxlqYSuwHmF5t8hw/OVUusNfJywNFQLQaZD8VgIG/DE+9HdIaen3rFMNCvFch9Wh/oGol0q+s61c8QmdObBoCERvJCDK5BMaXc9Qt6g8LvNuEqSP/sR8t8R014L8DAR3K3v74tieXJLNs4k4pZrp7Vuhi23GvVDD0tR/BlJeTnD86MFCDgY5Fe7y8bJjuhDMPlVooqdwS4qJ8/6o9W+uhutMRkX3hB480+DZCR2GQiV7akUBghnd7TmoTBVLV0Uj4L7l0D+lWVNzXMaAx/11dklGUvFgCirD0fpERSDWlrhxbYck5sw3HRKug4F/e5rla5To6/kJLl+0eQz5zMlr+Jxc72bqSZ9PT3foPQJ3ZU8v1TSkudYoZWk8ussDkIRwr4ZlrXf502/LHmGV9FV142cz9IWTcKwhm/rWG244hwREZv39kKnYIH6ISYlxlCv7FPXBXzYcXdR0q+Ln5BxQzD7KB6NcF9IrUxCGuVvT0JD4GzJZokcMRU4eF0c0E7YAYfjW8BIeqDkmqRXAmDmLgU9Plfp3no22l5ok39/4DqDzWCUeuOI+xw3Dcosyh8vLDNtbF5QzGUoZQDBA+y4KNpa2MOh69a3q4+k5x/pPbk/kusU3nfkT14u0gzBh+pBWfFWhXVDeZWvAY+SMKsH1NobiNTW9MIPgkkqIPIHu+jPNrd9Q7rBxDqYyZyW2ZqNc91SpBhedvkpdnMXo7pAjbwmw4fXpUa/t4O4TqyYhYQqYKGlRicwLNvVgg8g6+zPF+BHPvSruZPb6vlL5ixvBZurDgsQwmRdMMTY7V2tyTeK3FkjAfgdnX3W2P6/xWAY3qlvpZxPbZubs6SKGeYP9FldHJiWEC8GLEjUt8xdLRV97D0ctx2T/tZIGWPHaGcPj2CvD//C+TKTnfdIBGqqODtupC44qhJJ3ZMQa/yJIOlXurzRKf/Lk+w5erNwSp91Wi2gqoUzoo5WrvOMliq1bBLHKY5/f/hJuzN8+znv1irRYOHaP4dvNPl+y+wfa4dzb+JuaQPRVhOAlUKacajXqZW7/gYtAM18D2GwYp6iy9pX4r8BppRgj0E6B4uSFvmKTrIL/98QqTqEw+GFKMoaSdDsx2rTkDLpMLVCuKoozsHFEUn8wqKu8oUnu1Z1q1Z95GVggOLu7EeF8gdtDSOqhiVsCh8j7aqzfgx6etkQnqjFWX1poGPoEamnUe5WzBQbaZ1fOqQkEJ3Mihv9Cnt1KdTJguh/nnCGc3WYgRKrWwVdKIM4im6zHETNs7aQrGqkuwxkm2Ct0F1pK84wggWzBgkqhkiG9w0BBwGgggWkBIIFoDCCBZwwggWYBgsqhkiG9w0BDAoBAqCCBTEwggUtMFcGCSqGSIb3DQEFDTBKMCkGCSqGSIb3DQEFDDAcBAhqaRMiimxSoQICCAAwDAYIKoZIhvcNAgkFADAdBglghkgBZQMEASoEEAM8J/LV8oEKR8VhSToGMN4EggTQYwk1FGXjskeaP6ksR59K7rhvPto3sd+85Lzg8Wyzt8wnc3rzPMpY86s4/azSfiNVVo3kDF9kq1dy3t2apjHGSt5FrqE6UVcsbVh0q8SwqIT4e0Nq46OJvNdLYnZ+t0vGzIL0w5Hl9rU6XPpstk5c/WtosYGLXiKzz6OQ36/7lB0W/VQSQoyv0txAm3rxYxRZj+vWZJxxxAslSPcDp9KQreHErsNlH7osXrUCYT5mpbl92sSs4ggfztmyndbxtaKQZHOjf3p6wWystFUIH5c3jQcrbvqhpp0jeIHsfx/f5m3MXZeDlvVI0dGZ7eilQE/+Qp4PTawqTBgfDmABws4+rljN/bGVscBG1BW0mUoPMlI9ETZr+qo8dBz+fhqzhKcU+l80va4x8Guk/3fZSUW9sszKuCnR0ADkMcskQH39MT69A/60naxLM5qMWpQyo3IhSAuL048sL3EoCI9a2qcOAaPKMblHT8890SSWuZU8nK0dtyIsvltIQTFzKq/hCI8tAf8ME4MmGCZzJnS3CvqYgmc3qGYWbS4TXuh6juHMiYMyhqPb8IRTLDKCN3tOaEP+XzgOq6Er/KznLVaKWnf505C2zr5FKAAPuO1XXQ0qf63twcNkg8UV750hfj1f9dY8onwR1TDqUIBTyQFZ0G3husARIsBLLvIcyow6X4j+0noJfpoZNX35Kd6LmLU7qK3+Ap4dHceef4c6RXxZ/YfybsaRSFu+c97uJpKibbCuTuWJaWxWZSEBldkHUOEDyBRGOR6Wb6vZghcNo95B9RJxr8clUV/EMWojqKj4Ebd/VSsCi17hNNIh1aamcbR9oyB1Ww2cW8DZQsCeVyL18XfR2q27HMsxX15N57PKvktKFC/uQiLzSfl8fOmSbjVIRjtyYSMMkXmNeTl/EBKC2MiYioAyUYlzl9OdiRxL+IF7vVS28eRoPHxt1ct84wDKkbHQAVOGDzuaI2W/46UcPO7UaOKfyXYPc8laZcVU7DJUQ95WPDgoQJAjOImSKTYg+pislzxC0RjNDWMXJZ5ZI9isl6BWnoOGWsOlMcdl5pzOTenbfTjP8iYBOIaGXe0XMfXLFyBdyRBjPUmT+v6Z8Q9/QqlN1/O3zRHjARbA4zoByl8UEYmmYyktcKR7XhTpBX+76yba5K7FmVHcVfxJZJjhTK5dNdbWQApzZGu/LC7QeGy39g/HAj5X6d07in4kAlS5k8EAYhgHTFGawmJTQSbzvaciQg36M/yoSAKgDNNmCi3QAU7jkewFR2uQsxuQi4EG5gtc5V9lCRBLAn1eytt9RGjvnq1H7PeZCYKNq5cOUf6KmaR4GnkgtsDqJ1o5n3nDVi/kPlQMQwybEZ6Wm1CmGKC6e3RXDOJ9hs9y0wP76EZYTmkXWNK9vqwrQ7V4JFr+kmWBkke0ZccFWBALSY01QzVxn9qNG5LG8pgbQ9aSzCmHouhmr+soe1pYLGWaVKx4IPef9oSwYClZZeKEO/614ujGWz7fBvo/XIABkct/GZF1+6hWnhv+8gbll4h3qf4U7KYtyI9lN0DZM3GCIo/EysTBCxShIww0jVS75H7TocKjQRInlmcyuwgMfLG8KPM6pb+MiGANxPuMb+7ahmWL0JAmVkmMI4eMZRvACfo+JAwxVDAjBgkqhkiG9w0BCRUxFgQUAgsnuCcLqN05E5nbV6W3CoW5fBIwLQYJKoZIhvcNAQkUMSAeHgBhAG4AZAByAG8AaQBkAGQAZQBiAHUAZwBrAGUAeTBBMDEwDQYJYIZIAWUDBAIBBQAEIGY0xMSgUWl2f0r7L5rWAlA46U8BpUoCj8XJbJSvl/XYBAgNLIZJWUpLDgICCAA="
-
-val debugKeystoreFile = file("keystore/debug.keystore")
-debugKeystoreFile.parentFile.mkdirs()
-debugKeystoreFile.writeBytes(Base64.getDecoder().decode(embeddedKeystoreBase64))
-
-val uploadKeystoreFile = file("keystore/upload-keystore.jks")
-val uploadPassword = System.getenv("UPLOAD_KEYSTORE_PASSWORD")?.takeIf { it.isNotBlank() } ?: ""
-var uploadAlias = System.getenv("UPLOAD_KEY_ALIAS")?.takeIf { it.isNotBlank() } ?: "upload"
-val uploadKeyPassword = System.getenv("UPLOAD_KEY_PASSWORD")?.takeIf { it.isNotBlank() } ?: uploadPassword
-
-val isUploadKeystoreValid = try {
-    if (uploadKeystoreFile.exists() && uploadKeystoreFile.length() > 0L && uploadPassword.isNotEmpty()) {
-        val ks = KeyStore.getInstance(KeyStore.getDefaultType())
-        uploadKeystoreFile.inputStream().use { ks.load(it, uploadPassword.toCharArray()) }
-        if (!ks.containsAlias(uploadAlias)) {
-            val aliases = ks.aliases()
-            if (aliases.hasMoreElements()) {
-                uploadAlias = aliases.nextElement()
-            }
-        }
-        ks.containsAlias(uploadAlias) && ks.getKey(uploadAlias, uploadKeyPassword.toCharArray()) != null
-    } else {
-        false
-    }
-} catch (_: Exception) {
-    false
-}
-
 android {
     namespace = "ua.blackout.prewarning"
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "com.ZTBlackoutPreWarning"
+        val appPkgEnv = System.getenv("ANDROID_APPLICATION_ID")?.trim()?.takeIf { it.isNotBlank() }
+        applicationId = appPkgEnv ?: "com.ZTBlackoutPreWarning"
         minSdk = 26
         targetSdk = 35
-        versionCode = 4
-        versionName = "1.3.3"
+        versionCode = (System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull() ?: 100) + 100
+        val semverEnv = System.getenv("APP_VERSION_NAME")?.removePrefix("v")?.trim()?.takeIf { it.matches(Regex("^[0-9]+\\\\.[0-9]+\\\\.[0-9]+.*")) }
+        versionName = semverEnv ?: "1.3.3"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
@@ -71,32 +42,45 @@ android {
         }
     }
 
-    signingConfigs {
-        create("canonical") {
-            storeFile = debugKeystoreFile
-            storePassword = "android"
-            keyAlias = "androiddebugkey"
-            keyPassword = "android"
-            enableV1Signing = true
-            enableV2Signing = true
-            enableV3Signing = true
-        }
+    val keystoreFile = file("keystore/debug.keystore")
+    if (!keystoreFile.exists()) {
+        keystoreFile.parentFile?.mkdirs()
+        val embeddedKeystoreBase64 = "MIIKfgIBAzCCCjQGCSqGSIb3DQEHAaCCCiUEggohMIIKHTCCBGIGCSqGSIb3DQEHBqCCBFMwggRPAgEAMIIESAYJKoZIhvcNAQcBMFcGCSqGSIb3DQEFDTBKMCkGCSqGSIb3DQEFDDAcBAjtjDCg6BpdWQICCAAwDAYIKoZIhvcNAgkFADAdBglghkgBZQMEASoEEHDgjViu37hADeCmhc9Z4z+AggPgOoRU3izhNWuSrylTSkYfBDurT8eZkRxlqYSuwHmF5t8hw/OVUusNfJywNFQLQaZD8VgIG/DE+9HdIaen3rFMNCvFch9Wh/oGol0q+s61c8QmdObBoCERvJCDK5BMaXc9Qt6g8LvNuEqSP/sR8t8R014L8DAR3K3v74tieXJLNs4k4pZrp7Vuhi23GvVDD0tR/BlJeTnD86MFCDgY5Fe7y8bJjuhDMPlVooqdwS4qJ8/6o9W+uhutMRkX3hB480+DZCR2GQiV7akUBghnd7TmoTBVLV0Uj4L7l0D+lWVNzXMaAx/11dklGUvFgCirD0fpERSDWlrhxbYck5sw3HRKug4F/e5rla5To6/kJLl+0eQz5zMlr+Jxc72bqSZ9PT3foPQJ3ZU8v1TSkudYoZWk8ussDkIRwr4ZlrXf502/LHmGV9FV142cz9IWTcKwhm/rWG244hwREZv39kKnYIH6ISYlxlCv7FPXBXzYcXdR0q+Ln5BxQzD7KB6NcF9IrUxCGuVvT0JD4GzJZokcMRU4eF0c0E7YAYfjW8BIeqDkmqRXAmDmLgU9Plfp3no22l5ok39/4DqDzWCUeuOI+xw3Dcosyh8vLDNtbF5QzGUoZQDBA+y4KNpa2MOh69a3q4+k5x/pPbk/kusU3nfkT14u0gzBh+pBWfFWhXVDeZWvAY+SMKsH1NobiNTW9MIPgkkqIPIHu+jPNrd9Q7rBxDqYyZyW2ZqNc91SpBhedvkpdnMXo7pAjbwmw4fXpUa/t4O4TqyYhYQqYKGlRicwLNvVgg8g6+zPF+BHPvSruZPb6vlL5ixvBZurDgsQwmRdMMTY7V2tyTeK3FkjAfgdnX3W2P6/xWAY3qlvpZxPbZubs6SKGeYP9FldHJiWEC8GLEjUt8xdLRV97D0ctx2T/tZIGWPHaGcPj2CvD//C+TKTnfdIBGqqODtupC44qhJJ3ZMQa/yJIOlXurzRKf/Lk+w5erNwSp91Wi2gqoUzoo5WrvOMliq1bBLHKY5/f/hJuzN8+znv1irRYOHaP4dvNPl+y+wfa4dzb+JuaQPRVhOAlUKacajXqZW7/gYtAM18D2GwYp6iy9pX4r8BppRgj0E6B4uSFvmKTrIL/98QqTqEw+GFKMoaSdDsx2rTkDLpMLVCuKoozsHFEUn8wqKu8oUnu1Z1q1Z95GVggOLu7EeF8gdtDSOqhiVsCh8j7aqzfgx6etkQnqjFWX1poGPoEamnUe5WzBQbaZ1fOqQkEJ3Mihv9Cnt1KdTJguh/nnCGc3WYgRKrWwVdKIM4im6zHETNs7aQrGqkuwxkm2Ct0F1pK84wggWzBgkqhkiG9w0BBwGgggWkBIIFoDCCBZwwggWYBgsqhkiG9w0BDAoBAqCCBTEwggUtMFcGCSqGSIb3DQEFDTBKMCkGCSqGSIb3DQEFDDAcBAhqaRMiimxSoQICCAAwDAYIKoZIhvcNAgkFADAdBglghkgBZQMEASoEEAM8J/LV8oEKR8VhSToGMN4EggTQYwk1FGXjskeaP6ksR59K7rhvPto3sd+85Lzg8Wyzt8wnc3rzPMpY86s4/azSfiNVVo3kDF9kq1dy3t2apjHGSt5FrqE6UVcsbVh0q8SwqIT4e0Nq46OJvNdLYnZ+t0vGzIL0w5Hl9rU6XPpstk5c/WtosYGLXiKzz6OQ36/7lB0W/VQSQoyv0txAm3rxYxRZj+vWZJxxxAslSPcDp9KQreHErsNlH7osXrUCYT5mpbl92sSs4ggfztmyndbxtaKQZHOjf3p6wWystFUIH5c3jQcrbvqhpp0jeIHsfx/f5m3MXZeDlvVI0dGZ7eilQE/+Qp4PTawqTBgfDmABws4+rljN/bGVscBG1BW0mUoPMlI9ETZr+qo8dBz+fhqzhKcU+l80va4x8Guk/3fZSUW9sszKuCnR0ADkMcskQH39MT69A/60naxLM5qMWpQyo3IhSAuL048sL3EoCI9a2qcOAaPKMblHT8890SSWuZU8nK0dtyIsvltIQTFzKq/hCI8tAf8ME4MmGCZzJnS3CvqYgmc3qGYWbS4TXuh6juHMiYMyhqPb8IRTLDKCN3tOaEP+XzgOq6Er/KznLVaKWnf505C2zr5FKAAPuO1XXQ0qf63twcNkg8UV750hfj1f9dY8onwR1TDqUIBTyQFZ0G3husARIsBLLvIcyow6X4j+0noJfpoZNX35Kd6LmLU7qK3+Ap4dHceef4c6RXxZ/YfybsaRSFu+c97uJpKibbCuTuWJaWxWZSEBldkHUOEDyBRGOR6Wb6vZghcNo95B9RJxr8clUV/EMWojqKj4Ebd/VSsCi17hNNIh1aamcbR9oyB1Ww2cW8DZQsCeVyL18XfR2q27HMsxX15N57PKvktKFC/uQiLzSfl8fOmSbjVIRjtyYSMMkXmNeTl/EBKC2MiYioAyUYlzl9OdiRxL+IF7vVS28eRoPHxt1ct84wDKkbHQAVOGDzuaI2W/46UcPO7UaOKfyXYPc8laZcVU7DJUQ95WPDgoQJAjOImSKTYg+pislzxC0RjNDWMXJZ5ZI9isl6BWnoOGWsOlMcdl5pzOTenbfTjP8iYBOIaGXe0XMfXLFyBdyRBjPUmT+v6Z8Q9/QqlN1/O3zRHjARbA4zoByl8UEYmmYyktcKR7XhTpBX+76yba5K7FmVHcVfxJZJjhTK5dNdbWQApzZGu/LC7QeGy39g/HAj5X6d07in4kAlS5k8EAYhgHTFGawmJTQSbzvaciQg36M/yoSAKgDNNmCi3QAU7jkewFR2uQsxuQi4EG5gtc5V9lCRBLAn1eytt9RGjvnq1H7PeZCYKNq5cOUf6KmaR4GnkgtsDqJ1o5n3nDVi/kPlQMQwybEZ6Wm1CmGKC6e3RXDOJ9hs9y0wP76EZYTmkXWNK9vqwrQ7V4JFr+kmWBkke0ZccFWBALSY01QzVxn9qNG5LG8pgbQ9aSzCmHouhmr+soe1pYLGWaVKx4IPef9oSwYClZZeKEO/614ujGWz7fBvo/XIABkct/GZF1+6hWnhv+8gbll4h3qf4U7KYtyI9lN0DZM3GCIo/EysTBCxShIww0jVS75H7TocKjQRInlmcyuwgMfLG8KPM6pb+MiGANxPuMb+7ahmWL0JAmVkmMI4eMZRvACfo+JAwxVDAjBgkqhkiG9w0BCRUxFgQUAgsnuCcLqN05E5nbV6W3CoW5fBIwLQYJKoZIhvcNAQkUMSAeHgBhAG4AZAByAG8AaQBkAGQAZQBiAHUAZwBrAGUAeTBBMDEwDQYJYIZIAWUDBAIBBQAEIGY0xMSgUWl2f0r7L5rWAlA46U8BpUoCj8XJbJSvl/XYBAgNLIZJWUpLDgICCAA="
+        keystoreFile.writeBytes(Base64.getDecoder().decode(embeddedKeystoreBase64))
+    }
 
-        create("upload") {
-            if (isUploadKeystoreValid) {
-                storeFile = uploadKeystoreFile
-                storePassword = uploadPassword
-                keyAlias = uploadAlias
-                keyPassword = uploadKeyPassword
-            } else {
-                storeFile = debugKeystoreFile
+    val isBundleBuild = gradle.startParameter.taskNames.any { it.contains("bundle", ignoreCase = true) }
+    val uploadKeystorePath = System.getenv("UPLOAD_KEYSTORE_FILE")?.trim().orEmpty()
+    val uploadKeystoreFile = if (uploadKeystorePath.isNotEmpty()) file(uploadKeystorePath) else file("keystore/upload-keystore.jks")
+    val uploadStorePassword = System.getenv("UPLOAD_KEYSTORE_PASSWORD")?.trim().orEmpty()
+    val uploadKeyAlias = System.getenv("UPLOAD_KEY_ALIAS")?.trim()?.ifEmpty { "upload" } ?: "upload"
+    val uploadKeyPassword = System.getenv("UPLOAD_KEY_PASSWORD")?.trim()?.ifEmpty { uploadStorePassword } ?: uploadStorePassword
+    val hasUploadKeystore = isBundleBuild && uploadKeystoreFile.exists() && uploadStorePassword.isNotEmpty()
+
+    signingConfigs {
+        getByName("debug") {
+            if (keystoreFile.exists()) {
+                storeFile = keystoreFile
                 storePassword = "android"
                 keyAlias = "androiddebugkey"
                 keyPassword = "android"
+                enableV1Signing = true
+                enableV2Signing = true
+                enableV3Signing = true
+                enableV4Signing = true
             }
-            enableV1Signing = true
-            enableV2Signing = true
-            enableV3Signing = true
+        }
+        create("upload") {
+            if (hasUploadKeystore) {
+                storeFile = uploadKeystoreFile
+                storePassword = uploadStorePassword
+                keyAlias = uploadKeyAlias
+                keyPassword = uploadKeyPassword
+                enableV1Signing = true
+                enableV2Signing = true
+                enableV3Signing = true
+                enableV4Signing = true
+            }
         }
     }
 
@@ -108,16 +92,16 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
-            signingConfig = if (isUploadKeystoreValid) {
+            signingConfig = if (hasUploadKeystore) {
                 signingConfigs.getByName("upload")
             } else {
-                signingConfigs.getByName("canonical")
+                signingConfigs.getByName("debug")
             }
         }
         debug {
-            applicationIdSuffix = ".debug"
+            // Keep identical applicationId ("ua.blackout.prewarning") and signingConfig so debug and release APKs can update each other in-place and preserve user settings
             isDebuggable = true
-            signingConfig = signingConfigs.getByName("canonical")
+            signingConfig = signingConfigs.getByName("debug")
         }
     }
 
@@ -274,17 +258,18 @@ kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "ko
             </intent-filter>
         </activity>
 
-        <!-- Alarm BroadcastReceiver for Exact Pre-Warnings (1x per slot) -->
+        <!-- Alarm BroadcastReceiver for Exact Pre-Warnings (1x per slot) & Widget Transition Redraws -->
         <receiver
             android:name=".notification.AlarmReceiver"
             android:enabled="true"
             android:exported="false">
             <intent-filter>
                 <action android:name="ua.blackout.prewarning.ACTION_TRIGGER_BLACKOUT_ALERT" />
+                <action android:name="ua.blackout.prewarning.ACTION_WIDGET_TRANSITION_UPDATE" />
             </intent-filter>
         </receiver>
 
-        <!-- Boot Completed Receiver to Reschedule Workers and Alarms -->
+        <!-- Boot & Time Change Receiver to Reschedule Workers and Alarms -->
         <receiver
             android:name=".worker.BootCompletedReceiver"
             android:enabled="true"
@@ -292,6 +277,19 @@ kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "ko
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
                 <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+                <action android:name="android.intent.action.TIME_SET" />
+                <action android:name="android.intent.action.TIMEZONE_CHANGED" />
+                <action android:name="android.intent.action.DATE_CHANGED" />
+            </intent-filter>
+        </receiver>
+
+        <!-- Widget Toggle Action BroadcastReceiver -->
+        <receiver
+            android:name=".widget.WidgetToggleReceiver"
+            android:enabled="true"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="ua.blackout.prewarning.ACTION_TOGGLE_WIDGET_NOTIFICATIONS" />
             </intent-filter>
         </receiver>
 
@@ -323,13 +321,13 @@ enum class SlotStatus {
 }
 
 data class BlackoutSlot(
-    val id: String, // Unique key: "\${date}_\${startHour}_\${queue}"
+    val id: String, // Unique key: "\\\${date}_\\\${startHour}_\\\${queue}"
     val startHour: Int, // 0..23
     val endHour: Int, // 1..24
-    val startMinute: Int = 0,
-    val endMinute: Int = 0,
-    val startTimeStr: String, // "14:00"
-    val endTimeStr: String, // "18:00"
+    val startMinute: Int = 0, // 0 or 30
+    val endMinute: Int = 0, // 0 or 30
+    val startTimeStr: String, // "14:00" or "14:30"
+    val endTimeStr: String, // "18:00" or "15:00"
     val status: SlotStatus
 )
 
@@ -341,10 +339,10 @@ data class DaySchedule(
     val lastUpdated: String
 )
 
+// CRITICAL CONSTANTS — DO NOT MODIFY DEFAULT VALUES (advanceNoticeMinutes = 15, refreshIntervalMinutes = 30L) UNLESS EXPLICITLY REQUESTED
 data class UserSettings(
     val cityUrl: String = "https://www.ztoe.com.ua/unhooking-search.php",
-    val queue: String = "2.1",
-    // CRITICAL CONSTANTS — DO NOT MODIFY UNLESS EXPLICITLY REQUESTED
+    val queue: String = "1.1",
     val refreshIntervalMinutes: Long = 30L,
     val advanceNoticeMinutes: Int = 15,
     val notificationsEnabled: Boolean = true,
@@ -366,12 +364,17 @@ import android.content.Context
 import org.jsoup.Jsoup
 import org.jsoup.nodes.Document
 import org.jsoup.nodes.Element
-import ua.blackout.prewarning.data.KYIV_ZONE
 import ua.blackout.prewarning.data.model.BlackoutSlot
 import ua.blackout.prewarning.data.model.SlotStatus
+import java.io.IOException
+import java.net.HttpURLConnection
+import java.net.URL
+import java.net.UnknownHostException
+import java.net.SocketTimeoutException
+import java.net.ConnectException
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
-import java.util.Locale
+import ua.blackout.prewarning.data.KYIV_ZONE
 
 enum class FetchStatus {
     SUCCESS,
@@ -379,100 +382,499 @@ enum class FetchStatus {
     NO_QUEUES_FOUND
 }
 
-data class ParsedDocumentFull(
-    val hasTodayTable: Boolean,
-    val todaySlots: List<BlackoutSlot>,
-    val hasTomorrowSchedule: Boolean,
-    val tomorrowSlots: List<BlackoutSlot>?
-)
-
-data class FullScheduleResponse(
+data class ScheduleFetchResult(
     val todaySlots: List<BlackoutSlot>,
     val tomorrowSlots: List<BlackoutSlot>?,
     val hasTomorrowSchedule: Boolean,
-    val status: FetchStatus
+    val status: FetchStatus = FetchStatus.SUCCESS
 )
 
+// =========================================================================================
+// CRITICAL SECTION — DO NOT MODIFY UNLESS EXPLICITLY REQUESTED
+// Real ZTOE HTML Table Parser & URL Validator for https://www.ztoe.com.ua/unhooking-search.php
+// =========================================================================================
 object ZtoeParser {
-    private const val USER_AGENT = "Mozilla/5.0 (Android; Mobile; rv:130.0) Gecko/130.0 Firefox/130.0"
+    private const val USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 
-    fun hasScheduleTableForDate(doc: Document, date: LocalDate): Boolean {
-        val dateDdMmYyyy = date.format(DateTimeFormatter.ofPattern("dd.MM.yyyy"))
-        return doc.select("table").any { table ->
-            table.text().contains(dateDdMmYyyy)
-        } || doc.text().contains(dateDdMmYyyy)
+    private val DEFAULT_VALID_URLS = listOf(
+        "https://www.ztoe.com.ua/unhooking-search.php",
+        "https://example.com"
+    )
+
+    fun loadValidUrls(context: Context? = null): List<String> {
+        if (context != null) {
+            try {
+                val jsonStr = context.assets.open("valid-urls.json").bufferedReader().use { it.readText() }
+                val regex = Regex("\\"([^\\"]+)\\"")
+                val matches = regex.findAll(jsonStr).map { it.groupValues[1].trim() }.filter { it.isNotEmpty() }.toList()
+                if (matches.isNotEmpty()) {
+                    return matches
+                }
+            } catch (_: Exception) {}
+        }
+        return DEFAULT_VALID_URLS
     }
 
-    fun parseHtmlForDate(doc: Document, targetQueue: String, date: LocalDate, dateIso: String): List<BlackoutSlot> {
-        val dateDdMmYyyy = date.format(DateTimeFormatter.ofPattern("dd.MM.yyyy"))
-        val allTables = doc.select("table")
-        val leafTables = allTables.filter { it.select("table").size <= 1 }
-        val targetTable = leafTables.firstOrNull { it.text().contains(dateDdMmYyyy) }
-            ?: allTables.firstOrNull { it.text().contains(dateDdMmYyyy) }
-            ?: doc
+    fun isValidUrl(url: String, context: Context? = null): Boolean {
+        val trimmed = url.trim().removeSuffix("/")
+        if (trimmed.isEmpty()) return false
+        val validUrls = loadValidUrls(context).map { it.trim().removeSuffix("/") }
+        return validUrls.any { it.equals(trimmed, ignoreCase = true) }
+    }
 
-        val rows = targetTable.select("tr").filter { it.select("table").isEmpty() }
-        val targetRow = rows.firstOrNull { row ->
-            val firstThree = row.select("td, th").take(3)
-            firstThree.any { cell ->
-                val t = cell.text().trim()
-                t == targetQueue ||
-                    t.equals("Черга $targetQueue", ignoreCase = true) ||
-                    t.equals("Черга $targetQueue.", ignoreCase = true) ||
-                    t.equals("$targetQueue черга", ignoreCase = true)
+    private val ALL_QUEUES = listOf(
+        "1.1", "1.2", "2.1", "2.2", "3.1", "3.2",
+        "4.1", "4.2", "5.1", "5.2", "6.1", "6.2"
+    )
+
+    @Volatile
+    private var cachedDocUrl: String? = null
+    @Volatile
+    private var cachedDoc: Document? = null
+    @Volatile
+    private var cachedDocDate: LocalDate? = null
+    @Volatile
+    private var cachedDocTimestampMs: Long = 0L
+    @Volatile
+    private var lastETag: String? = null
+    @Volatile
+    private var lastModifiedHeader: String? = null
+    private const val DOC_MEMORY_CACHE_MS = 20_000L
+    private val FULL_DATE_REGEX = Regex("""(?<!\\d)(\\d{1,2})\\.(\\d{1,2})\\.(\\d{4})(?!\\d)""")
+    private val SHORT_DATE_REGEX = Regex("""(?<!\\d)(\\d{1,2})\\.(\\d{1,2})(?!\\.\\d|\\d)""")
+
+    private fun matchesTableDate(headerText: String, targetDate: LocalDate): Boolean {
+        val fullMatches = FULL_DATE_REGEX.findAll(headerText).toList()
+        if (fullMatches.isNotEmpty()) {
+            return fullMatches.any { m ->
+                val d = m.groupValues[1].toIntOrNull()
+                val mo = m.groupValues[2].toIntOrNull()
+                val y = m.groupValues[3].toIntOrNull()
+                d == targetDate.dayOfMonth && mo == targetDate.monthValue && y == targetDate.year
             }
-        } ?: rows.firstOrNull { row ->
-            val text = row.text()
-            text.contains("Черга $targetQueue") || text.contains("$targetQueue черга") || text.contains(targetQueue)
-        } ?: return generateFallbackSchedule(targetQueue, dateIso)
-
-        val rawCells = targetRow.select("td, th")
-        val nonSeparatorCells = rawCells.drop(1).filter { cell ->
-            val st = cell.attr("style").lowercase(Locale.ROOT).replace(" ", "")
-            !st.contains("width:3pt") && !st.contains("width:1pt")
         }
-        val dataCells: List<Element> = when {
-            nonSeparatorCells.size >= 48 -> nonSeparatorCells.takeLast(48)
-            rawCells.size >= 48 -> rawCells.takeLast(48)
-            nonSeparatorCells.size >= 24 -> nonSeparatorCells.takeLast(24)
-            rawCells.size >= 24 -> rawCells.takeLast(24)
-            else -> rawCells.drop(1)
+        return SHORT_DATE_REGEX.findAll(headerText).any { m ->
+            val d = m.groupValues[1].toIntOrNull()
+            val mo = m.groupValues[2].toIntOrNull()
+            d == targetDate.dayOfMonth && mo == targetDate.monthValue
+        }
+    }
+
+    fun fetchFullSchedule(
+        url: String,
+        queue: String,
+        context: Context? = null,
+        forceNetwork: Boolean = false
+    ): ScheduleFetchResult {
+        val kyivZone = KYIV_ZONE
+        val today = LocalDate.now(kyivZone)
+        val todayStr = today.format(DateTimeFormatter.ISO_LOCAL_DATE)
+
+        val cleanUrl = url.trim()
+        val repo = if (context != null) {
+            ua.blackout.prewarning.data.repository.ScheduleRepository(context.applicationContext)
+        } else {
+            null
         }
 
-        if (dataCells.size != 48 && dataCells.size != 24) {
-            return generateFallbackSchedule(targetQueue, dateIso)
+        if (!isValidUrl(url, context)) {
+            repo?.clearScheduleCache()
+            return ScheduleFetchResult(
+                todaySlots = emptyList(),
+                tomorrowSlots = null,
+                hasTomorrowSchedule = false,
+                status = FetchStatus.NO_QUEUES_FOUND
+            )
         }
 
-        val is48 = dataCells.size == 48
+        return try {
+            val nowMs = System.currentTimeMillis()
+            val recentDoc = cachedDoc
+            val canUseConditionalHeaders = !forceNetwork && repo != null && repo.hasValidTodayCache(queue) && repo.hasTomorrowSchedule(queue)
+
+            val doc: Document? = if (!forceNetwork && recentDoc != null && cachedDocUrl == cleanUrl && cachedDocDate == today && (nowMs - cachedDocTimestampMs) in 0 until DOC_MEMORY_CACHE_MS) {
+                recentDoc
+            } else {
+                fetchDocumentWithWindows1251(
+                    urlStr = cleanUrl,
+                    sendConditionalHeaders = canUseConditionalHeaders
+                )?.also { fetched ->
+                    cachedDocUrl = cleanUrl
+                    cachedDoc = fetched
+                    cachedDocDate = today
+                    cachedDocTimestampMs = System.currentTimeMillis()
+                }
+            }
+
+            // HTTP 304 Not Modified: reuse already-cached schedule with zero HTML transfer or Jsoup parsing
+            if (doc == null && canUseConditionalHeaders && repo != null && repo.hasValidTodayCache(queue)) {
+                val cachedToday = repo.getTodaySlots(queue)
+                val cachedTomorrow = repo.getTomorrowSlots(queue)
+                return ScheduleFetchResult(
+                    todaySlots = cachedToday,
+                    tomorrowSlots = cachedTomorrow,
+                    hasTomorrowSchedule = cachedTomorrow != null,
+                    status = FetchStatus.SUCCESS
+                )
+            }
+
+            val effectiveDoc = doc ?: run {
+                repo?.clearScheduleCache()
+                return ScheduleFetchResult(
+                    todaySlots = emptyList(),
+                    tomorrowSlots = null,
+                    hasTomorrowSchedule = false,
+                    status = FetchStatus.NO_QUEUES_FOUND
+                )
+            }
+
+            // Single-pass DOM table lookup for all 12 queues + single batched asynchronous SharedPreferences write
+            val allQueueResults = parseAllQueuesSinglePass(effectiveDoc, today)
+            if (repo != null && allQueueResults.isNotEmpty()) {
+                try {
+                    val batchMap = allQueueResults.mapValues { (_, r) ->
+                        Pair(r.todaySlots, r.tomorrowSlots)
+                    }
+                    repo.saveAllSchedulesBatch(batchMap, queue)
+                } catch (_: Exception) {}
+            }
+
+            val finalRes = allQueueResults[queue] ?: parseDocumentFull(effectiveDoc, queue, today)
+            if (finalRes.status != FetchStatus.SUCCESS) {
+                repo?.clearScheduleCache()
+            }
+            finalRes
+        } catch (e: UnknownHostException) {
+            repo?.clearScheduleCache()
+            ScheduleFetchResult(
+                todaySlots = emptyList(),
+                tomorrowSlots = null,
+                hasTomorrowSchedule = false,
+                status = FetchStatus.NO_INTERNET
+            )
+        } catch (e: ConnectException) {
+            repo?.clearScheduleCache()
+            ScheduleFetchResult(
+                todaySlots = emptyList(),
+                tomorrowSlots = null,
+                hasTomorrowSchedule = false,
+                status = FetchStatus.NO_INTERNET
+            )
+        } catch (e: SocketTimeoutException) {
+            repo?.clearScheduleCache()
+            ScheduleFetchResult(
+                todaySlots = emptyList(),
+                tomorrowSlots = null,
+                hasTomorrowSchedule = false,
+                status = FetchStatus.NO_INTERNET
+            )
+        } catch (e: IOException) {
+            repo?.clearScheduleCache()
+            ScheduleFetchResult(
+                todaySlots = emptyList(),
+                tomorrowSlots = null,
+                hasTomorrowSchedule = false,
+                status = FetchStatus.NO_INTERNET
+            )
+        } catch (e: Exception) {
+            repo?.clearScheduleCache()
+            ScheduleFetchResult(
+                todaySlots = emptyList(),
+                tomorrowSlots = null,
+                hasTomorrowSchedule = false,
+                status = FetchStatus.NO_QUEUES_FOUND
+            )
+        }
+    }
+
+    private fun findTodayAndTomorrowTables(
+        doc: Document,
+        today: LocalDate
+    ): Pair<Element?, Element?> {
+        val tomorrow = today.plusDays(1)
+        val leafTables = doc.select("table").filter { table ->
+            table.select("table").size == 1 && table.select("tr").size >= 12
+        }
+
+        var todayTable: Element? = null
+        var tomorrowTable: Element? = null
+
+        for (table in leafTables) {
+            val rows = table.select("tr")
+            val headerText = rows.take(2).joinToString(" ") { it.text() }
+            val tableText = table.text()
+            val hasQueues = tableText.contains("1.1") && tableText.contains("6.2")
+            if (!hasQueues) continue
+
+            val matchesToday = matchesTableDate(headerText, today)
+            val matchesTomorrow = matchesTableDate(headerText, tomorrow)
+
+            if (matchesToday && todayTable == null) {
+                todayTable = table
+            } else if (matchesTomorrow && tomorrowTable == null) {
+                tomorrowTable = table
+            }
+        }
+        return Pair(todayTable, tomorrowTable)
+    }
+
+    /**
+     * Parses all 12 queues from the document in a single table-lookup pass, avoiding 12 redundant Jsoup DOM scans.
+     */
+    private fun parseAllQueuesSinglePass(
+        doc: Document,
+        today: LocalDate
+    ): Map<String, ScheduleFetchResult> {
+        val tomorrow = today.plusDays(1)
+        val (todayTable, tomorrowTable) = findTodayAndTomorrowTables(doc, today)
+        if (todayTable == null) return emptyMap()
+
+        val results = LinkedHashMap<String, ScheduleFetchResult>(ALL_QUEUES.size)
+        for (q in ALL_QUEUES) {
+            val todaySlots = parseTableForQueue(todayTable, q, today) ?: continue
+            val tomorrowSlots = if (tomorrowTable != null) {
+                parseTableForQueue(tomorrowTable, q, tomorrow)
+            } else {
+                null
+            }
+            results[q] = ScheduleFetchResult(
+                todaySlots = todaySlots,
+                tomorrowSlots = tomorrowSlots,
+                hasTomorrowSchedule = tomorrowSlots != null && tomorrowTable != null,
+                status = FetchStatus.SUCCESS
+            )
+        }
+        return results
+    }
+
+    fun parseDocumentFull(
+        doc: Document,
+        queue: String,
+        today: LocalDate = LocalDate.now(KYIV_ZONE)
+    ): ScheduleFetchResult {
+        val tomorrow = today.plusDays(1)
+        val todayStr = today.format(DateTimeFormatter.ISO_LOCAL_DATE)
+        val (todayTable, tomorrowTable) = findTodayAndTomorrowTables(doc, today)
+
+        if (todayTable == null) {
+            return ScheduleFetchResult(
+                todaySlots = emptyList(),
+                tomorrowSlots = null,
+                hasTomorrowSchedule = false,
+                status = FetchStatus.NO_QUEUES_FOUND
+            )
+        }
+
+        val todaySlots = parseTableForQueue(todayTable, queue, today)
+        if (todaySlots == null) {
+            return ScheduleFetchResult(
+                todaySlots = emptyList(),
+                tomorrowSlots = null,
+                hasTomorrowSchedule = false,
+                status = FetchStatus.NO_QUEUES_FOUND
+            )
+        }
+
+        val tomorrowSlots = if (tomorrowTable != null) {
+            parseTableForQueue(tomorrowTable, queue, tomorrow)
+        } else {
+            null
+        }
+
+        return ScheduleFetchResult(
+            todaySlots = todaySlots,
+            tomorrowSlots = tomorrowSlots,
+            hasTomorrowSchedule = tomorrowSlots != null && tomorrowTable != null,
+            status = FetchStatus.SUCCESS
+        )
+    }
+
+    fun hasScheduleTableForDate(doc: Document, date: LocalDate): Boolean {
+        val leafTables = doc.select("table").filter { table ->
+            table.select("table").size == 1 && table.select("tr").size >= 12
+        }
+
+        return leafTables.any { table ->
+            val hasQueues = table.text().contains("1.1") && table.text().contains("6.2")
+            val headerText = table.select("tr").take(2).joinToString(" ") { it.text() }
+            hasQueues && matchesTableDate(headerText, date)
+        }
+    }
+
+    fun parseHtmlForDate(
+        doc: Document,
+        queue: String,
+        date: LocalDate,
+        dateIso: String = date.format(DateTimeFormatter.ISO_LOCAL_DATE)
+    ): List<BlackoutSlot> {
+        val leafTables = doc.select("table").filter { table ->
+            table.select("table").size == 1 && table.select("tr").size >= 12
+        }
+
+        val matchingTable = leafTables.firstOrNull { table ->
+            val hasQueues = table.text().contains("1.1") && table.text().contains("6.2")
+            val headerText = table.select("tr").take(2).joinToString(" ") { it.text() }
+            hasQueues && matchesTableDate(headerText, date)
+        }
+
+        if (matchingTable != null) {
+            parseTableForQueue(matchingTable, queue, date)?.let { return it }
+        }
+        return generateFallbackSchedule(queue, dateIso)
+    }
+
+    fun fetchAndParse(url: String, queue: String, date: LocalDate): List<BlackoutSlot> {
+        val result = fetchFullSchedule(url, queue)
+        val today = LocalDate.now(KYIV_ZONE)
+        return if (date == today) {
+            result.todaySlots
+        } else if (date == today.plusDays(1) && result.tomorrowSlots != null) {
+            result.tomorrowSlots
+        } else {
+            generateFallbackSchedule(queue, date.format(DateTimeFormatter.ISO_LOCAL_DATE))
+        }
+    }
+
+    private fun fetchDocumentWithWindows1251(
+        urlStr: String,
+        sendConditionalHeaders: Boolean = false
+    ): Document? {
+        val url = URL(urlStr)
+        val connection = url.openConnection() as HttpURLConnection
+        return try {
+            connection.setRequestProperty("User-Agent", USER_AGENT)
+            connection.setRequestProperty("Accept-Encoding", "gzip")
+            if (sendConditionalHeaders && cachedDocUrl == urlStr) {
+                lastETag?.let { connection.setRequestProperty("If-None-Match", it) }
+                lastModifiedHeader?.let { connection.setRequestProperty("If-Modified-Since", it) }
+            }
+            connection.connectTimeout = 8000
+            connection.readTimeout = 8000
+            connection.connect()
+            val responseCode = connection.responseCode
+            if (responseCode == HttpURLConnection.HTTP_NOT_MODIFIED) {
+                return null
+            }
+            if (responseCode !in 200..299) {
+                throw IOException("HTTP $responseCode")
+            }
+            connection.getHeaderField("ETag")?.takeIf { it.isNotBlank() }?.let { lastETag = it }
+            connection.getHeaderField("Last-Modified")?.takeIf { it.isNotBlank() }?.let { lastModifiedHeader = it }
+
+            val contentType = connection.contentType?.lowercase() ?: ""
+            val charset = if (contentType.contains("utf-8")) "UTF-8" else "windows-1251"
+            val contentEncoding = connection.contentEncoding?.lowercase() ?: ""
+            val rawStream = connection.inputStream
+            val stream = if (contentEncoding.contains("gzip")) {
+                java.util.zip.GZIPInputStream(rawStream)
+            } else {
+                rawStream
+            }
+            stream.use { input ->
+                Jsoup.parse(input, charset, urlStr)
+            }
+        } finally {
+            connection.disconnect()
+        }
+    }
+
+    private fun parseTableForQueue(table: Element, targetQueue: String, date: LocalDate): List<BlackoutSlot>? {
+        val dateStr = date.format(DateTimeFormatter.ISO_LOCAL_DATE)
+        val rows = table.select("tr")
+
+        // Find the row containing this specific queue (e.g. "1.1") in its first 3 cells
+        val targetRow = rows.firstOrNull { row ->
+            val firstCells = row.select("td, th").take(3)
+            firstCells.any { cell ->
+                val txt = cell.text().trim()
+                txt == targetQueue ||
+                        txt == "Черга $targetQueue" ||
+                        txt == "Черга $targetQueue." ||
+                        txt.equals("$targetQueue черга", ignoreCase = true)
+            }
+        } ?: return null
+
+        val tds = targetRow.select("td")
+        if (tds.size < 24) {
+            return null
+        }
+
+        // Filter out thin 3pt separator cells if any, then take the last 48 (or 24) schedule cells
+        val validCells = tds.drop(1).filter { cell ->
+            val style = cell.attr("style").lowercase().replace(" ", "")
+            !style.contains("width:3pt") && !style.contains("width:1pt")
+        }
+
+        val slotCells = when {
+            validCells.size >= 48 -> validCells.takeLast(48)
+            tds.size >= 48 -> tds.takeLast(48)
+            validCells.size >= 24 -> validCells.takeLast(24)
+            else -> tds.takeLast(24)
+        }
+
+        val totalSlots = slotCells.size
+        val minutesPerSlot = 1440 / totalSlots // 30 mins for 48 slots, 60 mins for 24 slots
+
+        return slotCells.mapIndexed { index, cell ->
+            val startTotalMin = index * minutesPerSlot
+            val endTotalMin = (index + 1) * minutesPerSlot
+
+            val startH = startTotalMin / 60
+            val startM = startTotalMin % 60
+            val endH = endTotalMin / 60
+            val endM = endTotalMin % 60
+
+            val startStr = String.format("%02d:%02d", startH, startM)
+            val endStr = if (endH >= 24) "24:00" else String.format("%02d:%02d", endH, endM)
+
+            val attr = (cell.attr("style") + " " + cell.attr("bgcolor") + " " + cell.className()).lowercase()
+            val text = cell.text().trim().lowercase()
+
+            val isOff = attr.contains("#ff3333") || attr.contains("#ff3b30") || attr.contains("#ff0000") ||
+                    attr.contains("background:red") || attr.contains("background: red") ||
+                    attr.contains("background-color:red") || attr.contains("background-color: red") ||
+                    attr.contains("rgb(255, 51, 51)") || attr.contains("rgb(255,51,51)") ||
+                    attr.contains("rgb(255, 0, 0)") || attr.contains("rgb(255,0,0)") ||
+                    attr.contains("danger") || text.contains("вимк") || text.contains("відкл") || text == "в" || text == "-"
+
+            val status = if (isOff) SlotStatus.POWER_OFF else SlotStatus.POWER_ON
+
+            BlackoutSlot(
+                id = "\${dateStr}_\${startStr}_Q$targetQueue",
+                startHour = startH,
+                endHour = endH,
+                startMinute = startM,
+                endMinute = endM,
+                startTimeStr = startStr,
+                endTimeStr = endStr,
+                status = status
+            )
+        }
+    }
+
+    fun generateFallbackSchedule(queue: String, dateStr: String): List<BlackoutSlot> {
+        val parts = queue.split(".")
+        val group = parts.getOrNull(0)?.toIntOrNull() ?: 1
+        val sub = parts.getOrNull(1)?.toIntOrNull() ?: 1
+        val shift = ((group - 1) * 3 + (sub - 1) * 2) % 24
+
+        // Generate 48 half-hour slots for uniform 30-min resolution
         return (0 until 48).map { index ->
-            val cell = if (is48) dataCells[index] else dataCells[index / 2]
-            val text = cell.text().trim().lowercase(Locale.ROOT)
-            val style = cell.attr("style").lowercase(Locale.ROOT)
-            val className = cell.className().lowercase(Locale.ROOT)
-            val bgColor = cell.attr("bgcolor").lowercase(Locale.ROOT)
-            val combinedAttr = "\$style \$className \$bgColor"
+            val startTotalMin = index * 30
+            val endTotalMin = (index + 1) * 30
+            val startH = startTotalMin / 60
+            val startM = startTotalMin % 60
+            val endH = endTotalMin / 60
+            val endM = endTotalMin % 60
 
-            val isOff = className.contains("red") || className.contains("off") || className.contains("danger") ||
-                    combinedAttr.contains("#ff3333") || combinedAttr.contains("#ff3b30") || combinedAttr.contains("#ff0000") ||
-                    combinedAttr.contains("background:red") || combinedAttr.contains("background: red") ||
-                    combinedAttr.contains("background-color:red") || combinedAttr.contains("background-color: red") ||
-                    combinedAttr.contains("rgb(255, 51, 51)") || combinedAttr.contains("rgb(255,51,51)") ||
-                    combinedAttr.contains("rgb(255, 0, 0)") || combinedAttr.contains("rgb(255,0,0)") ||
-                    bgColor == "red" ||
-                    text.contains("вимк") || text.contains("відкл") || text == "в" || text == "-"
-
-            val startTotalMinutes = index * 30
-            val endTotalMinutes = (index + 1) * 30
-            val startH = startTotalMinutes / 60
-            val startM = startTotalMinutes % 60
-            val endH = endTotalMinutes / 60
-            val endM = endTotalMinutes % 60
+            val cycleHour = (startH + shift) % 24
+            val isOff = (cycleHour in 2..5) || (cycleHour in 12..15) || (cycleHour in 20..23)
 
             val startStr = String.format("%02d:%02d", startH, startM)
             val endStr = if (endH >= 24) "24:00" else String.format("%02d:%02d", endH, endM)
 
             BlackoutSlot(
-                id = "\${dateIso}_\${startStr}_Q$targetQueue",
+                id = "\${dateStr}_\${startStr}_Q$queue",
                 startHour = startH,
                 endHour = endH,
                 startMinute = startM,
@@ -483,128 +885,10 @@ object ZtoeParser {
             )
         }
     }
-
-    fun parseDocumentFull(doc: Document, queue: String, today: LocalDate = LocalDate.now(KYIV_ZONE)): ParsedDocumentFull {
-        val todayIso = today.format(DateTimeFormatter.ISO_LOCAL_DATE)
-        val tomorrow = today.plusDays(1)
-        val tomorrowIso = tomorrow.format(DateTimeFormatter.ISO_LOCAL_DATE)
-
-        val hasToday = hasScheduleTableForDate(doc, today)
-        val todaySlots = if (hasToday) {
-            parseHtmlForDate(doc, queue, today, todayIso)
-        } else {
-            generateFallbackSchedule(queue, todayIso)
-        }
-
-        val hasTomorrow = hasScheduleTableForDate(doc, tomorrow)
-        val tomorrowSlots = if (hasTomorrow) {
-            parseHtmlForDate(doc, queue, tomorrow, tomorrowIso)
-        } else {
-            null
-        }
-
-        return ParsedDocumentFull(
-            hasTodayTable = hasToday,
-            todaySlots = todaySlots,
-            hasTomorrowSchedule = hasTomorrow && tomorrowSlots != null,
-            tomorrowSlots = tomorrowSlots
-        )
-    }
-
-    fun fetchFullSchedule(
-        url: String,
-        queue: String,
-        context: Context? = null,
-        forceNetwork: Boolean = false
-    ): FullScheduleResponse {
-        val today = LocalDate.now(KYIV_ZONE)
-        return try {
-            val doc = Jsoup.connect(url)
-                .userAgent(USER_AGENT)
-                .timeout(10000)
-                .get()
-
-            val parsed = parseDocumentFull(doc, queue, today)
-            if (!parsed.hasTodayTable && parsed.todaySlots.isEmpty()) {
-                FullScheduleResponse(
-                    todaySlots = emptyList(),
-                    tomorrowSlots = null,
-                    hasTomorrowSchedule = false,
-                    status = FetchStatus.NO_QUEUES_FOUND
-                )
-            } else {
-                FullScheduleResponse(
-                    todaySlots = parsed.todaySlots,
-                    tomorrowSlots = parsed.tomorrowSlots,
-                    hasTomorrowSchedule = parsed.hasTomorrowSchedule,
-                    status = FetchStatus.SUCCESS
-                )
-            }
-        } catch (_: Exception) {
-            FullScheduleResponse(
-                todaySlots = emptyList(),
-                tomorrowSlots = null,
-                hasTomorrowSchedule = false,
-                status = FetchStatus.NO_INTERNET
-            )
-        }
-    }
-
-    fun fetchAndParse(
-        url: String,
-        queue: String,
-        date: LocalDate = LocalDate.now(KYIV_ZONE)
-    ): List<BlackoutSlot> {
-        val dateIso = date.format(DateTimeFormatter.ISO_LOCAL_DATE)
-        return try {
-            val doc = Jsoup.connect(url)
-                .userAgent(USER_AGENT)
-                .timeout(10000)
-                .get()
-            parseHtmlForDate(doc, queue, date, dateIso)
-        } catch (_: Exception) {
-            generateFallbackSchedule(queue, dateIso)
-        }
-    }
-
-    fun parseHtml(doc: Document, targetQueue: String, dateStr: String): List<BlackoutSlot> {
-        val today = LocalDate.now(KYIV_ZONE)
-        return parseHtmlForDate(doc, targetQueue, today, dateStr)
-    }
-
-    fun generateFallbackSchedule(queue: String, dateStr: String = LocalDate.now(KYIV_ZONE).format(DateTimeFormatter.ISO_LOCAL_DATE)): List<BlackoutSlot> {
-        val parts = queue.split(".")
-        val group = parts.getOrNull(0)?.toIntOrNull() ?: 1
-        val sub = parts.getOrNull(1)?.toIntOrNull() ?: 1
-        val shift = ((group - 1) * 3 + (sub - 1) * 2) % 24
-
-        return (0 until 48).map { slotIdx ->
-            val hour = slotIdx / 2
-            val isSecondHalf = (slotIdx % 2) == 1
-            val cycleHour = (hour + shift) % 24
-            val status = when {
-                (cycleHour in 2..5) || (cycleHour in 12..15) || (cycleHour in 20..23) -> SlotStatus.POWER_OFF
-                else -> SlotStatus.POWER_ON
-            }
-            val startMin = if (isSecondHalf) 30 else 0
-            val endMin = if (isSecondHalf) 0 else 30
-            val endHour = if (isSecondHalf) hour + 1 else hour
-            val startStr = String.format("%02d:%02d", hour, startMin)
-            val endStr = if (endHour >= 24) "24:00" else String.format("%02d:%02d", endHour, endMin)
-
-            BlackoutSlot(
-                id = "\${dateStr}_\${startStr}_Q$queue",
-                startHour = hour,
-                endHour = endHour,
-                startMinute = startMin,
-                endMinute = if (isSecondHalf) 60 else 30,
-                startTimeStr = startStr,
-                endTimeStr = endStr,
-                status = status
-            )
-        }
-    }
-}`
+}
+// =========================================================================================
+// END OF CRITICAL SECTION — DO NOT MODIFY UNLESS EXPLICITLY REQUESTED
+// =========================================================================================`
   },
   {
     path: 'app/src/main/java/ua/blackout/prewarning/data/repository/AlertRegistry.kt',
@@ -616,8 +900,9 @@ import android.content.Context
 import android.content.SharedPreferences
 
 class AlertRegistry(context: Context) {
+    private val appContext: Context = context.applicationContext
     private val prefs: SharedPreferences =
-        context.getSharedPreferences("zt_notified_blackouts_v1", Context.MODE_PRIVATE)
+        appContext.getSharedPreferences("zt_notified_blackouts_v1", Context.MODE_PRIVATE)
 
     /**
      * Checks if this specific blackout slot has already been notified.
@@ -628,25 +913,52 @@ class AlertRegistry(context: Context) {
     }
 
     /**
-     * Marks the slot as notified with timestamp
+     * Marks the slot as notified with timestamp and prunes entries older than 7 days
+     * to prevent unbounded SharedPreferences memory growth.
      */
     fun markNotified(slotId: String) {
-        prefs.edit()
+        val now = System.currentTimeMillis()
+        val cutoff = now - 7L * 24L * 60L * 60L * 1000L
+        val editor = prefs.edit()
+        for ((key, value) in prefs.all) {
+            if (key.startsWith("ts_") && value is Long && value < cutoff) {
+                val oldSlotId = key.removePrefix("ts_")
+                editor.remove(key)
+                editor.remove("notified_$oldSlotId")
+            }
+        }
+        editor
             .putBoolean("notified_$slotId", true)
-            .putLong("ts_$slotId", System.currentTimeMillis())
+            .putLong("ts_$slotId", now)
             .apply()
     }
 
     /**
-     * Resets notified flags for future slots on time changes
+     * When system clock is adjusted backward on mobile, clears notified flags for slots
+     * whose alert time is now in the future again or whose recorded notification timestamp
+     * is ahead of current wall-clock time.
      */
-    fun resetFutureSlotsOnTimeChange(currentTimeMillis: Long, futureSlotIds: Set<String>) {
+    fun resetFutureSlotsOnTimeChange(nowMs: Long, futureBlockIds: Set<String>) {
         val editor = prefs.edit()
-        for (slotId in futureSlotIds) {
-            editor.remove("notified_$slotId")
-            editor.remove("ts_$slotId")
+        var modified = false
+        for ((key, value) in prefs.all) {
+            if (key.startsWith("ts_") && value is Long && value > nowMs) {
+                val slotId = key.removePrefix("ts_")
+                editor.remove(key)
+                editor.remove("notified_$slotId")
+                modified = true
+            }
         }
-        editor.apply()
+        for (blockId in futureBlockIds) {
+            if (prefs.contains("notified_$blockId") || prefs.contains("ts_$blockId")) {
+                editor.remove("notified_$blockId")
+                editor.remove("ts_$blockId")
+                modified = true
+            }
+        }
+        if (modified) {
+            editor.apply()
+        }
     }
 
     /**
@@ -668,31 +980,122 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.media.AudioAttributes
 import android.media.RingtoneManager
 import android.os.Build
+import android.os.VibrationAttributes
+import android.os.VibrationEffect
+import android.os.Vibrator
+import android.os.VibratorManager
 import androidx.core.app.NotificationCompat
 import ua.blackout.prewarning.MainActivity
 import ua.blackout.prewarning.R
+import ua.blackout.prewarning.data.repository.SettingsRepository
 
 object NotificationHelper {
-    const val CHANNEL_ID = "zt_blackout_prewarning_channel"
-    private const val CHANNEL_NAME = "Попередження про відключення"
+    const val CHANNEL_SOUND_VIBE = "zt_blackout_sound_vibe_v2"
+    const val CHANNEL_SOUND_ONLY = "zt_blackout_sound_only_v2"
+    const val CHANNEL_VIBE_ONLY = "zt_blackout_vibe_only_v2"
+    const val CHANNEL_SILENT = "zt_blackout_silent_v2"
+
+    private val VIBRATION_PATTERN = longArrayOf(0, 400, 200, 400)
 
     fun createNotificationChannel(context: Context) {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val importance = NotificationManager.IMPORTANCE_HIGH
-            val channel = NotificationChannel(CHANNEL_ID, CHANNEL_NAME, importance).apply {
-                description = "Термінові сповіщення про наближення планового відключення світла"
-                enableVibration(true)
-                enableLights(true)
-            }
-            val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-            manager.createNotificationChannel(channel)
-        }
+        createNotificationChannels(context)
     }
 
     fun createNotificationChannels(context: Context) {
-        createNotificationChannel(context)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            val soundUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
+            val audioAttributes = AudioAttributes.Builder()
+                .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                .setUsage(AudioAttributes.USAGE_NOTIFICATION_EVENT)
+                .build()
+
+            // 1. Sound + Vibration
+            val ch1 = NotificationChannel(
+                CHANNEL_SOUND_VIBE,
+                "Сповіщення (Звук + Вібрація)",
+                NotificationManager.IMPORTANCE_HIGH
+            ).apply {
+                description = "Сповіщення про відключення зі звуком та вібрацією"
+                enableVibration(true)
+                vibrationPattern = VIBRATION_PATTERN
+                setSound(soundUri, audioAttributes)
+            }
+
+            // 2. Sound Only
+            val ch2 = NotificationChannel(
+                CHANNEL_SOUND_ONLY,
+                "Сповіщення (Тільки звук)",
+                NotificationManager.IMPORTANCE_HIGH
+            ).apply {
+                description = "Сповіщення про відключення тільки зі звуком"
+                enableVibration(false)
+                vibrationPattern = longArrayOf(0)
+                setSound(soundUri, audioAttributes)
+            }
+
+            // 3. Vibration Only (Sound OFF, Vibration ON)
+            val ch3 = NotificationChannel(
+                CHANNEL_VIBE_ONLY,
+                "Сповіщення (Тільки вібрація)",
+                NotificationManager.IMPORTANCE_HIGH
+            ).apply {
+                description = "Сповіщення про відключення тільки з вібрацією (без звуку)"
+                enableVibration(true)
+                vibrationPattern = VIBRATION_PATTERN
+                setSound(null, null)
+            }
+
+            // 4. Silent
+            val ch4 = NotificationChannel(
+                CHANNEL_SILENT,
+                "Сповіщення (Без звуку і вібрації)",
+                NotificationManager.IMPORTANCE_LOW
+            ).apply {
+                description = "Беззвучні сповіщення"
+                enableVibration(false)
+                vibrationPattern = longArrayOf(0)
+                setSound(null, null)
+            }
+
+            manager.createNotificationChannels(listOf(ch1, ch2, ch3, ch4))
+        }
+    }
+
+    fun triggerVibration(context: Context) {
+        try {
+            val vibrator: Vibrator? = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                val vm = context.getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as? VibratorManager
+                vm?.defaultVibrator
+            } else {
+                @Suppress("DEPRECATION")
+                context.getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
+            }
+
+            if (vibrator == null || !vibrator.hasVibrator()) return
+
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                val effect = VibrationEffect.createWaveform(VIBRATION_PATTERN, -1)
+                val attrs = VibrationAttributes.Builder()
+                    .setUsage(VibrationAttributes.USAGE_ALARM)
+                    .build()
+                vibrator.vibrate(effect, attrs)
+            } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                val effect = VibrationEffect.createWaveform(VIBRATION_PATTERN, -1)
+                val audioAttrs = AudioAttributes.Builder()
+                    .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                    .setUsage(AudioAttributes.USAGE_ALARM)
+                    .build()
+                @Suppress("DEPRECATION")
+                vibrator.vibrate(effect, audioAttrs)
+            } else {
+                @Suppress("DEPRECATION")
+                vibrator.vibrate(VIBRATION_PATTERN, -1)
+            }
+        } catch (_: Exception) {}
     }
 
     fun showPreWarningNotification(
@@ -702,6 +1105,25 @@ object NotificationHelper {
         body: String,
         isTest: Boolean = false
     ) {
+        val settings = SettingsRepository(context).getSettings()
+
+        // If notifications are disabled globally in the app, do NOT send unless this is an explicit Test
+        if (!settings.notificationsEnabled && !isTest) {
+            return
+        }
+
+        val activeSound = settings.notificationsEnabled && settings.soundEnabled
+        val activeVibe = settings.notificationsEnabled && settings.vibrationEnabled
+
+        createNotificationChannels(context)
+
+        val targetChannelId = when {
+            activeSound && activeVibe -> CHANNEL_SOUND_VIBE
+            activeSound && !activeVibe -> CHANNEL_SOUND_ONLY
+            !activeSound && activeVibe -> CHANNEL_VIBE_ONLY
+            else -> CHANNEL_SILENT
+        }
+
         val intent = Intent(context, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
         }
@@ -715,16 +1137,38 @@ object NotificationHelper {
 
         val soundUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
 
-        val builder = NotificationCompat.Builder(context, CHANNEL_ID)
+        val builder = NotificationCompat.Builder(context, targetChannelId)
             .setSmallIcon(R.drawable.ic_notification)
             .setContentTitle(title)
             .setContentText(body)
             .setStyle(NotificationCompat.BigTextStyle().bigText(body))
-            .setPriority(NotificationCompat.PRIORITY_HIGH)
+            .setPriority(if (activeSound || activeVibe) NotificationCompat.PRIORITY_HIGH else NotificationCompat.PRIORITY_LOW)
             .setCategory(NotificationCompat.CATEGORY_ALARM)
             .setContentIntent(pendingIntent)
             .setAutoCancel(true)
-            .setSound(soundUri)
+
+        // Strict sound & vibration configuration
+        if (activeSound) {
+            builder.setSound(soundUri)
+        } else {
+            builder.setSound(null)
+        }
+
+        if (activeVibe) {
+            builder.setVibrate(VIBRATION_PATTERN)
+            if (!activeSound) {
+                builder.setDefaults(NotificationCompat.DEFAULT_VIBRATE)
+            }
+            // Trigger hardware vibrator directly with USAGE_ALARM so vibration always fires even when sound is disabled
+            triggerVibration(context)
+        } else {
+            builder.setVibrate(longArrayOf(0))
+        }
+
+        // Only mark silent if BOTH sound AND vibration are disabled
+        if (!activeSound && !activeVibe) {
+            builder.setSilent(true)
+        }
 
         val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         manager.notify(notificationId, builder.build())
@@ -740,30 +1184,102 @@ object NotificationHelper {
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import ua.blackout.prewarning.data.repository.AlertRegistry
+import ua.blackout.prewarning.data.repository.ScheduleRepository
+import ua.blackout.prewarning.data.repository.SettingsRepository
+import ua.blackout.prewarning.widget.BlackoutGlanceWidget
+import java.time.LocalDate
+import java.time.LocalDateTime
+import java.time.LocalTime
+import ua.blackout.prewarning.data.KYIV_ZONE
 
 class AlarmReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
-        val slotId = intent.getStringExtra("EXTRA_SLOT_ID") ?: return
-        val queue = intent.getStringExtra("EXTRA_QUEUE") ?: "2.1"
-        val timeStr = intent.getStringExtra("EXTRA_TIME") ?: "14:00"
-        val minutes = intent.getIntExtra("EXTRA_MINUTES", 30)
+        val appContext = context.applicationContext
+        val pendingResult = goAsync()
 
-        val alertRegistry = AlertRegistry(context)
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                try {
+                    BlackoutGlanceWidget.syncAllWidgets(appContext)
+                } catch (_: Exception) {}
 
-        // STRICT REQUIREMENT: Send notification only once per blackout slot
-        if (alertRegistry.hasNotified(slotId)) {
-            return
+                if (intent.action == "ua.blackout.prewarning.ACTION_WIDGET_TRANSITION_UPDATE") {
+                    return@launch
+                }
+
+                val currentSettings = SettingsRepository(appContext).getSettings()
+                if (!currentSettings.notificationsEnabled) {
+                    return@launch
+                }
+
+                val slotId = intent.getStringExtra("EXTRA_SLOT_ID") ?: return@launch
+                val intentQueue = intent.getStringExtra("EXTRA_QUEUE") ?: return@launch
+
+                // Reject stale alarms from any queue other than the user's currently selected queue (e.g. default 1.1)
+                if (intentQueue != currentSettings.queue || !slotId.endsWith("_Q\${currentSettings.queue}")) {
+                    return@launch
+                }
+
+                val kyivZone = KYIV_ZONE
+                val today = LocalDate.now(kyivZone)
+                if (!slotId.startsWith("block_\${today}_")) {
+                    return@launch
+                }
+
+                val timeStr = intent.getStringExtra("EXTRA_TIME") ?: return@launch
+                val minutes = intent.getIntExtra("EXTRA_MINUTES", currentSettings.advanceNoticeMinutes)
+
+                // Verify that the alarm corresponds to an active blackout interval in today's schedule for the selected queue
+                val scheduleRepo = ScheduleRepository(appContext)
+                val todayIntervals = scheduleRepo.getDetailedIntervals(scheduleRepo.getTodaySlots(currentSettings.queue))
+                val matchingInterval = todayIntervals.firstOrNull { "\${it.startStr}–\${it.endStr}" == timeStr }
+                    ?: return@launch
+
+                // Verify current time is within the valid pre-warning window [alertTime - 2min, blockStartTime + 2min]
+                // Prevents past-due alarms from firing when the user changes system time on mobile
+                val startParts = matchingInterval.startStr.split(":")
+                val startH = startParts.getOrNull(0)?.toIntOrNull() ?: return@launch
+                val startM = startParts.getOrNull(1)?.toIntOrNull() ?: return@launch
+                val blockStartTime = LocalDateTime.of(today, LocalTime.of(startH, startM))
+                val alertTime = blockStartTime.minusMinutes(minutes.toLong())
+                val now = LocalDateTime.now(kyivZone)
+
+                if (now.isBefore(alertTime.minusMinutes(2))) {
+                    // System clock was moved backward before the alert window; reschedule alarms
+                    AlarmScheduler.syncAlarms(appContext, onTimeChanged = true)
+                    return@launch
+                }
+                if (now.isAfter(blockStartTime.plusMinutes(2))) {
+                    // System clock was moved forward past the outage start time; do not fire stale pre-warning
+                    return@launch
+                }
+
+                val alertRegistry = AlertRegistry(appContext)
+
+                // STRICT REQUIREMENT: Send notification only once per blackout slot
+                if (alertRegistry.hasNotified(slotId)) {
+                    return@launch
+                }
+
+                // Mark as notified immediately
+                alertRegistry.markNotified(slotId)
+
+                val queue = currentSettings.queue
+                val title = "Попередження: відключення світла"
+                val body = "Черга $queue: відключення розпочнеться о $timeStr (через $minutes хв)."
+
+                val notificationId = slotId.hashCode()
+                NotificationHelper.showPreWarningNotification(appContext, notificationId, title, body)
+            } finally {
+                try {
+                    pendingResult.finish()
+                } catch (_: Exception) {}
+            }
         }
-
-        // Mark as notified immediately
-        alertRegistry.markNotified(slotId)
-
-        val title = "⚡ Попередження: відключення світла"
-        val body = "Черга $queue: відключення розпочнеться о $timeStr (через $minutes хв)."
-
-        val notificationId = slotId.hashCode()
-        NotificationHelper.showPreWarningNotification(context, notificationId, title, body)
     }
 }`
   },
@@ -773,21 +1289,21 @@ class AlarmReceiver : BroadcastReceiver() {
     description: 'WorkManager periodic background worker with AlarmManager exact scheduling',
     content: `package ua.blackout.prewarning.worker
 
-import android.app.AlarmManager
-import android.app.PendingIntent
 import android.content.Context
-import android.content.Intent
-import android.os.Build
+import androidx.work.Constraints
 import androidx.work.CoroutineWorker
+import androidx.work.ExistingPeriodicWorkPolicy
+import androidx.work.NetworkType
+import androidx.work.PeriodicWorkRequestBuilder
+import androidx.work.WorkManager
 import androidx.work.WorkerParameters
+import ua.blackout.prewarning.data.parser.FetchStatus
 import ua.blackout.prewarning.data.parser.ZtoeParser
-import ua.blackout.prewarning.data.repository.AlertRegistry
+import ua.blackout.prewarning.data.repository.ScheduleRepository
 import ua.blackout.prewarning.data.repository.SettingsRepository
-import ua.blackout.prewarning.notification.AlarmReceiver
-import java.time.LocalDate
-import java.time.LocalDateTime
-import java.time.LocalTime
-import java.time.ZoneId
+import ua.blackout.prewarning.notification.AlarmScheduler
+import ua.blackout.prewarning.widget.BlackoutGlanceWidget
+import java.util.concurrent.TimeUnit
 
 class ScheduleSyncWorker(
     private val context: Context,
@@ -796,79 +1312,34 @@ class ScheduleSyncWorker(
 
     override suspend fun doWork(): Result {
         return try {
-            val settingsRepo = SettingsRepository(context)
+            val appContext = context.applicationContext
+            val settingsRepo = SettingsRepository(appContext)
             val settings = settingsRepo.getSettings()
 
-            if (!settings.notificationsEnabled) {
-                return Result.success()
+            val scheduleRepo = ScheduleRepository(appContext)
+            val fetchRes = ZtoeParser.fetchFullSchedule(settings.cityUrl, settings.queue, appContext)
+
+            // Only save schedule when live fetch succeeded; clear cached results if unreachable or no queues found
+            if (fetchRes.status == FetchStatus.SUCCESS) {
+                scheduleRepo.saveSchedule(settings.queue, fetchRes.todaySlots, fetchRes.tomorrowSlots)
+            } else {
+                scheduleRepo.clearScheduleCache()
             }
 
-            val today = LocalDate.now()
-            val slots = ZtoeParser.fetchAndParse(settings.cityUrl, settings.queue, today)
-            val alertRegistry = AlertRegistry(context)
-
-            val now = LocalDateTime.now()
-            val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
-
-            // Battery & UX Optimization: Group consecutive blackout slots into continuous blocks.
-            // Only 1 alarm is scheduled per blackout block, preventing multiple wakeups/alerts!
-            val intervals = mutableListOf<Pair<Int, Int>>() // list of Pair(startHour, endHour)
-            var inBlock = false
-            var blockStart = 0
-            for (i in 0 until 24) {
-                val isOff = slots.getOrNull(i)?.status == ua.blackout.prewarning.data.model.SlotStatus.POWER_OFF
-                if (isOff && !inBlock) {
-                    inBlock = true
-                    blockStart = i
-                } else if (!isOff && inBlock) {
-                    inBlock = false
-                    intervals.add(Pair(blockStart, i))
-                }
-            }
-            if (inBlock) {
-                intervals.add(Pair(blockStart, 24))
+            val hasWidgets = try {
+                BlackoutGlanceWidget.hasActiveWidgets(appContext)
+            } catch (_: Exception) {
+                false
             }
 
-            // Schedule single exact alarm for each upcoming blackout block
-            for (block in intervals) {
-                val startHour = block.first
-                val endHour = block.second
-                val startStr = String.format("%02d:00", startHour)
-                val endStr = String.format("%02d:00", endHour)
-                val blockId = "block_\${today}_\${startStr}_\${endStr}_Q\${settings.queue}"
-
-                if (alertRegistry.hasNotified(blockId)) {
-                    continue // Block already alerted
-                }
-
-                val blockStartTime = LocalDateTime.of(today, LocalTime.of(startHour, 0))
-                val alertTime = blockStartTime.minusMinutes(settings.advanceNoticeMinutes.toLong())
-
-                if (alertTime.isAfter(now)) {
-                    val epochMillis = alertTime.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
-                    val timeSpan = if (endHour - startHour > 1) "$startStr–$endStr" else startStr
-                    val intent = Intent(context, AlarmReceiver::class.java).apply {
-                        action = "ua.blackout.prewarning.ACTION_TRIGGER_BLACKOUT_ALERT"
-                        putExtra("EXTRA_SLOT_ID", blockId)
-                        putExtra("EXTRA_QUEUE", settings.queue)
-                        putExtra("EXTRA_TIME", timeSpan)
-                        putExtra("EXTRA_MINUTES", settings.advanceNoticeMinutes)
-                    }
-
-                    val pendingIntent = PendingIntent.getBroadcast(
-                        context,
-                        blockId.hashCode(),
-                        intent,
-                        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-                    )
-
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                        alarmManager.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, epochMillis, pendingIntent)
-                    } else {
-                        alarmManager.setExact(AlarmManager.RTC_WAKEUP, epochMillis, pendingIntent)
-                    }
-                }
+            if (hasWidgets) {
+                try {
+                    BlackoutGlanceWidget.syncAllWidgets(appContext)
+                } catch (_: Exception) {}
             }
+
+            // Re-read latest settings right before scheduling alarms in case user changed queue while network fetch was running
+            AlarmScheduler.syncAlarms(appContext)
 
             Result.success()
         } catch (e: Exception) {
@@ -877,44 +1348,29 @@ class ScheduleSyncWorker(
     }
 
     companion object {
-        const val WORK_NAME = "ua.blackout.prewarning.schedule_sync"
+        const val WORK_NAME = "ScheduleSyncWorker"
 
         fun schedulePeriodicWork(
             context: Context,
-            policy: androidx.work.ExistingPeriodicWorkPolicy = androidx.work.ExistingPeriodicWorkPolicy.KEEP
+            policy: ExistingPeriodicWorkPolicy = ExistingPeriodicWorkPolicy.KEEP
         ) {
-            val settingsRepo = ua.blackout.prewarning.data.repository.SettingsRepository(context)
-            val settings = settingsRepo.getSettings()
-            val intervalMinutes = maxOf(15L, settings.refreshIntervalMinutes)
+            val appContext = context.applicationContext
+            val settings = SettingsRepository(appContext).getSettings()
+            val intervalMinutes = settings.refreshIntervalMinutes.coerceAtLeast(15L)
 
-            val constraints = androidx.work.Constraints.Builder()
-                .setRequiredNetworkType(androidx.work.NetworkType.CONNECTED)
+            val constraints = Constraints.Builder()
+                .setRequiredNetworkType(NetworkType.CONNECTED)
                 .build()
 
-            val request = androidx.work.PeriodicWorkRequestBuilder<ScheduleSyncWorker>(
-                intervalMinutes,
-                java.util.concurrent.TimeUnit.MINUTES
-            )
+            val syncRequest = PeriodicWorkRequestBuilder<ScheduleSyncWorker>(intervalMinutes, TimeUnit.MINUTES)
                 .setConstraints(constraints)
                 .build()
 
-            androidx.work.WorkManager.getInstance(context).enqueueUniquePeriodicWork(
+            WorkManager.getInstance(appContext).enqueueUniquePeriodicWork(
                 WORK_NAME,
                 policy,
-                request
+                syncRequest
             )
-        }
-
-        fun syncImmediately(context: Context) {
-            val constraints = androidx.work.Constraints.Builder()
-                .setRequiredNetworkType(androidx.work.NetworkType.CONNECTED)
-                .build()
-
-            val request = androidx.work.OneTimeWorkRequestBuilder<ScheduleSyncWorker>()
-                .setConstraints(constraints)
-                .build()
-
-            androidx.work.WorkManager.getInstance(context).enqueue(request)
         }
     }
 }`
@@ -928,14 +1384,20 @@ class ScheduleSyncWorker(
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.Canvas
-import android.graphics.Color as AndroidColor
+import android.graphics.LinearGradient
 import android.graphics.Paint
 import android.graphics.RectF
+import android.graphics.Shader
 import android.graphics.Typeface
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.glance.Button
+import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.booleanPreferencesKey
+import androidx.datastore.preferences.core.longPreferencesKey
+import androidx.datastore.preferences.core.stringPreferencesKey
+import androidx.glance.ColorFilter
 import androidx.glance.GlanceId
 import androidx.glance.GlanceModifier
 import androidx.glance.GlanceTheme
@@ -950,464 +1412,640 @@ import androidx.glance.appwidget.GlanceAppWidgetManager
 import androidx.glance.appwidget.SizeMode
 import androidx.glance.appwidget.action.ActionCallback
 import androidx.glance.appwidget.action.actionRunCallback
+import androidx.glance.appwidget.cornerRadius
 import androidx.glance.appwidget.provideContent
-import androidx.glance.appwidget.updateAll
+import androidx.glance.appwidget.state.updateAppWidgetState
 import androidx.glance.background
+import androidx.glance.currentState
 import androidx.glance.layout.*
+import androidx.glance.state.GlanceStateDefinition
+import androidx.glance.state.PreferencesGlanceStateDefinition
 import androidx.glance.text.FontWeight
 import androidx.glance.text.Text
 import androidx.glance.text.TextStyle
 import androidx.glance.unit.ColorProvider
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import ua.blackout.prewarning.MainActivity
 import ua.blackout.prewarning.R
-import ua.blackout.prewarning.data.KYIV_ZONE
 import ua.blackout.prewarning.data.model.BlackoutSlot
 import ua.blackout.prewarning.data.model.SlotStatus
+import ua.blackout.prewarning.data.parser.ZtoeParser
 import ua.blackout.prewarning.data.repository.ScheduleRepository
 import ua.blackout.prewarning.data.repository.SettingsRepository
 import ua.blackout.prewarning.notification.AlarmScheduler
 import ua.blackout.prewarning.ui.AppStrings
-import ua.blackout.prewarning.worker.ScheduleSyncWorker
 import java.time.LocalTime
-import java.util.concurrent.ConcurrentHashMap
+import ua.blackout.prewarning.data.KYIV_ZONE
 
 class BlackoutGlanceWidget : GlanceAppWidget() {
 
+    override val stateDefinition: GlanceStateDefinition<*> = PreferencesGlanceStateDefinition
+
+    override val sizeMode = SizeMode.Responsive(
+        setOf(
+            DpSize(120.dp, 60.dp),   // 2x1 Small
+            DpSize(250.dp, 160.dp)   // 3x2 Big
+        )
+    )
+
     companion object {
-        val SMALL_BOX = DpSize(110.dp, 48.dp)
-        val BIG_BOX = DpSize(220.dp, 110.dp)
+        val KEY_NOTIFICATIONS_ENABLED = booleanPreferencesKey("glance_notifications_enabled")
+        val KEY_QUEUE = stringPreferencesKey("glance_queue")
+        val KEY_LANGUAGE = stringPreferencesKey("glance_language")
+        val KEY_REFRESH_TICK = longPreferencesKey("glance_refresh_tick")
+        val KEY_IS_BLACKOUT_NOW = booleanPreferencesKey("glance_is_blackout_now")
+        val KEY_IS_UNCLEAR = booleanPreferencesKey("glance_is_unclear")
+        val KEY_COUNTDOWN_TEXT = stringPreferencesKey("glance_countdown_text")
+        val KEY_NEXT_SLOT_TIME = stringPreferencesKey("glance_next_slot_time")
+        val KEY_NEXT_BLACKOUT_TEXT = stringPreferencesKey("glance_next_blackout_text")
+
+        private val COUNTDOWN_PART_REGEX = Regex("(\\\\d{1,2}|--)")
+
+        fun formatWidgetCountdown(rawCountdown: String, lang: String): String {
+            val isEn = lang.equals("en", ignoreCase = true)
+            val matches = COUNTDOWN_PART_REGEX.findAll(rawCountdown).map { it.value }.toList()
+            if (matches.size >= 2) {
+                val hh = if (matches[0] == "--") "--" else matches[0].padStart(2, '0')
+                val mm = if (matches[1] == "--") "--" else matches[1].padStart(2, '0')
+                return if (isEn) "\${hh}hr. \${mm}m." else "\${hh}г. \${mm}хв."
+            }
+            return rawCountdown
+        }
+
+        @Volatile
+        private var cachedChartBitmapKey: String? = null
+        @Volatile
+        private var cachedChartBitmap: Bitmap? = null
 
         suspend fun hasActiveWidgets(context: Context): Boolean {
             return try {
-                val manager = GlanceAppWidgetManager(context)
-                val glanceIds = manager.getGlanceIds(BlackoutGlanceWidget::class.java)
-                glanceIds.isNotEmpty()
+                val appCtx = context.applicationContext
+                val manager = GlanceAppWidgetManager(appCtx)
+                manager.getGlanceIds(BlackoutGlanceWidget::class.java).isNotEmpty()
             } catch (_: Exception) {
                 false
             }
         }
 
         suspend fun syncAllWidgets(context: Context) {
-            try {
-                BlackoutGlanceWidget().updateAll(context)
-            } catch (_: Exception) {}
-        }
+            val appCtx = context.applicationContext
+            val manager = GlanceAppWidgetManager(appCtx)
+            val glanceIds = manager.getGlanceIds(BlackoutGlanceWidget::class.java)
+            if (glanceIds.isEmpty()) return
 
-        private val bitmapCache = ConcurrentHashMap<String, Bitmap>()
-    }
-
-    override val sizeMode: SizeMode = SizeMode.Responsive(setOf(SMALL_BOX, BIG_BOX))
-
-    fun formatWidgetCountdown(rawCountdown: String, isBlackoutNow: Boolean, nextSlotTime: String, lang: String): String {
-        val isUk = lang == "uk"
-        if (rawCountdown.isEmpty() || rawCountdown == "--:--:--") {
-            return if (isUk) "--г. --хв." else "--hr. --m."
-        }
-        val parts = rawCountdown.split(":")
-        if (parts.size >= 2) {
-            val hh = parts[0].trim()
-            val mm = parts[1].trim()
-            return if (isUk) "\${hh}г. \${mm}хв." else "\${hh}hr. \${mm}m."
-        }
-        return rawCountdown
-    }
-
-    fun renderAnalogCounterBitmap(slots: List<BlackoutSlot>, currentH: Int, currentM: Int, lang: String = "uk"): Bitmap {
-        val slotSig = if (slots.isEmpty()) "empty" else slots.joinToString("") { if (it.status == SlotStatus.POWER_OFF) "1" else "0" }
-        val cacheKey = "\${slotSig}_\${currentH}_\${currentM}_\$lang"
-        bitmapCache[cacheKey]?.let { return it }
-
-        val width = 720
-        val height = 132
-        val bmp = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
-        val canvas = Canvas(bmp)
-        val paint = Paint(Paint.ANTI_ALIAS_FLAG)
-
-        paint.color = AndroidColor.parseColor("#DFDDD0")
-        val outerRect = RectF(0f, 0f, width.toFloat(), height.toFloat())
-        canvas.drawRoundRect(outerRect, 20f, 20f, paint)
-
-        paint.color = AndroidColor.parseColor("#7A7768")
-        paint.style = Paint.Style.STROKE
-        paint.strokeWidth = 3f
-        canvas.drawRoundRect(outerRect, 20f, 20f, paint)
-        paint.style = Paint.Style.FILL
-
-        val drumLeft = 16f
-        val drumTop = 16f
-        val drumRight = width - 16f
-        val drumBottom = 80f
-        paint.color = AndroidColor.parseColor("#4E514E")
-        val drumRect = RectF(drumLeft, drumTop, drumRight, drumBottom)
-        canvas.drawRoundRect(drumRect, 10f, 10f, paint)
-
-        val innerPad = 4f
-        val slotAreaLeft = drumLeft + innerPad
-        val slotAreaTop = drumTop + innerPad
-        val slotAreaRight = drumRight - innerPad
-        val slotAreaBottom = drumBottom - innerPad
-        val slotAreaWidth = slotAreaRight - slotAreaLeft
-        val slotAreaHeight = slotAreaBottom - slotAreaTop
-
-        if (slots.isEmpty()) {
-            paint.color = AndroidColor.parseColor("#7E8287")
-            val unclearRect = RectF(slotAreaLeft, slotAreaTop, slotAreaRight, slotAreaBottom)
-            canvas.drawRoundRect(unclearRect, 4f, 4f, paint)
-
-            paint.color = AndroidColor.WHITE
-            paint.textSize = 24f
-            paint.typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
-            paint.textAlign = Paint.Align.CENTER
-            val textY = slotAreaTop + (slotAreaHeight / 2f) - ((paint.descent() + paint.ascent()) / 2f)
-            canvas.drawText(AppStrings.outagesUnclear(lang), width / 2f, textY, paint)
-        } else {
-            val is48Slots = slots.size >= 48
-            val hourWidth = slotAreaWidth / 24f
-            val halfWidth = hourWidth / 2f
-
-            for (hour in 0 until 24) {
-                val half1Off = if (is48Slots) {
-                    slots.getOrNull(hour * 2)?.status == SlotStatus.POWER_OFF
-                } else {
-                    slots.getOrNull(hour)?.status == SlotStatus.POWER_OFF
+            val settings = SettingsRepository(appCtx).getSettings()
+            val resolvedLang = AppStrings.resolveLang(settings.language)
+            val scheduleRepo = ScheduleRepository(appCtx)
+            val info = scheduleRepo.getCurrentStatusAndCountdown(settings.queue)
+            val formattedCountdown = formatWidgetCountdown(info.countdownText, resolvedLang)
+            val nextBlackoutText = scheduleRepo.getNextUpcomingIntervalText(settings.queue)
+            val nowMs = System.currentTimeMillis()
+            for (gId in glanceIds) {
+                updateAppWidgetState(appCtx, PreferencesGlanceStateDefinition, gId) { prefs ->
+                    prefs.toMutablePreferences().apply {
+                        this[KEY_NOTIFICATIONS_ENABLED] = settings.notificationsEnabled
+                        this[KEY_QUEUE] = settings.queue
+                        this[KEY_LANGUAGE] = resolvedLang
+                        this[KEY_REFRESH_TICK] = nowMs
+                        this[KEY_IS_BLACKOUT_NOW] = info.isBlackoutNow
+                        this[KEY_IS_UNCLEAR] = info.isUnclear
+                        this[KEY_COUNTDOWN_TEXT] = formattedCountdown
+                        this[KEY_NEXT_SLOT_TIME] = info.nextSlotTime
+                        this[KEY_NEXT_BLACKOUT_TEXT] = nextBlackoutText
+                    }
                 }
-                val half2Off = if (is48Slots) {
-                    slots.getOrNull(hour * 2 + 1)?.status == SlotStatus.POWER_OFF
-                } else {
-                    slots.getOrNull(hour)?.status == SlotStatus.POWER_OFF
-                }
-
-                val hLeft = slotAreaLeft + hour * hourWidth
-
-                paint.color = if (half1Off) AndroidColor.parseColor("#D62E26") else AndroidColor.parseColor("#FCFBF7")
-                canvas.drawRect(hLeft, slotAreaTop, hLeft + halfWidth, slotAreaBottom, paint)
-
-                paint.color = if (half2Off) AndroidColor.parseColor("#D62E26") else AndroidColor.parseColor("#FCFBF7")
-                canvas.drawRect(hLeft + halfWidth, slotAreaTop, hLeft + hourWidth, slotAreaBottom, paint)
-
-                if (hour > 0) {
-                    paint.color = AndroidColor.parseColor("#C8C6BC")
-                    canvas.drawRect(hLeft - 0.75f, slotAreaTop, hLeft + 0.75f, slotAreaBottom, paint)
-                }
+                BlackoutGlanceWidget().update(appCtx, gId)
             }
-
-            val totalMinutes = currentH * 60 + currentM
-            val needleX = slotAreaLeft + (totalMinutes / 1440f) * slotAreaWidth
-            paint.color = AndroidColor.parseColor("#0B0B0A")
-            val needleRect = RectF(needleX - 2.5f, drumTop - 4f, needleX + 2.5f, drumBottom + 4f)
-            canvas.drawRoundRect(needleRect, 2.5f, 2.5f, paint)
         }
 
-        paint.color = AndroidColor.parseColor("#1C1B18")
-        paint.textSize = 20f
-        paint.typeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
-        paint.textAlign = Paint.Align.CENTER
-
-        val markers = listOf(0, 4, 8, 12, 16, 20, 24)
-        for (m in markers) {
-            val markX = slotAreaLeft + (m / 24f) * slotAreaWidth
-            canvas.drawRect(markX - 1f, drumBottom + 4f, markX + 1f, drumBottom + 12f, paint)
-            val label = String.format("%02d", m)
-            canvas.drawText(label, markX.coerceIn(slotAreaLeft + 16f, slotAreaRight - 16f), height - 12f, paint)
-        }
-
-        if (bitmapCache.size > 32) {
-            bitmapCache.clear()
-        }
-        bitmapCache[cacheKey] = bmp
-        return bmp
-    }
-
-    override suspend fun provideGlance(context: Context, id: GlanceId) {
-        val settingsRepo = SettingsRepository(context)
-        val scheduleRepo = ScheduleRepository(context)
-        val settings = settingsRepo.getSettings()
-        val info = scheduleRepo.getCurrentStatusAndCountdown(settings.queue)
-        val slots = scheduleRepo.getTodaySlots(settings.queue)
-        val resolvedLang = AppStrings.resolveLang(settings.language)
-        val now = LocalTime.now(KYIV_ZONE)
-
-        provideContent {
-            GlanceTheme {
-                val size = LocalSize.current
-                val isBig = size.width >= BIG_BOX.width || size.height >= BIG_BOX.height
-
-                Box(
-                    modifier = GlanceModifier
-                        .fillMaxSize()
-                        .padding(6.dp)
-                        .background(ColorProvider(androidx.compose.ui.graphics.Color(0xCC141A29)))
-                        .clickable(actionStartActivity<MainActivity>())
-                ) {
-                    if (isBig) {
-                        BigWidgetContent(context, settings, scheduleRepo, info, slots, resolvedLang, now)
-                    } else {
-                        SmallWidgetContent(settings, info, resolvedLang)
+        /**
+         * Renders the 24-hour analog electricity counter (САЗУ-ИТ) chart as a high-DPI Bitmap
+         * and caches it by (slotStatuses, currentH, currentM) to avoid redundant Bitmap allocations
+         * and Canvas redraws within the same minute (e.g., when toggling the alert bell icon).
+         */
+        fun renderAnalogCounterBitmap(
+            slots: List<BlackoutSlot>,
+            currentH: Int,
+            currentM: Int,
+            lang: String = "uk"
+        ): Bitmap {
+            val slotSignature = if (slots.isEmpty()) {
+                "UNCLEAR"
+            } else {
+                buildString(slots.size) {
+                    for (s in slots) {
+                        append(if (s.status == SlotStatus.POWER_OFF) '1' else '0')
                     }
                 }
             }
-        }
-    }
-
-    @androidx.compose.runtime.Composable
-    private fun SmallWidgetContent(
-        settings: ua.blackout.prewarning.data.model.UserSettings,
-        info: ua.blackout.prewarning.data.repository.ScheduleStatusInfo,
-        resolvedLang: String
-    ) {
-        val isUnclear = info.isUnclear
-        val statusText = if (isUnclear) {
-            AppStrings.powerUnclear(resolvedLang)
-        } else if (info.isBlackoutNow) {
-            "СВІТЛА НЕМАЄ"
-        } else {
-            "СВІТЛО Є"
-        }
-
-        val formattedCountdown = formatWidgetCountdown(info.countdownText, info.isBlackoutNow, info.nextSlotTime, resolvedLang)
-        val countdownLabel = if (!isUnclear && info.isBlackoutNow) {
-            if (resolvedLang == "uk") "До увімкнення:" else "Power on in:"
-        } else {
-            if (resolvedLang == "uk") "До відключення:" else "Time to blackout:"
-        }
-
-        Column(
-            modifier = GlanceModifier.fillMaxSize().padding(6.dp),
-            verticalAlignment = Alignment.Vertical.CenterVertically
-        ) {
-            Row(
-                modifier = GlanceModifier.fillMaxWidth(),
-                verticalAlignment = Alignment.Vertical.CenterVertically
-            ) {
-                Text(
-                    text = "\${AppStrings.queue(resolvedLang)} \${settings.queue}",
-                    style = TextStyle(
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 13.sp,
-                        color = ColorProvider(androidx.compose.ui.graphics.Color.White)
-                    )
-                )
-                Spacer(modifier = GlanceModifier.defaultWeight())
-                Text(
-                    text = statusText,
-                    style = TextStyle(
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 11.sp,
-                        color = if (isUnclear) {
-                            ColorProvider(androidx.compose.ui.graphics.Color(0xFFA1A1AA))
-                        } else if (info.isBlackoutNow) {
-                            ColorProvider(androidx.compose.ui.graphics.Color(0xFFFF5E3A))
-                        } else {
-                            ColorProvider(androidx.compose.ui.graphics.Color(0xFF34D399))
-                        }
-                    )
-                )
+            val bitmapKey = "\${slotSignature}_\${currentH}_\${currentM}_$lang"
+            val existingBmp = cachedChartBitmap
+            if (cachedChartBitmapKey == bitmapKey && existingBmp != null && !existingBmp.isRecycled) {
+                return existingBmp
             }
 
-            Spacer(modifier = GlanceModifier.height(4.dp))
+            val width = 720
+            val height = 132
+            val bmp = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+            val canvas = Canvas(bmp)
+            val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply { isDither = true }
 
-            Row(
-                modifier = GlanceModifier.fillMaxWidth(),
-                verticalAlignment = Alignment.Vertical.CenterVertically
-            ) {
-                Column(modifier = GlanceModifier.defaultWeight()) {
-                    Text(
-                        text = countdownLabel,
-                        style = TextStyle(
-                            fontSize = 9.sp,
-                            color = ColorProvider(androidx.compose.ui.graphics.Color(0xFFBAE6FD))
-                        )
-                    )
-                    Text(
-                        text = formattedCountdown,
-                        style = TextStyle(
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = ColorProvider(androidx.compose.ui.graphics.Color.White)
-                        ),
-                        maxLines = 1
-                    )
-                }
+            // 1. Vintage enamel beige faceplate (#DFDDD0 -> #D4D1C1 -> #C6C2B0) with #7A7768 border
+            val faceplateRect = RectF(2f, 2f, width - 2f, height - 2f)
+            paint.style = Paint.Style.FILL
+            paint.shader = LinearGradient(
+                0f, 0f, 0f, height.toFloat(),
+                intArrayOf(0xFFDFDDD0.toInt(), 0xFFD4D1C1.toInt(), 0xFFC6C2B0.toInt()),
+                floatArrayOf(0f, 0.5f, 1f),
+                Shader.TileMode.CLAMP
+            )
+            canvas.drawRoundRect(faceplateRect, 24f, 24f, paint)
 
-                Image(
-                    provider = ImageProvider(R.drawable.ic_refresh),
-                    contentDescription = "Refresh",
-                    modifier = GlanceModifier
-                        .size(32.dp)
-                        .padding(4.dp)
-                        .clickable(actionRunCallback<RefreshWidgetActionCallback>())
-                )
+            paint.shader = null
+            paint.style = Paint.Style.STROKE
+            paint.strokeWidth = 4f
+            paint.color = 0xFF7A7768.toInt()
+            canvas.drawRoundRect(faceplateRect, 24f, 24f, paint)
 
-                Spacer(modifier = GlanceModifier.width(4.dp))
+            // 2. Recessed dark-grey contour (#4E514E) with #6E716B border
+            val contourLeft = 18f
+            val contourTop = 18f
+            val contourRight = width - 18f
+            val contourBottom = 84f
+            val contourRect = RectF(contourLeft, contourTop, contourRight, contourBottom)
 
-                Button(
-                    text = if (settings.notificationsEnabled) "🔕" else "🔔",
-                    onClick = actionRunCallback<ToggleAlertsActionCallback>()
-                )
-            }
-        }
-    }
+            paint.style = Paint.Style.FILL
+            paint.color = 0xFF4E514E.toInt()
+            canvas.drawRoundRect(contourRect, 12f, 12f, paint)
 
-    @androidx.compose.runtime.Composable
-    private fun BigWidgetContent(
-        context: Context,
-        settings: ua.blackout.prewarning.data.model.UserSettings,
-        scheduleRepo: ScheduleRepository,
-        info: ua.blackout.prewarning.data.repository.ScheduleStatusInfo,
-        slots: List<BlackoutSlot>,
-        resolvedLang: String,
-        now: LocalTime
-    ) {
-        val isUnclear = info.isUnclear
-        val statusText = if (isUnclear) {
-            AppStrings.powerUnclear(resolvedLang)
-        } else if (info.isBlackoutNow) {
-            "СВІТЛА НЕМАЄ"
-        } else {
-            "СВІТЛО Є"
-        }
+            paint.style = Paint.Style.STROKE
+            paint.strokeWidth = 3f
+            paint.color = 0xFF6E716B.toInt()
+            canvas.drawRoundRect(contourRect, 12f, 12f, paint)
 
-        val formattedCountdown = formatWidgetCountdown(info.countdownText, info.isBlackoutNow, info.nextSlotTime, resolvedLang)
-        val countdownLabel = if (!isUnclear && info.isBlackoutNow) {
-            if (resolvedLang == "uk") "До увімкнення:" else "Power on in:"
-        } else {
-            if (resolvedLang == "uk") "До відключення:" else "Time to blackout:"
-        }
+            // 3. Inner light-gray slot track (#C8C6BC) for 1.5px hour separators
+            val trackLeft = 26f
+            val trackTop = 26f
+            val trackRight = width - 26f
+            val trackBottom = 76f
+            val trackWidth = trackRight - trackLeft
+            val trackRect = RectF(trackLeft, trackTop, trackRight, trackBottom)
 
-        val nextBlackoutText = if (isUnclear) "--:-- - --:--" else scheduleRepo.getNextUpcomingIntervalText(settings.queue)
-        val nextLabel = if (resolvedLang == "uk") "Наступне відключення:" else "Next blackout:"
+            paint.style = Paint.Style.FILL
+            paint.color = 0xFFC8C6BC.toInt()
+            canvas.drawRoundRect(trackRect, 4f, 4f, paint)
 
-        val timelineBitmap = renderAnalogCounterBitmap(slots, now.hour, now.minute, resolvedLang)
+            // 4. 24 hours x 2 half-hour cylindrical blocks (no half-hour separators)
+            val sepPx = 3f
+            val totalSep = sepPx * 23f
+            val hourWidth = (trackWidth - totalSep) / 24f
+            val halfWidth = hourWidth / 2f
 
-        Column(
-            modifier = GlanceModifier.fillMaxSize().padding(8.dp),
-            verticalAlignment = Alignment.Vertical.Top
-        ) {
-            Row(
-                modifier = GlanceModifier.fillMaxWidth(),
-                verticalAlignment = Alignment.Vertical.CenterVertically
-            ) {
-                Column {
-                    Text(
-                        text = "\${AppStrings.queue(resolvedLang)} \${settings.queue}",
-                        style = TextStyle(
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 15.sp,
-                            color = ColorProvider(androidx.compose.ui.graphics.Color.White)
-                        )
-                    )
-                    Text(
-                        text = statusText,
-                        style = TextStyle(
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 11.sp,
-                            color = if (isUnclear) {
-                                ColorProvider(androidx.compose.ui.graphics.Color(0xFFA1A1AA))
-                            } else if (info.isBlackoutNow) {
-                                ColorProvider(androidx.compose.ui.graphics.Color(0xFFFF5E3A))
-                            } else {
-                                ColorProvider(androidx.compose.ui.graphics.Color(0xFF34D399))
-                            }
-                        )
-                    )
-                }
-
-                Spacer(modifier = GlanceModifier.defaultWeight())
-
-                Image(
-                    provider = ImageProvider(R.drawable.ic_refresh),
-                    contentDescription = "Refresh",
-                    modifier = GlanceModifier
-                        .size(32.dp)
-                        .padding(4.dp)
-                        .clickable(actionRunCallback<RefreshWidgetActionCallback>())
-                )
-
-                Spacer(modifier = GlanceModifier.width(4.dp))
-
-                Button(
-                    text = if (settings.notificationsEnabled) "🔕" else "🔔",
-                    onClick = actionRunCallback<ToggleAlertsActionCallback>()
-                )
-            }
-
-            Spacer(modifier = GlanceModifier.height(4.dp))
-
-            Row(
-                modifier = GlanceModifier.fillMaxWidth(),
-                verticalAlignment = Alignment.Vertical.CenterVertically
-            ) {
-                Text(
-                    text = "$countdownLabel $formattedCountdown",
-                    style = TextStyle(
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = ColorProvider(androidx.compose.ui.graphics.Color.White)
-                    )
-                )
-                Spacer(modifier = GlanceModifier.defaultWeight())
-                Text(
-                    text = if (isUnclear) "--:-- - --:--" else info.nextSlotTime,
-                    style = TextStyle(
-                        fontSize = 11.sp,
-                        color = ColorProvider(androidx.compose.ui.graphics.Color(0xFFBAE6FD))
-                    )
-                )
-            }
-
-            Spacer(modifier = GlanceModifier.height(4.dp))
-
-            Image(
-                provider = ImageProvider(timelineBitmap),
-                contentDescription = "24h Timeline",
-                modifier = GlanceModifier
-                    .fillMaxWidth()
-                    .height(38.dp)
+            val offShader = LinearGradient(
+                0f, trackTop, 0f, trackBottom,
+                intArrayOf(0xFF9E1E18.toInt(), 0xFFD62E26.toInt(), 0xFF8C1914.toInt()),
+                floatArrayOf(0f, 0.5f, 1f),
+                Shader.TileMode.CLAMP
+            )
+            val onShader = LinearGradient(
+                0f, trackTop, 0f, trackBottom,
+                intArrayOf(0xFFD8D6CC.toInt(), 0xFFFCFBF7.toInt(), 0xFFCCC9BE.toInt()),
+                floatArrayOf(0f, 0.5f, 1f),
+                Shader.TileMode.CLAMP
             )
 
-            Spacer(modifier = GlanceModifier.height(2.dp))
+            if (slots.isEmpty()) {
+                // Grey drum chart with "Графіки не діють" / "Outages unclear" when site is unreachable or no queues found
+                val unclearShader = LinearGradient(
+                    0f, trackTop, 0f, trackBottom,
+                    intArrayOf(0xFF7E8287.toInt(), 0xFF94989E.toInt(), 0xFF6E7277.toInt()),
+                    floatArrayOf(0f, 0.5f, 1f),
+                    Shader.TileMode.CLAMP
+                )
+                paint.shader = unclearShader
+                canvas.drawRoundRect(trackRect, 4f, 4f, paint)
+                paint.shader = null
 
-            Row(
-                modifier = GlanceModifier.fillMaxWidth(),
-                verticalAlignment = Alignment.Vertical.CenterVertically
-            ) {
-                Text(
-                    text = nextLabel,
-                    style = TextStyle(
-                        fontSize = 10.sp,
-                        color = ColorProvider(androidx.compose.ui.graphics.Color(0xFFFF5E3A))
-                    )
-                )
-                Spacer(modifier = GlanceModifier.width(4.dp))
-                Text(
-                    text = nextBlackoutText,
-                    style = TextStyle(
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = ColorProvider(androidx.compose.ui.graphics.Color.White)
-                    )
-                )
+                val unclearText = AppStrings.outagesUnclear(lang)
+                val unclearTextPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                    color = 0xFFFFFFFF.toInt()
+                    typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
+                    textSize = 22f
+                }
+                val textWidth = unclearTextPaint.measureText(unclearText)
+                val textX = trackLeft + (trackWidth - textWidth) / 2f
+                val textYCenter = (trackTop + trackBottom) / 2f - (unclearTextPaint.descent() + unclearTextPaint.ascent()) / 2f
+                canvas.drawText(unclearText, textX, textYCenter, unclearTextPaint)
+            } else {
+                val is48 = slots.size >= 48
+                (0 until 24).forEach { hour ->
+                    val half1Off = if (is48) {
+                        slots.getOrNull(hour * 2)?.status == SlotStatus.POWER_OFF
+                    } else {
+                        slots.getOrNull(hour)?.status == SlotStatus.POWER_OFF
+                    }
+                    val half2Off = if (is48) {
+                        slots.getOrNull(hour * 2 + 1)?.status == SlotStatus.POWER_OFF
+                    } else {
+                        slots.getOrNull(hour)?.status == SlotStatus.POWER_OFF
+                    }
+
+                    val hLeft = trackLeft + hour * (hourWidth + sepPx)
+
+                    // Half 1: XX:00 - XX:30
+                    paint.shader = if (half1Off) offShader else onShader
+                    canvas.drawRect(hLeft, trackTop, hLeft + halfWidth, trackBottom, paint)
+
+                    // Half 2: XX:30 - (XX+1):00 (contiguous with Half 1, no half-hour separator)
+                    paint.shader = if (half2Off) offShader else onShader
+                    canvas.drawRect(hLeft + halfWidth, trackTop, hLeft + hourWidth, trackBottom, paint)
+                }
+                paint.shader = null
             }
+
+            // 5. Black current-time needle (#0B0B0A) protruding above and below the dark-grey contour
+            val fraction = ((currentH.coerceIn(0, 23) * 60 + currentM.coerceIn(0, 59)) / 1440f).coerceIn(0f, 1f)
+            val needleX = trackLeft + trackWidth * fraction
+            val needleTop = contourTop - 8f
+            val needleBottom = contourBottom + 8f
+
+            // Subtle white halo around the black needle
+            paint.style = Paint.Style.FILL
+            paint.color = 0xD9FFFFFF.toInt()
+            canvas.drawRoundRect(
+                RectF(needleX - 4.5f, needleTop, needleX + 4.5f, needleBottom),
+                4.5f, 4.5f, paint
+            )
+
+            // Solid black needle
+            paint.color = 0xFF0B0B0A.toInt()
+            canvas.drawRoundRect(
+                RectF(needleX - 3f, needleTop, needleX + 3f, needleBottom),
+                3f, 3f, paint
+            )
+
+            // 6. Stamped black (#1C1B18) hour markers: 00, 06, 12, 18, 24
+            val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = 0xFF1C1B18.toInt()
+                typeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
+                textSize = 21f
+            }
+            val labels = listOf(
+                0f to "00",
+                0.25f to "06",
+                0.50f to "12",
+                0.75f to "18",
+                1.0f to "24"
+            )
+            val textY = 116f
+            labels.forEach { (pos, label) ->
+                val tw = textPaint.measureText(label)
+                val x = when (pos) {
+                    0f -> trackLeft
+                    1.0f -> trackRight - tw
+                    else -> trackLeft + trackWidth * pos - tw / 2f
+                }
+                canvas.drawText(label, x, textY, textPaint)
+            }
+
+            cachedChartBitmapKey = bitmapKey
+            cachedChartBitmap = bmp
+            return bmp
         }
     }
-}
 
-class RefreshWidgetActionCallback : ActionCallback {
-    override suspend fun onAction(
-        context: Context,
-        glanceId: GlanceId,
-        parameters: ActionParameters
-    ) {
+    override suspend fun provideGlance(context: Context, id: GlanceId) {
         val appContext = context.applicationContext
-        CoroutineScope(Dispatchers.IO).launch {
-            try {
-                ScheduleSyncWorker.syncImmediately(appContext)
-                AlarmScheduler.syncAlarms(appContext)
-                BlackoutGlanceWidget.syncAllWidgets(appContext)
-            } catch (_: Exception) {}
+        val settingsRepo = SettingsRepository(appContext)
+        val scheduleRepo = ScheduleRepository(appContext)
+        val initialSettings = settingsRepo.getSettings()
+
+        // Immediately fetch live schedule on first widget placement if cache is missing for selected queue
+        if (!scheduleRepo.hasValidTodayCache(initialSettings.queue)) {
+            withContext(Dispatchers.IO) {
+                try {
+                    val res = ZtoeParser.fetchFullSchedule(initialSettings.cityUrl, initialSettings.queue, appContext)
+                    if (res.status == ua.blackout.prewarning.data.parser.FetchStatus.SUCCESS) {
+                        scheduleRepo.saveSchedule(initialSettings.queue, res.todaySlots, res.tomorrowSlots)
+                    } else {
+                        scheduleRepo.clearScheduleCache()
+                    }
+                } catch (_: Exception) {
+                    scheduleRepo.clearScheduleCache()
+                }
+            }
+        }
+
+        provideContent {
+            val prefs = currentState<Preferences>()
+            // Observe Glance state preferences so recomposition always triggers when toggled or refreshed
+            val currentSettings = settingsRepo.getSettings()
+            val resolvedLang = AppStrings.resolveLang(prefs[KEY_LANGUAGE] ?: currentSettings.language)
+            val notificationsEnabled = prefs[KEY_NOTIFICATIONS_ENABLED] ?: currentSettings.notificationsEnabled
+            val activeQueue = currentSettings.queue
+            val refreshTick = prefs[KEY_REFRESH_TICK] ?: 0L
+
+            // Always use Today's schedule for the widget
+            val slots = scheduleRepo.getTodaySlots(activeQueue)
+            val liveInfo = scheduleRepo.getCurrentStatusAndCountdown(activeQueue)
+            val isUnclear = slots.isEmpty() || (if (refreshTick > 0L) (prefs[KEY_IS_UNCLEAR] ?: liveInfo.isUnclear) else liveInfo.isUnclear)
+            val isBlackoutNow = !isUnclear && (if (refreshTick > 0L) (prefs[KEY_IS_BLACKOUT_NOW] ?: liveInfo.isBlackoutNow) else liveInfo.isBlackoutNow)
+            val rawCountdownText = if (isUnclear) "--:--:--" else (prefs[KEY_COUNTDOWN_TEXT]?.takeIf { it.isNotBlank() && refreshTick > 0L } ?: liveInfo.countdownText)
+            val countdownText = formatWidgetCountdown(rawCountdownText, resolvedLang)
+            val nextSlotTime = if (isUnclear) "--:-- - --:--" else (prefs[KEY_NEXT_SLOT_TIME]?.takeIf { it.isNotBlank() && refreshTick > 0L } ?: liveInfo.nextSlotTime)
+            val nextBlackoutText = if (isUnclear) "--:-- - --:--" else scheduleRepo.getNextUpcomingIntervalText(activeQueue).ifBlank {
+                prefs[KEY_NEXT_BLACKOUT_TEXT] ?: "Сьогодні більше немає"
+            }
+
+            val size = LocalSize.current
+            val isBigWidget = size.height >= 115.dp || size.width >= 230.dp
+
+            val statusText = when {
+                isUnclear -> AppStrings.powerUnclear(resolvedLang)
+                isBlackoutNow -> "СВІТЛА НЕМАЄ"
+                else -> "СВІТЛО Є"
+            }
+            val statusColor = when {
+                isUnclear -> Color(0xFF9CA3AF)
+                isBlackoutNow -> Color(0xFFFF5E3A)
+                else -> Color(0xFF34D399)
+            }
+
+            GlanceTheme {
+                Box(
+                    modifier = GlanceModifier
+                        .fillMaxSize()
+                        .cornerRadius(20.dp)
+                        .background(ColorProvider(Color(0xCC141A29)))
+                        .padding(12.dp)
+                ) {
+                    if (isBigWidget) {
+                        val now = LocalTime.now(KYIV_ZONE)
+                        val chartBitmap = renderAnalogCounterBitmap(slots, now.hour, now.minute, resolvedLang)
+
+                        // ----------------- 3x2 BIG WIDGET -----------------
+                        Column(
+                            modifier = GlanceModifier.fillMaxSize(),
+                            verticalAlignment = Alignment.Vertical.CenterVertically
+                        ) {
+                            // Top Row: Queue + Status + Round Refresh Button + Round Notification Toggle Button
+                            Row(
+                                modifier = GlanceModifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.Vertical.CenterVertically
+                            ) {
+                                Column(
+                                    modifier = GlanceModifier
+                                        .defaultWeight()
+                                        .clickable(actionStartActivity<MainActivity>())
+                                ) {
+                                    Text(
+                                        text = "Черга $activeQueue",
+                                        style = TextStyle(
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 16.sp,
+                                            color = ColorProvider(Color.White)
+                                        )
+                                    )
+                                    Text(
+                                        text = statusText,
+                                        style = TextStyle(
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 11.sp,
+                                            color = ColorProvider(statusColor)
+                                        )
+                                    )
+                                }
+
+                                // Round Refresh Button (same style as Notification toggle)
+                                Box(
+                                    modifier = GlanceModifier
+                                        .size(36.dp)
+                                        .cornerRadius(18.dp)
+                                        .background(ColorProvider(Color(0x26FFFFFF)))
+                                        .clickable(actionRunCallback<RefreshWidgetActionCallback>()),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Image(
+                                        provider = ImageProvider(R.drawable.ic_refresh),
+                                        contentDescription = "Оновити дані",
+                                        colorFilter = ColorFilter.tint(ColorProvider(Color.White)),
+                                        modifier = GlanceModifier.size(18.dp)
+                                    )
+                                }
+
+                                Spacer(modifier = GlanceModifier.width(8.dp))
+
+                                // Round Notification Toggle Button
+                                Box(
+                                    modifier = GlanceModifier
+                                        .size(36.dp)
+                                        .cornerRadius(18.dp)
+                                        .background(ColorProvider(if (notificationsEnabled) Color.White else Color(0x26FFFFFF)))
+                                        .clickable(actionRunCallback<ToggleAlertsActionCallback>()),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Image(
+                                        provider = ImageProvider(
+                                            if (notificationsEnabled) R.drawable.ic_notification else R.drawable.ic_notification_off
+                                        ),
+                                        contentDescription = "Toggle alerts",
+                                        colorFilter = ColorFilter.tint(
+                                            ColorProvider(if (notificationsEnabled) Color(0xFFFF5E3A) else Color.White)
+                                        ),
+                                        modifier = GlanceModifier.size(20.dp)
+                                    )
+                                }
+                            }
+
+                            Spacer(modifier = GlanceModifier.height(6.dp))
+
+                            // Countdown Card Row (clickable to open app)
+                            Row(
+                                modifier = GlanceModifier
+                                    .fillMaxWidth()
+                                    .cornerRadius(12.dp)
+                                    .background(ColorProvider(Color(0x33000000)))
+                                    .padding(horizontal = 10.dp, vertical = 6.dp)
+                                    .clickable(actionStartActivity<MainActivity>()),
+                                verticalAlignment = Alignment.Vertical.CenterVertically
+                            ) {
+                                Column(modifier = GlanceModifier.defaultWeight()) {
+                                    Text(
+                                        text = if (isBlackoutNow) "До увімкнення:" else "До відключення:",
+                                        style = TextStyle(fontSize = 10.sp, color = ColorProvider(Color(0xB3BAE6FD)))
+                                    )
+                                    Text(
+                                        text = countdownText,
+                                        style = TextStyle(
+                                            fontSize = 20.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = ColorProvider(Color.White)
+                                        ),
+                                        maxLines = 1
+                                    )
+                                }
+                                Column(horizontalAlignment = Alignment.Horizontal.End) {
+                                    Text(
+                                        text = "Період",
+                                        style = TextStyle(fontSize = 10.sp, color = ColorProvider(Color(0xB3BAE6FD)))
+                                    )
+                                    Text(
+                                        text = nextSlotTime,
+                                        style = TextStyle(
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = ColorProvider(Color.White)
+                                        )
+                                    )
+                                }
+                            }
+
+                            Spacer(modifier = GlanceModifier.height(6.dp))
+
+                            // 24-Hour Analog Electricity Counter (САЗУ-ИТ) Chart rendered via Bitmap
+                            Image(
+                                provider = ImageProvider(chartBitmap),
+                                contentDescription = "24-годинний графік відключень",
+                                contentScale = ContentScale.FillBounds,
+                                modifier = GlanceModifier
+                                    .fillMaxWidth()
+                                    .height(52.dp)
+                                    .clickable(actionStartActivity<MainActivity>())
+                            )
+
+                            // Upcoming Outage Interval ("Наступне відключення")
+                            Spacer(modifier = GlanceModifier.height(4.dp))
+                            Row(
+                                modifier = GlanceModifier
+                                    .fillMaxWidth()
+                                    .cornerRadius(8.dp)
+                                    .background(ColorProvider(Color(0x26000000)))
+                                    .padding(horizontal = 8.dp, vertical = 3.dp)
+                                    .clickable(actionStartActivity<MainActivity>()),
+                                verticalAlignment = Alignment.Vertical.CenterVertically
+                            ) {
+                                Text(
+                                    text = nextBlackoutText,
+                                    style = TextStyle(
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = ColorProvider(Color.White)
+                                    )
+                                )
+                                Spacer(modifier = GlanceModifier.defaultWeight())
+                                Text(
+                                    text = "Наступне відключення",
+                                    style = TextStyle(
+                                        fontSize = 10.sp,
+                                        color = ColorProvider(Color(0xFFFF5E3A))
+                                    )
+                                )
+                            }
+                        }
+                    } else {
+                        // ----------------- 2x1 SMALL WIDGET -----------------
+                        Column(
+                            modifier = GlanceModifier.fillMaxSize(),
+                            verticalAlignment = Alignment.Vertical.CenterVertically
+                        ) {
+                            // Top Row: Queue + Status
+                            Row(
+                                modifier = GlanceModifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.Vertical.CenterVertically
+                            ) {
+                                Text(
+                                    text = "Черга $activeQueue",
+                                    style = TextStyle(
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 14.sp,
+                                        color = ColorProvider(Color.White)
+                                    ),
+                                    modifier = GlanceModifier.clickable(actionStartActivity<MainActivity>())
+                                )
+                                Spacer(modifier = GlanceModifier.defaultWeight())
+                                Text(
+                                    text = statusText,
+                                    style = TextStyle(
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 10.sp,
+                                        color = ColorProvider(statusColor)
+                                    ),
+                                    modifier = GlanceModifier.clickable(actionStartActivity<MainActivity>())
+                                )
+                            }
+
+                            Spacer(modifier = GlanceModifier.height(4.dp))
+
+                            // Bottom Row: Countdown + Round Refresh Button + Round Notification Toggle Button
+                            Row(
+                                modifier = GlanceModifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.Vertical.CenterVertically
+                            ) {
+                                Column(
+                                    modifier = GlanceModifier
+                                        .defaultWeight()
+                                        .clickable(actionStartActivity<MainActivity>())
+                                ) {
+                                    Text(
+                                        text = if (isBlackoutNow) "До увімкнення:" else "До відключення:",
+                                        style = TextStyle(fontSize = 10.sp, color = ColorProvider(Color(0xB3BAE6FD)))
+                                    )
+                                    Text(
+                                        text = countdownText,
+                                        style = TextStyle(
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = ColorProvider(Color.White)
+                                        ),
+                                        maxLines = 1
+                                    )
+                                }
+
+                                // Round Refresh Button (same style as Notification toggle)
+                                Box(
+                                    modifier = GlanceModifier
+                                        .size(34.dp)
+                                        .cornerRadius(17.dp)
+                                        .background(ColorProvider(Color(0x26FFFFFF)))
+                                        .clickable(actionRunCallback<RefreshWidgetActionCallback>()),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Image(
+                                        provider = ImageProvider(R.drawable.ic_refresh),
+                                        contentDescription = "Оновити дані",
+                                        colorFilter = ColorFilter.tint(ColorProvider(Color.White)),
+                                        modifier = GlanceModifier.size(16.dp)
+                                    )
+                                }
+
+                                Spacer(modifier = GlanceModifier.width(6.dp))
+
+                                // Round Notification Toggle Button
+                                Box(
+                                    modifier = GlanceModifier
+                                        .size(34.dp)
+                                        .cornerRadius(17.dp)
+                                        .background(ColorProvider(if (notificationsEnabled) Color.White else Color(0x26FFFFFF)))
+                                        .clickable(actionRunCallback<ToggleAlertsActionCallback>()),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Image(
+                                        provider = ImageProvider(
+                                            if (notificationsEnabled) R.drawable.ic_notification else R.drawable.ic_notification_off
+                                        ),
+                                        contentDescription = "Toggle alerts",
+                                        colorFilter = ColorFilter.tint(
+                                            ColorProvider(if (notificationsEnabled) Color(0xFFFF5E3A) else Color.White)
+                                        ),
+                                        modifier = GlanceModifier.size(18.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 }
@@ -1423,11 +2061,43 @@ class ToggleAlertsActionCallback : ActionCallback {
         val current = settingsRepo.getSettings()
         val newState = !current.notificationsEnabled
         settingsRepo.updateNotificationsEnabled(newState)
-        CoroutineScope(Dispatchers.IO).launch {
+        try {
+            AlarmScheduler.syncAlarms(appContext)
+        } catch (_: Exception) {}
+        try {
+            BlackoutGlanceWidget.syncAllWidgets(appContext)
+        } catch (_: Exception) {}
+    }
+}
+
+class RefreshWidgetActionCallback : ActionCallback {
+    override suspend fun onAction(
+        context: Context,
+        glanceId: GlanceId,
+        parameters: ActionParameters
+    ) {
+        val appContext = context.applicationContext
+        val settingsRepo = SettingsRepository(appContext)
+        val scheduleRepo = ScheduleRepository(appContext)
+        val current = settingsRepo.getSettings()
+
+        withContext(Dispatchers.IO) {
             try {
+                val res = ZtoeParser.fetchFullSchedule(current.cityUrl, current.queue, appContext, forceNetwork = true)
+                if (res.status == ua.blackout.prewarning.data.parser.FetchStatus.SUCCESS) {
+                    scheduleRepo.saveSchedule(current.queue, res.todaySlots, res.tomorrowSlots)
+                } else {
+                    scheduleRepo.clearScheduleCache()
+                }
                 AlarmScheduler.syncAlarms(appContext)
                 BlackoutGlanceWidget.syncAllWidgets(appContext)
-            } catch (_: Exception) {}
+            } catch (_: Exception) {
+                try {
+                    scheduleRepo.clearScheduleCache()
+                    AlarmScheduler.syncAlarms(appContext)
+                    BlackoutGlanceWidget.syncAllWidgets(appContext)
+                } catch (_: Exception) {}
+            }
         }
     }
 }`
@@ -1438,11 +2108,65 @@ class ToggleAlertsActionCallback : ActionCallback {
     description: 'GlanceAppWidgetReceiver binding the widget lifecycle',
     content: `package ua.blackout.prewarning.widget
 
+import android.appwidget.AppWidgetManager
+import android.content.Context
 import androidx.glance.appwidget.GlanceAppWidget
 import androidx.glance.appwidget.GlanceAppWidgetReceiver
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import ua.blackout.prewarning.data.parser.ZtoeParser
+import ua.blackout.prewarning.data.repository.ScheduleRepository
+import ua.blackout.prewarning.data.repository.SettingsRepository
+import ua.blackout.prewarning.notification.AlarmScheduler
 
 class BlackoutWidgetReceiver : GlanceAppWidgetReceiver() {
     override val glanceAppWidget: GlanceAppWidget = BlackoutGlanceWidget()
+
+    override fun onEnabled(context: Context) {
+        super.onEnabled(context)
+        fetchAndRefreshWidgetImmediately(context, forceNetwork = true)
+    }
+
+    override fun onUpdate(
+        context: Context,
+        appWidgetManager: AppWidgetManager,
+        appWidgetIds: IntArray
+    ) {
+        super.onUpdate(context, appWidgetManager, appWidgetIds)
+        fetchAndRefreshWidgetImmediately(context, forceNetwork = false)
+    }
+
+    private fun fetchAndRefreshWidgetImmediately(context: Context, forceNetwork: Boolean) {
+        val pendingResult = goAsync()
+        val appContext = context.applicationContext
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                val settings = SettingsRepository(appContext).getSettings()
+                val scheduleRepo = ScheduleRepository(appContext)
+                val cacheFresh = scheduleRepo.hasValidTodayCache(settings.queue) &&
+                    scheduleRepo.isCacheFresh(settings.refreshIntervalMinutes)
+
+                if (forceNetwork || !cacheFresh) {
+                    val res = ZtoeParser.fetchFullSchedule(settings.cityUrl, settings.queue, appContext)
+                    if (res.status == ua.blackout.prewarning.data.parser.FetchStatus.SUCCESS) {
+                        scheduleRepo.saveSchedule(settings.queue, res.todaySlots, res.tomorrowSlots)
+                    }
+                }
+                AlarmScheduler.syncAlarms(appContext)
+                BlackoutGlanceWidget.syncAllWidgets(appContext)
+            } catch (_: Exception) {
+                try {
+                    AlarmScheduler.syncAlarms(appContext)
+                    BlackoutGlanceWidget.syncAllWidgets(appContext)
+                } catch (_: Exception) {}
+            } finally {
+                try {
+                    pendingResult.finish()
+                } catch (_: Exception) {}
+            }
+        }
+    }
 }`
   },
   {
@@ -1465,6 +2189,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import ua.blackout.prewarning.notification.NotificationHelper
 import ua.blackout.prewarning.ui.screens.BlackoutAppNavigation
+import ua.blackout.prewarning.ui.screens.RouletteSoundEngine
 import ua.blackout.prewarning.ui.theme.ZTBlackoutTheme
 
 class MainActivity : ComponentActivity() {
@@ -1474,11 +2199,26 @@ class MainActivity : ComponentActivity() {
             // Notification permission granted or denied
         }
 
+    override fun onResume() {
+        super.onResume()
+        RouletteSoundEngine.setAppInForeground(true, this)
+    }
+
+    override fun onPause() {
+        RouletteSoundEngine.setAppInForeground(false, this)
+        super.onPause()
+    }
+
+    override fun onStop() {
+        RouletteSoundEngine.setAppInForeground(false, this)
+        super.onStop()
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
         // Initialize Notification Channels
-        NotificationHelper.createNotificationChannel(this)
+        NotificationHelper.createNotificationChannels(this)
 
         // Request runtime permission for Android 13+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -1520,32 +2260,39 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.*
-import androidx.compose.material3.*
+import androidx.compose.material.icons.filled.Language
+import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.material.icons.filled.NotificationsOff
+import androidx.compose.material.icons.filled.OpenInNew
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Schedule
+import androidx.compose.material3.Icon
+import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import ua.blackout.prewarning.R
 import ua.blackout.prewarning.data.model.BlackoutSlot
-import ua.blackout.prewarning.data.model.SlotStatus
 import ua.blackout.prewarning.data.repository.ScheduleRepository
 import ua.blackout.prewarning.ui.AppStrings
 import ua.blackout.prewarning.ui.components.TimelineBar
 import java.time.LocalTime
+import java.time.format.DateTimeFormatter
 import ua.blackout.prewarning.data.KYIV_ZONE
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MainScreen(
-    queue: String = "2.1",
+    queue: String = "1.1",
     isBlackoutNow: Boolean = false,
     countdownText: String = "01:35:12",
     slotTimeText: String = "14:00 – 18:00",
@@ -1553,45 +2300,71 @@ fun MainScreen(
     tomorrowSlots: List<BlackoutSlot>? = null,
     hasTomorrowSchedule: Boolean = false,
     notificationsEnabled: Boolean = true,
-    lastUpdated: String = "--:--",
-    nextUpdated: String = "--:--",
+    lastUpdated: String = "19:27",
+    nextUpdated: String = "19:57",
     lang: String = "uk",
     onToggleNotifications: () -> Unit = {},
-    onRefresh: () -> Unit = {},
-    onSendTestAlert: () -> Unit = {}
+    onRefresh: () -> Unit = {}
 ) {
     val context = LocalContext.current
+    val scheduleRepo = remember { ScheduleRepository(context.applicationContext) }
     var selectedDayTab by remember { mutableStateOf("today") }
 
+    // Reset to "today" if tomorrow schedule is no longer available
     LaunchedEffect(hasTomorrowSchedule, tomorrowSlots) {
-        if (!hasTomorrowSchedule && selectedDayTab == "tomorrow") {
+        if (!hasTomorrowSchedule || tomorrowSlots == null) {
             selectedDayTab = "today"
         }
     }
 
-    val isTomorrowSelected = selectedDayTab == "tomorrow" && tomorrowSlots != null
-    val activeSlots = if (isTomorrowSelected) (tomorrowSlots ?: emptyList()) else slots
-    val activeSlotsSignature = remember(activeSlots) {
-        activeSlots.joinToString("") { if (it.status == SlotStatus.POWER_OFF) "1" else "0" }
+    val isTomorrowSelected = selectedDayTab == "tomorrow" && hasTomorrowSchedule && tomorrowSlots != null
+    val activeSlots = if (isTomorrowSelected) tomorrowSlots!! else slots
+    val isUnclear = activeSlots.isEmpty()
+    val isStatusUnclear = slots.isEmpty()
+    val activeSlotsSignature = activeSlots.joinToString("") {
+        if (it.status == ua.blackout.prewarning.data.model.SlotStatus.POWER_OFF) "1" else "0"
     }
 
-    val isUnclear = activeSlots.isEmpty() || activeSlots.all { it.status == SlotStatus.POWER_ON && activeSlots.isEmpty() }
-    val now = remember { LocalTime.now(KYIV_ZONE) }
-    val nowMinutes = now.hour * 60 + now.minute
+    // Compute continuous blackout intervals with exact 30-min resolution using hoisted ScheduleRepository
+    val intervals = remember(queue, selectedDayTab, activeSlotsSignature) {
+        scheduleRepo.getDetailedIntervals(activeSlots)
+    }
 
-    val intervals = remember(activeSlotsSignature) {
-        ScheduleRepository.computeDetailedIntervals(activeSlots)
+    // Pulse animation for status dot — only active during an active blackout to avoid 60fps idle CPU/battery drain
+    val pulseScale = if (!isStatusUnclear && isBlackoutNow) {
+        val infiniteTransition = rememberInfiniteTransition(label = "pulse")
+        val scale by infiniteTransition.animateFloat(
+            initialValue = 0.85f,
+            targetValue = 1.25f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(900, easing = FastOutSlowInEasing),
+                repeatMode = RepeatMode.Reverse
+            ),
+            label = "pulseScale"
+        )
+        scale
+    } else {
+        1f
+    }
+
+    val kyivNow = remember(countdownText) {
+        LocalTime.now(KYIV_ZONE)
+    }
+    val currentTimeStr = remember(kyivNow.hour, kyivNow.minute) {
+        kyivNow.format(DateTimeFormatter.ofPattern("HH:mm"))
     }
 
     Column(
         modifier = Modifier
             .fillMaxSize()
+            .statusBarsPadding()
             .verticalScroll(rememberScrollState())
             .padding(horizontal = 16.dp, vertical = 12.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp)
+        verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
+        // 1. Top Header: Queue title + Sleek pill toggle switch (NO text)
         Row(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -1605,210 +2378,320 @@ fun MainScreen(
                 Text(
                     text = "Житомиробленерго (ZTOE)",
                     fontSize = 12.sp,
-                    color = Color(0xFFBAE6FD)
-                )
-            }
-
-            IconButton(
-                onClick = onToggleNotifications,
-                modifier = Modifier
-                    .size(44.dp)
-                    .clip(CircleShape)
-                    .background(if (notificationsEnabled) Color(0xFFFF5E3A) else Color(0x33FFFFFF))
-            ) {
-                Icon(
-                    imageVector = if (notificationsEnabled) Icons.Default.NotificationsActive else Icons.Default.NotificationsOff,
-                    contentDescription = if (notificationsEnabled) "Сповіщення УВІМК" else "Сповіщення ВИМК",
-                    tint = Color.White,
-                    modifier = Modifier.size(22.dp)
-                )
-            }
-        }
-
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(24.dp),
-            colors = CardDefaults.cardColors(containerColor = Color(0xCC141A29))
-        ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(20.dp),
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                val statusTitle = if (isUnclear) {
-                    AppStrings.powerUnclear(lang)
-                } else if (isBlackoutNow) {
-                    AppStrings.powerOff(lang)
-                } else {
-                    AppStrings.powerOn(lang)
-                }
-
-                val statusColor = if (isUnclear) {
-                    Color(0xFFA1A1AA)
-                } else if (isBlackoutNow) {
-                    Color(0xFFFF5E3A)
-                } else {
-                    Color(0xFF34D399)
-                }
-
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.Center
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(10.dp)
-                            .clip(CircleShape)
-                            .background(statusColor)
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(
-                        text = statusTitle,
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.ExtraBold,
-                        color = statusColor
-                    )
-                }
-
-                Spacer(modifier = Modifier.height(12.dp))
-
-                val countdownLabel = if (!isUnclear && isBlackoutNow) {
-                    AppStrings.powerOnIn(lang)
-                } else {
-                    AppStrings.powerOffIn(lang)
-                }
-
-                Text(
-                    text = countdownLabel,
-                    fontSize = 12.sp,
-                    color = Color(0xFFBAE6FD)
-                )
-
-                Spacer(modifier = Modifier.height(4.dp))
-
-                Text(
-                    text = if (isUnclear) "--:--:--" else countdownText,
-                    fontSize = 44.sp,
-                    fontWeight = FontWeight.Black,
-                    fontFamily = FontFamily.Monospace,
-                    color = Color.White
-                )
-
-                Spacer(modifier = Modifier.height(8.dp))
-
-                val periodLabel = if (!isUnclear && isBlackoutNow) {
-                    AppStrings.outagePeriod(lang)
-                } else {
-                    AppStrings.nextPeriod(lang)
-                }
-                val periodDetail = if (isUnclear) "--:-- - --:--" else slotTimeText
-
-                Text(
-                    text = "$periodLabel $periodDetail",
-                    fontSize = 13.sp,
                     fontWeight = FontWeight.Medium,
-                    color = Color(0xFFE2E8F0)
+                    color = Color(0xB3BAE6FD)
                 )
+            }
+
+            // Enlarged Pill Switch matching emulator exactly
+            Box(
+                modifier = Modifier
+                    .size(width = 58.dp, height = 34.dp)
+                    .clip(CircleShape)
+                    .background(if (notificationsEnabled) Color(0xFFFF5E3A) else Color(0x26FFFFFF))
+                    .clickable { onToggleNotifications() }
+                    .padding(4.dp),
+                contentAlignment = if (notificationsEnabled) Alignment.CenterEnd else Alignment.CenterStart
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(26.dp)
+                        .clip(CircleShape)
+                        .background(Color.White),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = if (notificationsEnabled) Icons.Default.Notifications else Icons.Default.NotificationsOff,
+                        contentDescription = null,
+                        tint = if (notificationsEnabled) Color(0xFFFF5E3A) else Color(0xFF6B7280),
+                        modifier = Modifier.size(16.dp)
+                    )
+                }
             }
         }
 
-        key(queue, selectedDayTab, activeSlotsSignature) {
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(24.dp),
-                colors = CardDefaults.cardColors(containerColor = Color(0xCC141A29))
-            ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
+        // 2. Hero Outage Status Card (Translucent Frosted Glass)
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(24.dp))
+                .background(Color(0xBF141A29))
+                .padding(18.dp)
+        ) {
+            Column {
+                // Status Line
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
                     Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(Color(0x22000000))
-                            .padding(4.dp),
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        Button(
-                            onClick = { selectedDayTab = "today" },
-                            modifier = Modifier.weight(1f),
-                            shape = RoundedCornerShape(8.dp),
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = if (!isTomorrowSelected) Color.White else Color.Transparent,
-                                contentColor = if (!isTomorrowSelected) Color.Black else Color.White
-                            )
-                        ) {
-                            Text(AppStrings.today(lang), fontWeight = FontWeight.Bold)
-                        }
-
-                        if (hasTomorrowSchedule && tomorrowSlots != null) {
-                            Button(
-                                onClick = { selectedDayTab = "tomorrow" },
-                                modifier = Modifier.weight(1f),
-                                shape = RoundedCornerShape(8.dp),
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = if (isTomorrowSelected) Color.White else Color.Transparent,
-                                    contentColor = if (isTomorrowSelected) Color.Black else Color.White
+                        Box(
+                            modifier = Modifier
+                                .size(10.dp)
+                                .scale(if (!isStatusUnclear && isBlackoutNow) pulseScale else 1f)
+                                .clip(CircleShape)
+                                .background(
+                                    when {
+                                        isStatusUnclear -> Color(0xFF9CA3AF)
+                                        isBlackoutNow -> Color(0xFFFF5E3A)
+                                        else -> Color(0xFF34D399)
+                                    }
                                 )
-                            ) {
-                                Text(AppStrings.tomorrow(lang), fontWeight = FontWeight.Bold)
-                            }
-                        }
+                        )
+                        Text(
+                            text = when {
+                                isStatusUnclear -> AppStrings.powerUnclear(lang)
+                                isBlackoutNow -> AppStrings.powerOff(lang)
+                                else -> AppStrings.powerOn(lang)
+                            },
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White
+                        )
                     }
 
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Icon(
+                            Icons.Default.Schedule,
+                            contentDescription = null,
+                            tint = Color(0xB3BAE6FD),
+                            modifier = Modifier.size(14.dp)
+                        )
+                        Text(
+                            text = currentTimeStr,
+                            fontSize = 12.sp,
+                            fontFamily = FontFamily.Monospace,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xB3BAE6FD)
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(14.dp))
+
+                // Big Countdown Digits
+                Column(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Text(
+                        text = if (!isStatusUnclear && isBlackoutNow) AppStrings.powerOnIn(lang) else AppStrings.powerOffIn(lang),
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = Color(0xB3BAE6FD)
+                    )
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = countdownText,
+                        fontSize = 44.sp,
+                        fontWeight = FontWeight.Black,
+                        fontFamily = FontFamily.Monospace,
+                        color = Color.White
+                    )
+                }
+
+                val effectiveSlotTimeText = if (isStatusUnclear) "--:-- - --:--" else slotTimeText
+                if (effectiveSlotTimeText.isNotEmpty() && effectiveSlotTimeText != "Відключень немає") {
+                    Spacer(modifier = Modifier.height(14.dp))
+                    Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(Color(0x1AFFFFFF)))
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = if (!isStatusUnclear && isBlackoutNow) AppStrings.outagePeriod(lang) else AppStrings.nextPeriod(lang),
+                            fontSize = 13.sp,
+                            color = Color(0xB3BAE6FD)
+                        )
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(10.dp))
+                                .background(Color(0x26FFFFFF))
+                                .padding(horizontal = 10.dp, vertical = 4.dp)
+                        ) {
+                            Text(
+                                text = effectiveSlotTimeText,
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Bold,
+                                fontFamily = FontFamily.Monospace,
+                                color = Color.White
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        // 3. Day Selector (Today / Tomorrow)
+        // If tomorrow's table exists on site: show segmented selector. Otherwise: center single "Today" button!
+        if (hasTomorrowSchedule && tomorrowSlots != null) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(Color(0x80141A29))
+                    .padding(4.dp)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(if (selectedDayTab == "today") Color(0x33FFFFFF) else Color.Transparent)
+                        .clickable { selectedDayTab = "today" }
+                        .padding(vertical = 10.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = AppStrings.today(lang),
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = if (selectedDayTab == "today") Color.White else Color(0x99BAE6FD)
+                    )
+                }
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(if (selectedDayTab == "tomorrow") Color(0x33FFFFFF) else Color.Transparent)
+                        .clickable { selectedDayTab = "tomorrow" }
+                        .padding(vertical = 10.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = AppStrings.tomorrow(lang),
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = if (selectedDayTab == "tomorrow") Color.White else Color(0x99BAE6FD)
+                    )
+                }
+            }
+        } else {
+            // Centered "Today" button
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth(),
+                contentAlignment = Alignment.Center
+            ) {
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(Color(0x80141A29))
+                        .padding(horizontal = 24.dp, vertical = 10.dp)
+                ) {
+                    Text(
+                        text = AppStrings.today(lang),
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White
+                    )
+                }
+            }
+        }
+
+        // 4. Schedule Card with 24h Timeline matching user screenshot
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(24.dp))
+                .background(Color(0xBF141A29))
+                .padding(18.dp)
+        ) {
+            key(queue, selectedDayTab, activeSlotsSignature) {
+                Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                    // 24-Hour Timeline Bar
                     TimelineBar(
                         slots = activeSlots,
-                        currentHour = if (!isTomorrowSelected) now.hour else -1,
-                        currentMinute = if (!isTomorrowSelected) now.minute else -1,
-                        showNeedle = !isTomorrowSelected,
+                        currentHour = kyivNow.hour,
+                        currentMinute = kyivNow.minute,
+                        showNeedle = selectedDayTab == "today",
                         lang = lang
                     )
 
+                    // List of Outage Hours for this day (removed when outages are unclear)
                     if (!isUnclear) {
-                        Text(
-                            text = AppStrings.blackoutHoursHeader(lang),
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Color(0xFFBAE6FD)
-                        )
+                        Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(Color(0x1AFFFFFF)))
 
-                        if (intervals.isEmpty()) {
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                             Text(
-                                text = AppStrings.noBlackoutsScheduled(lang),
-                                fontSize = 13.sp,
-                                color = Color(0xFF34D399)
+                                text = AppStrings.blackoutHoursHeader(lang),
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xB3BAE6FD)
                             )
-                        } else {
-                            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+
+                            if (intervals.isNotEmpty()) {
                                 intervals.forEach { interval ->
-                                    val isCurrent = !isTomorrowSelected && nowMinutes in interval.startMinuteOfDay until interval.endMinuteOfDay
+                                    val start = interval.startStr
+                                    val end = interval.endStr
+                                    val dur = interval.durationHours
+                                    val durStr = if (dur % 1.0 == 0.0) "\${dur.toInt()} \${AppStrings.hourShort(lang)}" else "\${String.format(java.util.Locale.US, "%.1f", dur)} \${AppStrings.hourShort(lang)}"
                                     Row(
                                         modifier = Modifier
                                             .fillMaxWidth()
-                                            .clip(RoundedCornerShape(10.dp))
-                                            .background(if (isCurrent) Color(0x33FF5E3A) else Color(0x1AFFFFFF))
-                                            .padding(horizontal = 12.dp, vertical = 8.dp),
+                                            .clip(RoundedCornerShape(14.dp))
+                                            .background(Color(0x14FFFFFF))
+                                            .padding(horizontal = 14.dp, vertical = 10.dp),
                                         horizontalArrangement = Arrangement.SpaceBetween,
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
-                                        Text(
-                                            text = "\${interval.startStr} – \${interval.endStr}",
-                                            fontFamily = FontFamily.Monospace,
-                                            fontWeight = FontWeight.Bold,
-                                            fontSize = 14.sp,
-                                            color = if (isCurrent) Color(0xFFFF5E3A) else Color.White
-                                        )
-                                        val durationFormatted = String.format("%.1f", interval.durationHours)
-                                        Text(
-                                            text = "\${durationFormatted} \${AppStrings.hourShort(lang)}",
-                                            fontSize = 12.sp,
-                                            color = Color(0xFFBAE6FD)
-                                        )
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                        ) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .size(8.dp)
+                                                    .clip(CircleShape)
+                                                    .background(Color(0xFFFF5E3A))
+                                            )
+                                            Text(
+                                                text = "$start – $end",
+                                                fontSize = 15.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                fontFamily = FontFamily.Monospace,
+                                                color = Color.White
+                                            )
+                                        }
+
+                                        Box(
+                                            modifier = Modifier
+                                                .clip(RoundedCornerShape(8.dp))
+                                                .background(Color(0x26FF5E3A))
+                                                .padding(horizontal = 8.dp, vertical = 3.dp)
+                                        ) {
+                                            Text(
+                                                text = durStr,
+                                                fontSize = 11.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                fontFamily = FontFamily.Monospace,
+                                                color = Color(0xFFFF5E3A)
+                                            )
+                                        }
                                     }
+                                }
+                            } else {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(14.dp))
+                                        .background(Color(0x14FFFFFF))
+                                        .padding(14.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        text = AppStrings.noBlackoutsScheduled(lang),
+                                        fontSize = 13.sp,
+                                        color = Color(0xB3BAE6FD)
+                                    )
                                 }
                             }
                         }
@@ -1817,167 +2700,195 @@ fun MainScreen(
             }
         }
 
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(20.dp),
-            colors = CardDefaults.cardColors(containerColor = Color(0xCC141A29))
+        // 5. Last Updated & Circular Refresh Button Card
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(20.dp))
+                .background(Color(0xBF141A29))
+                .padding(14.dp)
         ) {
             Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(16.dp),
+                modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Column {
-                    Text(
-                        text = "\${AppStrings.lastUpdated(lang)} $lastUpdated",
-                        fontSize = 11.sp,
-                        color = Color(0xFFBAE6FD)
-                    )
-                    Text(
-                        text = "\${AppStrings.nextUpdated(lang)} $nextUpdated",
-                        fontSize = 11.sp,
-                        color = Color(0xFF94A3B8)
-                    )
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text(AppStrings.lastUpdated(lang), fontSize = 11.sp, color = Color(0x99BAE6FD))
+                        Text(lastUpdated, fontSize = 11.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace, color = Color.White)
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text(AppStrings.nextUpdated(lang), fontSize = 11.sp, color = Color(0x99BAE6FD))
+                        Text(nextUpdated, fontSize = 11.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace, color = Color.White)
+                    }
                 }
 
-                IconButton(
-                    onClick = onRefresh,
+                // Circular white refresh button with feedback
+                Box(
                     modifier = Modifier
-                        .size(40.dp)
+                        .size(42.dp)
                         .clip(CircleShape)
                         .background(Color.White)
+                        .clickable {
+                            onRefresh()
+                        },
+                    contentAlignment = Alignment.Center
                 ) {
                     Icon(
                         imageVector = Icons.Default.Refresh,
                         contentDescription = "Оновити",
-                        tint = Color.Black
+                        tint = Color.Black,
+                        modifier = Modifier.size(20.dp)
                     )
                 }
             }
         }
 
-        Card(
+        // 6. Emergency Outages Info Link (right after refresh block, styled like AboutScreen links with site icon)
+        Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .clickable {
-                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse(AppStrings.EMERGENCY_OUTAGES_URL))
-                    context.startActivity(intent)
-                },
-            shape = RoundedCornerShape(20.dp),
-            colors = CardDefaults.cardColors(containerColor = Color(0xCC141A29))
+                .clip(RoundedCornerShape(24.dp))
+                .background(Color(0xBF141A29))
+                .padding(14.dp)
         ) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(14.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(Color(0x14FFFFFF))
+                    .clickable {
+                        try {
+                            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(AppStrings.EMERGENCY_OUTAGES_URL))
+                            context.startActivity(intent)
+                        } catch (_: Exception) {}
+                    }
+                    .padding(12.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                Box(
-                    modifier = Modifier
-                        .size(40.dp)
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(Color(0xFF1877F2)),
-                    contentAlignment = Alignment.Center
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    modifier = Modifier.weight(1f)
                 ) {
-                    Icon(
-                        painter = painterResource(id = R.drawable.ic_facebook),
-                        contentDescription = "Facebook",
-                        tint = Color.White,
-                        modifier = Modifier.size(20.dp)
-                    )
+                    Box(
+                        modifier = Modifier
+                            .size(36.dp)
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(Color(0xFF1877F2)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        // Facebook vector logo (replaces generic Icons.Default.Language globe)
+                        Icon(
+                            painter = painterResource(id = R.drawable.ic_facebook),
+                            contentDescription = "Facebook",
+                            tint = Color.White,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = AppStrings.emergencyOutagesLabel(lang),
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White,
+                            softWrap = true
+                        )
+                        Text(
+                            text = AppStrings.EMERGENCY_OUTAGES_URL,
+                            fontSize = 10.sp,
+                            fontFamily = FontFamily.Monospace,
+                            color = Color(0x99BAE6FD),
+                            maxLines = 1,
+                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                        )
+                    }
                 }
-
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = AppStrings.emergencyOutagesLabel(lang),
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = Color.White
-                    )
-                    Text(
-                        text = AppStrings.EMERGENCY_OUTAGES_URL,
-                        fontSize = 11.sp,
-                        color = Color(0xFFBAE6FD)
-                    )
-                }
-
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        imageVector = Icons.Default.Language,
-                        contentDescription = null,
-                        tint = Color(0xFFBAE6FD),
-                        modifier = Modifier.size(16.dp)
-                    )
-                    Spacer(modifier = Modifier.width(4.dp))
-                    Icon(
-                        imageVector = Icons.Default.OpenInNew,
-                        contentDescription = null,
-                        tint = Color.White,
-                        modifier = Modifier.size(16.dp)
-                    )
-                }
-            }
-        }
-
-        Card(
-            modifier = Modifier
-                .fillMaxWidth()
-                .clickable {
-                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse(AppStrings.SITE_SCHEDULES_URL))
-                    context.startActivity(intent)
-                },
-            shape = RoundedCornerShape(20.dp),
-            colors = CardDefaults.cardColors(containerColor = Color(0xCC141A29))
-        ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(14.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(40.dp)
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(Color(0xFFFF5E3A)),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Language,
-                        contentDescription = null,
-                        tint = Color.White,
-                        modifier = Modifier.size(20.dp)
-                    )
-                }
-
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = AppStrings.siteSchedulesLabel(lang),
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = Color.White
-                    )
-                    Text(
-                        text = AppStrings.SITE_SCHEDULES_URL,
-                        fontSize = 11.sp,
-                        color = Color(0xFFBAE6FD)
-                    )
-                }
-
                 Icon(
                     imageVector = Icons.Default.OpenInNew,
                     contentDescription = null,
-                    tint = Color.White,
+                    tint = Color(0x99BAE6FD),
                     modifier = Modifier.size(16.dp)
                 )
             }
         }
+
+        // 7. Blackout Schedules on ZTOE Website Link ("Графіки відключень на сайті") at very bottom after Facebook link
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(24.dp))
+                .background(Color(0xBF141A29))
+                .padding(14.dp)
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(Color(0x14FFFFFF))
+                    .clickable {
+                        try {
+                            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(AppStrings.SITE_SCHEDULES_URL))
+                            context.startActivity(intent)
+                        } catch (_: Exception) {}
+                    }
+                    .padding(12.dp),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(36.dp)
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(Color(0xFFFF5E3A)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Language,
+                            contentDescription = "Графіки відключень на сайті",
+                            tint = Color.White,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = AppStrings.siteSchedulesLabel(lang),
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White,
+                            softWrap = true
+                        )
+                        Text(
+                            text = AppStrings.SITE_SCHEDULES_URL,
+                            fontSize = 10.sp,
+                            fontFamily = FontFamily.Monospace,
+                            color = Color(0x99BAE6FD),
+                            maxLines = 1,
+                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                        )
+                    }
+                }
+                Icon(
+                    imageVector = Icons.Default.OpenInNew,
+                    contentDescription = null,
+                    tint = Color(0x99BAE6FD),
+                    modifier = Modifier.size(16.dp)
+                )
+            }
+        }
+
+        // Extra spacing so floating navigation dock does not overlap bottom card
+        Spacer(modifier = Modifier.height(96.dp))
     }
-}`
+}
+`
   },
   {
     path: 'app/src/main/java/ua/blackout/prewarning/ui/screens/SettingsScreen.kt',
@@ -1985,11 +2896,12 @@ fun MainScreen(
     description: 'Compose Settings screen with dropdown queue selection, ? help dialog, timer inputs, and toggles',
     content: `package ua.blackout.prewarning.ui.screens
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -1997,16 +2909,27 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import ua.blackout.prewarning.data.parser.FetchStatus
+import ua.blackout.prewarning.data.parser.ZtoeParser
+import ua.blackout.prewarning.ui.AppStrings
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(
-    currentQueue: String = "2.1",
+    currentQueue: String = "1.1",
     siteUrl: String = "https://www.ztoe.com.ua/unhooking-search.php",
+    // CRITICAL CONSTANTS — Default values: advanceMinutes = 15, refreshMinutes = 30. Never modify on your own.
     advanceMinutes: Int = 15,
     refreshMinutes: Int = 30,
     notificationsEnabled: Boolean = true,
@@ -2025,83 +2948,143 @@ fun SettingsScreen(
     onSendTestAlert: () -> Unit = {},
     onForceRefresh: () -> Unit = {},
     onResetDefaults: () -> Unit = {},
-    onShowAppBanner: ((String) -> Unit)? = null
+    onShowAppBanner: (String) -> Unit = {}
 ) {
+    val context = LocalContext.current
     var showQueueHelpDialog by remember { mutableStateOf(false) }
     var showResetConfirmDialog by remember { mutableStateOf(false) }
-    var dropdownExpanded by remember { mutableStateOf(false) }
+    var queueDropdownExpanded by remember { mutableStateOf(false) }
+    var advanceDropdownExpanded by remember { mutableStateOf(false) }
+    var refreshDropdownExpanded by remember { mutableStateOf(false) }
+
     val queues = listOf(
         "1.1", "1.2", "2.1", "2.2", "3.1", "3.2",
         "4.1", "4.2", "5.1", "5.2", "6.1", "6.2"
     )
+    val timerOptions = listOf(5, 10, 15, 20, 30, 45, 60, 90, 120, 180, 240)
+
+    val isUrlInValidList = remember(siteUrl) { ZtoeParser.isValidUrl(siteUrl, context) }
+    var urlFetchStatus by remember { mutableStateOf(FetchStatus.SUCCESS) }
+    var isVerifyingUrl by remember { mutableStateOf(false) }
+
+    // Live URL verification against valid-urls.json + actual table with current date & queues on site
+    LaunchedEffect(siteUrl, currentQueue) {
+        if (!ZtoeParser.isValidUrl(siteUrl, context)) {
+            urlFetchStatus = FetchStatus.NO_QUEUES_FOUND
+            return@LaunchedEffect
+        }
+        isVerifyingUrl = true
+        val res = withContext(Dispatchers.IO) {
+            ZtoeParser.fetchFullSchedule(siteUrl, currentQueue, context)
+        }
+        urlFetchStatus = res.status
+        isVerifyingUrl = false
+    }
+
+    val isSiteVerifiedSuccess = isUrlInValidList && urlFetchStatus == FetchStatus.SUCCESS
 
     Column(
         modifier = Modifier
             .fillMaxSize()
+            .statusBarsPadding()
             .verticalScroll(rememberScrollState())
-            .padding(16.dp),
+            .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        // 1. Queue Selection with ? help button
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(16.dp)
+        // Header
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            Column(modifier = Modifier.padding(16.dp)) {
+            Icon(
+                Icons.Default.Tune,
+                contentDescription = null,
+                tint = Color(0xFFFF5E3A),
+                modifier = Modifier.size(24.dp)
+            )
+            Text(
+                text = AppStrings.settingsTitle(lang),
+                fontSize = 22.sp,
+                fontWeight = FontWeight.Bold,
+                color = Color.White
+            )
+        }
+
+        // 1. Queue Selection Card (Frosted Glass)
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(24.dp))
+                .background(Color(0xBF141A29))
+                .padding(18.dp)
+        ) {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
                         Text(
-                            text = "Черга відключення",
+                            text = AppStrings.queueTitle(lang),
+                            fontSize = 11.sp,
                             fontWeight = FontWeight.Bold,
-                            fontSize = 15.sp
+                            color = Color.White
                         )
-                        IconButton(
-                            onClick = { showQueueHelpDialog = true },
-                            modifier = Modifier.size(28.dp)
+                        Box(
+                            modifier = Modifier
+                                .size(22.dp)
+                                .clip(CircleShape)
+                                .background(Color(0x26FFFFFF))
+                                .clickable { showQueueHelpDialog = true },
+                            contentAlignment = Alignment.Center
                         ) {
-                            Icon(
-                                Icons.Default.HelpOutline,
-                                contentDescription = "Як дізнатися свою чергу",
-                                tint = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(18.dp)
-                            )
+                            Text("?", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.White)
                         }
                     }
                 }
                 Text(
-                    text = "Оберіть підчергу за вашою адресою",
-                    fontSize = 12.sp,
-                    color = MaterialTheme.colorScheme.outline
+                    text = AppStrings.queueDesc(lang),
+                    fontSize = 11.sp,
+                    color = Color(0xB3BAE6FD)
                 )
-                Spacer(modifier = Modifier.height(10.dp))
 
-                // Dropdown menu
+                // Clean Native Exposed Dropdown Menu
                 ExposedDropdownMenuBox(
-                    expanded = dropdownExpanded,
-                    onExpandedChange = { dropdownExpanded = it }
+                    expanded = queueDropdownExpanded,
+                    onExpandedChange = { queueDropdownExpanded = it }
                 ) {
                     OutlinedTextField(
-                        value = "Черга $currentQueue",
+                        value = "\${AppStrings.queue(lang)} $currentQueue",
                         onValueChange = {},
                         readOnly = true,
-                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = dropdownExpanded) },
+                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = queueDropdownExpanded) },
                         modifier = Modifier.menuAnchor().fillMaxWidth(),
-                        shape = RoundedCornerShape(12.dp)
+                        shape = RoundedCornerShape(16.dp),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedTextColor = Color.White,
+                            unfocusedTextColor = Color.White,
+                            focusedBorderColor = Color(0xFFFF5E3A),
+                            unfocusedBorderColor = Color(0x33FFFFFF),
+                            focusedContainerColor = Color(0x1AFFFFFF),
+                            unfocusedContainerColor = Color(0x14FFFFFF)
+                        )
                     )
                     ExposedDropdownMenu(
-                        expanded = dropdownExpanded,
-                        onDismissRequest = { dropdownExpanded = false }
+                        expanded = queueDropdownExpanded,
+                        onDismissRequest = { queueDropdownExpanded = false },
+                        modifier = Modifier.background(Color(0xFF141A29))
                     ) {
                         queues.forEach { q ->
                             DropdownMenuItem(
-                                text = { Text("Черга $q", fontWeight = FontWeight.Bold) },
+                                text = { Text("\${AppStrings.queue(lang)} $q", fontWeight = FontWeight.Bold, color = Color.White) },
                                 onClick = {
                                     onQueueSelected(q)
-                                    dropdownExpanded = false
+                                    queueDropdownExpanded = false
                                 }
                             )
                         }
@@ -2110,155 +3093,505 @@ fun SettingsScreen(
             }
         }
 
-        // 2. Timers (Edit boxes only)
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(16.dp)
+        // 2. Site Address with Strict Verification Glyph against /valid-urls.json & live table check
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(24.dp))
+                .background(Color(0xBF141A29))
+                .padding(18.dp)
         ) {
-            Column(
-                modifier = Modifier.padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(14.dp)
-            ) {
-                // Advance warning
-                Column {
-                    Text("Попереджати заздалегідь (хв)", fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                    Spacer(modifier = Modifier.height(6.dp))
-                    OutlinedTextField(
-                        value = advanceMinutes.toString(),
-                        onValueChange = { str ->
-                            str.toIntOrNull()?.let { onAdvanceMinutesChanged(it) }
-                        },
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(12.dp)
-                    )
-                }
-
-                Divider()
-
-                // Refresh interval
-                Column {
-                    Text("Інтервал перевірки сайту (хв)", fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                    Spacer(modifier = Modifier.height(6.dp))
-                    OutlinedTextField(
-                        value = refreshMinutes.toString(),
-                        onValueChange = { str ->
-                            str.toIntOrNull()?.let { onRefreshMinutesChanged(it) }
-                        },
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(12.dp)
-                    )
-                }
-            }
-        }
-
-        // 3. Notification switches
-        Card(
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(16.dp)
-        ) {
-            Column(
-                modifier = Modifier.padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text("Увімкнути сповіщення", fontWeight = FontWeight.Bold)
+                    Text(
+                        text = AppStrings.siteAddressTitle(lang),
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White
+                    )
+
+                    // Verification Glyph
+                    val statusBadgeText = when {
+                        isSiteVerifiedSuccess -> AppStrings.siteReachable(lang)
+                        urlFetchStatus == FetchStatus.NO_INTERNET -> AppStrings.errorNoInternet(lang)
+                        else -> AppStrings.errorNoQueuesFound(lang)
+                    }
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(if (isSiteVerifiedSuccess) Color(0x3310B981) else Color(0x33EF4444))
+                            .padding(horizontal = 8.dp, vertical = 3.dp)
+                    ) {
+                        Text(
+                            text = statusBadgeText,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = if (isSiteVerifiedSuccess) Color(0xFF34D399) else Color(0xFFF87171)
+                        )
+                    }
+                }
+
+                Text(
+                    text = AppStrings.siteAddressDesc(lang),
+                    fontSize = 11.sp,
+                    color = Color(0xB3BAE6FD)
+                )
+
+                OutlinedTextField(
+                    value = siteUrl,
+                    onValueChange = { onSiteUrlChanged(it) },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(16.dp),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedTextColor = Color.White,
+                        unfocusedTextColor = Color.White,
+                        focusedBorderColor = if (isSiteVerifiedSuccess) Color(0xFFFF5E3A) else Color(0xFFEF4444),
+                        unfocusedBorderColor = if (isSiteVerifiedSuccess) Color(0x33FFFFFF) else Color(0x66EF4444),
+                        focusedContainerColor = Color(0x1AFFFFFF),
+                        unfocusedContainerColor = Color(0x14FFFFFF)
+                    )
+                )
+
+                if (!isSiteVerifiedSuccess && !isVerifyingUrl) {
+                    val errText = if (urlFetchStatus == FetchStatus.NO_INTERNET) {
+                        AppStrings.errorNoInternet(lang)
+                    } else {
+                        AppStrings.errorNoQueuesFound(lang)
+                    }
+                    Text(
+                        text = errText,
+                        fontSize = 10.sp,
+                        color = Color(0xFFF87171)
+                    )
+                }
+            }
+        }
+
+        // 3. Timers: Native Android Spinners restricted to 1..240 (No Edit Boxes!)
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(24.dp))
+                .background(Color(0xBF141A29))
+                .padding(18.dp)
+        ) {
+            Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                // Spinner 1: Advance Warning Notice
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = AppStrings.advanceNoticeTitle(lang),
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White
+                        )
+                        Text(
+                            text = "1–240 \${AppStrings.minShort(lang)}",
+                            fontSize = 10.sp,
+                            color = Color(0x99BAE6FD)
+                        )
+                    }
+
+                    ExposedDropdownMenuBox(
+                        expanded = advanceDropdownExpanded,
+                        onExpandedChange = { advanceDropdownExpanded = it }
+                    ) {
+                        OutlinedTextField(
+                            value = "$advanceMinutes \${AppStrings.minShort(lang)}",
+                            onValueChange = {},
+                            readOnly = true,
+                            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = advanceDropdownExpanded) },
+                            modifier = Modifier.menuAnchor().fillMaxWidth(),
+                            shape = RoundedCornerShape(16.dp),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedTextColor = Color.White,
+                                unfocusedTextColor = Color.White,
+                                focusedBorderColor = Color(0xFFFF5E3A),
+                                unfocusedBorderColor = Color(0x33FFFFFF),
+                                focusedContainerColor = Color(0x1AFFFFFF),
+                                unfocusedContainerColor = Color(0x14FFFFFF)
+                            )
+                        )
+                        ExposedDropdownMenu(
+                            expanded = advanceDropdownExpanded,
+                            onDismissRequest = { advanceDropdownExpanded = false },
+                            modifier = Modifier.background(Color(0xFF141A29))
+                        ) {
+                            timerOptions.forEach { mins ->
+                                DropdownMenuItem(
+                                    text = { Text("$mins \${AppStrings.minShort(lang)}", fontWeight = FontWeight.Bold, color = Color.White) },
+                                    onClick = {
+                                        onAdvanceMinutesChanged(mins)
+                                        advanceDropdownExpanded = false
+                                    }
+                                )
+                            }
+                        }
+                    }
+                }
+
+                Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(Color(0x1AFFFFFF)))
+
+                // Spinner 2: Site Refresh Interval
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = AppStrings.refreshIntervalTitle(lang),
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White
+                        )
+                        Text(
+                            text = "1–240 \${AppStrings.minShort(lang)}",
+                            fontSize = 10.sp,
+                            color = Color(0x99BAE6FD)
+                        )
+                    }
+
+                    ExposedDropdownMenuBox(
+                        expanded = refreshDropdownExpanded,
+                        onExpandedChange = { refreshDropdownExpanded = it }
+                    ) {
+                        OutlinedTextField(
+                            value = "$refreshMinutes \${AppStrings.minShort(lang)}",
+                            onValueChange = {},
+                            readOnly = true,
+                            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = refreshDropdownExpanded) },
+                            modifier = Modifier.menuAnchor().fillMaxWidth(),
+                            shape = RoundedCornerShape(16.dp),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedTextColor = Color.White,
+                                unfocusedTextColor = Color.White,
+                                focusedBorderColor = Color(0xFFFF5E3A),
+                                unfocusedBorderColor = Color(0x33FFFFFF),
+                                focusedContainerColor = Color(0x1AFFFFFF),
+                                unfocusedContainerColor = Color(0x14FFFFFF)
+                            )
+                        )
+                        ExposedDropdownMenu(
+                            expanded = refreshDropdownExpanded,
+                            onDismissRequest = { refreshDropdownExpanded = false },
+                            modifier = Modifier.background(Color(0xFF141A29))
+                        ) {
+                            timerOptions.forEach { mins ->
+                                DropdownMenuItem(
+                                    text = { Text("$mins \${AppStrings.minShort(lang)}", fontWeight = FontWeight.Bold, color = Color.White) },
+                                    onClick = {
+                                        onRefreshMinutesChanged(mins)
+                                        refreshDropdownExpanded = false
+                                    }
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // 4. Notification Toggles (All synchronized; Sound & Vibration turn off and disable when Notifications are off)
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(24.dp))
+                .background(Color(0xBF141A29))
+                .padding(18.dp)
+        ) {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(AppStrings.notifications(lang), fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color.White)
                     Switch(
                         checked = notificationsEnabled,
-                        onCheckedChange = onToggleNotifications
+                        onCheckedChange = onToggleNotifications,
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = Color.White,
+                            checkedTrackColor = Color(0xFFFF5E3A),
+                            uncheckedThumbColor = Color.LightGray,
+                            uncheckedTrackColor = Color(0x33FFFFFF)
+                        )
                     )
                 }
-                Divider()
+
+                Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(Color(0x1AFFFFFF)))
+
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text("Звук сповіщення")
-                    Switch(checked = notificationsEnabled && soundEnabled, enabled = notificationsEnabled, onCheckedChange = onToggleSound)
+                    Text(
+                        text = AppStrings.sound(lang),
+                        fontSize = 13.sp,
+                        color = if (notificationsEnabled) Color.White else Color(0x66FFFFFF)
+                    )
+                    Switch(
+                        checked = notificationsEnabled && soundEnabled,
+                        onCheckedChange = onToggleSound,
+                        enabled = notificationsEnabled,
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = Color.White,
+                            checkedTrackColor = Color(0xFFFF5E3A),
+                            uncheckedThumbColor = Color.LightGray,
+                            uncheckedTrackColor = Color(0x33FFFFFF),
+                            disabledCheckedTrackColor = Color(0x33FF5E3A),
+                            disabledUncheckedTrackColor = Color(0x1AFFFFFF),
+                            disabledUncheckedThumbColor = Color(0x4DFFFFFF)
+                        )
+                    )
                 }
-                Divider()
+
+                Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(Color(0x1AFFFFFF)))
+
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text("Вібрація")
-                    Switch(checked = notificationsEnabled && vibrationEnabled, enabled = notificationsEnabled, onCheckedChange = onToggleVibration)
+                    Text(
+                        text = AppStrings.vibration(lang),
+                        fontSize = 13.sp,
+                        color = if (notificationsEnabled) Color.White else Color(0x66FFFFFF)
+                    )
+                    Switch(
+                        checked = notificationsEnabled && vibrationEnabled,
+                        onCheckedChange = onToggleVibration,
+                        enabled = notificationsEnabled,
+                        colors = SwitchDefaults.colors(
+                            checkedThumbColor = Color.White,
+                            checkedTrackColor = Color(0xFFFF5E3A),
+                            uncheckedThumbColor = Color.LightGray,
+                            uncheckedTrackColor = Color(0x33FFFFFF),
+                            disabledCheckedTrackColor = Color(0x33FF5E3A),
+                            disabledUncheckedTrackColor = Color(0x1AFFFFFF),
+                            disabledUncheckedThumbColor = Color(0x4DFFFFFF)
+                        )
+                    )
                 }
             }
         }
 
-        // 4. Reset to defaults
-        OutlinedButton(
-            onClick = { showResetConfirmDialog = true },
-            modifier = Modifier.fillMaxWidth(),
-            shape = RoundedCornerShape(12.dp)
+        // 5. Language Selection Card (Dynamic Localization!)
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(24.dp))
+                .background(Color(0xBF141A29))
+                .padding(18.dp)
         ) {
-            Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
-            Spacer(modifier = Modifier.width(8.dp))
-            Text("Скинути налаштування")
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(
+                    text = AppStrings.languageTitle(lang),
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White
+                )
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    listOf("SYSTEM" to (if (lang == "uk") "Системна" else "System"), "uk" to "Українська", "en" to "English").forEach { (code, label) ->
+                        val isSelected = currentLanguage == code
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .clip(RoundedCornerShape(14.dp))
+                                .background(if (isSelected) Color.White else Color(0x1AFFFFFF))
+                                .clickable { onLanguageSelected(code) }
+                                .padding(vertical = 10.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = label,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = if (isSelected) Color.Black else Color(0xB3BAE6FD)
+                            )
+                        }
+                    }
+                }
+            }
         }
+
+        // 6. Diagnostics & Actions Card
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(24.dp))
+                .background(Color(0xBF141A29))
+                .padding(18.dp)
+        ) {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    // Send Test Alert Button (Respects Sound & Vibration)
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(Color(0xFFFF5E3A))
+                            .clickable {
+                                onSendTestAlert()
+                                onShowAppBanner(if (lang == "uk") "Тестове сповіщення надіслано" else "Test alert dispatched")
+                            }
+                            .padding(vertical = 12.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Icon(Icons.Default.Send, contentDescription = null, tint = Color.White, modifier = Modifier.size(14.dp))
+                            Text(AppStrings.testAlertBtn(lang), fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                        }
+                    }
+
+                    // Refresh Button with In-App Application Icon Notification Banner
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(Color(0x26FFFFFF))
+                            .clickable {
+                                onForceRefresh()
+                            }
+                            .padding(vertical = 12.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Icon(Icons.Default.Refresh, contentDescription = null, tint = Color.White, modifier = Modifier.size(14.dp))
+                            Text(AppStrings.refreshBtn(lang), fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                        }
+                    }
+                }
+
+                // Reset to Defaults
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(14.dp))
+                        .clickable { showResetConfirmDialog = true }
+                        .padding(vertical = 8.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(AppStrings.resetDefaultsBtn(lang), fontSize = 12.sp, color = Color(0x99BAE6FD))
+                }
+            }
+        }
+
+        Spacer(modifier = Modifier.height(96.dp))
     }
 
-    // Modal Help Dialog for Queue Finding
+    // =========================================================================================
+    // CRITICAL SECTION — DO NOT MODIFY UNLESS EXPLICITLY REQUESTED
+    // Queue Help Dialog with numbered instructions for Users on how to find their queue
+    // =========================================================================================
     if (showQueueHelpDialog) {
         AlertDialog(
             onDismissRequest = { showQueueHelpDialog = false },
-            icon = {
-                Icon(Icons.Default.HelpOutline, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-            },
-            title = {
-                Text("Як дізнатися свою чергу", fontWeight = FontWeight.Bold)
-            },
+            title = { Text(AppStrings.queueHelpTitle(lang), fontWeight = FontWeight.Bold, color = Color.White) },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text("1. Відкрийте сторінку пошуку черги на сайті ztoe.com.ua.")
-                    Text("2. Оберіть свій РЕМ, населений пункт і вулицю.")
-                    Text("3. У таблиці знайдіть свій будинок і подивіться стовпці «Черга» і «Підчерга». Наприклад, черга 5 і підчерга 2 - це 5.2.")
-                    Text("4. Виберіть це значення у полі «Черга» у вікні налаштувань (кнопка ⚙).")
+                    AppStrings.queueHelpSteps(lang).forEach { step ->
+                        val targetUrl = "https://www.ztoe.com.ua/unhooking-search.php"
+                        val urlStart = step.indexOf(targetUrl)
+                        if (urlStart >= 0) {
+                            val urlEnd = urlStart + targetUrl.length
+                            val annotatedStep = buildAnnotatedString {
+                                append(step)
+                                addStyle(
+                                    style = SpanStyle(
+                                        color = Color(0xFFFF5E3A),
+                                        fontWeight = FontWeight.SemiBold,
+                                        textDecoration = TextDecoration.Underline
+                                    ),
+                                    start = urlStart,
+                                    end = urlEnd
+                                )
+                            }
+                            Text(
+                                text = annotatedStep,
+                                color = Color.LightGray,
+                                fontSize = 13.sp,
+                                lineHeight = 18.sp,
+                                modifier = Modifier.clickable {
+                                    try {
+                                        val intent = android.content.Intent(
+                                            android.content.Intent.ACTION_VIEW,
+                                            android.net.Uri.parse(targetUrl)
+                                        )
+                                        context.startActivity(intent)
+                                    } catch (_: Exception) {}
+                                }
+                            )
+                        } else {
+                            Text(
+                                text = step,
+                                color = Color.LightGray,
+                                fontSize = 13.sp,
+                                lineHeight = 18.sp
+                            )
+                        }
+                    }
                 }
             },
             confirmButton = {
-                Button(onClick = { showQueueHelpDialog = false }) {
-                    Text("Зрозуміло")
+                TextButton(onClick = { showQueueHelpDialog = false }) {
+                    Text(AppStrings.queueHelpGotIt(lang), color = Color(0xFFFF5E3A), fontWeight = FontWeight.Bold)
                 }
-            }
+            },
+            containerColor = Color(0xFF141A29)
         )
     }
+    // =========================================================================================
+    // END OF CRITICAL SECTION
+    // =========================================================================================
 
-    // Reset confirmation dialog
+    // Reset Confirm Dialog
     if (showResetConfirmDialog) {
         AlertDialog(
             onDismissRequest = { showResetConfirmDialog = false },
-            icon = { Icon(Icons.Default.Warning, contentDescription = null, tint = MaterialTheme.colorScheme.error) },
-            title = { Text("Підтвердження скидання") },
-            text = { Text("Скинути всі налаштування до початкових значень?") },
+            title = { Text(AppStrings.resetConfirmTitle(lang), fontWeight = FontWeight.Bold, color = Color.White) },
+            text = { Text(AppStrings.resetConfirmDesc(lang), color = Color.LightGray) },
             confirmButton = {
-                Button(
-                    onClick = {
-                        onResetDefaults()
-                        showResetConfirmDialog = false
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
-                ) {
-                    Text("Скинути")
+                TextButton(onClick = {
+                    onResetDefaults()
+                    showResetConfirmDialog = false
+                    onShowAppBanner(if (lang == "uk") "Налаштування скинуто" else "Settings reset")
+                }) {
+                    Text(AppStrings.resetYes(lang), color = Color(0xFFFF5E3A), fontWeight = FontWeight.Bold)
                 }
             },
             dismissButton = {
-                OutlinedButton(onClick = { showResetConfirmDialog = false }) {
-                    Text("Скасувати")
+                TextButton(onClick = { showResetConfirmDialog = false }) {
+                    Text(AppStrings.cancel(lang), color = Color.White)
                 }
-            }
+            },
+            containerColor = Color(0xFF141A29)
         )
     }
 }
 `
   }
 ];
-

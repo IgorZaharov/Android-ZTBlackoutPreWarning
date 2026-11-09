@@ -2167,9 +2167,9 @@ async function runUnitTestC_ZhytomyrRoulette() {
   );
   assert.ok(
     !ztoeParserKtText.includes('contains("#ff")') &&
-      ztoeParserKtText.includes('combinedAttr.contains("#ff3333")') &&
-      ztoeParserKtText.includes('combinedAttr.contains("#ff0000")') &&
-      ztoeParserKtText.includes('it.select("table").size <= 1'),
+      ztoeParserKtText.includes('attr.contains("#ff3333")') &&
+      ztoeParserKtText.includes('attr.contains("#ff0000")') &&
+      ztoeParserKtText.includes('table.select("table").size == 1'),
     'ZtoeParser.kt must match explicit red color codes (#ff3333, #ff0000, etc.) without matching #ffffff and filter leaf tables'
   );
 
@@ -2191,6 +2191,28 @@ async function runUnitTestC_ZhytomyrRoulette() {
   assert.ok(
     ztoeParserTestKt.includes('import org.junit.Assert.assertFalse'),
     'ZtoeParserTest.kt must import org.junit.Assert.assertFalse'
+  );
+
+  // Verify SettingsScreen.kt matches Emulator 100%: Site URL, Language selector, Test notification & Refresh buttons, and Frosted Glass / Orange colors
+  const settingsScreenKt = fs.readFileSync(
+    path.join(ROOT_DIR, 'android/app/src/main/java/ua/blackout/prewarning/ui/screens/SettingsScreen.kt'),
+    'utf-8'
+  );
+  assert.ok(
+    settingsScreenKt.includes('AppStrings.siteAddressTitle(lang)') &&
+      settingsScreenKt.includes('AppStrings.siteReachable(lang)') &&
+      settingsScreenKt.includes('AppStrings.errorNoQueuesFound(lang)') &&
+      settingsScreenKt.includes('AppStrings.languageTitle(lang)') &&
+      settingsScreenKt.includes('"Системна"') &&
+      settingsScreenKt.includes('"Українська"') &&
+      settingsScreenKt.includes('"English"') &&
+      settingsScreenKt.includes('AppStrings.testAlertBtn(lang)') &&
+      settingsScreenKt.includes('AppStrings.refreshBtn(lang)') &&
+      settingsScreenKt.includes('AppStrings.resetDefaultsBtn(lang)') &&
+      settingsScreenKt.includes('Color(0xBF141A29)') &&
+      settingsScreenKt.includes('Color(0xFFFF5E3A)') &&
+      settingsScreenKt.includes('Icons.Default.Tune'),
+    'SettingsScreen.kt must include Site URL card, Language selector, Test notification and Refresh buttons, and Frosted Glass / Orange colors matching the Emulator'
   );
 
   resetAllRouletteProgress();

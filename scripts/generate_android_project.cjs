@@ -2,60 +2,66 @@ const fs = require('fs');
 const path = require('path');
 const { execSync } = require('child_process');
 
-// Read src/data/androidProjectFiles.ts
-const content = fs.readFileSync(path.join(__dirname, '../src/data/androidProjectFiles.ts'), 'utf8');
-
-// Match each file entry { path: '...', ... content: `...` }
-const fileRegex = /path:\s*['"]([^'"]+)['"][\s\S]*?content:\s*`([\s\S]*?)`\s*}/g;
-let match;
-let count = 0;
-
 const androidDir = path.join(__dirname, '../android');
+const tsFilePath = path.join(__dirname, '../src/data/androidProjectFiles.ts');
 
-while ((match = fileRegex.exec(content)) !== null) {
+// Read existing metadata from src/data/androidProjectFiles.ts and sync content FROM /android (source of truth)
+const existingTs = fs.readFileSync(tsFilePath, 'utf8');
+const entryRegex = /\{\s*path:\s*'([^']+)',\s*language:\s*'([^']+)',\s*description:\s*'([^']+)',\s*content:\s*`([\s\S]*?)`\s*\}/g;
+
+let match;
+const entries = [];
+while ((match = entryRegex.exec(existingTs)) !== null) {
   const relPath = match[1];
-  const fileContent = match[2].replace(/\\\$/g, '$');
-  
-  // Normalize destination inside androidDir
-  const destPath = path.join(androidDir, relPath);
-  fs.mkdirSync(path.dirname(destPath), { recursive: true });
-  fs.writeFileSync(destPath, fileContent, 'utf8');
-  console.log(`Wrote: ${relPath}`);
-  count++;
+  const language = match[2];
+  const description = match[3];
+  const diskPath = path.join(androidDir, relPath);
+
+  if (fs.existsSync(diskPath)) {
+    const diskContent = fs.readFileSync(diskPath, 'utf8');
+    entries.push({ path: relPath, language, description, content: diskContent });
+    console.log(`Synced from /android: ${relPath}`);
+  } else {
+    const fallbackContent = match[4].replace(/\\\$/g, '$').replace(/\\`/g, '`');
+    fs.mkdirSync(path.dirname(diskPath), { recursive: true });
+    fs.writeFileSync(diskPath, fallbackContent, 'utf8');
+    entries.push({ path: relPath, language, description, content: fallbackContent });
+    console.log(`Created missing file in /android: ${relPath}`);
+  }
 }
 
-console.log(`Successfully extracted ${count} Android project files into /android.`);
+if (entries.length > 0) {
+  const escapeTemplateLiteral = (str) =>
+    str.replace(/\\/g, '\\\\').replace(/`/g, '\\`').replace(/\$\{/g, '\\${');
 
-// Also generate standard gradlew script and gradle wrapper
-const gradlewContent = `#!/bin/sh
-APP_BASE_NAME=\`basename "$0"\`
-GRADLE_USER_HOME=\${GRADLE_USER_HOME:-\$HOME/.gradle}
-export GRADLE_USER_HOME
+  const tsOut = `/**
+ * Complete Native Android (Kotlin + Jetpack Compose) Source Files
+ * Ready for direct commit to https://github.com/IgorZaharov/Android-ZTBlackoutPreWarning
+ */
 
-# Attempt to locate gradle or run gradlew
-if command -v gradle >/dev/null 2>&1; then
-    exec gradle "$@"
-else
-    echo "Using gradle wrapper..."
-    exec gradle "$@"
-fi
+export interface AndroidFile {
+  path: string;
+  language: string;
+  description: string;
+  content: string;
+}
+
+export const ANDROID_PROJECT_FILES: AndroidFile[] = [
+${entries
+  .map(
+    (e) => `  {
+    path: '${e.path}',
+    language: '${e.language}',
+    description: '${e.description.replace(/'/g, "\\'")}',
+    content: \`${escapeTemplateLiteral(e.content)}\`
+  }`
+  )
+  .join(',\n')}
+];
 `;
-
-fs.writeFileSync(path.join(androidDir, 'gradlew'), gradlewContent, { mode: 0o755 });
-fs.writeFileSync(path.join(androidDir, 'gradlew.bat'), '@echo off\r\ngradle %*\r\n', { mode: 0o755 });
-
-// Also generate gradle/wrapper/gradle-wrapper.properties
-const wrapperProps = `distributionBase=GRADLE_USER_HOME
-distributionPath=wrapper/dists
-distributionUrl=https\\://services.gradle.org/distributions/gradle-8.11.1-bin.zip
-networkTimeout=10000
-validateDistributionUrl=true
-zipStoreBase=GRADLE_USER_HOME
-zipStorePath=wrapper/dists
-`;
-const wrapperDir = path.join(androidDir, 'gradle/wrapper');
-fs.mkdirSync(wrapperDir, { recursive: true });
-fs.writeFileSync(path.join(wrapperDir, 'gradle-wrapper.properties'), wrapperProps, 'utf8');
+  fs.writeFileSync(tsFilePath, tsOut, 'utf8');
+  console.log(`Updated src/data/androidProjectFiles.ts with ${entries.length} authentic files from /android.`);
+}
 
 // Copy .github into android/ as well so if someone pushes android/ alone, GitHub Actions is present
 const workflowSrc = path.join(__dirname, '../.github');
@@ -67,11 +73,10 @@ if (fs.existsSync(workflowSrc)) {
 // Generate the zip file using python3 zipfile
 const publicDir = path.join(__dirname, '../public');
 fs.mkdirSync(publicDir, { recursive: true });
-const zipPath = path.join(publicDir, 'Android-ZTBlackoutPreWarning.zip');
 
 try {
   execSync(`python3 -c "
-import shutil, os
+import shutil
 shutil.make_archive('${publicDir}/Android-ZTBlackoutPreWarning', 'zip', '${androidDir}')
 "`, { stdio: 'inherit' });
   console.log('Successfully generated /public/Android-ZTBlackoutPreWarning.zip');
