@@ -9,6 +9,8 @@ data class BlackoutSlot(
     val id: String, // Unique key: "${date}_${startHour}_${queue}"
     val startHour: Int, // 0..23
     val endHour: Int, // 1..24
+    val startMinute: Int = 0,
+    val endMinute: Int = 0,
     val startTimeStr: String, // "14:00"
     val endTimeStr: String, // "18:00"
     val status: SlotStatus

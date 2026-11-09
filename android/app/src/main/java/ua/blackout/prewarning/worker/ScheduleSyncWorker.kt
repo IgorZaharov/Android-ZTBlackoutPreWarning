@@ -102,4 +102,46 @@ class ScheduleSyncWorker(
             Result.retry()
         }
     }
+
+    companion object {
+        const val WORK_NAME = "ua.blackout.prewarning.schedule_sync"
+
+        fun schedulePeriodicWork(
+            context: Context,
+            policy: androidx.work.ExistingPeriodicWorkPolicy = androidx.work.ExistingPeriodicWorkPolicy.KEEP
+        ) {
+            val settingsRepo = ua.blackout.prewarning.data.repository.SettingsRepository(context)
+            val settings = settingsRepo.getSettings()
+            val intervalMinutes = maxOf(15L, settings.refreshIntervalMinutes)
+
+            val constraints = androidx.work.Constraints.Builder()
+                .setRequiredNetworkType(androidx.work.NetworkType.CONNECTED)
+                .build()
+
+            val request = androidx.work.PeriodicWorkRequestBuilder<ScheduleSyncWorker>(
+                intervalMinutes,
+                java.util.concurrent.TimeUnit.MINUTES
+            )
+                .setConstraints(constraints)
+                .build()
+
+            androidx.work.WorkManager.getInstance(context).enqueueUniquePeriodicWork(
+                WORK_NAME,
+                policy,
+                request
+            )
+        }
+
+        fun syncImmediately(context: Context) {
+            val constraints = androidx.work.Constraints.Builder()
+                .setRequiredNetworkType(androidx.work.NetworkType.CONNECTED)
+                .build()
+
+            val request = androidx.work.OneTimeWorkRequestBuilder<ScheduleSyncWorker>()
+                .setConstraints(constraints)
+                .build()
+
+            androidx.work.WorkManager.getInstance(context).enqueue(request)
+        }
+    }
 }

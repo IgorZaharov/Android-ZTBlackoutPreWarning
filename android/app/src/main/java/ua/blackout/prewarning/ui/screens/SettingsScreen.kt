@@ -21,18 +21,26 @@ import androidx.compose.ui.unit.sp
 @Composable
 fun SettingsScreen(
     currentQueue: String = "2.1",
+    siteUrl: String = "https://www.ztoe.com.ua/unhooking-search.php",
     advanceMinutes: Int = 15,
     refreshMinutes: Int = 30,
     notificationsEnabled: Boolean = true,
     soundEnabled: Boolean = true,
     vibrationEnabled: Boolean = true,
+    currentLanguage: String = "SYSTEM",
+    lang: String = "uk",
     onQueueSelected: (String) -> Unit = {},
+    onSiteUrlChanged: (String) -> Unit = {},
     onAdvanceMinutesChanged: (Int) -> Unit = {},
     onRefreshMinutesChanged: (Int) -> Unit = {},
     onToggleNotifications: (Boolean) -> Unit = {},
     onToggleSound: (Boolean) -> Unit = {},
     onToggleVibration: (Boolean) -> Unit = {},
-    onResetDefaults: () -> Unit = {}
+    onLanguageSelected: (String) -> Unit = {},
+    onSendTestAlert: () -> Unit = {},
+    onForceRefresh: () -> Unit = {},
+    onResetDefaults: () -> Unit = {},
+    onShowAppBanner: ((String) -> Unit)? = null
 ) {
     var showQueueHelpDialog by remember { mutableStateOf(false) }
     var showResetConfirmDialog by remember { mutableStateOf(false) }

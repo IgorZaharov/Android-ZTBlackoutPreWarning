@@ -115,6 +115,7 @@ android {
 
     buildFeatures {
         compose = true
+        buildConfig = true
     }
 }
 
@@ -303,6 +304,8 @@ data class BlackoutSlot(
     val id: String, // Unique key: "\${date}_\${startHour}_\${queue}"
     val startHour: Int, // 0..23
     val endHour: Int, // 1..24
+    val startMinute: Int = 0,
+    val endMinute: Int = 0,
     val startTimeStr: String, // "14:00"
     val endTimeStr: String, // "18:00"
     val status: SlotStatus
@@ -589,6 +592,18 @@ class AlertRegistry(context: Context) {
     }
 
     /**
+     * Resets notified flags for future slots on time changes
+     */
+    fun resetFutureSlotsOnTimeChange(currentTimeMillis: Long, futureSlotIds: Set<String>) {
+        val editor = prefs.edit()
+        for (slotId in futureSlotIds) {
+            editor.remove("notified_$slotId")
+            editor.remove("ts_$slotId")
+        }
+        editor.apply()
+    }
+
+    /**
      * Clears old history (e.g. from previous days)
      */
     fun clearHistory() {
@@ -634,7 +649,8 @@ object NotificationHelper {
         context: Context,
         notificationId: Int,
         title: String,
-        body: String
+        body: String,
+        isTest: Boolean = false
     ) {
         val intent = Intent(context, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
@@ -807,6 +823,48 @@ class ScheduleSyncWorker(
             Result.success()
         } catch (e: Exception) {
             Result.retry()
+        }
+    }
+
+    companion object {
+        const val WORK_NAME = "ua.blackout.prewarning.schedule_sync"
+
+        fun schedulePeriodicWork(
+            context: Context,
+            policy: androidx.work.ExistingPeriodicWorkPolicy = androidx.work.ExistingPeriodicWorkPolicy.KEEP
+        ) {
+            val settingsRepo = ua.blackout.prewarning.data.repository.SettingsRepository(context)
+            val settings = settingsRepo.getSettings()
+            val intervalMinutes = maxOf(15L, settings.refreshIntervalMinutes)
+
+            val constraints = androidx.work.Constraints.Builder()
+                .setRequiredNetworkType(androidx.work.NetworkType.CONNECTED)
+                .build()
+
+            val request = androidx.work.PeriodicWorkRequestBuilder<ScheduleSyncWorker>(
+                intervalMinutes,
+                java.util.concurrent.TimeUnit.MINUTES
+            )
+                .setConstraints(constraints)
+                .build()
+
+            androidx.work.WorkManager.getInstance(context).enqueueUniquePeriodicWork(
+                WORK_NAME,
+                policy,
+                request
+            )
+        }
+
+        fun syncImmediately(context: Context) {
+            val constraints = androidx.work.Constraints.Builder()
+                .setRequiredNetworkType(androidx.work.NetworkType.CONNECTED)
+                .build()
+
+            val request = androidx.work.OneTimeWorkRequestBuilder<ScheduleSyncWorker>()
+                .setConstraints(constraints)
+                .build()
+
+            androidx.work.WorkManager.getInstance(context).enqueue(request)
         }
     }
 }`
@@ -1898,18 +1956,26 @@ import androidx.compose.ui.unit.sp
 @Composable
 fun SettingsScreen(
     currentQueue: String = "2.1",
+    siteUrl: String = "https://www.ztoe.com.ua/unhooking-search.php",
     advanceMinutes: Int = 15,
     refreshMinutes: Int = 30,
     notificationsEnabled: Boolean = true,
     soundEnabled: Boolean = true,
     vibrationEnabled: Boolean = true,
+    currentLanguage: String = "SYSTEM",
+    lang: String = "uk",
     onQueueSelected: (String) -> Unit = {},
+    onSiteUrlChanged: (String) -> Unit = {},
     onAdvanceMinutesChanged: (Int) -> Unit = {},
     onRefreshMinutesChanged: (Int) -> Unit = {},
     onToggleNotifications: (Boolean) -> Unit = {},
     onToggleSound: (Boolean) -> Unit = {},
     onToggleVibration: (Boolean) -> Unit = {},
-    onResetDefaults: () -> Unit = {}
+    onLanguageSelected: (String) -> Unit = {},
+    onSendTestAlert: () -> Unit = {},
+    onForceRefresh: () -> Unit = {},
+    onResetDefaults: () -> Unit = {},
+    onShowAppBanner: ((String) -> Unit)? = null
 ) {
     var showQueueHelpDialog by remember { mutableStateOf(false) }
     var showResetConfirmDialog by remember { mutableStateOf(false) }

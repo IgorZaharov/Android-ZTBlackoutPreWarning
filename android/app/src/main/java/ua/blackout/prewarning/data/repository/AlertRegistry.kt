@@ -26,6 +26,18 @@ class AlertRegistry(context: Context) {
     }
 
     /**
+     * Resets notified flags for future slots on time changes
+     */
+    fun resetFutureSlotsOnTimeChange(currentTimeMillis: Long, futureSlotIds: Set<String>) {
+        val editor = prefs.edit()
+        for (slotId in futureSlotIds) {
+            editor.remove("notified_$slotId")
+            editor.remove("ts_$slotId")
+        }
+        editor.apply()
+    }
+
+    /**
      * Clears old history (e.g. from previous days)
      */
     fun clearHistory() {
