@@ -2145,6 +2145,8 @@ async function runUnitTestC_ZhytomyrRoulette() {
     buildGradleKt.includes('import java.util.Base64') &&
       buildGradleKt.includes('Base64.getDecoder().decode(embeddedKeystoreBase64)') &&
       !buildGradleKt.includes('java.util.Base64.') &&
+      buildGradleKt.includes('compileSdk = 36') &&
+      buildGradleKt.includes('targetSdk = 36') &&
       buildGradleKt.includes('create("upload")') &&
       buildGradleKt.includes('UPLOAD_KEYSTORE_PASSWORD') &&
       buildGradleKt.includes('com.ZTBlackoutPreWarning') &&
@@ -2157,7 +2159,7 @@ async function runUnitTestC_ZhytomyrRoulette() {
       !buildGradleKt.includes('keyPassword = "androiddebugkey"') &&
       workflowYml.includes('UPLOAD_KEYSTORE_BASE64') &&
       workflowYml.includes('UPLOAD_KEYSTORE_PASSWORD'),
-    'android/app/build.gradle.kts must set applicationId to com.ZTBlackoutPreWarning, use storePassword/keyPassword "android" for debug.keystore, enable buildConfig, disable release lint blockers, import java.util.Base64 at top-level, and support signing .aab bundles via GitHub Secrets'
+    'android/app/build.gradle.kts must set compileSdk = 36, targetSdk = 36, applicationId to com.ZTBlackoutPreWarning, use storePassword/keyPassword "android" for debug.keystore, enable buildConfig, disable release lint blockers, import java.util.Base64 at top-level, and support signing .aab bundles via GitHub Secrets'
   );
 
   // Verify ZtoeParser.kt does not match #ffffff as #ff (which caused ZtoeParserTest:201 failure) and filters leaf tables

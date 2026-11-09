@@ -8,13 +8,13 @@ plugins {
 
 android {
     namespace = "ua.blackout.prewarning"
-    compileSdk = 35
+    compileSdk = 36
 
     defaultConfig {
         val appPkgEnv = System.getenv("ANDROID_APPLICATION_ID")?.trim()?.takeIf { it.isNotBlank() }
         applicationId = appPkgEnv ?: "com.ZTBlackoutPreWarning"
         minSdk = 26
-        targetSdk = 35
+        targetSdk = 36
         versionCode = (System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull() ?: 100) + 100
         val semverEnv = System.getenv("APP_VERSION_NAME")?.removePrefix("v")?.trim()?.takeIf { it.matches(Regex("^[0-9]+\\.[0-9]+\\.[0-9]+.*")) }
         versionName = semverEnv ?: "1.3.3"
