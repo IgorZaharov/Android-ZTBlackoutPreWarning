@@ -14,7 +14,7 @@ const androidDir = path.join(__dirname, '../android');
 
 while ((match = fileRegex.exec(content)) !== null) {
   const relPath = match[1];
-  const fileContent = match[2].replace(/\\\$\{/g, '${');
+  const fileContent = match[2].replace(/\\\$/g, '$');
   
   // Normalize destination inside androidDir
   const destPath = path.join(androidDir, relPath);

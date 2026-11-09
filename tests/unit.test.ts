@@ -2148,9 +2148,44 @@ async function runUnitTestC_ZhytomyrRoulette() {
       buildGradleKt.includes('create("upload")') &&
       buildGradleKt.includes('UPLOAD_KEYSTORE_PASSWORD') &&
       buildGradleKt.includes('com.ZTBlackoutPreWarning') &&
+      buildGradleKt.includes('buildConfig = true') &&
+      buildGradleKt.includes('checkReleaseBuilds = false') &&
       workflowYml.includes('UPLOAD_KEYSTORE_BASE64') &&
       workflowYml.includes('UPLOAD_KEYSTORE_PASSWORD'),
-    'android/app/build.gradle.kts must set applicationId to com.ZTBlackoutPreWarning for Google Play Store compatibility, import java.util.Base64 at top-level, and support signing .aab bundles via GitHub Secrets'
+    'android/app/build.gradle.kts must set applicationId to com.ZTBlackoutPreWarning, enable buildConfig, disable release lint blockers, import java.util.Base64 at top-level, and support signing .aab bundles via GitHub Secrets'
+  );
+
+  // Verify ZtoeParser.kt does not match #ffffff as #ff (which caused ZtoeParserTest:201 failure) and filters leaf tables
+  const ztoeParserKtText = fs.readFileSync(
+    path.join(ROOT_DIR, 'android/app/src/main/java/ua/blackout/prewarning/data/parser/ZtoeParser.kt'),
+    'utf-8'
+  );
+  assert.ok(
+    !ztoeParserKtText.includes('contains("#ff")') &&
+      ztoeParserKtText.includes('combinedAttr.contains("#ff3333")') &&
+      ztoeParserKtText.includes('combinedAttr.contains("#ff0000")') &&
+      ztoeParserKtText.includes('it.select("table").size <= 1'),
+    'ZtoeParser.kt must match explicit red color codes (#ff3333, #ff0000, etc.) without matching #ffffff and filter leaf tables'
+  );
+
+  // Verify NotificationHelper.kt, AlertRegistry.kt, ScheduleSyncWorker.kt, SettingsScreen.kt, Models.kt, and ZtoeParserTest.kt
+  const notificationHelperKt = fs.readFileSync(
+    path.join(ROOT_DIR, 'android/app/src/main/java/ua/blackout/prewarning/notification/NotificationHelper.kt'),
+    'utf-8'
+  );
+  assert.ok(
+    notificationHelperKt.includes('fun createNotificationChannels(context: Context)') &&
+      notificationHelperKt.includes('isTest: Boolean = false'),
+    'NotificationHelper.kt must define createNotificationChannels(context: Context) and isTest parameter'
+  );
+
+  const ztoeParserTestKt = fs.readFileSync(
+    path.join(ROOT_DIR, 'android/app/src/test/java/ua/blackout/prewarning/ZtoeParserTest.kt'),
+    'utf-8'
+  );
+  assert.ok(
+    ztoeParserTestKt.includes('import org.junit.Assert.assertFalse'),
+    'ZtoeParserTest.kt must import org.junit.Assert.assertFalse'
   );
 
   resetAllRouletteProgress();

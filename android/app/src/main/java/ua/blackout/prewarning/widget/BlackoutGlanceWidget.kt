@@ -92,7 +92,7 @@ class BlackoutGlanceWidget : GlanceAppWidget() {
 
     fun renderAnalogCounterBitmap(slots: List<BlackoutSlot>, currentH: Int, currentM: Int, lang: String = "uk"): Bitmap {
         val slotSig = if (slots.isEmpty()) "empty" else slots.joinToString("") { if (it.status == SlotStatus.POWER_OFF) "1" else "0" }
-        val cacheKey = "${slotSig}_${currentH}_${currentM}_\$lang"
+        val cacheKey = "${slotSig}_${currentH}_${currentM}_$lang"
         bitmapCache[cacheKey]?.let { return it }
 
         val width = 720

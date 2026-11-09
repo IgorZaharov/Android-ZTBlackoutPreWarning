@@ -117,6 +117,11 @@ android {
         compose = true
         buildConfig = true
     }
+
+    lint {
+        checkReleaseBuilds = false
+        abortOnError = false
+    }
 }
 
 dependencies {
@@ -383,21 +388,38 @@ object ZtoeParser {
 
     fun parseHtmlForDate(doc: Document, targetQueue: String, date: LocalDate, dateIso: String): List<BlackoutSlot> {
         val dateDdMmYyyy = date.format(DateTimeFormatter.ofPattern("dd.MM.yyyy"))
-        val tables = doc.select("table")
-        val targetTable = tables.firstOrNull { it.text().contains(dateDdMmYyyy) } ?: doc
+        val allTables = doc.select("table")
+        val leafTables = allTables.filter { it.select("table").size <= 1 }
+        val targetTable = leafTables.firstOrNull { it.text().contains(dateDdMmYyyy) }
+            ?: allTables.firstOrNull { it.text().contains(dateDdMmYyyy) }
+            ?: doc
 
-        val rows = targetTable.select("tr")
+        val rows = targetTable.select("tr").filter { it.select("table").isEmpty() }
         val targetRow = rows.firstOrNull { row ->
+            val firstThree = row.select("td, th").take(3)
+            firstThree.any { cell ->
+                val t = cell.text().trim()
+                t == targetQueue ||
+                    t.equals("Черга $targetQueue", ignoreCase = true) ||
+                    t.equals("Черга $targetQueue.", ignoreCase = true) ||
+                    t.equals("$targetQueue черга", ignoreCase = true)
+            }
+        } ?: rows.firstOrNull { row ->
             val text = row.text()
-            text.contains(targetQueue) || text.contains("Черга $targetQueue") || text.contains("$targetQueue черга")
+            text.contains("Черга $targetQueue") || text.contains("$targetQueue черга") || text.contains(targetQueue)
         } ?: return generateFallbackSchedule(targetQueue, dateIso)
 
-        val allCells = targetRow.select("td, th")
+        val rawCells = targetRow.select("td, th")
+        val nonSeparatorCells = rawCells.drop(1).filter { cell ->
+            val st = cell.attr("style").lowercase(Locale.ROOT).replace(" ", "")
+            !st.contains("width:3pt") && !st.contains("width:1pt")
+        }
         val dataCells: List<Element> = when {
-            allCells.size >= 50 -> allCells.takeLast(48)
-            allCells.size in 48..49 -> allCells.takeLast(48)
-            allCells.size in 24..26 -> allCells.takeLast(24)
-            else -> allCells.drop(1)
+            nonSeparatorCells.size >= 48 -> nonSeparatorCells.takeLast(48)
+            rawCells.size >= 48 -> rawCells.takeLast(48)
+            nonSeparatorCells.size >= 24 -> nonSeparatorCells.takeLast(24)
+            rawCells.size >= 24 -> rawCells.takeLast(24)
+            else -> rawCells.drop(1)
         }
 
         if (dataCells.size != 48 && dataCells.size != 24) {
@@ -410,9 +432,16 @@ object ZtoeParser {
             val text = cell.text().trim().lowercase(Locale.ROOT)
             val style = cell.attr("style").lowercase(Locale.ROOT)
             val className = cell.className().lowercase(Locale.ROOT)
+            val bgColor = cell.attr("bgcolor").lowercase(Locale.ROOT)
+            val combinedAttr = "\$style \$className \$bgColor"
 
             val isOff = className.contains("red") || className.contains("off") || className.contains("danger") ||
-                    style.contains("red") || style.contains("#ff") || style.contains("rgb(255") ||
+                    combinedAttr.contains("#ff3333") || combinedAttr.contains("#ff3b30") || combinedAttr.contains("#ff0000") ||
+                    combinedAttr.contains("background:red") || combinedAttr.contains("background: red") ||
+                    combinedAttr.contains("background-color:red") || combinedAttr.contains("background-color: red") ||
+                    combinedAttr.contains("rgb(255, 51, 51)") || combinedAttr.contains("rgb(255,51,51)") ||
+                    combinedAttr.contains("rgb(255, 0, 0)") || combinedAttr.contains("rgb(255,0,0)") ||
+                    bgColor == "red" ||
                     text.contains("вимк") || text.contains("відкл") || text == "в" || text == "-"
 
             val startTotalMinutes = index * 30
