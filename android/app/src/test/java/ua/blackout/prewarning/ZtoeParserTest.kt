@@ -2,6 +2,7 @@ package ua.blackout.prewarning
 
 import org.jsoup.Jsoup
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import ua.blackout.prewarning.data.model.SlotStatus
