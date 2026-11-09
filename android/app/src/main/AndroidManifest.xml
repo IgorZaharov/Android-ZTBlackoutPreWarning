@@ -36,18 +36,17 @@
             </intent-filter>
         </activity>
 
-        <!-- Alarm BroadcastReceiver for Exact Pre-Warnings (1x per slot) & Widget Transition Redraws -->
+        <!-- Alarm BroadcastReceiver for Exact Pre-Warnings (1x per slot) -->
         <receiver
             android:name=".notification.AlarmReceiver"
             android:enabled="true"
             android:exported="false">
             <intent-filter>
                 <action android:name="ua.blackout.prewarning.ACTION_TRIGGER_BLACKOUT_ALERT" />
-                <action android:name="ua.blackout.prewarning.ACTION_WIDGET_TRANSITION_UPDATE" />
             </intent-filter>
         </receiver>
 
-        <!-- Boot & Time Change Receiver to Reschedule Workers and Alarms -->
+        <!-- Boot Completed Receiver to Reschedule Workers and Alarms -->
         <receiver
             android:name=".worker.BootCompletedReceiver"
             android:enabled="true"
@@ -55,19 +54,6 @@
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
                 <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
-                <action android:name="android.intent.action.TIME_SET" />
-                <action android:name="android.intent.action.TIMEZONE_CHANGED" />
-                <action android:name="android.intent.action.DATE_CHANGED" />
-            </intent-filter>
-        </receiver>
-
-        <!-- Widget Toggle Action BroadcastReceiver -->
-        <receiver
-            android:name=".widget.WidgetToggleReceiver"
-            android:enabled="true"
-            android:exported="true">
-            <intent-filter>
-                <action android:name="ua.blackout.prewarning.ACTION_TOGGLE_WIDGET_NOTIFICATIONS" />
             </intent-filter>
         </receiver>
 

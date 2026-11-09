@@ -486,7 +486,23 @@ function runUnitTestB() {
     // Git not initialized or not in a git worktree
   }
 
-  console.log('Unit Test B PASSED: All UI elements, icons, labels, defaults, and changelog checks succeeded.');
+  // 13. Verify Official Privacy Policy (Google Play & GDPR compliant)
+  const privacyMdPath = path.join(ROOT_DIR, 'PRIVACY_POLICY.md');
+  assert.ok(fs.existsSync(privacyMdPath), 'PRIVACY_POLICY.md must exist in repository root');
+  const privacyMd = fs.readFileSync(privacyMdPath, 'utf-8');
+  assert.ok(privacyMd.length > 1000, 'PRIVACY_POLICY.md must be comprehensive and official');
+  assert.ok(privacyMd.includes('com.ZTBlackoutPreWarning'), 'Privacy Policy must include package name com.ZTBlackoutPreWarning');
+  assert.ok(privacyMd.includes('Igor Zaharov'), 'Privacy Policy must include developer name Igor Zaharov');
+  assert.ok(privacyMd.includes('android.permission.INTERNET'), 'Privacy Policy must document INTERNET permission');
+  assert.ok(privacyMd.includes('android.permission.POST_NOTIFICATIONS'), 'Privacy Policy must document POST_NOTIFICATIONS permission');
+  assert.ok(privacyMd.includes('SCHEDULE_EXACT_ALARM'), 'Privacy Policy must document SCHEDULE_EXACT_ALARM permission');
+  assert.ok(privacyMd.includes('RECEIVE_BOOT_COMPLETED'), 'Privacy Policy must document RECEIVE_BOOT_COMPLETED permission');
+  assert.ok(privacyMd.includes('Політика конфіденційності'), 'Privacy Policy must include Ukrainian section');
+  assert.ok(privacyMd.includes('2297-VI') || privacyMd.includes('GDPR'), 'Privacy Policy must cite relevant data protection laws');
+  const publicPrivacyHtml = path.join(ROOT_DIR, 'public/privacy.html');
+  assert.ok(fs.existsSync(publicPrivacyHtml), 'public/privacy.html must exist for Google Play Console URL hosting');
+
+  console.log('Unit Test B PASSED: All UI elements, icons, labels, defaults, changelog, and official Privacy Policy checks succeeded.');
 }
 
 async function runUnitTestC_ZhytomyrRoulette() {

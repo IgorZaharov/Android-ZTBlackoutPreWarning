@@ -3,14 +3,20 @@ name: Android CI/CD Build & Release
 on:
   push:
     branches: [ "main", "master" ]
+    tags: [ "v*" ]
   pull_request:
     branches: [ "main", "master" ]
   workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
   build:
     name: Build Android APK and AAB Bundle
     runs-on: ubuntu-latest
+    env:
+      APP_VERSION_NAME: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || '' }}
 
     steps:
       - name: Checkout Code
@@ -23,10 +29,36 @@ jobs:
 
       - name: Install Dependencies & Run Unit Tests (A & B)
         run: |
+          mkdir -p public/assets/aistudio
+          [ -f android/app/src/main/res/raw/audio_start_shop_gameover.mp3 ] && cp -f android/app/src/main/res/raw/audio_start_shop_gameover.mp3 public/assets/aistudio/Audio_-_Game_Start_screen_and_Shop_975662cc.mp3 || true
+          [ -f android/app/src/main/res/raw/audio_start_shop_gameover.mp3 ] && cp -f android/app/src/main/res/raw/audio_start_shop_gameover.mp3 public/assets/aistudio/Audio_-_Game_Start_screen_and_Shop_a8d903bf.mp3 || true
+          [ -f android/app/src/main/res/raw/audio_start_shop_2.mp3 ] && cp -f android/app/src/main/res/raw/audio_start_shop_2.mp3 public/assets/aistudio/Audio_-_Game_Start_screen_and_Shop_2_4fe4d993.mp3 || true
+          [ -f android/app/src/main/res/raw/audio_main_game.mp3 ] && cp -f android/app/src/main/res/raw/audio_main_game.mp3 public/assets/aistudio/Audio_-_Main_Game_Screen_d8782980.mp3 || true
+          [ -f android/app/src/main/res/raw/sfx_lightbulb.mp3 ] && cp -f android/app/src/main/res/raw/sfx_lightbulb.mp3 public/assets/aistudio/lightbulb_812f6410.mp3 || true
+          [ -f android/app/src/main/res/raw/sfx_scratch.mp3 ] && cp -f android/app/src/main/res/raw/sfx_scratch.mp3 public/assets/aistudio/scratch_1cd603a1.mp3 || true
+          [ -f android/app/src/main/res/raw/sfx_cash_register.mp3 ] && cp -f android/app/src/main/res/raw/sfx_cash_register.mp3 public/assets/aistudio/cash_register_d07e4cb5.mp3 || true
+          [ -f android/app/src/main/res/raw/sfx_flicker.mp3 ] && cp -f android/app/src/main/res/raw/sfx_flicker.mp3 public/assets/aistudio/flicker_b50e736a.mp3 || true
+          [ -f android/app/src/main/res/raw/sfx_coin.mp3 ] && cp -f android/app/src/main/res/raw/sfx_coin.mp3 public/assets/aistudio/coin_593cd810.mp3 || true
+          [ -f android/app/src/main/res/raw/sfx_2x_coin.mp3 ] && cp -f android/app/src/main/res/raw/sfx_2x_coin.mp3 public/assets/aistudio/2Xcoin_78ae3de4.mp3 || true
+          [ -f android/app/src/main/res/raw/sfx_shuffle.mp3 ] && cp -f android/app/src/main/res/raw/sfx_shuffle.mp3 public/assets/aistudio/shuffle_3d7b5646.mp3 || true
           if [ -f package.json ]; then
             npm install --legacy-peer-deps
             npm test
           fi
+
+      - name: Resolve Release Tag & Version
+        id: release_meta
+        run: |
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            TAG_NAME="${GITHUB_REF#refs/tags/}"
+          elif [ -f package.json ]; then
+            PKG_VER=$(node -p "require('./package.json').version")
+            TAG_NAME="v${PKG_VER}"
+          else
+            TAG_NAME="v1.3.3"
+          fi
+          echo "tag_name=${TAG_NAME}" >> "$GITHUB_OUTPUT"
+          echo "APP_VERSION_NAME=${TAG_NAME}" >> "$GITHUB_ENV"
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
@@ -58,6 +90,13 @@ jobs:
           fi
           gradle assembleDebug --stacktrace
 
+      - name: Build Release APK
+        run: |
+          if [ -d android ]; then
+            cd android
+          fi
+          gradle assembleRelease --stacktrace
+
       - name: Build Release Bundle (AAB) for Google Play
         env:
           UPLOAD_KEYSTORE_BASE64: ${{ secrets.UPLOAD_KEYSTORE_BASE64 }}
@@ -72,7 +111,7 @@ jobs:
             mkdir -p app/keystore
             echo "${UPLOAD_KEYSTORE_BASE64}" | tr -d ' \t\r\n' | base64 -d > app/keystore/upload-keystore.jks
           fi
-          gradle bundleRelease --stacktrace || true
+          gradle bundleRelease --stacktrace
 
       - name: Upload Debug APK
         uses: actions/upload-artifact@v4
@@ -84,6 +123,16 @@ jobs:
             android/app/build/outputs/apk/debug/*.apk
           if-no-files-found: warn
 
+      - name: Upload Release APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-release-apk
+          path: |
+            **/build/outputs/apk/release/*.apk
+            app/build/outputs/apk/release/*.apk
+            android/app/build/outputs/apk/release/*.apk
+          if-no-files-found: warn
+
       - name: Upload Release AAB Bundle
         uses: actions/upload-artifact@v4
         with:
@@ -92,4 +141,17 @@ jobs:
             **/build/outputs/bundle/release/*.aab
             app/build/outputs/bundle/release/*.aab
             android/app/build/outputs/bundle/release/*.aab
-          if-no-files-found: ignore
+          if-no-files-found: warn
+
+      - name: Publish GitHub Release
+        if: (startsWith(github.ref, 'refs/tags/v') || github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' || github.event_name == 'workflow_dispatch') && github.actor != 'github-actions[bot]'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.release_meta.outputs.tag_name }}
+          name: ${{ steps.release_meta.outputs.tag_name }}
+          body_path: CHANGELOG.md
+          files: |
+            android/app/build/outputs/apk/release/*.apk
+            android/app/build/outputs/apk/debug/*.apk
+            android/app/build/outputs/bundle/release/*.aab
+          generate_release_notes: false
