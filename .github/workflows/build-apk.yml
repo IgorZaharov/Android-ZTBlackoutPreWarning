@@ -30,6 +30,7 @@ jobs:
       - name: Install Dependencies & Run Unit Tests (A & B)
         run: |
           mkdir -p public/assets/aistudio
+          [ -f android/app/src/main/res/raw/audio_start_shop_gameover.mp3 ] && cp -f android/app/src/main/res/raw/audio_start_shop_gameover.mp3 public/assets/aistudio/Audio_-_Game_Start_screen_and_Shop_975662cc.mp3 || true
           [ -f android/app/src/main/res/raw/audio_start_shop_gameover.mp3 ] && cp -f android/app/src/main/res/raw/audio_start_shop_gameover.mp3 public/assets/aistudio/Audio_-_Game_Start_screen_and_Shop_a8d903bf.mp3 || true
           [ -f android/app/src/main/res/raw/audio_start_shop_2.mp3 ] && cp -f android/app/src/main/res/raw/audio_start_shop_2.mp3 public/assets/aistudio/Audio_-_Game_Start_screen_and_Shop_2_4fe4d993.mp3 || true
           [ -f android/app/src/main/res/raw/audio_main_game.mp3 ] && cp -f android/app/src/main/res/raw/audio_main_game.mp3 public/assets/aistudio/Audio_-_Main_Game_Screen_d8782980.mp3 || true
