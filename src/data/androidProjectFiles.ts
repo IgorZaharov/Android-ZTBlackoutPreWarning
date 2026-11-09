@@ -645,6 +645,10 @@ object NotificationHelper {
         }
     }
 
+    fun createNotificationChannels(context: Context) {
+        createNotificationChannel(context)
+    }
+
     fun showPreWarningNotification(
         context: Context,
         notificationId: Int,
