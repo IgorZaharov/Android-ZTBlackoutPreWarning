@@ -71,7 +71,9 @@ class SettingsRepository(context: Context) {
         val legacyNames = listOf(
             "zt_user_settings",
             "blackout_prefs",
-            "${appContext.packageName}_preferences"
+            "${appContext.packageName}_preferences",
+            "ua.blackout.prewarning_preferences",
+            "com.ZTBlackoutPreWarning_preferences"
         )
         for (name in legacyNames) {
             try {

@@ -256,7 +256,7 @@ object ZhytomyrRouletteEngine {
     private const val KEY_DEPOSIT_BASE_TS_MS = "deposit_base_ts_ms"
     private const val KEY_DEPOSIT_FINMON_LOCKED = "deposit_finmon_locked"
 
-    const val TICKET_SCRATCH_REVEAL_THRESHOLD = 0.20f
+    const val TICKET_SCRATCH_REVEAL_THRESHOLD = 0.30f
     const val MAX_ROULETTE_SCORE = 9_999_999
     const val SCORE_SHUFFLE_THRESHOLD = 999
     const val TICKET_SHUFFLE_ANIMATION_DURATION_MS = 2000L
@@ -380,8 +380,8 @@ object ZhytomyrRouletteEngine {
             cost = 2000,
             nameUk = "Цвіт папороті",
             nameEn = "Fern flower",
-            descriptionUk = "Секрет",
-            descriptionEn = "Secret",
+            descriptionUk = "Удача +5%",
+            descriptionEn = "Luck +5%",
             hideDescription = false
         ),
         RouletteUpgradeDef(
@@ -389,8 +389,8 @@ object ZhytomyrRouletteEngine {
             cost = 13,
             nameUk = "Чорний кіт",
             nameEn = "Black Cat",
-            descriptionUk = "Секрет",
-            descriptionEn = "Secret",
+            descriptionUk = "Приносить невдачу",
+            descriptionEn = "Brings misfortune",
             hideDescription = false
         ),
         RouletteUpgradeDef(
@@ -398,8 +398,8 @@ object ZhytomyrRouletteEngine {
             cost = 10,
             nameUk = "Нічна істота",
             nameEn = "Nocturnal Creature",
-            descriptionUk = "Секрет",
-            descriptionEn = "Secret",
+            descriptionUk = "Тепер блекаут вам до вподоби",
+            descriptionEn = "You love blackouts",
             hideDescription = false,
             isToggleable = true
         ),
@@ -455,11 +455,11 @@ object ZhytomyrRouletteEngine {
         return if (lang == "en") upgrade.descriptionEn else upgrade.descriptionUk
     }
 
-    fun isTicketScratchedEnough(scratchedFraction: Float, isRedCenterOutlineShown: Boolean = false): Boolean {
-        return isRedCenterOutlineShown || scratchedFraction >= TICKET_SCRATCH_REVEAL_THRESHOLD
+    fun isTicketScratchedEnough(scratchedFraction: Float, isCenterShown: Boolean = false): Boolean {
+        return isCenterShown || scratchedFraction >= TICKET_SCRATCH_REVEAL_THRESHOLD
     }
 
-    fun doesScratchExposeRedCenterOutline(
+    fun doesScratchExposeLightbulbCenter(
         x0: Float,
         y0: Float,
         x1: Float,
@@ -471,7 +471,7 @@ object ZhytomyrRouletteEngine {
         if (canvasWidth <= 0f || canvasHeight <= 0f) return false
         val cx = canvasWidth / 2f
         val cy = canvasHeight / 2f
-        val redRadius = min(canvasWidth, canvasHeight) * 0.42f
+        val bulbRadius = min(canvasWidth, canvasHeight) * 0.25f
 
         val dx = x1 - x0
         val dy = y1 - y0
@@ -483,12 +483,32 @@ object ZhytomyrRouletteEngine {
         }
         val closestX = x0 + t * dx
         val closestY = y0 + t * dy
-        val rx = max(redRadius, canvasWidth * 0.32f) + brushRadius * 0.75f
-        val ry = redRadius + brushRadius * 0.75f
+        val rx = bulbRadius + brushRadius * 0.5f
+        val ry = bulbRadius + brushRadius * 0.5f
         val normX = (cx - closestX) / max(1f, rx)
         val normY = (cy - closestY) / max(1f, ry)
         return normX * normX + normY * normY <= 1f
     }
+
+    fun doesScratchExposeCenter(
+        x0: Float,
+        y0: Float,
+        x1: Float,
+        y1: Float,
+        canvasWidth: Float,
+        canvasHeight: Float,
+        brushRadius: Float
+    ): Boolean = doesScratchExposeLightbulbCenter(x0, y0, x1, y1, canvasWidth, canvasHeight, brushRadius)
+
+    fun doesScratchExposeRedCenterOutline(
+        x0: Float,
+        y0: Float,
+        x1: Float,
+        y1: Float,
+        canvasWidth: Float,
+        canvasHeight: Float,
+        brushRadius: Float
+    ): Boolean = doesScratchExposeLightbulbCenter(x0, y0, x1, y1, canvasWidth, canvasHeight, brushRadius)
 
     fun isNocturnalModeActive(purchasedUpgrades: Set<RouletteUpgradeId> = getPurchasedUpgrades()): Boolean {
         return purchasedUpgrades.contains(RouletteUpgradeId.NOCTURNAL_CREATURE)
@@ -2005,9 +2025,9 @@ object RouletteSoundEngine {
     const val COIN_VOLUME_SCALE = 0.75
     const val GAMEOVER_UPGRADE_VOLUME_SCALE = 0.60
     const val COIN_GAMEOVER_UPGRADE_VOLUME_SCALE = 0.75
-    const val FLICKER_BUZZ_VOLUME_SCALE = 0.10
-    const val GAME_BLACKOUT_VOLUME_SCALE = 0.10
-    const val FLICKER_SFX_VOLUME_MULTIPLIER = 1.3
+    const val FLICKER_BUZZ_VOLUME_SCALE = 0.575
+    const val GAME_BLACKOUT_VOLUME_SCALE = 0.575
+    const val FLICKER_SFX_VOLUME_MULTIPLIER = 0.9
     const val MUSIC_VOLUME_SCALE = 0.15f
     const val MUSIC_FADE_DURATION_MS = 1200L
     const val GAME_OVER_MUSIC_FADE_IN_DELAY_MS = 2000L
@@ -3107,11 +3127,11 @@ private fun ScratchTicketComposable(
 ) {
     val scratchPoints = remember(ticket.index, ticket.slotLabel, generationId) { mutableStateListOf<Offset>() }
     val scratchedCells = remember(ticket.index, ticket.slotLabel, generationId) { mutableSetOf<Int>() }
-    var redCenterOutlineShown by remember(ticket.index, ticket.slotLabel, generationId) { mutableStateOf(false) }
+    var centerOutlineShown by remember(ticket.index, ticket.slotLabel, generationId) { mutableStateOf(false) }
 
     val markGridAndCheckReveal: (Offset, Offset, Float, Float, Float) -> Unit = { prevPos, pos, widthPx, heightPx, brushRadiusPx ->
         if (widthPx > 0f && heightPx > 0f) {
-            if (ticket.isRed && !redCenterOutlineShown) {
+            if (!centerOutlineShown) {
                 if (ZhytomyrRouletteEngine.doesScratchExposeRedCenterOutline(
                         prevPos.x,
                         prevPos.y,
@@ -3122,7 +3142,7 @@ private fun ScratchTicketComposable(
                         brushRadiusPx
                     )
                 ) {
-                    redCenterOutlineShown = true
+                    centerOutlineShown = true
                 }
             }
             val cellW = widthPx / GRID_COLS
@@ -3142,7 +3162,7 @@ private fun ScratchTicketComposable(
                 }
             }
             val fraction = scratchedCells.size.toFloat() / TOTAL_GRID_CELLS.toFloat()
-            if (ZhytomyrRouletteEngine.isTicketScratchedEnough(fraction, redCenterOutlineShown)) {
+            if (ZhytomyrRouletteEngine.isTicketScratchedEnough(fraction, centerOutlineShown)) {
                 onReveal(ticket.index)
             }
         }
@@ -3227,14 +3247,6 @@ private fun ScratchTicketComposable(
                     radius = goldRadius * 1.2f,
                     center = center
                 )
-                if (ticket.isRed) {
-                    drawCircle(
-                        color = Color(0xFFEF4444),
-                        radius = min(w, h) * 0.25f,
-                        center = center,
-                        style = Stroke(width = 2.dp.toPx())
-                    )
-                }
                 drawIntactLightbulbContour(
                     center = center,
                     radius = min(w, h) * 0.26f,
@@ -3244,59 +3256,22 @@ private fun ScratchTicketComposable(
                 val x2Radius = min(w, h) * 0.36f
                 drawCircle(
                     brush = Brush.radialGradient(
-                        colors = if (ticket.isRed) {
-                            listOf(
-                                Color(0xFFD62E26),
-                                Color(0xFF9E1E18),
-                                Color(0x00D8D6CC)
-                            )
-                        } else {
-                            listOf(
-                                Color(0x73F5D061),
-                                Color(0x26D97706),
-                                Color.Transparent
-                            )
-                        },
+                        colors = listOf(
+                            Color(0x73F5D061),
+                            Color(0x26D97706),
+                            Color.Transparent
+                        ),
                         center = center,
                         radius = x2Radius * 1.15f
                     ),
                     radius = x2Radius * 1.15f,
                     center = center
                 )
-                if (ticket.isRed) {
-                    drawCircle(
-                        color = Color(0xFFEF4444),
-                        radius = min(w, h) * 0.25f,
-                        center = center,
-                        style = Stroke(width = 2.dp.toPx())
-                    )
-                }
             } else if (ticket.isRed) {
-                val redRadius = min(w, h) * 0.42f
-                drawCircle(
-                    brush = Brush.radialGradient(
-                        colors = listOf(
-                            Color(0xFFD62E26),
-                            Color(0xFF9E1E18),
-                            Color(0x00D8D6CC)
-                        ),
-                        center = center,
-                        radius = redRadius * 1.22f
-                    ),
-                    radius = redRadius * 1.22f,
-                    center = center
-                )
-                // Wider red outline around center so border scratching exposes it
-                drawCircle(
-                    color = Color(0xFFEF4444),
-                    radius = min(w, h) * 0.34f,
-                    center = center,
-                    style = Stroke(width = 2.dp.toPx())
-                )
                 drawExplodedLightbulbContour(
                     center = center,
                     radius = min(w, h) * 0.26f,
-                    strokeColor = Color(0xFFFFF5F5)
+                    strokeColor = Color(0xFFEF4444)
                 )
             } else {
                 drawIntactLightbulbContour(
@@ -3394,7 +3369,7 @@ private fun ScratchTicketComposable(
                 fontSize = 20.sp,
                 fontWeight = FontWeight.Black,
                 fontFamily = FontFamily.Monospace,
-                color = if (ticket.isRed) Color(0xFFFFF7F5) else Color(0xFF78350F)
+                color = if (ticket.isRed) Color(0xFFEF4444) else Color(0xFF78350F)
             )
         }
 

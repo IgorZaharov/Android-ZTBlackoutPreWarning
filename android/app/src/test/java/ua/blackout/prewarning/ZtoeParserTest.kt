@@ -228,9 +228,11 @@ class ZtoeParserTest {
         assertEquals("15:30-16:00", labels[31])
         assertEquals("23:30-24:00", labels[47])
 
-        assertEquals(0.20f, ua.blackout.prewarning.ui.screens.ZhytomyrRouletteEngine.TICKET_SCRATCH_REVEAL_THRESHOLD, 0.0001f)
+        assertEquals(0.30f, ua.blackout.prewarning.ui.screens.ZhytomyrRouletteEngine.TICKET_SCRATCH_REVEAL_THRESHOLD, 0.0001f)
         assertEquals(false, ua.blackout.prewarning.ui.screens.ZhytomyrRouletteEngine.isTicketScratchedEnough(0.19f))
-        assertEquals(true, ua.blackout.prewarning.ui.screens.ZhytomyrRouletteEngine.isTicketScratchedEnough(0.20f))
+        assertEquals(false, ua.blackout.prewarning.ui.screens.ZhytomyrRouletteEngine.isTicketScratchedEnough(0.29f))
+        assertEquals(true, ua.blackout.prewarning.ui.screens.ZhytomyrRouletteEngine.isTicketScratchedEnough(0.30f))
+        assertEquals(true, ua.blackout.prewarning.ui.screens.ZhytomyrRouletteEngine.isTicketScratchedEnough(0.02f, isCenterShown = true))
 
         val controlledTickets = labels.mapIndexed { idx, label ->
             ua.blackout.prewarning.ui.screens.RouletteTicketItem(
@@ -348,9 +350,9 @@ class ZtoeParserTest {
         assertEquals(0.9, ua.blackout.prewarning.ui.screens.RouletteSoundEngine.SCRATCH_SFX_VOLUME_MULTIPLIER, 0.001)
         assertEquals(0.75, ua.blackout.prewarning.ui.screens.RouletteSoundEngine.COIN_VOLUME_SCALE, 0.001)
         assertEquals(0.60, ua.blackout.prewarning.ui.screens.RouletteSoundEngine.GAMEOVER_UPGRADE_VOLUME_SCALE, 0.001)
-        assertEquals(0.10, ua.blackout.prewarning.ui.screens.RouletteSoundEngine.FLICKER_BUZZ_VOLUME_SCALE, 0.001)
-        assertEquals(0.10, ua.blackout.prewarning.ui.screens.RouletteSoundEngine.GAME_BLACKOUT_VOLUME_SCALE, 0.001)
-        assertEquals(1.3, ua.blackout.prewarning.ui.screens.RouletteSoundEngine.FLICKER_SFX_VOLUME_MULTIPLIER, 0.001)
+        assertEquals(0.575, ua.blackout.prewarning.ui.screens.RouletteSoundEngine.FLICKER_BUZZ_VOLUME_SCALE, 0.001)
+        assertEquals(0.575, ua.blackout.prewarning.ui.screens.RouletteSoundEngine.GAME_BLACKOUT_VOLUME_SCALE, 0.001)
+        assertEquals(0.9, ua.blackout.prewarning.ui.screens.RouletteSoundEngine.FLICKER_SFX_VOLUME_MULTIPLIER, 0.001)
         assertEquals(
             0.05,
             ua.blackout.prewarning.ui.screens.ZhytomyrRouletteEngine.getGoldenTicketProbability(
@@ -361,8 +363,18 @@ class ZtoeParserTest {
         val fernDef = ua.blackout.prewarning.ui.screens.ZhytomyrRouletteEngine.UPGRADES.first {
             it.id == ua.blackout.prewarning.ui.screens.RouletteUpgradeId.FERN_FLOWER
         }
-        assertEquals("Секрет", ua.blackout.prewarning.ui.screens.ZhytomyrRouletteEngine.getUpgradeDescription(fernDef, "uk", false))
-        assertEquals("Secret", ua.blackout.prewarning.ui.screens.ZhytomyrRouletteEngine.getUpgradeDescription(fernDef, "en", false))
+        assertEquals("Удача +5%", ua.blackout.prewarning.ui.screens.ZhytomyrRouletteEngine.getUpgradeDescription(fernDef, "uk", false))
+        assertEquals("Luck +5%", ua.blackout.prewarning.ui.screens.ZhytomyrRouletteEngine.getUpgradeDescription(fernDef, "en", false))
+        val catDef = ua.blackout.prewarning.ui.screens.ZhytomyrRouletteEngine.UPGRADES.first {
+            it.id == ua.blackout.prewarning.ui.screens.RouletteUpgradeId.BLACK_CAT
+        }
+        assertEquals("Приносить невдачу", ua.blackout.prewarning.ui.screens.ZhytomyrRouletteEngine.getUpgradeDescription(catDef, "uk", false))
+        assertEquals("Brings misfortune", ua.blackout.prewarning.ui.screens.ZhytomyrRouletteEngine.getUpgradeDescription(catDef, "en", false))
+        val nocDef = ua.blackout.prewarning.ui.screens.ZhytomyrRouletteEngine.UPGRADES.first {
+            it.id == ua.blackout.prewarning.ui.screens.RouletteUpgradeId.NOCTURNAL_CREATURE
+        }
+        assertEquals("Тепер блекаут вам до вподоби", ua.blackout.prewarning.ui.screens.ZhytomyrRouletteEngine.getUpgradeDescription(nocDef, "uk", false))
+        assertEquals("You love blackouts", ua.blackout.prewarning.ui.screens.ZhytomyrRouletteEngine.getUpgradeDescription(nocDef, "en", false))
 
         ua.blackout.prewarning.ui.screens.ZhytomyrRouletteEngine.resetAllProgress()
         ua.blackout.prewarning.ui.screens.ZhytomyrRouletteEngine.resetSavedPowerPoints(5000)
@@ -499,9 +511,12 @@ class ZtoeParserTest {
         )
         assertTrue(blackCatBodyUk.contains("14:35-23:00"))
 
-        // Verify red center outline scratch detection
-        assertTrue(ua.blackout.prewarning.ui.screens.ZhytomyrRouletteEngine.isTicketScratchedEnough(0.02f, isRedCenterOutlineShown = true))
-        assertTrue(ua.blackout.prewarning.ui.screens.ZhytomyrRouletteEngine.doesScratchExposeRedCenterOutline(120f, 48f, 120f, 48f, 240f, 96f, 11f))
+        // Verify center lightbulb scratch detection and scratching sides away from center
+        assertTrue(ua.blackout.prewarning.ui.screens.ZhytomyrRouletteEngine.isTicketScratchedEnough(0.02f, isCenterShown = true))
+        assertFalse(ua.blackout.prewarning.ui.screens.ZhytomyrRouletteEngine.isTicketScratchedEnough(0.25f, isCenterShown = false))
+        assertTrue(ua.blackout.prewarning.ui.screens.ZhytomyrRouletteEngine.isTicketScratchedEnough(0.30f, isCenterShown = false))
+        assertTrue(ua.blackout.prewarning.ui.screens.ZhytomyrRouletteEngine.doesScratchExposeRedCenterOutline(84f, 37f, 84f, 37f, 168f, 74f, 7.5f))
+        assertFalse(ua.blackout.prewarning.ui.screens.ZhytomyrRouletteEngine.doesScratchExposeRedCenterOutline(20f, 20f, 30f, 25f, 168f, 74f, 7.5f))
 
         // Verify 15-30s flicker interval, 2-3s slow flicker duration, and 5-10m Game Blackout interval
         val delayMs = ua.blackout.prewarning.ui.screens.ZhytomyrRouletteEngine.getNextFlickerDelayMs()
@@ -723,17 +738,17 @@ class ZtoeParserTest {
         assertEquals(true, shuffleRes.nextState.ticketsShuffledAbove999)
         assertTrue(shuffleRes.nextState.tickets.map { it.slotLabel } != labels)
 
-        // Verify wider red ticket reveal area around center
+        // Verify center lightbulb reveal area
         assertEquals(
             true,
             ua.blackout.prewarning.ui.screens.ZhytomyrRouletteEngine.doesScratchExposeRedCenterOutline(
-                85f, 20f, 85f, 20f, 168f, 74f, 7.5f
+                84f, 37f, 84f, 37f, 168f, 74f, 7.5f
             )
         )
         assertEquals(
             false,
             ua.blackout.prewarning.ui.screens.ZhytomyrRouletteEngine.doesScratchExposeRedCenterOutline(
-                4f, 4f, 10f, 8f, 168f, 74f, 7.5f
+                20f, 20f, 30f, 25f, 168f, 74f, 7.5f
             )
         )
 

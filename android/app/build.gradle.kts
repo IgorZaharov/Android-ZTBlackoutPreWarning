@@ -11,7 +11,8 @@ android {
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "ua.blackout.prewarning"
+        val appPkgEnv = System.getenv("ANDROID_APPLICATION_ID")?.trim()?.takeIf { it.isNotBlank() }
+        applicationId = appPkgEnv ?: "com.ZTBlackoutPreWarning"
         minSdk = 26
         targetSdk = 35
         versionCode = (System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull() ?: 100) + 100
@@ -31,6 +32,14 @@ android {
         keystoreFile.writeBytes(Base64.getDecoder().decode(embeddedKeystoreBase64))
     }
 
+    val isBundleBuild = gradle.startParameter.taskNames.any { it.contains("bundle", ignoreCase = true) }
+    val uploadKeystorePath = System.getenv("UPLOAD_KEYSTORE_FILE")?.trim().orEmpty()
+    val uploadKeystoreFile = if (uploadKeystorePath.isNotEmpty()) file(uploadKeystorePath) else file("keystore/upload-keystore.jks")
+    val uploadStorePassword = System.getenv("UPLOAD_KEYSTORE_PASSWORD")?.trim().orEmpty()
+    val uploadKeyAlias = System.getenv("UPLOAD_KEY_ALIAS")?.trim()?.ifEmpty { "upload" } ?: "upload"
+    val uploadKeyPassword = System.getenv("UPLOAD_KEY_PASSWORD")?.trim()?.ifEmpty { uploadStorePassword } ?: uploadStorePassword
+    val hasUploadKeystore = isBundleBuild && uploadKeystoreFile.exists() && uploadStorePassword.isNotEmpty()
+
     signingConfigs {
         getByName("debug") {
             if (keystoreFile.exists()) {
@@ -38,6 +47,18 @@ android {
                 storePassword = "android"
                 keyAlias = "androiddebugkey"
                 keyPassword = "android"
+                enableV1Signing = true
+                enableV2Signing = true
+                enableV3Signing = true
+                enableV4Signing = true
+            }
+        }
+        create("upload") {
+            if (hasUploadKeystore) {
+                storeFile = uploadKeystoreFile
+                storePassword = uploadStorePassword
+                keyAlias = uploadKeyAlias
+                keyPassword = uploadKeyPassword
                 enableV1Signing = true
                 enableV2Signing = true
                 enableV3Signing = true
@@ -54,7 +75,11 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = if (hasUploadKeystore) {
+                signingConfigs.getByName("upload")
+            } else {
+                signingConfigs.getByName("debug")
+            }
         }
         debug {
             // Keep identical applicationId ("ua.blackout.prewarning") and signingConfig so debug and release APKs can update each other in-place and preserve user settings

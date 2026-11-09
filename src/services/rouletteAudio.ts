@@ -18,7 +18,7 @@ export const ROULETTE_MUSIC_VOLUME = 0.15;
 export const MUSIC_FADE_DURATION_MS = 1200;
 export const GAME_OVER_MUSIC_FADE_IN_DELAY_MS = 2000;
 export const START_SHOP_GAMEOVER_MUSIC_URL =
-  '/assets/aistudio/Audio_-_Game_Start_screen_and_Shop_a8d903bf.mp3';
+  '/assets/aistudio/Audio_-_Game_Start_screen_and_Shop_975662cc.mp3';
 export const START_SHOP_2_MUSIC_URL =
   '/assets/aistudio/Audio_-_Game_Start_screen_and_Shop_2_4fe4d993.mp3';
 export const START_SHOP_MUSIC_OPTIONS = [
@@ -237,9 +237,9 @@ export const SCRATCH_SFX_DURATION_MS = 336;
 export const COIN_VOLUME_SCALE = 0.75;
 export const GAMEOVER_UPGRADE_VOLUME_SCALE = 0.6;
 export const COIN_GAMEOVER_UPGRADE_VOLUME_SCALE = 0.75;
-export const FLICKER_BUZZ_VOLUME_SCALE = 0.1;
-export const GAME_BLACKOUT_VOLUME_SCALE = 0.1;
-export const FLICKER_SFX_VOLUME_MULTIPLIER = 1.3;
+export const FLICKER_BUZZ_VOLUME_SCALE = 0.575;
+export const GAME_BLACKOUT_VOLUME_SCALE = 0.575;
+export const FLICKER_SFX_VOLUME_MULTIPLIER = 0.9;
 
 export function getRemainingScratchSoundDelayMs(nowMs: number = Date.now()): number {
   if (
@@ -449,7 +449,7 @@ export function playElectricBuzzSound(
 }
 
 /**
- * 4b. Plays flicker.mp3 (30% louder) during flickering lights (with fallback to playBulbExplosionSound(FLICKER_BUZZ_VOLUME_SCALE)).
+ * 4b. Plays flicker.mp3 (louder, similar to scratch.mp3) during flickering lights (with fallback to playBulbExplosionSound(FLICKER_BUZZ_VOLUME_SCALE)).
  */
 export function playFlickerBuzzSound(_durationMs: number = 550): void {
   if (!isRouletteSoundEnabled() || !isRouletteAppInForeground()) return;
@@ -458,7 +458,7 @@ export function playFlickerBuzzSound(_durationMs: number = 550): void {
 }
 
 /**
- * 4c. Plays flicker.mp3 (30% louder) on Game blackout (with fallback to playBulbExplosionSound(GAME_BLACKOUT_VOLUME_SCALE)).
+ * 4c. Plays flicker.mp3 (louder, similar to scratch.mp3) on Game blackout (with fallback to playBulbExplosionSound(GAME_BLACKOUT_VOLUME_SCALE)).
  */
 export function playGameBlackoutSound(): void {
   if (!isRouletteSoundEnabled() || !isRouletteAppInForeground()) return;

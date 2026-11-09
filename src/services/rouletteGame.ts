@@ -48,16 +48,19 @@ export const GENERATED_TICKET_FOIL_IMAGES: Record<TicketVisualVariant, string> =
 };
 
 /**
- * Ticket is treated as scratched if at least 20% (0.20) of its surface is scratched off,
- * OR if the red outline in the center of a Red ticket is shown.
+ * Scratching rules for red and other tickets:
+ * - Red outline is removed from tickets; only difference is lightbulb in center is red.
+ * - Scratching can be done freely around ticket, unless only lightbulb color in center is revealed,
+ *   or 30% of ticket surface is scratched (TICKET_SCRATCH_REVEAL_THRESHOLD = 0.3).
+ * - X2 tickets follow the same principle.
  */
-export const TICKET_SCRATCH_REVEAL_THRESHOLD = 0.2;
+export const TICKET_SCRATCH_REVEAL_THRESHOLD = 0.3;
 
 export function isTicketScratchedEnough(
   scratchedFraction: number,
-  isRedCenterOutlineShown: boolean = false
+  isCenterShown: boolean = false
 ): boolean {
-  if (isRedCenterOutlineShown) {
+  if (isCenterShown) {
     return true;
   }
   return scratchedFraction >= TICKET_SCRATCH_REVEAL_THRESHOLD;
@@ -78,11 +81,11 @@ export function clampRouletteScore(score: number): number {
 
 /**
  * Checks whether a scratch stroke segment `(x0, y0) -> (x1, y1)` exposes the center
- * red outline medallion of a Red ticket (`canvasWidth x canvasHeight`).
- * Uses a wider elliptical area around the center (`0.42 * min(w, h)` vertically and `0.32 * w` horizontally)
- * so players cannot peek at the outer border of the red tint without revealing the red ticket.
+ * lightbulb (or X2 symbol) where its color is revealed.
+ * Center detection focuses specifically on the center lightbulb (`0.25 * min(w, h)`)
+ * allowing scratching to be done freely around the ticket without premature reveal.
  */
-export function doesScratchExposeRedCenterOutline(
+export function doesScratchExposeLightbulbCenter(
   x0: number,
   y0: number,
   x1: number,
@@ -92,10 +95,10 @@ export function doesScratchExposeRedCenterOutline(
   brushRadius: number = 7.5
 ): boolean {
   const cx = canvasWidth / 2;
-  const cy = canvasHeight / 2 - 2;
-  const redOutlineRadius = Math.min(canvasWidth, canvasHeight) * 0.42;
-  const rx = Math.max(redOutlineRadius, canvasWidth * 0.32) + brushRadius * 0.75;
-  const ry = redOutlineRadius + brushRadius * 0.75;
+  const cy = canvasHeight / 2;
+  const bulbRadius = Math.min(canvasWidth, canvasHeight) * 0.25;
+  const rx = bulbRadius + brushRadius * 0.5;
+  const ry = bulbRadius + brushRadius * 0.5;
 
   const segDx = x1 - x0;
   const segDy = y1 - y0;
@@ -110,6 +113,9 @@ export function doesScratchExposeRedCenterOutline(
   const normDy = (cy - projY) / Math.max(1, ry);
   return normDx * normDx + normDy * normDy <= 1;
 }
+
+export const doesScratchExposeRedCenterOutline = doesScratchExposeLightbulbCenter;
+export const doesScratchExposeCenter = doesScratchExposeLightbulbCenter;
 
 export type RouletteUpgradeId =
   | 'x2_ticket_1'
@@ -213,8 +219,8 @@ export const ROULETTE_UPGRADES: RouletteUpgradeDefinition[] = [
     nameEn: 'Fern flower',
     buttonLabelUk: 'Цвіт папороті (Cost: 2000)',
     buttonLabelEn: 'Fern flower (Cost: 2000)',
-    descriptionUk: 'Секрет',
-    descriptionEn: 'Secret',
+    descriptionUk: 'Удача +5%',
+    descriptionEn: 'Luck +5%',
     hideDescription: false,
   },
   {
@@ -224,8 +230,8 @@ export const ROULETTE_UPGRADES: RouletteUpgradeDefinition[] = [
     nameEn: 'Black Cat',
     buttonLabelUk: 'Чорний кіт (Cost: 13)',
     buttonLabelEn: 'Black Cat (Cost: 13)',
-    descriptionUk: 'Секрет',
-    descriptionEn: 'Secret',
+    descriptionUk: 'Приносить невдачу',
+    descriptionEn: 'Brings misfortune',
     hideDescription: false,
   },
   {
@@ -235,8 +241,8 @@ export const ROULETTE_UPGRADES: RouletteUpgradeDefinition[] = [
     nameEn: 'Nocturnal Creature',
     buttonLabelUk: 'Нічна істота (Ціна: 10)',
     buttonLabelEn: 'Nocturnal Creature (Cost: 10)',
-    descriptionUk: 'Секрет',
-    descriptionEn: 'Secret',
+    descriptionUk: 'Тепер блекаут вам до вподоби',
+    descriptionEn: 'You love blackouts',
     hideDescription: false,
     isToggleable: true,
   },

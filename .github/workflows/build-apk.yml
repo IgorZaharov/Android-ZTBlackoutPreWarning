@@ -97,9 +97,18 @@ jobs:
           gradle assembleRelease --stacktrace
 
       - name: Build Release Bundle (AAB) for Google Play
+        env:
+          UPLOAD_KEYSTORE_BASE64: ${{ secrets.UPLOAD_KEYSTORE_BASE64 }}
+          UPLOAD_KEYSTORE_PASSWORD: ${{ secrets.UPLOAD_KEYSTORE_PASSWORD }}
+          UPLOAD_KEY_ALIAS: ${{ secrets.UPLOAD_KEY_ALIAS }}
+          UPLOAD_KEY_PASSWORD: ${{ secrets.UPLOAD_KEY_PASSWORD }}
         run: |
           if [ -d android ]; then
             cd android
+          fi
+          if [ -n "${UPLOAD_KEYSTORE_BASE64}" ]; then
+            mkdir -p app/keystore
+            echo "${UPLOAD_KEYSTORE_BASE64}" | tr -d ' \t\r\n' | base64 -d > app/keystore/upload-keystore.jks
           fi
           gradle bundleRelease --stacktrace
 

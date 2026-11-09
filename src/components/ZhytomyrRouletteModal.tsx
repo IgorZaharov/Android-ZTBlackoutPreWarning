@@ -865,9 +865,8 @@ const ScratchTicketCard: React.FC<ScratchTicketCardProps> = ({
       lastPointRef.current = { x, y };
       playScratchSound(false);
 
-      // Requirement 7: Count ticket as scratched off if red outline in center is shown (or >= 20% surface is scratched off)
+      // Scratching rules for red and other tickets: if center is shown, ticket is revealed. Otherwise scratching sides away from center is allowed.
       if (
-        ticket.isRed &&
         doesScratchExposeRedCenterOutline(x0, y0, x, y, CANVAS_W, CANVAS_H, SCRATCH_BRUSH_RADIUS)
       ) {
         redCenterOutlineShownRef.current = true;
@@ -878,7 +877,7 @@ const ScratchTicketCard: React.FC<ScratchTicketCardProps> = ({
         onReveal(ticket.index);
       }
     },
-    [disabled, isBlackoutMode, ticket.isRevealed, ticket.isRed, ticket.index, onReveal, markScratchedGridCells]
+    [disabled, isBlackoutMode, ticket.isRevealed, ticket.index, onReveal, markScratchedGridCells]
   );
 
   // During 10-second Main Game Screen blackout: only outlines of tickets are visible without text or scratching area
@@ -916,9 +915,7 @@ const ScratchTicketCard: React.FC<ScratchTicketCardProps> = ({
         {ticket.isGolden ? (
           /* Scratched Golden ticket (1% or 5% chance, on Beige or Red in Nocturnal Creature mode): radiant golden medallion & bulb */
           <div
-            className={`w-12 h-12 rounded-full flex items-center justify-center shadow-inner ${
-              ticket.isRed ? 'border-2 border-[#EF4444]' : ''
-            }`}
+            className="w-12 h-12 rounded-full flex items-center justify-center shadow-inner"
             style={{
               background:
                 'radial-gradient(circle, rgba(251, 191, 36, 0.72) 0%, rgba(217, 119, 6, 0.35) 68%, rgba(254, 243, 199, 0) 100%)',
@@ -930,36 +927,23 @@ const ScratchTicketCard: React.FC<ScratchTicketCardProps> = ({
           /* Scratched X2 multiplier ticket (on Beige or Red in Nocturnal Creature mode): bold "X2" symbol */
           <div
             data-testid={`roulette-ticket-x2-symbol-${ticket.index}`}
-            className={`w-12 h-12 rounded-full flex items-center justify-center ${
-              ticket.isRed
-                ? 'border-2 border-[#EF4444]'
-                : 'border border-[#92400E]/35'
-            }`}
-            style={{
-              background: ticket.isRed
-                ? 'radial-gradient(circle, #D62E26 0%, #9E1E18 68%, rgba(216, 214, 204, 0) 100%)'
-                : 'radial-gradient(circle, rgba(245, 208, 97, 0.45) 0%, rgba(217, 119, 6, 0.15) 70%, rgba(216, 214, 204, 0) 100%)',
-            }}
+            className="w-12 h-12 rounded-full flex items-center justify-center"
           >
             <span
               className={`text-xl font-black tracking-tighter font-mono ${
-                ticket.isRed ? 'text-[#FFF7F5]' : 'text-[#78350F]'
+                ticket.isRed ? 'text-[#EF4444]' : 'text-[#78350F]'
               }`}
             >
               X2
             </span>
           </div>
         ) : ticket.isRed ? (
-          /* Scratched Red ticket: wider red color & red outline around center medallion so border scratching reveals it */
+          /* Scratched Red ticket: only difference is lightbulb in center - red. No red outline. */
           <div
             data-testid={`roulette-ticket-red-center-${ticket.index}`}
-            className="w-14 h-14 rounded-full flex items-center justify-center shadow-inner border-2 border-[#EF4444]"
-            style={{
-              background:
-                'radial-gradient(circle, #D62E26 0%, #9E1E18 74%, rgba(216, 214, 204, 0) 100%)',
-            }}
+            className="w-12 h-12 rounded-full flex items-center justify-center"
           >
-            <ExplodedLightbulbContourSvg className="w-7 h-7" strokeColor="#FFF7F5" />
+            <ExplodedLightbulbContourSvg className="w-8 h-8" strokeColor="#EF4444" />
           </div>
         ) : (
           /* Scratched Beige ticket: contour drawing of an intact lightbulb */

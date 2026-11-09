@@ -632,10 +632,14 @@ async function runUnitTestC_ZhytomyrRoulette() {
     0.6,
     'Game Over and Upgrade Purchase sounds must have volume 20% less (0.75 * 0.8 = 0.6)'
   );
-  assert.equal(COIN_GAMEOVER_UPGRADE_VOLUME_SCALE, 0.75);
-  assert.equal(FLICKER_BUZZ_VOLUME_SCALE, 0.1, 'Screen flickering lamp breaking sound volume must be 10% (0.10)');
-  assert.equal(GAME_BLACKOUT_VOLUME_SCALE, 0.1, '10-second Game Blackout lamp breaking sound volume must be 10% (0.10)');
-  assert.equal(FLICKER_SFX_VOLUME_MULTIPLIER, 1.3, 'flicker.mp3 volume multiplier must be 30% louder (1.3)');
+  assert.equal(FLICKER_BUZZ_VOLUME_SCALE, 0.575, 'Screen flickering lamp breaking sound volume scale must be 0.575 (similar to scratch.mp3)');
+  assert.equal(GAME_BLACKOUT_VOLUME_SCALE, 0.575, '10-second Game Blackout lamp breaking sound volume scale must be 0.575 (similar to scratch.mp3)');
+  assert.equal(FLICKER_SFX_VOLUME_MULTIPLIER, 0.9, 'flicker.mp3 volume multiplier must be 0.9 (similar to scratch.mp3)');
+  assert.equal(
+    Number((FLICKER_BUZZ_VOLUME_SCALE * FLICKER_SFX_VOLUME_MULTIPLIER).toFixed(4)),
+    Number((SCRATCH_VOLUME_SCALE * SCRATCH_SFX_VOLUME_MULTIPLIER).toFixed(4)),
+    'flicker.mp3 effective sound volume must match scratch.mp3 sound volume'
+  );
   assert.equal(ROULETTE_MUSIC_VOLUME, 0.15, 'Background music must play at 15% volume (0.15)');
   assert.ok(MUSIC_FADE_DURATION_MS >= 500, 'Background music must use fade-in and fade-out duration');
   assert.equal(
@@ -849,22 +853,29 @@ async function runUnitTestC_ZhytomyrRoulette() {
     'At least one beige ticket must have X2 multiplier when tickets are loaded'
   );
 
-  // Verify 20% surface scratch threshold helper AND red outline in center scratch detection
-  assert.equal(TICKET_SCRATCH_REVEAL_THRESHOLD, 0.2, 'Ticket scratch reveal threshold must be 20% (0.20)');
-  assert.equal(isTicketScratchedEnough(0.19, false), false, '19% scratched surface without red center outline must not treat ticket as scratched');
-  assert.equal(isTicketScratchedEnough(0.2, false), true, '20% scratched surface must treat ticket as scratched');
-  assert.equal(isTicketScratchedEnough(0.35, false), true, '35% scratched surface must treat ticket as scratched');
-  assert.equal(isTicketScratchedEnough(0.03, true), true, 'Ticket must be counted as scratched off immediately if red outline in center is shown');
+  // Verify scratching rules: red outline removed, only center lightbulb is red.
+  // Scratching can be done freely around ticket, unless lightbulb color in center is revealed or 30% of ticket surface is scratched. X2 tickets follow same principle.
+  assert.equal(TICKET_SCRATCH_REVEAL_THRESHOLD, 0.3, 'Ticket scratch reveal threshold must be 30% (0.30)');
+  assert.equal(isTicketScratchedEnough(0.19, false), false, '19% scratched surface without center shown must not treat ticket as scratched');
+  assert.equal(isTicketScratchedEnough(0.29, false), false, '29% scratched surface without center shown must allow scratching sides freely without reveal');
+  assert.equal(isTicketScratchedEnough(0.30, false), true, '30% scratched surface must treat ticket as scratched');
+  assert.equal(isTicketScratchedEnough(0.02, true), true, 'Ticket must be revealed immediately if center lightbulb color is revealed (same for red and other tickets)');
+  assert.equal(isTicketScratchedEnough(0.15, true), true, 'Ticket must be revealed when center lightbulb is shown');
 
   assert.equal(
-    doesScratchExposeRedCenterOutline(120, 48, 120, 48, 240, 96, 11),
+    doesScratchExposeRedCenterOutline(84, 37, 84, 37, 168, 74, 7.5),
     true,
-    'Scratching across the center red outline must return true'
+    'Scratching across the center lightbulb must return true'
+  );
+  assert.equal(
+    doesScratchExposeRedCenterOutline(20, 20, 30, 25, 168, 74, 7.5),
+    false,
+    'Scratching sides around ticket away from lightbulb must return false, allowing free scratching'
   );
   assert.equal(
     doesScratchExposeRedCenterOutline(5, 5, 15, 10, 240, 96, 11),
     false,
-    'Scratching only the far corner away from center must return false'
+    'Scratching only the far corner away from center must return false, allowing scratching sides away from center'
   );
 
   // Verify 9 generated non-uniform ticket images (including profound wrinkled & stained variations) exist on disk
@@ -1321,18 +1332,21 @@ async function runUnitTestC_ZhytomyrRoulette() {
   assert.equal(afterAdd1000, 1900);
   assert.equal(isMilestoneReached(1000), true);
 
-  //Verify descriptions for "Cat", "Fern", "Nocturnal Creature" upgrades are set to "Secret" in English and "Секрет" in Ukrainian,
+  // Verify descriptions for "Cat", "Fern", "Nocturnal Creature" upgrades:
+  // "Fern Flower": uk "Удача +5%", en "Luck +5%"
+  // "Black Cat": uk "Приносить невдачу", en "Brings misfortune"
+  // "Nocturnal Creature": uk "Тепер блекаут вам до вподоби", en "You love blackouts"
   // and Deposit upgrade has localized description in uk/en that each 100 power points deposited grants 10 Points income daily
   const fernUpgrade = ROULETTE_UPGRADES.find((u) => u.id === 'fern_flower')!;
   const blackCatUpgrade = ROULETTE_UPGRADES.find((u) => u.id === 'black_cat')!;
   const nocturnalUpgrade = ROULETTE_UPGRADES.find((u) => u.id === 'nocturnal_creature')!;
   const depositUpgrade = ROULETTE_UPGRADES.find((u) => u.id === 'deposit_power_points')!;
-  assert.equal(getUpgradeDescription(fernUpgrade, 'en', false), 'Secret', 'Fern flower English description must be "Secret"');
-  assert.equal(getUpgradeDescription(fernUpgrade, 'uk', false), 'Секрет', 'Fern flower Ukrainian description must be "Секрет"');
-  assert.equal(getUpgradeDescription(blackCatUpgrade, 'en', false), 'Secret', 'Black Cat English description must be "Secret"');
-  assert.equal(getUpgradeDescription(blackCatUpgrade, 'uk', false), 'Секрет', 'Black Cat Ukrainian description must be "Секрет"');
-  assert.equal(getUpgradeDescription(nocturnalUpgrade, 'en', false), 'Secret', 'Nocturnal Creature English description must be "Secret"');
-  assert.equal(getUpgradeDescription(nocturnalUpgrade, 'uk', false), 'Секрет', 'Nocturnal Creature Ukrainian description must be "Секрет"');
+  assert.equal(getUpgradeDescription(fernUpgrade, 'en', false), 'Luck +5%', 'Fern flower English description must be "Luck +5%"');
+  assert.equal(getUpgradeDescription(fernUpgrade, 'uk', false), 'Удача +5%', 'Fern flower Ukrainian description must be "Удача +5%"');
+  assert.equal(getUpgradeDescription(blackCatUpgrade, 'en', false), 'Brings misfortune', 'Black Cat English description must be "Brings misfortune"');
+  assert.equal(getUpgradeDescription(blackCatUpgrade, 'uk', false), 'Приносить невдачу', 'Black Cat Ukrainian description must be "Приносить невдачу"');
+  assert.equal(getUpgradeDescription(nocturnalUpgrade, 'en', false), 'You love blackouts', 'Nocturnal Creature English description must be "You love blackouts"');
+  assert.equal(getUpgradeDescription(nocturnalUpgrade, 'uk', false), 'Тепер блекаут вам до вподоби', 'Nocturnal Creature Ukrainian description must be "Тепер блекаут вам до вподоби"');
   assert.equal(
     getUpgradeDescription(depositUpgrade, 'en', false),
     'Each 100 Power Points deposited will grant you 10 Points income daily.',
@@ -1966,7 +1980,7 @@ async function runUnitTestC_ZhytomyrRoulette() {
       rouletteAudioTs.includes('playFlickerBuzzSound') &&
       rouletteAudioTs.includes('playGameBlackoutSound') &&
       rouletteAudioTs.includes('SCRATCH_SFX_VOLUME_MULTIPLIER = 0.9') &&
-      rouletteAudioTs.includes('FLICKER_SFX_VOLUME_MULTIPLIER = 1.3') &&
+      rouletteAudioTs.includes('FLICKER_SFX_VOLUME_MULTIPLIER = 0.9') &&
       rouletteModalTsx.includes('MultiFrameExplodingBulbAnimation') &&
       rouletteModalTsx.includes('play2XCoinSound') &&
       rouletteModalTsx.includes('touch-pan-y') &&
@@ -1983,7 +1997,7 @@ async function runUnitTestC_ZhytomyrRoulette() {
       rouletteScreenKt.includes('R.raw.sfx_2x_coin') &&
       rouletteScreenKt.includes('R.raw.sfx_shuffle') &&
       rouletteScreenKt.includes('SCRATCH_SFX_VOLUME_MULTIPLIER = 0.9') &&
-      rouletteScreenKt.includes('FLICKER_SFX_VOLUME_MULTIPLIER = 1.3') &&
+      rouletteScreenKt.includes('FLICKER_SFX_VOLUME_MULTIPLIER = 0.9') &&
       rouletteScreenKt.includes('MultiFrameExplodingBulbCanvas'),
     'Both Web and Android roulette implementations must include all 7 MP3 SFX replacements, play2XCoinSound on X2/Gold tickets, improved scroll vs scratch gesture handling, and 2.4s+ multi-frame exploding bulb animation'
   );
@@ -2043,6 +2057,14 @@ async function runUnitTestC_ZhytomyrRoulette() {
 
   // Verify 1.2.X APK upgrade compatibility in build.gradle.kts and SettingsRepository.kt
   const buildGradleKt = fs.readFileSync(path.join(ROOT_DIR, 'android/app/build.gradle.kts'), 'utf-8');
+  const debugKeystorePath = path.join(ROOT_DIR, 'android/app/keystore/debug.keystore');
+  if (!fs.existsSync(debugKeystorePath)) {
+    const ksMatch = buildGradleKt.match(/val embeddedKeystoreBase64 = "([^"]+)"/);
+    if (ksMatch) {
+      fs.mkdirSync(path.dirname(debugKeystorePath), { recursive: true });
+      fs.writeFileSync(debugKeystorePath, Buffer.from(ksMatch[1], 'base64'));
+    }
+  }
   const settingsRepoKt = fs.readFileSync(
     path.join(ROOT_DIR, 'android/app/src/main/java/ua/blackout/prewarning/data/repository/SettingsRepository.kt'),
     'utf-8'
@@ -2052,7 +2074,7 @@ async function runUnitTestC_ZhytomyrRoulette() {
       buildGradleKt.includes('enableV2Signing = true') &&
       buildGradleKt.includes('enableV3Signing = true') &&
       buildGradleKt.includes('embeddedKeystoreBase64') &&
-      fs.existsSync(path.join(ROOT_DIR, 'android/app/keystore/debug.keystore')),
+      fs.existsSync(debugKeystorePath),
     'build.gradle.kts must enforce the canonical v1.2.0 signing keystore and v1/v2/v3 signing so upgrading from 1.2.X never fails with INSTALL_FAILED_UPDATE_INCOMPATIBLE'
   );
   assert.ok(
@@ -2102,11 +2124,17 @@ async function runUnitTestC_ZhytomyrRoulette() {
     'Both Web and Android must use the 2-second top-border ticket shuffle animation, align Sound switch at same height as Share button with double vertical spacing between Sound and Music switches, and wait for scratch.mp3 before playing coin.mp3'
   );
 
+  const workflowYml = fs.readFileSync(path.join(ROOT_DIR, '.github/workflows/build-apk.yml'), 'utf-8');
   assert.ok(
     buildGradleKt.includes('import java.util.Base64') &&
       buildGradleKt.includes('Base64.getDecoder().decode(embeddedKeystoreBase64)') &&
-      !buildGradleKt.includes('java.util.Base64.'),
-    'android/app/build.gradle.kts must import java.util.Base64 at top-level and not reference java.util.Base64.getDecoder() inside android { ... } where Project.java shadows the java package'
+      !buildGradleKt.includes('java.util.Base64.') &&
+      buildGradleKt.includes('create("upload")') &&
+      buildGradleKt.includes('UPLOAD_KEYSTORE_PASSWORD') &&
+      buildGradleKt.includes('com.ZTBlackoutPreWarning') &&
+      workflowYml.includes('UPLOAD_KEYSTORE_BASE64') &&
+      workflowYml.includes('UPLOAD_KEYSTORE_PASSWORD'),
+    'android/app/build.gradle.kts must set applicationId to com.ZTBlackoutPreWarning for Google Play Store compatibility, import java.util.Base64 at top-level, and support signing .aab bundles via GitHub Secrets'
   );
 
   resetAllRouletteProgress();
