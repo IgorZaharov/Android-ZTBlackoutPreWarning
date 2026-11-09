@@ -2150,9 +2150,14 @@ async function runUnitTestC_ZhytomyrRoulette() {
       buildGradleKt.includes('com.ZTBlackoutPreWarning') &&
       buildGradleKt.includes('buildConfig = true') &&
       buildGradleKt.includes('checkReleaseBuilds = false') &&
+      buildGradleKt.includes('storePassword = "android"') &&
+      buildGradleKt.includes('keyAlias = "androiddebugkey"') &&
+      buildGradleKt.includes('keyPassword = "android"') &&
+      !buildGradleKt.includes('storePassword = "androiddebugkey"') &&
+      !buildGradleKt.includes('keyPassword = "androiddebugkey"') &&
       workflowYml.includes('UPLOAD_KEYSTORE_BASE64') &&
       workflowYml.includes('UPLOAD_KEYSTORE_PASSWORD'),
-    'android/app/build.gradle.kts must set applicationId to com.ZTBlackoutPreWarning, enable buildConfig, disable release lint blockers, import java.util.Base64 at top-level, and support signing .aab bundles via GitHub Secrets'
+    'android/app/build.gradle.kts must set applicationId to com.ZTBlackoutPreWarning, use storePassword/keyPassword "android" for debug.keystore, enable buildConfig, disable release lint blockers, import java.util.Base64 at top-level, and support signing .aab bundles via GitHub Secrets'
   );
 
   // Verify ZtoeParser.kt does not match #ffffff as #ff (which caused ZtoeParserTest:201 failure) and filters leaf tables

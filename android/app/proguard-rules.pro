@@ -1,4 +1,5 @@
-# Keep data models
+# Keep application classes and data models
+-keep class ua.blackout.prewarning.** { *; }
 -keep class ua.blackout.prewarning.data.model.** { *; }
 
 # Keep Glance app widget
@@ -17,3 +18,4 @@
 -dontwarn org.jspecify.annotations.**
 -dontwarn javax.annotation.**
 -dontwarn org.codehaus.mojo.animal_sniffer.**
+-ignorewarnings
