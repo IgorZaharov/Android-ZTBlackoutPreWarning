@@ -6,7 +6,7 @@ import {defineConfig} from 'vite';
 
 function readAndroidBuildVersion(): string {
   try {
-    const gradleContent = fs.readFileSync(path.resolve(__dirname, 'android/app/build.gradle.kts'), 'utf-8');
+    const gradleContent = fs.readFileSync(path.resolve(process.cwd(), 'android/app/build.gradle.kts'), 'utf-8');
     const match = gradleContent.match(/versionName\s*=.*?"([0-9]+\.[0-9]+\.[0-9]+)"/);
     if (match && match[1]) {
       return match[1];
@@ -19,6 +19,7 @@ function readAndroidBuildVersion(): string {
 
 export default defineConfig(() => {
   const appVersion = readAndroidBuildVersion();
+  const port = 3000;
   return {
     plugins: [react(), tailwindcss()],
     define: {
@@ -26,10 +27,13 @@ export default defineConfig(() => {
     },
     resolve: {
       alias: {
-        '@': path.resolve(__dirname, '.'),
+        '@': path.resolve(process.cwd(), '.'),
       },
     },
     server: {
+      port,
+      host: '0.0.0.0',
+      allowedHosts: true,
       // HMR is disabled in AI Studio via DISABLE_HMR env var.
       // Do not modify—file watching is disabled to prevent flickering during agent edits.
       hmr: process.env.DISABLE_HMR !== 'true',
@@ -43,6 +47,11 @@ export default defineConfig(() => {
           rewrite: (path) => path.replace(/^\/proxy-ztoe/, '')
         }
       }
+    },
+    preview: {
+      port,
+      host: '0.0.0.0',
+      allowedHosts: true,
     },
   };
 });
