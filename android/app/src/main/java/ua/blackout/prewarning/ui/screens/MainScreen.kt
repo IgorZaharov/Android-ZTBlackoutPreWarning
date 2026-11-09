@@ -88,7 +88,7 @@ fun MainScreen(
         ) {
             Column {
                 Text(
-                    text = "\${AppStrings.queue(lang)} $queue",
+                    text = "${AppStrings.queue(lang)} $queue",
                     fontSize = 24.sp,
                     fontWeight = FontWeight.Bold,
                     color = Color.White
@@ -193,9 +193,10 @@ fun MainScreen(
                 } else {
                     AppStrings.nextPeriod(lang)
                 }
+                val periodDetail = if (isUnclear) "--:-- - --:--" else slotTimeText
 
                 Text(
-                    text = "$periodLabel \${if (isUnclear) "--:-- - --:--" else slotTimeText}",
+                    text = "$periodLabel $periodDetail",
                     fontSize = 13.sp,
                     fontWeight = FontWeight.Medium,
                     color = Color(0xFFE2E8F0)
@@ -286,14 +287,15 @@ fun MainScreen(
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
                                         Text(
-                                            text = "\${interval.startStr} – \${interval.endStr}",
+                                            text = "${interval.startStr} – ${interval.endStr}",
                                             fontFamily = FontFamily.Monospace,
                                             fontWeight = FontWeight.Bold,
                                             fontSize = 14.sp,
                                             color = if (isCurrent) Color(0xFFFF5E3A) else Color.White
                                         )
+                                        val durationFormatted = String.format("%.1f", interval.durationHours)
                                         Text(
-                                            text = "\${String.format(\"%.1f\", interval.durationHours)} \${AppStrings.hourShort(lang)}",
+                                            text = "${durationFormatted} ${AppStrings.hourShort(lang)}",
                                             fontSize = 12.sp,
                                             color = Color(0xFFBAE6FD)
                                         )
@@ -320,12 +322,12 @@ fun MainScreen(
             ) {
                 Column {
                     Text(
-                        text = "\${AppStrings.lastUpdated(lang)} $lastUpdated",
+                        text = "${AppStrings.lastUpdated(lang)} $lastUpdated",
                         fontSize = 11.sp,
                         color = Color(0xFFBAE6FD)
                     )
                     Text(
-                        text = "\${AppStrings.nextUpdated(lang)} $nextUpdated",
+                        text = "${AppStrings.nextUpdated(lang)} $nextUpdated",
                         fontSize = 11.sp,
                         color = Color(0xFF94A3B8)
                     )

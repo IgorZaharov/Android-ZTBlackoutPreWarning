@@ -85,14 +85,14 @@ class BlackoutGlanceWidget : GlanceAppWidget() {
         if (parts.size >= 2) {
             val hh = parts[0].trim()
             val mm = parts[1].trim()
-            return if (isUk) "\${hh}г. \${mm}хв." else "\${hh}hr. \${mm}m."
+            return if (isUk) "${hh}г. ${mm}хв." else "${hh}hr. ${mm}m."
         }
         return rawCountdown
     }
 
     fun renderAnalogCounterBitmap(slots: List<BlackoutSlot>, currentH: Int, currentM: Int, lang: String = "uk"): Bitmap {
         val slotSig = if (slots.isEmpty()) "empty" else slots.joinToString("") { if (it.status == SlotStatus.POWER_OFF) "1" else "0" }
-        val cacheKey = "\${slotSig}_\${currentH}_\${currentM}_\$lang"
+        val cacheKey = "${slotSig}_${currentH}_${currentM}_\$lang"
         bitmapCache[cacheKey]?.let { return it }
 
         val width = 720
@@ -258,7 +258,7 @@ class BlackoutGlanceWidget : GlanceAppWidget() {
                 verticalAlignment = Alignment.Vertical.CenterVertically
             ) {
                 Text(
-                    text = "\${AppStrings.queue(resolvedLang)} \${settings.queue}",
+                    text = "${AppStrings.queue(resolvedLang)} ${settings.queue}",
                     style = TextStyle(
                         fontWeight = FontWeight.Bold,
                         fontSize = 13.sp,
@@ -367,7 +367,7 @@ class BlackoutGlanceWidget : GlanceAppWidget() {
             ) {
                 Column {
                     Text(
-                        text = "\${AppStrings.queue(resolvedLang)} \${settings.queue}",
+                        text = "${AppStrings.queue(resolvedLang)} ${settings.queue}",
                         style = TextStyle(
                             fontWeight = FontWeight.Bold,
                             fontSize = 15.sp,

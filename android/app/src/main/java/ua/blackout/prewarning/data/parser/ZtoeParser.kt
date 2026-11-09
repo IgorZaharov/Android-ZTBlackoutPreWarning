@@ -86,7 +86,7 @@ object ZtoeParser {
             val endStr = if (endH >= 24) "24:00" else String.format("%02d:%02d", endH, endM)
 
             BlackoutSlot(
-                id = "\${dateIso}_\${startStr}_Q$targetQueue",
+                id = "${dateIso}_${startStr}_Q$targetQueue",
                 startHour = startH,
                 endHour = endH,
                 startMinute = startM,
@@ -207,7 +207,7 @@ object ZtoeParser {
             val endStr = if (endHour >= 24) "24:00" else String.format("%02d:%02d", endHour, endMin)
 
             BlackoutSlot(
-                id = "\${dateStr}_\${startStr}_Q$queue",
+                id = "${dateStr}_${startStr}_Q$queue",
                 startHour = hour,
                 endHour = endHour,
                 startMinute = startMin,

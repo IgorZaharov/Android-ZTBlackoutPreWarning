@@ -6,7 +6,7 @@ enum class SlotStatus {
 }
 
 data class BlackoutSlot(
-    val id: String, // Unique key: "\${date}_\${startHour}_\${queue}"
+    val id: String, // Unique key: "${date}_${startHour}_${queue}"
     val startHour: Int, // 0..23
     val endHour: Int, // 1..24
     val startTimeStr: String, // "14:00"

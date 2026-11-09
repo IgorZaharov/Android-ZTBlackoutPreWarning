@@ -1594,9 +1594,10 @@ fun MainScreen(
                 } else {
                     AppStrings.nextPeriod(lang)
                 }
+                val periodDetail = if (isUnclear) "--:-- - --:--" else slotTimeText
 
                 Text(
-                    text = "$periodLabel \${if (isUnclear) "--:-- - --:--" else slotTimeText}",
+                    text = "$periodLabel $periodDetail",
                     fontSize = 13.sp,
                     fontWeight = FontWeight.Medium,
                     color = Color(0xFFE2E8F0)
@@ -1693,8 +1694,9 @@ fun MainScreen(
                                             fontSize = 14.sp,
                                             color = if (isCurrent) Color(0xFFFF5E3A) else Color.White
                                         )
+                                        val durationFormatted = String.format("%.1f", interval.durationHours)
                                         Text(
-                                            text = "\${String.format(\"%.1f\", interval.durationHours)} \${AppStrings.hourShort(lang)}",
+                                            text = "\${durationFormatted} \${AppStrings.hourShort(lang)}",
                                             fontSize = 12.sp,
                                             color = Color(0xFFBAE6FD)
                                         )
