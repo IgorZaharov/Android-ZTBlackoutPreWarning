@@ -5,6 +5,7 @@ import android.content.SharedPreferences
 import ua.blackout.prewarning.data.model.EmergencyOutageInfo
 import ua.blackout.prewarning.data.model.SelectedAddressQuery
 import ua.blackout.prewarning.data.model.UserSettings
+import ua.blackout.prewarning.data.parser.ZtoeAddressLookup
 
 class SettingsRepository(context: Context) {
     private val appContext: Context = context.applicationContext
@@ -53,11 +54,22 @@ class SettingsRepository(context: Context) {
     }
 
     /**
-     * Ensures settings from any earlier APK version (including 1.2.X) or preference file are preserved seamlessly
+     * Ensures settings from any earlier APK version (including 1.2.X and 1.3.3) or preference file are preserved seamlessly
      * when updating the application, without ever overwriting already-saved user settings or throwing ClassCastException.
      */
     private fun migrateLegacySettingsIfNeeded() {
         val currentAll = try { prefs.all } catch (_: Exception) { emptyMap<String, Any?>() }
+        if (currentAll.isNotEmpty() &&
+            !prefs.contains("queue") &&
+            !prefs.contains("selected_address") &&
+            !prefs.contains("custom_queue_status_text") &&
+            (prefs.contains("refresh_minutes") || prefs.contains("advance_minutes") || prefs.contains("notifications_enabled") || prefs.contains("city_url"))
+        ) {
+            // In v1.3.3 and earlier, "1.1" was the default queue when "queue" had not been explicitly written to prefs yet
+            try {
+                prefs.edit().putString("queue", "1.1").apply()
+            } catch (_: Exception) {}
+        }
         if (prefs.contains("queue") || prefs.contains("city_url")) {
             // Normalize numeric types in-place if an older 1.2.X version stored refresh_minutes as Int or advance_minutes as Long
             try {
@@ -148,7 +160,7 @@ class SettingsRepository(context: Context) {
         val emergencyType = readSafeString(allMap, "active_emergency_outage_type", "Аварійне відключення")
         val emergencyStart = readSafeString(allMap, "active_emergency_outage_start", "")
         val emergencyRestore = readSafeString(allMap, "active_emergency_outage_restore", "")
-        val activeEmergencyOutage = if (emergencyStart.isNotBlank() && emergencyRestore.isNotBlank()) {
+        val rawEmergencyCandidate = if (emergencyStart.isNotBlank() && emergencyRestore.isNotBlank()) {
             EmergencyOutageInfo(
                 id = emergencyId.ifBlank { "emergency_outage" },
                 outageType = emergencyType.ifBlank { "Аварійне відключення" },
@@ -156,6 +168,21 @@ class SettingsRepository(context: Context) {
                 estimatedRestoreTime = emergencyRestore
             )
         } else {
+            null
+        }
+        val activeEmergencyOutage = if (ZtoeAddressLookup.isValidEmergencyOutage(rawEmergencyCandidate)) {
+            rawEmergencyCandidate
+        } else {
+            if (rawEmergencyCandidate != null) {
+                try {
+                    prefs.edit()
+                        .remove("active_emergency_outage_id")
+                        .remove("active_emergency_outage_type")
+                        .remove("active_emergency_outage_start")
+                        .remove("active_emergency_outage_restore")
+                        .apply()
+                } catch (_: Exception) {}
+            }
             null
         }
 

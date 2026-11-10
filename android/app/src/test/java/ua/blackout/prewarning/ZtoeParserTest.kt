@@ -977,6 +977,41 @@ class ZtoeParserTest {
         assertEquals("5.2", bulkMap["zt_kyivska"]?.firstOrNull { it.house == "77" }?.queue)
         assertEquals(3, bulkMap["st_999999"]?.size)
         assertEquals("3.1", bulkMap["st_999999"]?.firstOrNull { it.house == "2А" }?.queue)
+
+        // 8. Verify вул. Київська house 74 7-column ZTOE table row ("В цей час не вимикається, за винятком випадків аварійних відключень" | "побутові споживачі") does NOT produce a false Emergency Outage
+        val kyivska74Html = """
+            <table>
+                <tr>
+                    <td><b>РЕМ</b></td>
+                    <td><b>Населений пункт</b></td>
+                    <td><b>Назва вулиці, провулка, тощо</b></td>
+                    <td><b>Будинки</b></td>
+                    <td><b>Черга</b></td>
+                    <td><b>Підчерга</b></td>
+                    <td><b>Примітка</b></td>
+                </tr>
+                <tr>
+                    <td>Житомирський</td>
+                    <td>місто Житомир</td>
+                    <td>вул. Київська</td>
+                    <td>74</td>
+                    <td>В цей час не вимикається, за винятком випадків аварійних відключень</td>
+                    <td>В цей час не вимикається, за винятком випадків аварійних відключень</td>
+                    <td>побутові споживачі</td>
+                </tr>
+            </table>
+        """.trimIndent()
+        val parsedKyivska74 = ua.blackout.prewarning.data.parser.ZtoeAddressLookup.parseZtoeAddressLookupTableHtml(kyivska74Html, "74")
+        assertEquals(null, parsedKyivska74?.first)
+        assertEquals("В цей час не вимикається, за винятком випадків аварійних відключень", parsedKyivska74?.second)
+        val parsedKyivska74Emergency = ua.blackout.prewarning.data.parser.ZtoeAddressLookup.parseZtoeEmergencyOutagesTableHtml(kyivska74Html, "74")
+        assertEquals(null, parsedKyivska74Emergency)
+        assertEquals(false, ua.blackout.prewarning.data.parser.ZtoeAddressLookup.isValidOutageTimestamp("В цей час не вимикається, за винятком випадків аварійних відключень"))
+        assertEquals(false, ua.blackout.prewarning.data.parser.ZtoeAddressLookup.isValidOutageTimestamp("побутові споживачі"))
+        assertEquals(true, ua.blackout.prewarning.data.parser.ZtoeAddressLookup.isValidOutageTimestamp("06.04 19:21"))
+        assertEquals(true, ua.blackout.prewarning.data.parser.ZtoeAddressLookup.isValidOutageTimestamp("10.11.2026 22:00"))
+        assertEquals(true, ua.blackout.prewarning.data.parser.ZtoeAddressLookup.isValidEmergencyOutage(demoEmergency))
+
         ua.blackout.prewarning.data.parser.ZtoeAddressLookup.clearCacheForTesting()
     }
 }

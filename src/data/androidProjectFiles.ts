@@ -84,6 +84,7 @@ android {
 
     buildTypes {
         release {
+            isDebuggable = false
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(
@@ -97,8 +98,8 @@ android {
             }
         }
         debug {
-            // Keep identical applicationId ("ua.blackout.prewarning") and signingConfig so debug and release APKs can update each other in-place and preserve user settings
-            isDebuggable = true
+            // Keep identical applicationId ("com.ZTBlackoutPreWarning"), isDebuggable = false, and signingConfig so debug and release APKs can update each other in-place over v1.3.3 and preserve user settings
+            isDebuggable = false
             signingConfig = signingConfigs.getByName("debug")
         }
     }
@@ -2681,6 +2682,7 @@ import androidx.compose.ui.unit.sp
 import ua.blackout.prewarning.R
 import ua.blackout.prewarning.data.model.BlackoutSlot
 import ua.blackout.prewarning.data.model.SlotStatus
+import ua.blackout.prewarning.data.parser.ZtoeAddressLookup
 import ua.blackout.prewarning.data.repository.ScheduleRepository
 import ua.blackout.prewarning.ui.AppStrings
 import ua.blackout.prewarning.ui.components.TimelineBar
@@ -2732,7 +2734,8 @@ fun MainScreen(
 
     val hasCustomNoQueueStatus = !customQueueStatusText.isNullOrBlank()
     val isQueueUnselected = queue.isBlank() && !hasCustomNoQueueStatus
-    val hasEmergencyOutage = !emergencyOutageStartTime.isNullOrBlank() && !emergencyOutageRestoreTime.isNullOrBlank()
+    val hasEmergencyOutage = ZtoeAddressLookup.isValidOutageTimestamp(emergencyOutageStartTime) &&
+        ZtoeAddressLookup.isValidOutageTimestamp(emergencyOutageRestoreTime)
     val formattedSelectedAddress = remember(selectedAddress) { formatAddressAfterCity(selectedAddress) }
 
     // 48 light POWER_ON half-hour slots for buildings that are never disconnected by hourly schedules
@@ -5231,9 +5234,11 @@ object ZtoeAddressLookup {
     private val STREET_PREFIX_REGEX = Regex("""^(вул\\.|вулиця|пров\\.|провулок|просп\\.|проспект|майдан|бульвар|б-р|шосе)\\s*""", RegexOption.IGNORE_CASE)
     private val HOUSE_PREFIX_REGEX = Regex("""^(буд\\.|будинок)\\s*""", RegexOption.IGNORE_CASE)
 
+    private val VALID_OUTAGE_TIMESTAMP_REGEX = Regex("""(?:\\b\\d{1,2}\\.\\d{1,2}(?:\\.\\d{2,4})?\\b|\\b\\d{4}-\\d{2}-\\d{2}\\b).*?\\b\\d{1,2}:\\d{2}\\b""")
+
     private const val PREFS_NAME = "zt_address_index_cache_v1"
     private const val KEY_INDEX_JSON = "address_index_json_v1"
-    private const val MAX_PERSISTED_HOUSE_STREETS = 2500
+    private const val MAX_PERSISTED_HOUSE_STREETS = 50
     private const val FRESH_HOUSE_CACHE_TTL_MS = 120_000L
 
     private val SELECT_REM_REGEX = Regex("""<select[^>]*name=["']?rem_id["']?[^>]*>([\\s\\S]*?)</select>""", RegexOption.IGNORE_CASE)
@@ -5249,6 +5254,9 @@ object ZtoeAddressLookup {
     private var appContext: android.content.Context? = null
 
     @Volatile
+    private var diskCacheHydrated: Boolean = false
+
+    @Volatile
     private var cachedRems: List<ZtoeRemOption>? = null
     private val cachedSettlementsByRem = java.util.concurrent.ConcurrentHashMap<String, List<ZtoeSettlementOption>>()
     private val cachedStreetsBySettlement = java.util.concurrent.ConcurrentHashMap<String, List<ZtoeStreetOption>>()
@@ -5257,7 +5265,10 @@ object ZtoeAddressLookup {
     private val settlementFetchLocks = java.util.concurrent.ConcurrentHashMap<String, Any>()
     private val recentHouseStreetOrder = java.util.concurrent.CopyOnWriteArrayList<String>()
     private val diskPersistExecutor = java.util.concurrent.Executors.newSingleThreadExecutor { r ->
-        Thread(r, "ZtoeDiskCachePersist").apply { isDaemon = true }
+        Thread(r, "ZtoeDiskCachePersist").apply {
+            isDaemon = true
+            priority = Thread.MIN_PRIORITY
+        }
     }
 
     private val APOS_ENTITY_REGEX = Regex("""&#0*39;|&#x0*27;|&apos;|&#8217;|&#0*146;""", RegexOption.IGNORE_CASE)
@@ -5430,8 +5441,13 @@ object ZtoeAddressLookup {
             val housesArrStr = extractJsonArrayField(jsonStr, "houses")
             if (housesArrStr != null) {
                 val grouped = LinkedHashMap<String, MutableList<ZtoeHouseLookupResult>>()
+                var loadedStreets = 0
                 for (objStr in extractTopLevelJsonObjects(housesArrStr)) {
                     val streetId = extractJsonStringField(objStr, "streetId") ?: continue
+                    if (!grouped.containsKey(streetId)) {
+                        if (loadedStreets >= MAX_PERSISTED_HOUSE_STREETS) continue
+                        loadedStreets++
+                    }
                     val house = extractJsonStringField(objStr, "house") ?: continue
                     val queue = extractJsonStringField(objStr, "queue") ?: ""
                     val statusText = extractJsonStringField(objStr, "statusText")
@@ -5445,6 +5461,7 @@ object ZtoeAddressLookup {
                     }
                 }
             }
+            diskCacheHydrated = true
             true
         } catch (_: Exception) {
             false
@@ -5453,6 +5470,7 @@ object ZtoeAddressLookup {
 
     fun initDiskCache(context: android.content.Context): Boolean {
         appContext = context.applicationContext
+        if (diskCacheHydrated && cachedRems != null) return true
         return try {
             val prefs = context.applicationContext.getSharedPreferences(PREFS_NAME, android.content.Context.MODE_PRIVATE)
             val rawJson = prefs.getString(KEY_INDEX_JSON, null) ?: return false
@@ -5477,6 +5495,7 @@ object ZtoeAddressLookup {
     }
 
     fun clearCacheForTesting() {
+        diskCacheHydrated = false
         cachedRems = null
         cachedSettlementsByRem.clear()
         cachedStreetsBySettlement.clear()
@@ -5632,6 +5651,7 @@ object ZtoeAddressLookup {
                 ZtoeHouseLookupResult("37", "2.2", emergencyOutage = getKyivska37DemoEmergencyOutage(LocalDate.now(KYIV_ZONE))),
                 ZtoeHouseLookupResult("45", "4.1"),
                 ZtoeHouseLookupResult("59", "4.2"),
+                ZtoeHouseLookupResult("74", "", statusText = "В цей час не вимикається, за винятком випадків аварійних відключень"),
                 ZtoeHouseLookupResult("77", "5.2"),
                 ZtoeHouseLookupResult("81", "5.1"),
                 ZtoeHouseLookupResult("96", "6.1"),
@@ -5909,7 +5929,7 @@ object ZtoeAddressLookup {
         if (streetId == "zt_kyivska") {
             for (localH in getDefaultHousesForStreet("zt_kyivska")) {
                 val k = normalizeHouseNumber(localH.house)
-                if (localH.house == "77" || localH.house == "37" || localH.house == "104" || localH.house == "106" || !mergedMap.containsKey(k)) {
+                if (localH.house == "74" || localH.house == "77" || localH.house == "37" || localH.house == "104" || localH.house == "106" || !mergedMap.containsKey(k)) {
                     mergedMap[k] = localH
                 }
             }
@@ -6194,13 +6214,18 @@ object ZtoeAddressLookup {
         val allRems = fetchRemsFromZtoe(siteUrl, false)
         val priorityRems = listOf("zhytomyr", activeRemId).distinct()
 
-        // Priority 2: Bounded parallel prefetch (4 workers) for all remaining REMs' settlements + each REM's primary city streets & houses
+        // Priority 2: Bounded low-priority background prefetch (2 daemon workers) for remaining REMs' settlements + primary city streets
         val remainingRems = java.util.concurrent.ConcurrentLinkedQueue(
             allRems.filter { it.id !in priorityRems }
         )
         if (remainingRems.isNotEmpty()) {
-            val workerCount = minOf(4, remainingRems.size)
-            val executor = java.util.concurrent.Executors.newFixedThreadPool(workerCount)
+            val workerCount = minOf(2, remainingRems.size)
+            val executor = java.util.concurrent.Executors.newFixedThreadPool(workerCount) { r ->
+                Thread(r, "ZtoeBgPrefetch").apply {
+                    isDaemon = true
+                    priority = Thread.MIN_PRIORITY
+                }
+            }
             try {
                 val futures = (0 until workerCount).map {
                     executor.submit {
@@ -6240,6 +6265,30 @@ object ZtoeAddressLookup {
             return "$day.$month.$year $hour:$minute"
         }
         return trimmed
+    }
+
+    fun isValidOutageTimestamp(value: String?): Boolean {
+        if (value.isNullOrBlank()) return false
+        val lower = value.lowercase()
+        if (lower.contains("не вимикається") ||
+            lower.contains("за винятком") ||
+            lower.contains("побутові") ||
+            lower.contains("споживачі")
+        ) {
+            return false
+        }
+        return VALID_OUTAGE_TIMESTAMP_REGEX.containsMatchIn(value.trim())
+    }
+
+    fun isValidEmergencyOutage(info: EmergencyOutageInfo?): Boolean {
+        if (info == null) return false
+        val typeLower = info.outageType.lowercase()
+        val validType = (typeLower.contains("аварійн") || typeLower.contains("emergency")) &&
+            !typeLower.contains("не вимикається") &&
+            !typeLower.contains("за винятком")
+        return validType &&
+            isValidOutageTimestamp(info.startTime) &&
+            isValidOutageTimestamp(info.estimatedRestoreTime)
     }
 
     /**
@@ -6387,10 +6436,15 @@ object ZtoeAddressLookup {
             val restoreRaw = cells.getOrNull(6) ?: ""
 
             if (outageType.isBlank() || startRaw.isBlank()) continue
-            val isEmergencyType = outageType.lowercase().contains("аварійн") ||
-                outageType.lowercase().contains("відключення") ||
-                outageType.lowercase().contains("emergency")
+            val typeLower = outageType.lowercase()
+            val isEmergencyType = (typeLower.contains("аварійн") || typeLower.contains("emergency")) &&
+                !typeLower.contains("не вимикається") &&
+                !typeLower.contains("за винятком")
             if (!isEmergencyType) continue
+
+            val formattedStart = formatZtoeOutageTimestamp(startRaw)
+            val formattedRestore = formatZtoeOutageTimestamp(restoreRaw)
+            if (!isValidOutageTimestamp(formattedStart) || !isValidOutageTimestamp(formattedRestore)) continue
 
             val houses = houseField.split(Regex("[,;]")).map { it.trim() }.filter { it.isNotEmpty() }
             for (h in houses) {
@@ -6402,8 +6456,8 @@ object ZtoeAddressLookup {
                         streetName = streetName,
                         house = h,
                         outageType = outageType,
-                        startTime = formatZtoeOutageTimestamp(startRaw),
-                        estimatedRestoreTime = formatZtoeOutageTimestamp(restoreRaw)
+                        startTime = formattedStart,
+                        estimatedRestoreTime = formattedRestore
                     )
                 )
             }
@@ -6686,14 +6740,14 @@ object ZtoeAddressLookup {
                     targetCityNorm.contains(normalizeUkText(r.settlementName))
                 houseMatches && streetMatches && cityMatches
             }
-            if (matchedRow != null) return matchedRow
+            if (matchedRow != null && isValidEmergencyOutage(matchedRow)) return matchedRow
 
-            matchEmergencyOutageFromAccidentsJson(pageHtml, query)?.let { return it }
+            matchEmergencyOutageFromAccidentsJson(pageHtml, query)?.takeIf { isValidEmergencyOutage(it) }?.let { return it }
         }
 
         val localMatch = getHousesForStreet(query.streetId)
             .firstOrNull { normalizeHouseNumber(it.house) == targetHouseNorm }
-        return localMatch?.emergencyOutage
+        return localMatch?.emergencyOutage?.takeIf { isValidEmergencyOutage(it) }
     }
 
     fun checkAddressOnZtoeWebsite(

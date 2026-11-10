@@ -175,9 +175,12 @@ export default function App() {
     });
   }, []);
 
-  // Pre-load and index REMs, cities, and active city streets in the background on app launch
+  // Pre-load and index REMs, cities, and active city streets in the background after initial UI render
   useEffect(() => {
-    prefetchAddressIndexInBackground(settings.url, settings.selectedAddressQuery).catch(() => {});
+    const timer = setTimeout(() => {
+      prefetchAddressIndexInBackground(settings.url, settings.selectedAddressQuery).catch(() => {});
+    }, 150);
+    return () => clearTimeout(timer);
   }, [settings.url]);
 
   // Battery & Power optimization: shared system clock state

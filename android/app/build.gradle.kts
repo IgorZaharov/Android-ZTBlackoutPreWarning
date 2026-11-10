@@ -67,6 +67,7 @@ android {
 
     buildTypes {
         release {
+            isDebuggable = false
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(
@@ -80,8 +81,8 @@ android {
             }
         }
         debug {
-            // Keep identical applicationId ("ua.blackout.prewarning") and signingConfig so debug and release APKs can update each other in-place and preserve user settings
-            isDebuggable = true
+            // Keep identical applicationId ("com.ZTBlackoutPreWarning"), isDebuggable = false, and signingConfig so debug and release APKs can update each other in-place over v1.3.3 and preserve user settings
+            isDebuggable = false
             signingConfig = signingConfigs.getByName("debug")
         }
     }

@@ -167,6 +167,13 @@ export const ZTOE_STREET_HOUSES: Record<string, ZtoeHouseLookupResult[]> = {
       emergencyOutage: getKyivska37DemoEmergencyOutage(),
     },
     { house: '47', queue: '3.2', rawQueueCell: '3', rawSubqueueCell: '2' },
+    {
+      house: '74',
+      queue: '',
+      rawQueueCell: ZTOE_FULL_NO_OUTAGE_MESSAGE,
+      rawSubqueueCell: ZTOE_FULL_NO_OUTAGE_MESSAGE,
+      statusText: ZTOE_FULL_NO_OUTAGE_MESSAGE,
+    },
     { house: '77', queue: '5.2', rawQueueCell: '5', rawSubqueueCell: '2' },
     {
       house: '104',
@@ -554,6 +561,40 @@ export function parseZtoeAddressLookupTableHtml(html: string): ZtoeHouseLookupRe
   return results;
 }
 
+const VALID_OUTAGE_TIMESTAMP_REGEX =
+  /(?:(?:\b\d{2}\.\d{2}(?:\.\d{4})?|\b\d{4}-\d{2}-\d{2})[T\s]+)?\b([01]\d|2[0-3]):[0-5]\d\b/;
+
+/**
+ * Validates that an outage timestamp string contains a real date/time (e.g. "06.04 19:21", "10.11.2026 22:00", or "19:21")
+ * and is NOT a static ZTOE remark or message such as "В цей час не вимикається..." or "побутові споживачі".
+ */
+export function isValidOutageTimestamp(value?: string | null): boolean {
+  if (!value) return false;
+  const trimmed = value.trim();
+  if (!trimmed) return false;
+  const lower = trimmed.toLowerCase();
+  if (
+    lower.includes('не вимикається') ||
+    lower.includes('за винятком') ||
+    lower.includes('побутові споживачі')
+  ) {
+    return false;
+  }
+  return VALID_OUTAGE_TIMESTAMP_REGEX.test(trimmed);
+}
+
+/**
+ * Validates that an EmergencyOutageInfo object represents a genuine emergency outage with valid start and restore timestamps.
+ */
+export function isValidEmergencyOutage(info?: EmergencyOutageInfo | null): boolean {
+  if (!info) return false;
+  const typeLower = (info.outageType || '').toLowerCase();
+  if (typeLower.includes('не вимикається') || typeLower.includes('за винятком')) {
+    return false;
+  }
+  return isValidOutageTimestamp(info.startTime) && isValidOutageTimestamp(info.estimatedRestoreTime);
+}
+
 /**
  * Formats an ISO timestamp from ZTOE (e.g. "2026-11-09T06:35:59+00:00") into "DD.MM.YYYY HH:mm"
  * using the UTC date/time fields (matching ZTOE's official frontend behavior).
@@ -649,6 +690,9 @@ export function parseZtoeEmergencyOutagesTableHtml(html: string): ParsedEmergenc
 
     const formattedStart = formatZtoeOutageTimestamp(startVal);
     const formattedRestore = formatZtoeOutageTimestamp(restoreVal);
+    if (!isValidOutageTimestamp(formattedStart) || !isValidOutageTimestamp(formattedRestore)) {
+      continue;
+    }
 
     const houseTokens = houseVal.includes(',')
       ? houseVal.split(',').map((h) => h.trim()).filter(Boolean)
@@ -780,7 +824,6 @@ export async function checkEmergencyOutageOnZtoe(
   if (!query || !query.streetId || !query.house) return null;
 
   const streetObj = findStreetById(query.streetId);
-  const remObj = getRems().find((r) => r.id === query.remId);
   const targetHouseNorm = query.house.trim().toLowerCase();
 
   // 1. Check HTML table if available
@@ -793,7 +836,7 @@ export async function checkEmergencyOutageOnZtoe(
       }
       return true;
     });
-    if (matchedHtmlRow) {
+    if (matchedHtmlRow && isValidEmergencyOutage(matchedHtmlRow)) {
       return {
         id: matchedHtmlRow.id,
         startTime: matchedHtmlRow.startTime,
@@ -803,46 +846,10 @@ export async function checkEmergencyOutageOnZtoe(
     }
   }
 
-  // 2. Query ZTOE live pw_accidents API (prefer street.id filter so all street outages are returned directly)
-  if (typeof fetch !== 'undefined' && (streetObj?.poweronStreetId || remObj?.ztoeOtgId)) {
-    const querySuffix = streetObj?.poweronStreetId
-      ? `/api/pw_accidents?street.id=${encodeURIComponent(streetObj.poweronStreetId)}`
-      : `/api/pw_accidents?page=1&otg.id=${encodeURIComponent(remObj!.ztoeOtgId!)}&typeOff=1`;
-    const isBrowser = typeof window !== 'undefined' && typeof window.document !== 'undefined';
-    const candidateUrls = isBrowser
-      ? [`/proxy-ztoe-poweron${querySuffix}`, `https://api-ztoe-poweron.inneti.net${querySuffix}`]
-      : [`https://api-ztoe-poweron.inneti.net${querySuffix}`];
-
-    for (const url of candidateUrls) {
-      try {
-        const controller = new AbortController();
-        const timer = setTimeout(() => controller.abort(), 4000);
-        const res = await fetch(url, {
-          headers: { Accept: 'application/ld+json, application/json' },
-          signal: controller.signal,
-        });
-        clearTimeout(timer);
-        if (res.ok) {
-          const data = await res.json();
-          const members: ZtoePwAccidentRecord[] = Array.isArray(data?.['hydra:member'])
-            ? data['hydra:member']
-            : Array.isArray(data)
-            ? data
-            : [];
-          const matched = matchEmergencyOutageFromAccidentsJson(members, query);
-          if (matched) {
-            return matched;
-          }
-        }
-      } catch {
-        // Try next candidate URL or fall through
-      }
-    }
-  }
-
+  // 2. Check canonical local house directory (e.g. demo emergency outage on вул. Київська, буд. 37)
   const localHouses = getHousesForStreet(query.streetId);
   const localMatch = localHouses.find((h) => h.house.toLowerCase() === targetHouseNorm);
-  if (localMatch?.emergencyOutage) {
+  if (localMatch?.emergencyOutage && isValidEmergencyOutage(localMatch.emergencyOutage)) {
     return localMatch.emergencyOutage;
   }
 
@@ -936,7 +943,7 @@ export async function checkAddressOnZtoeWebsite(
 }
 
 export const ADDRESS_INDEX_STORAGE_KEY = 'zt_address_index_cache_v1';
-const MAX_PERSISTED_HOUSE_STREETS = 2500;
+const MAX_PERSISTED_HOUSE_STREETS = 50;
 const FRESH_HOUSE_CACHE_TTL_MS = 120_000;
 
 export interface PersistedAddressIndexCache {
@@ -985,6 +992,7 @@ function applyCanonicalStreetOverrides(
     for (const localH of ZTOE_STREET_HOUSES.zt_kyivska || []) {
       const k = localH.house.trim().toLowerCase();
       if (
+        localH.house === '74' ||
         localH.house === '77' ||
         localH.house === '37' ||
         localH.house === '104' ||
@@ -1136,9 +1144,6 @@ function ensureHydrated(): void {
     hydrateAddressIndexFromStorage();
   }
 }
-
-// Hydrate from persistent disk cache immediately on module load
-ensureHydrated();
 
 export function getRems(): ZtoeRemOption[] {
   ensureHydrated();

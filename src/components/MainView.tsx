@@ -14,6 +14,7 @@ import {
   getBlackoutIntervals,
   getChartHalfHourBlocks
 } from '../services/ztoeParser';
+import { isValidEmergencyOutage } from '../services/ztoeAddressLookup';
 import { translations } from '../services/i18n';
 
 interface MainViewProps {
@@ -45,7 +46,7 @@ export const MainView: React.FC<MainViewProps> = ({
   const t = translations[lang];
   const [selectedDayTab, setSelectedDayTab] = useState<'today' | 'tomorrow'>('today');
   const [toastMessage, setToastMessage] = useState<string | null>(null);
-  const hasActiveEmergencyOutage = Boolean(settings.activeEmergencyOutage);
+  const hasActiveEmergencyOutage = isValidEmergencyOutage(settings.activeEmergencyOutage);
   const hasNoQueueMessage = Boolean(
     settings.customQueueStatusText &&
       (!settings.queue || settings.queue.trim() === '') &&

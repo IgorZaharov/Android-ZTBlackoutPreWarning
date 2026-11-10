@@ -5,6 +5,7 @@
  */
 import { BlackoutSlot, DaySchedule, EmergencyOutageInfo, NotificationRecord, UserSettings } from '../types';
 import { calculateOutageCountdown, DEFAULT_ZTOE_URL } from './ztoeParser';
+import { isValidEmergencyOutage } from './ztoeAddressLookup';
 import { translations } from './i18n';
 
 const SETTINGS_KEY = 'zt_blackout_user_settings_v1';
@@ -42,9 +43,13 @@ export function loadUserSettings(): UserSettings {
       const raw = localStorage.getItem(SETTINGS_KEY);
       if (raw) {
         const parsed = JSON.parse(raw);
+        const validEmergency = isValidEmergencyOutage(parsed.activeEmergencyOutage)
+          ? parsed.activeEmergencyOutage
+          : null;
         const merged: UserSettings = {
           ...DEFAULT_SETTINGS,
           ...parsed,
+          activeEmergencyOutage: validEmergency,
           emergencyNotificationsEnabled: parsed.emergencyNotificationsEnabled ?? true
         };
         const anyAlertsEnabled = Boolean(merged.notificationsEnabled || merged.emergencyNotificationsEnabled);
@@ -55,7 +60,12 @@ export function loadUserSettings(): UserSettings {
         return merged;
       }
     } else if (memorySettings) {
-      return { ...memorySettings };
+      return {
+        ...memorySettings,
+        activeEmergencyOutage: isValidEmergencyOutage(memorySettings.activeEmergencyOutage)
+          ? memorySettings.activeEmergencyOutage
+          : null,
+      };
     }
   } catch {
     // fallback
@@ -67,8 +77,12 @@ export function saveUserSettings(settings: UserSettings): void {
   try {
     const emergencyEnabled = settings.emergencyNotificationsEnabled ?? true;
     const anyAlertsEnabled = Boolean(settings.notificationsEnabled || emergencyEnabled);
+    const validEmergency = isValidEmergencyOutage(settings.activeEmergencyOutage)
+      ? settings.activeEmergencyOutage
+      : null;
     const normalized: UserSettings = {
       ...settings,
+      activeEmergencyOutage: validEmergency,
       emergencyNotificationsEnabled: emergencyEnabled,
       soundEnabled: anyAlertsEnabled ? settings.soundEnabled : false,
       vibrationEnabled: anyAlertsEnabled ? settings.vibrationEnabled : false,

@@ -37,6 +37,7 @@ import androidx.compose.ui.unit.sp
 import ua.blackout.prewarning.R
 import ua.blackout.prewarning.data.model.BlackoutSlot
 import ua.blackout.prewarning.data.model.SlotStatus
+import ua.blackout.prewarning.data.parser.ZtoeAddressLookup
 import ua.blackout.prewarning.data.repository.ScheduleRepository
 import ua.blackout.prewarning.ui.AppStrings
 import ua.blackout.prewarning.ui.components.TimelineBar
@@ -88,7 +89,8 @@ fun MainScreen(
 
     val hasCustomNoQueueStatus = !customQueueStatusText.isNullOrBlank()
     val isQueueUnselected = queue.isBlank() && !hasCustomNoQueueStatus
-    val hasEmergencyOutage = !emergencyOutageStartTime.isNullOrBlank() && !emergencyOutageRestoreTime.isNullOrBlank()
+    val hasEmergencyOutage = ZtoeAddressLookup.isValidOutageTimestamp(emergencyOutageStartTime) &&
+        ZtoeAddressLookup.isValidOutageTimestamp(emergencyOutageRestoreTime)
     val formattedSelectedAddress = remember(selectedAddress) { formatAddressAfterCity(selectedAddress) }
 
     // 48 light POWER_ON half-hour slots for buildings that are never disconnected by hourly schedules

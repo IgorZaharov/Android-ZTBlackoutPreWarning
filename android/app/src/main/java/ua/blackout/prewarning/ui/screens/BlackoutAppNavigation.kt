@@ -209,6 +209,7 @@ fun BlackoutAppNavigation(
 
     val isMainScreenVisible = pagerState.currentPage == 0 && !isRouletteOpen
     val isCountdownScreenActive = isMainScreenVisible && !isQueueUnselected
+    var hasCompletedInitialScheduleFetch by remember { mutableStateOf(false) }
 
     // Automatically refresh timer and drum bar when User enters main screen
     LaunchedEffect(isMainScreenVisible) {
@@ -225,7 +226,7 @@ fun BlackoutAppNavigation(
                 tomorrowSlots = if (hasTomorrowSchedule) effectiveTomorrowSlots else null,
                 now = now
             )
-            if (queue.isNotBlank()) {
+            if (queue.isNotBlank() && hasCompletedInitialScheduleFetch) {
                 val res = withContext(Dispatchers.IO) {
                     ZtoeParser.fetchFullSchedule(siteUrl, queue, appContext)
                 }
@@ -352,14 +353,12 @@ fun BlackoutAppNavigation(
         }
     }
 
-    // Hydrate address index from disk cache immediately and prefetch all REMs, cities, and active city streets in the background on app launch
-    remember(appContext) {
-        ZtoeAddressLookup.initDiskCache(appContext)
-        true
-    }
+    // Hydrate address index from disk cache and prefetch REMs, cities, and streets strictly in the background after initial UI render
     LaunchedEffect(siteUrl) {
+        delay(250L)
         withContext(Dispatchers.IO) {
             try {
+                ZtoeAddressLookup.initDiskCache(appContext)
                 ZtoeAddressLookup.prefetchAddressIndexInBackground(
                     context = appContext,
                     siteUrl = siteUrl,
@@ -377,6 +376,7 @@ fun BlackoutAppNavigation(
             baseSlots = emptyList()
             baseTomorrowSlots = null
             hasTomorrowSchedule = false
+            hasCompletedInitialScheduleFetch = true
             return@LaunchedEffect
         }
 
@@ -387,6 +387,7 @@ fun BlackoutAppNavigation(
         val res = withContext(Dispatchers.IO) {
             ZtoeParser.fetchFullSchedule(siteUrl, activeQ, appContext)
         }
+        hasCompletedInitialScheduleFetch = true
         if (res.status == FetchStatus.SUCCESS) {
             baseSlots = res.todaySlots
             baseTomorrowSlots = res.tomorrowSlots

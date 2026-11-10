@@ -2949,9 +2949,112 @@ async function runUnitTestE_AddressLookupAndUnsetQueue() {
       ztoeAddressLookupKt.includes('fun serializeCacheToJson(') &&
       ztoeAddressLookupKt.includes('fun hydrateCacheFromJson(') &&
       navScreenKt.includes('ZtoeAddressLookup.initDiskCache(appContext)') &&
-      navScreenKt.includes('ZtoeAddressLookup.prefetchAddressIndexInBackground('),
-    'Both Web (App.tsx / ztoeAddressLookup.ts) and Android (BlackoutAppNavigation.kt / ZtoeAddressLookup.kt) must hydrate disk cache on startup and bulk-index all houses per settlement'
+      navScreenKt.includes('ZtoeAddressLookup.prefetchAddressIndexInBackground(') &&
+      !navScreenKt.includes('remember(appContext) {\n        ZtoeAddressLookup.initDiskCache(appContext)'),
+    'Both Web (App.tsx / ztoeAddressLookup.ts) and Android (BlackoutAppNavigation.kt / ZtoeAddressLookup.kt) must hydrate disk cache and prefetch in the background without blocking initial UI rendering'
   );
+
+  // (8) Verify вул. Київська, буд. 74 7-column ZTOE table row does NOT trigger an Emergency Outage popup, and verify v1.3.3 upgrade compatibility
+  const {
+    isValidOutageTimestamp,
+    isValidEmergencyOutage,
+    checkEmergencyOutageOnZtoe,
+  } = await import('../src/services/ztoeAddressLookup');
+  const kyivska74Html = `
+    <table>
+      <tr>
+        <td><b>РЕМ</b></td>
+        <td><b>Населений пункт</b></td>
+        <td><b>Назва вулиці, провулка, тощо</b></td>
+        <td><b>Будинки</b></td>
+        <td><b>Черга</b></td>
+        <td><b>Підчерга</b></td>
+        <td><b>Примітка</b></td>
+      </tr>
+      <tr>
+        <td>Житомирський</td>
+        <td>місто Житомир</td>
+        <td>вул. Київська</td>
+        <td>74</td>
+        <td>В цей час не вимикається, за винятком випадків аварійних відключень</td>
+        <td>В цей час не вимикається, за винятком випадків аварійних відключень</td>
+        <td>побутові споживачі</td>
+      </tr>
+    </table>
+  `;
+  const parsedKyivska74Rows = parseZtoeAddressLookupTableHtml(kyivska74Html);
+  assert.equal(parsedKyivska74Rows.length, 1);
+  assert.equal(parsedKyivska74Rows[0].house, '74');
+  assert.equal(parsedKyivska74Rows[0].queue, '');
+  assert.equal(
+    parsedKyivska74Rows[0].statusText,
+    'В цей час не вимикається, за винятком випадків аварійних відключень'
+  );
+  const parsedKyivska74EmergencyRows = parseZtoeEmergencyOutagesTableHtml(kyivska74Html);
+  assert.equal(
+    parsedKyivska74EmergencyRows.length,
+    0,
+    'вул. Київська house 74 7-column regular table row must NEVER be parsed as an emergency outage'
+  );
+  const checkedKyivska74Emergency = await checkEmergencyOutageOnZtoe(
+    { remId: 'zhytomyr', settlementId: 'zt_city', streetId: 'zt_kyivska', house: '74' },
+    kyivska74Html
+  );
+  assert.equal(
+    checkedKyivska74Emergency,
+    null,
+    'checkEmergencyOutageOnZtoe must return null for вул. Київська house 74 when no emergency outage exists'
+  );
+  assert.equal(
+    isValidOutageTimestamp('В цей час не вимикається, за винятком випадків аварійних відключень'),
+    false
+  );
+  assert.equal(isValidOutageTimestamp('побутові споживачі'), false);
+  assert.equal(isValidOutageTimestamp('10.11.2026 22:00'), true);
+  assert.equal(
+    isValidEmergencyOutage({
+      id: 'bad_emerg',
+      outageType: 'В цей час не вимикається, за винятком випадків аварійних відключень',
+      startTime: 'В цей час не вимикається, за винятком випадків аварійних відключень',
+      estimatedRestoreTime: 'побутові споживачі',
+    }),
+    false
+  );
+
+  // Verify loadUserSettings sanitizes any bogus persisted activeEmergencyOutage
+  saveUserSettings({
+    ...DEFAULT_SETTINGS,
+    activeEmergencyOutage: {
+      id: 'bad_emerg',
+      outageType: 'В цей час не вимикається, за винятком випадків аварійних відключень',
+      startTime: 'В цей час не вимикається, за винятком випадків аварійних відключень',
+      estimatedRestoreTime: 'побутові споживачі',
+    },
+  });
+  assert.equal(
+    loadUserSettings().activeEmergencyOutage,
+    null,
+    'loadUserSettings must sanitize and discard invalid persisted activeEmergencyOutage values'
+  );
+
+  // Verify build.gradle.kts and SettingsRepository.kt preserve v1.3.3 upgrade compatibility
+  const buildGradleKts = fs.readFileSync(
+    path.join(ROOT_DIR, 'android/app/build.gradle.kts'),
+    'utf-8'
+  );
+  const settingsRepoKt = fs.readFileSync(
+    path.join(ROOT_DIR, 'android/app/src/main/java/ua/blackout/prewarning/data/repository/SettingsRepository.kt'),
+    'utf-8'
+  );
+  assert.ok(
+    buildGradleKts.includes('applicationId = appPkgEnv ?: "com.ZTBlackoutPreWarning"') &&
+      !buildGradleKts.includes('isDebuggable = true') &&
+      settingsRepoKt.includes('ZtoeAddressLookup.isValidEmergencyOutage(rawEmergencyCandidate)') &&
+      ztoeAddressLookupKt.includes('fun isValidOutageTimestamp(') &&
+      ztoeAddressLookupKt.includes('fun isValidEmergencyOutage('),
+    'build.gradle.kts must keep unified applicationId and isDebuggable = false across debug and release APKs for v1.3.3 upgrades, and SettingsRepository.kt must validate emergency outages'
+  );
+
   resetAddressIndexCache(true);
 
   resetAllAppDataToFirstLaunch();
