@@ -59,13 +59,14 @@ import java.time.LocalTime
 import java.time.format.DateTimeFormatter
 import ua.blackout.prewarning.data.KYIV_ZONE
 
-class BlackoutGlanceWidget : GlanceAppWidget() {
+open class BlackoutGlanceWidget(private val forceBigLayout: Boolean = false) : GlanceAppWidget() {
 
     override val stateDefinition: GlanceStateDefinition<*> = PreferencesGlanceStateDefinition
 
     override val sizeMode = SizeMode.Responsive(
         setOf(
             DpSize(120.dp, 60.dp),   // 2x1 Small
+            DpSize(250.dp, 110.dp),  // 4x2 Big
             DpSize(250.dp, 160.dp)   // 3x2 Big
         )
     )
@@ -121,7 +122,8 @@ class BlackoutGlanceWidget : GlanceAppWidget() {
             return try {
                 val appCtx = context.applicationContext
                 val manager = GlanceAppWidgetManager(appCtx)
-                manager.getGlanceIds(BlackoutGlanceWidget::class.java).isNotEmpty()
+                manager.getGlanceIds(BlackoutGlanceWidget::class.java).isNotEmpty() ||
+                    manager.getGlanceIds(BlackoutBigGlanceWidget::class.java).isNotEmpty()
             } catch (_: Exception) {
                 false
             }
@@ -130,7 +132,9 @@ class BlackoutGlanceWidget : GlanceAppWidget() {
         suspend fun syncAllWidgets(context: Context) {
             val appCtx = context.applicationContext
             val manager = GlanceAppWidgetManager(appCtx)
-            val glanceIds = manager.getGlanceIds(BlackoutGlanceWidget::class.java)
+            val smallIds = manager.getGlanceIds(BlackoutGlanceWidget::class.java)
+            val bigIds = manager.getGlanceIds(BlackoutBigGlanceWidget::class.java)
+            val glanceIds = smallIds + bigIds
             if (glanceIds.isEmpty()) return
 
             val settings = SettingsRepository(appCtx).getSettings()
@@ -180,7 +184,7 @@ class BlackoutGlanceWidget : GlanceAppWidget() {
                 if (upcoming != null) "${upcoming.startStr} – ${upcoming.endStr}" else "Сьогодні більше немає"
             }
             val nowMs = System.currentTimeMillis()
-            for (gId in glanceIds) {
+            for (gId in smallIds) {
                 updateAppWidgetState(appCtx, PreferencesGlanceStateDefinition, gId) { prefs ->
                     prefs.toMutablePreferences().apply {
                         this[KEY_NOTIFICATIONS_ENABLED] = settings.notificationsEnabled
@@ -195,6 +199,22 @@ class BlackoutGlanceWidget : GlanceAppWidget() {
                     }
                 }
                 BlackoutGlanceWidget().update(appCtx, gId)
+            }
+            for (gId in bigIds) {
+                updateAppWidgetState(appCtx, PreferencesGlanceStateDefinition, gId) { prefs ->
+                    prefs.toMutablePreferences().apply {
+                        this[KEY_NOTIFICATIONS_ENABLED] = settings.notificationsEnabled
+                        this[KEY_QUEUE] = settings.queue
+                        this[KEY_LANGUAGE] = resolvedLang
+                        this[KEY_REFRESH_TICK] = nowMs
+                        this[KEY_IS_BLACKOUT_NOW] = info.isBlackoutNow
+                        this[KEY_IS_UNCLEAR] = info.isUnclear
+                        this[KEY_COUNTDOWN_TEXT] = formattedCountdown
+                        this[KEY_NEXT_SLOT_TIME] = info.nextSlotTime
+                        this[KEY_NEXT_BLACKOUT_TEXT] = nextBlackoutText
+                    }
+                }
+                BlackoutBigGlanceWidget().update(appCtx, gId)
             }
         }
 
@@ -477,7 +497,7 @@ class BlackoutGlanceWidget : GlanceAppWidget() {
             }
 
             val size = LocalSize.current
-            val isBigWidget = size.height >= 115.dp || size.width >= 230.dp
+            val isBigWidget = forceBigLayout || size.height >= 110.dp || size.width >= 220.dp
 
             val queueHeaderText = when {
                 isNoQueueHouse -> if (resolvedLang == "uk") "Черга відсутня" else "No queue"
@@ -773,6 +793,8 @@ class BlackoutGlanceWidget : GlanceAppWidget() {
         }
     }
 }
+
+class BlackoutBigGlanceWidget : BlackoutGlanceWidget(forceBigLayout = true)
 
 class ToggleAlertsActionCallback : ActionCallback {
     override suspend fun onAction(

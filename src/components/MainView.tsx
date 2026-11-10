@@ -72,6 +72,13 @@ export const MainView: React.FC<MainViewProps> = ({
     }
   }, [effectiveTomorrowSchedule, selectedDayTab]);
 
+  const [entryTick, setEntryTick] = useState(0);
+
+  // Automatically refresh timer and drum bar when User enters main screen
+  useEffect(() => {
+    setEntryTick((prev) => prev + 1);
+  }, []);
+
   const isTomorrowActive = selectedDayTab === 'tomorrow' && effectiveTomorrowSchedule !== null;
   const activeSchedule = isTomorrowActive ? effectiveTomorrowSchedule! : effectiveTodaySchedule;
   const activeSlotsSignature = useMemo(
@@ -81,17 +88,17 @@ export const MainView: React.FC<MainViewProps> = ({
 
   const blackoutIntervals = useMemo(
     () => getBlackoutIntervals(activeSchedule.slots),
-    [selectedDayTab, activeSchedule.dateStr, activeSlotsSignature, activeSchedule.slots]
+    [selectedDayTab, activeSchedule.dateStr, activeSlotsSignature, activeSchedule.slots, entryTick]
   );
 
   const chartBlocks = useMemo(
     () => getChartHalfHourBlocks(activeSchedule.slots),
-    [selectedDayTab, activeSchedule.dateStr, activeSlotsSignature, activeSchedule.slots]
+    [selectedDayTab, activeSchedule.dateStr, activeSlotsSignature, activeSchedule.slots, entryTick]
   );
 
   const countdown = useMemo(
     () => calculateOutageCountdown(effectiveTodaySchedule, now, effectiveTomorrowSchedule),
-    [effectiveTodaySchedule, now, effectiveTomorrowSchedule]
+    [effectiveTodaySchedule, now, effectiveTomorrowSchedule, entryTick]
   );
 
   const isUnclear =
@@ -313,17 +320,17 @@ export const MainView: React.FC<MainViewProps> = ({
             data-testid="main-emergency-outage-times"
             className="flex flex-col gap-0.5 text-xs text-white font-mono tabular-nums leading-snug"
           >
-            <div>
+            <div className="flex items-center justify-between gap-2">
               <span className="text-sky-200/70 font-sans font-medium">
                 {lang === 'uk' ? 'Початок: ' : 'Start: '}
               </span>
-              <span className="font-bold">{settings.activeEmergencyOutage.startTime || '--:--'}</span>
+              <span className="font-bold text-right">{settings.activeEmergencyOutage.startTime || '--:--'}</span>
             </div>
-            <div>
+            <div className="flex items-center justify-between gap-2">
               <span className="text-sky-200/70 font-sans font-medium">
                 {lang === 'uk' ? 'Орієнтовне відновлення: ' : 'Estimated restore: '}
               </span>
-              <span className="font-bold">
+              <span className="font-bold text-right">
                 {settings.activeEmergencyOutage.estimatedRestoreTime || '--:--'}
               </span>
             </div>

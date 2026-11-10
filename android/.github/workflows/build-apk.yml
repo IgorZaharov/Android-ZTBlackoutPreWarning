@@ -55,7 +55,7 @@ jobs:
             PKG_VER=$(node -p "require('./package.json').version")
             TAG_NAME="v${PKG_VER}"
           else
-            TAG_NAME="v1.3.3"
+            TAG_NAME="v1.3.4"
           fi
           echo "tag_name=${TAG_NAME}" >> "$GITHUB_OUTPUT"
           echo "APP_VERSION_NAME=${TAG_NAME}" >> "$GITHUB_ENV"

@@ -842,7 +842,144 @@ class ZtoeParserTest {
         assertEquals("Blackout hours for tomorrow:", AppStrings.blackoutHoursForTomorrowHeader("en"))
         assertEquals("Пошук вручну", AppStrings.queueHelpManualSearchTitle("uk"))
         assertEquals("Manual search", AppStrings.queueHelpManualSearchTitle("en"))
+
+        // 4. Verify all 19 REMs and dynamic settlement & street option parsers from unhooking-search.php
+        assertEquals(19, ua.blackout.prewarning.data.parser.ZtoeAddressLookup.ZTOE_REM_OPTIONS.size)
+        val sampleSelectHtml = """
+            <select name="naspunkt_id">
+                <option value="0">--Оберіть населений пункт--</option>
+                <option value="16657">місто Житомир</option>
+                <option value="16699">село Зарічани</option>
+                <option value="99999">село Кам&#039;янка</option>
+            </select>
+            <select name="vulica_id">
+                <option value="0">--Оберіть вулицю--</option>
+                <option value="173934">вул. Київська</option>
+                <option value="174574">вул. Велика Бердичівська</option>
+                <option value="888888">вул. В&#039;ячеслава Чорновола</option>
+            </select>
+        """.trimIndent()
+        val parsedSettlements = ua.blackout.prewarning.data.parser.ZtoeAddressLookup.parseZtoeSettlementOptionsHtml("zhytomyr", sampleSelectHtml)
+        assertEquals(3, parsedSettlements.size)
+        assertEquals("zt_city", parsedSettlements[0].id)
+        assertEquals("16657", parsedSettlements[0].ztoeNaspunktId)
+        assertEquals("np_99999", parsedSettlements[2].id)
+        assertEquals("с. Кам'янка", parsedSettlements[2].nameUk)
+
+        val parsedStreets = ua.blackout.prewarning.data.parser.ZtoeAddressLookup.parseZtoeStreetOptionsHtml("zt_city", sampleSelectHtml)
+        assertEquals(3, parsedStreets.size)
+        assertEquals("zt_kyivska", parsedStreets[0].id)
+        assertEquals("173934", parsedStreets[0].ztoeVulicaId)
+        assertEquals("st_888888", parsedStreets[2].id)
+        assertEquals("вул. В'ячеслава Чорновола", parsedStreets[2].nameUk)
+
+        // 5. Verify live REM options HTML parser, "?" subtitle under "Пошук черги за адресою", and independent Emergency Outages switch
+        val sampleRemHtml = """
+            <select name="rem_id">
+                <option value="0">--Оберіть РЕМ--</option>
+                <option value="4">Житомирський РЕМ</option>
+                <option value="2">Бердичівський РЕМ</option>
+            </select>
+        """.trimIndent()
+        val parsedRems = ua.blackout.prewarning.data.parser.ZtoeAddressLookup.parseZtoeRemOptionsHtml(sampleRemHtml)
+        assertTrue(parsedRems.size >= 19)
+        assertEquals("4", parsedRems.first { it.id == "zhytomyr" }.ztoeRemId)
+
+        assertEquals(
+            "(Або закрийте це вікно та виберіть тільки чергу)",
+            AppStrings.queueHelpAddressSubtitle("uk")
+        )
+        assertEquals(
+            "(Or close this window and select directly)",
+            AppStrings.queueHelpAddressSubtitle("en")
+        )
+        assertEquals("Сповіщення про аварійні відключення", AppStrings.emergencyNotifications("uk"))
+        assertEquals("Emergency outage notifications", AppStrings.emergencyNotifications("en"))
+        assertEquals(true, defaults.emergencyNotificationsEnabled)
+
+        // 6. Verify persistent disk cache JSON serialization/hydration and background prefetching on launch
+        ua.blackout.prewarning.data.parser.ZtoeAddressLookup.clearCacheForTesting()
+        val mockCacheJson = """
+            {
+              "version": 1,
+              "rems": [
+                {"id": "zhytomyr", "ztoeRemId": 7, "nameUk": "Житомирський РЕМ", "nameEn": "Zhytomyr REM"},
+                {"id": "berdychiv", "ztoeRemId": 3, "nameUk": "Бердичівський РЕМ", "nameEn": "Berdychiv REM"}
+              ],
+              "settlements": [
+                {"id": "zt_city", "remId": "zhytomyr", "ztoeNaspunktId": 16657, "nameUk": "м. Житомир", "nameEn": "Zhytomyr"},
+                {"id": "np_77777", "remId": "zhytomyr", "ztoeNaspunktId": 77777, "nameUk": "с. Тестове", "nameEn": "Testove"}
+              ],
+              "streets": [
+                {"id": "zt_kyivska", "settlementId": "zt_city", "ztoeVulicaId": 173934, "nameUk": "вул. Київська", "nameEn": "Kyivska St."},
+                {"id": "st_999999", "settlementId": "zt_city", "ztoeVulicaId": 999999, "nameUk": "вул. Інноваційна", "nameEn": "Innovatsiina St."}
+              ],
+              "houses": [
+                {"streetId": "st_999999", "house": "12А", "queue": "4.2"}
+              ]
+            }
+        """.trimIndent()
+        val hydratedOk = ua.blackout.prewarning.data.parser.ZtoeAddressLookup.hydrateCacheFromJson(mockCacheJson)
+        assertEquals(true, hydratedOk)
+        assertTrue(
+            ua.blackout.prewarning.data.parser.ZtoeAddressLookup.getSettlementsForRem("zhytomyr").any { it.id == "np_77777" }
+        )
+        assertTrue(
+            ua.blackout.prewarning.data.parser.ZtoeAddressLookup.getStreetsForSettlement("zt_city").any { it.id == "st_999999" }
+        )
+        assertEquals(
+            "4.2",
+            ua.blackout.prewarning.data.parser.ZtoeAddressLookup.getHousesForStreet("st_999999").firstOrNull()?.queue
+        )
+        val roundTripJson = ua.blackout.prewarning.data.parser.ZtoeAddressLookup.serializeCacheToJson()
+        assertTrue(roundTripJson.contains("np_77777"))
+        assertTrue(roundTripJson.contains("st_999999"))
+
+        // 7. Verify bulk settlement-wide house indexing (rem_id + naspunkt_id + all=1 7-column table) for 0ms street house dropdown loading
+        val sampleSettlementAllHtml = """
+            <table>
+                <tr>
+                    <td><b>РЕМ</b></td>
+                    <td><b>Населений пункт</b></td>
+                    <td><b>Назва вулиці</b></td>
+                    <td><b>Будинки</b></td>
+                    <td><b>Черга</b></td>
+                    <td><b>Підчерга</b></td>
+                    <td><b>Примітка</b></td>
+                </tr>
+                <tr>
+                    <td>Житомирський</td>
+                    <td>місто Житомир</td>
+                    <td>вул. Київська</td>
+                    <td>3, 5, 77</td>
+                    <td align="center">5</td>
+                    <td align="center">2</td>
+                    <td></td>
+                </tr>
+                <tr>
+                    <td>Житомирський</td>
+                    <td>місто Житомир</td>
+                    <td>вул. Інноваційна</td>
+                    <td>1, 2А, 10</td>
+                    <td align="center">3</td>
+                    <td align="center">1</td>
+                    <td></td>
+                </tr>
+            </table>
+        """.trimIndent()
+        val settlementStreets = ua.blackout.prewarning.data.parser.ZtoeAddressLookup.getStreetsForSettlement("zt_city")
+        val bulkMap = ua.blackout.prewarning.data.parser.ZtoeAddressLookup.parseZtoeSettlementHousesTableHtml(
+            "zt_city",
+            settlementStreets,
+            sampleSettlementAllHtml
+        )
+        assertTrue((bulkMap["zt_kyivska"]?.size ?: 0) >= 3)
+        assertEquals("5.2", bulkMap["zt_kyivska"]?.firstOrNull { it.house == "77" }?.queue)
+        assertEquals(3, bulkMap["st_999999"]?.size)
+        assertEquals("3.1", bulkMap["st_999999"]?.firstOrNull { it.house == "2А" }?.queue)
+        ua.blackout.prewarning.data.parser.ZtoeAddressLookup.clearCacheForTesting()
     }
 }
+
 
 

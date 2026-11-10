@@ -267,6 +267,7 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
               onResetDefaults={onResetDefaults}
               autoOpenQueueHelp={autoOpenQueueHelp}
               onQueueHelpOpened={() => setAutoOpenQueueHelp(false)}
+              onNavigateToMain={() => setActiveTab('schedule')}
             />
           )}
 

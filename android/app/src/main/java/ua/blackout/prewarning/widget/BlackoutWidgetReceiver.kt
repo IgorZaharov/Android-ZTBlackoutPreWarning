@@ -12,7 +12,7 @@ import ua.blackout.prewarning.data.repository.ScheduleRepository
 import ua.blackout.prewarning.data.repository.SettingsRepository
 import ua.blackout.prewarning.notification.AlarmScheduler
 
-class BlackoutWidgetReceiver : GlanceAppWidgetReceiver() {
+open class BlackoutWidgetReceiver : GlanceAppWidgetReceiver() {
     override val glanceAppWidget: GlanceAppWidget = BlackoutGlanceWidget()
 
     override fun onEnabled(context: Context) {
@@ -59,4 +59,8 @@ class BlackoutWidgetReceiver : GlanceAppWidgetReceiver() {
             }
         }
     }
+}
+
+class BlackoutBigWidgetReceiver : BlackoutWidgetReceiver() {
+    override val glanceAppWidget: GlanceAppWidget = BlackoutBigGlanceWidget()
 }

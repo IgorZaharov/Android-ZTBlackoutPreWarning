@@ -17,12 +17,16 @@ import {
 import { UserSettings, Language } from '../types';
 import { QUEUES, DEFAULT_ZTOE_URL, verifyZtoeSiteAndData } from '../services/ztoeParser';
 import {
-  ZTOE_REM_OPTIONS,
+  getRems,
   getSettlementsForRem,
   getStreetsForSettlement,
-  getHousesForStreet
+  getHousesForStreet,
+  fetchRemsFromZtoe,
+  fetchSettlementsForRem,
+  fetchStreetsForSettlement,
+  fetchHousesForStreet
 } from '../services/ztoeAddressLookup';
-import { toggleMasterNotifications } from '../services/alertManager';
+import { toggleMasterNotifications, toggleEmergencyNotifications } from '../services/alertManager';
 import { translations } from '../services/i18n';
 
 interface SettingsViewProps {
@@ -34,6 +38,7 @@ interface SettingsViewProps {
   onResetDefaults: () => void;
   autoOpenQueueHelp?: boolean;
   onQueueHelpOpened?: () => void;
+  onNavigateToMain?: () => void;
 }
 
 export const SettingsView: React.FC<SettingsViewProps> = ({
@@ -44,7 +49,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   onForceRefresh,
   onResetDefaults,
   autoOpenQueueHelp = false,
-  onQueueHelpOpened
+  onQueueHelpOpened,
+  onNavigateToMain
 }) => {
   const t = translations[lang];
   const [toastMessage, setToastMessage] = useState<string | null>(null);
@@ -62,6 +68,10 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const [selectedHouseNumber, setSelectedHouseNumber] = useState<string>(
     settings.selectedAddressQuery?.house || ''
   );
+  const [rems, setRems] = useState(() => getRems());
+  const [settlements, setSettlements] = useState(() => getSettlementsForRem(selectedRemId));
+  const [streets, setStreets] = useState(() => getStreetsForSettlement(selectedSettlementId));
+  const [houses, setHouses] = useState(() => getHousesForStreet(selectedStreetId));
   const [verification, setVerification] = useState<{
     isChecking: boolean;
     isAvailable: boolean;
@@ -106,11 +116,78 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     showQueueHelp
   ]);
 
-  const settlements = getSettlementsForRem(selectedRemId);
-  const streets = getStreetsForSettlement(selectedSettlementId);
-  const houses = getHousesForStreet(selectedStreetId);
+  // Refresh the list of all REMs, Cities, and Streets (plus bulk-indexed houses for all streets in the settlement)
+  // whenever User enters the "?" screen or changes REM/Settlement, without re-running when User selects a Street
+  React.useEffect(() => {
+    setRems(getRems());
+    setSettlements(getSettlementsForRem(selectedRemId));
+    setStreets(getStreetsForSettlement(selectedSettlementId));
+    if (!showQueueHelp) return;
+
+    let cancelled = false;
+    (async () => {
+      if (selectedSettlementId) {
+        const freshStreets = await fetchStreetsForSettlement(
+          selectedRemId,
+          selectedSettlementId,
+          settings.url,
+          true
+        );
+        if (!cancelled && freshStreets.length > 0) {
+          setStreets(freshStreets);
+          setRems(getRems());
+          setSettlements(getSettlementsForRem(selectedRemId));
+          if (selectedStreetId) {
+            const indexedHouses = getHousesForStreet(selectedStreetId);
+            if (indexedHouses.length > 0) {
+              setHouses(indexedHouses);
+            }
+          }
+        }
+      }
+      const [freshRems, freshSettlements] = await Promise.all([
+        fetchRemsFromZtoe(settings.url, true),
+        fetchSettlementsForRem(selectedRemId, settings.url, true),
+      ]);
+      if (!cancelled && freshRems.length > 0) {
+        setRems(freshRems);
+      }
+      if (!cancelled && freshSettlements.length > 0) {
+        setSettlements(freshSettlements);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [showQueueHelp, selectedRemId, selectedSettlementId, settings.url]);
+
+  // Immediately populate all houses for the selected street in 0ms from the settlement-wide bulk index
+  React.useEffect(() => {
+    setHouses(getHousesForStreet(selectedStreetId));
+    if (!showQueueHelp || !selectedStreetId) return;
+
+    let cancelled = false;
+    (async () => {
+      const freshHouses = await fetchHousesForStreet(
+        selectedRemId,
+        selectedSettlementId,
+        selectedStreetId,
+        settings.url,
+        true
+      );
+      if (!cancelled && freshHouses.length > 0) {
+        setHouses(freshHouses);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [showQueueHelp, selectedRemId, selectedSettlementId, selectedStreetId, settings.url]);
+
   const matchedHouseRecord = houses.find((h) => h.house === selectedHouseNumber) || null;
-  const selectedRemObj = ZTOE_REM_OPTIONS.find((r) => r.id === selectedRemId);
+  const selectedRemObj = rems.find((r) => r.id === selectedRemId);
   const selectedSettlementObj = settlements.find((s) => s.id === selectedSettlementId);
   const selectedStreetObj = streets.find((st) => st.id === selectedStreetId);
   const selectedAddressStr = selectedHouseNumber
@@ -401,7 +478,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           </button>
         </div>
 
-        <div className={`flex items-center justify-between pt-2.5 border-t border-white/10 ${!settings.notificationsEnabled ? 'opacity-45' : ''}`}>
+        <div className={`flex items-center justify-between pt-2.5 border-t border-white/10 ${!(settings.notificationsEnabled || (settings.emergencyNotificationsEnabled ?? true)) ? 'opacity-45' : ''}`}>
           <div className="flex items-center gap-2 text-xs text-sky-100">
             <Volume2 className="w-4 h-4 text-sky-200/70" />
             <span>{t.settingsSound}</span>
@@ -409,11 +486,11 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           <button
             type="button"
             role="switch"
-            aria-checked={Boolean(settings.notificationsEnabled && settings.soundEnabled)}
+            aria-checked={Boolean((settings.notificationsEnabled || (settings.emergencyNotificationsEnabled ?? true)) && settings.soundEnabled)}
             data-testid="ios-switch-sound"
-            disabled={!settings.notificationsEnabled}
+            disabled={!(settings.notificationsEnabled || (settings.emergencyNotificationsEnabled ?? true))}
             onClick={() => {
-              if (!settings.notificationsEnabled) return;
+              if (!(settings.notificationsEnabled || (settings.emergencyNotificationsEnabled ?? true))) return;
               const nextVal = !settings.soundEnabled;
               onUpdateSettings({
                 ...settings,
@@ -422,22 +499,22 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               });
             }}
             className={`w-[51px] h-[31px] rounded-full p-[2px] transition-colors duration-200 flex items-center shrink-0 ${
-              !settings.notificationsEnabled ? 'cursor-not-allowed' : 'cursor-pointer'
+              !(settings.notificationsEnabled || (settings.emergencyNotificationsEnabled ?? true)) ? 'cursor-not-allowed' : 'cursor-pointer'
             } ${
-              settings.notificationsEnabled && settings.soundEnabled
+              (settings.notificationsEnabled || (settings.emergencyNotificationsEnabled ?? true)) && settings.soundEnabled
                 ? 'bg-[#FF5E3A] shadow-inner'
                 : 'bg-white/15 border border-white/10'
             }`}
           >
             <div
               className={`w-[27px] h-[27px] rounded-full bg-white shadow-[0_3px_8px_rgba(0,0,0,0.25),0_1px_1px_rgba(0,0,0,0.16)] transition-transform duration-200 ${
-                settings.notificationsEnabled && settings.soundEnabled ? 'translate-x-[20px]' : 'translate-x-0'
+                (settings.notificationsEnabled || (settings.emergencyNotificationsEnabled ?? true)) && settings.soundEnabled ? 'translate-x-[20px]' : 'translate-x-0'
               }`}
             />
           </button>
         </div>
 
-        <div className={`flex items-center justify-between pt-2.5 border-t border-white/10 ${!settings.notificationsEnabled ? 'opacity-45' : ''}`}>
+        <div className={`flex items-center justify-between pt-2.5 border-t border-white/10 ${!(settings.notificationsEnabled || (settings.emergencyNotificationsEnabled ?? true)) ? 'opacity-45' : ''}`}>
           <div className="flex items-center gap-2 text-xs text-sky-100">
             <Vibrate className="w-4 h-4 text-sky-200/70" />
             <span>{t.settingsVibration}</span>
@@ -445,11 +522,11 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           <button
             type="button"
             role="switch"
-            aria-checked={Boolean(settings.notificationsEnabled && settings.vibrationEnabled)}
+            aria-checked={Boolean((settings.notificationsEnabled || (settings.emergencyNotificationsEnabled ?? true)) && settings.vibrationEnabled)}
             data-testid="ios-switch-vibration"
-            disabled={!settings.notificationsEnabled}
+            disabled={!(settings.notificationsEnabled || (settings.emergencyNotificationsEnabled ?? true))}
             onClick={() => {
-              if (!settings.notificationsEnabled) return;
+              if (!(settings.notificationsEnabled || (settings.emergencyNotificationsEnabled ?? true))) return;
               const nextVal = !settings.vibrationEnabled;
               onUpdateSettings({
                 ...settings,
@@ -458,16 +535,52 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               });
             }}
             className={`w-[51px] h-[31px] rounded-full p-[2px] transition-colors duration-200 flex items-center shrink-0 ${
-              !settings.notificationsEnabled ? 'cursor-not-allowed' : 'cursor-pointer'
+              !(settings.notificationsEnabled || (settings.emergencyNotificationsEnabled ?? true)) ? 'cursor-not-allowed' : 'cursor-pointer'
             } ${
-              settings.notificationsEnabled && settings.vibrationEnabled
+              (settings.notificationsEnabled || (settings.emergencyNotificationsEnabled ?? true)) && settings.vibrationEnabled
                 ? 'bg-[#FF5E3A] shadow-inner'
                 : 'bg-white/15 border border-white/10'
             }`}
           >
             <div
               className={`w-[27px] h-[27px] rounded-full bg-white shadow-[0_3px_8px_rgba(0,0,0,0.25),0_1px_1px_rgba(0,0,0,0.16)] transition-transform duration-200 ${
-                settings.notificationsEnabled && settings.vibrationEnabled ? 'translate-x-[20px]' : 'translate-x-0'
+                (settings.notificationsEnabled || (settings.emergencyNotificationsEnabled ?? true)) && settings.vibrationEnabled ? 'translate-x-[20px]' : 'translate-x-0'
+              }`}
+            />
+          </button>
+        </div>
+      </div>
+
+      {/* 4b. Emergency Power Outages Switch (Separate block below Notifications block; always visible even when no outages detected; ON by default) */}
+      <div
+        data-testid="emergency-outage-switch-block"
+        className="bg-[#141A29]/75 backdrop-blur-2xl rounded-3xl p-5 border border-white/15 shadow-[0_12px_40px_rgba(0,0,0,0.45)] flex flex-col gap-3"
+      >
+        <div
+          data-testid="emergency-outage-switch-row"
+          className="flex items-center justify-between gap-3"
+        >
+          <div className="flex items-center gap-2 min-w-0 flex-1">
+            <AlertTriangle className="w-4 h-4 text-[#FF5E3A] shrink-0" />
+            <span className="text-xs font-bold text-white uppercase tracking-wider break-words leading-snug">
+              {t.settingsEmergencyOutages}
+            </span>
+          </div>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={settings.emergencyNotificationsEnabled ?? true}
+            data-testid="ios-switch-emergency-notifications"
+            onClick={() => onUpdateSettings(toggleEmergencyNotifications(settings))}
+            className={`w-[51px] h-[31px] rounded-full p-[2px] transition-colors duration-200 flex items-center cursor-pointer shrink-0 ${
+              (settings.emergencyNotificationsEnabled ?? true)
+                ? 'bg-[#FF5E3A] shadow-inner'
+                : 'bg-white/15 border border-white/10'
+            }`}
+          >
+            <div
+              className={`w-[27px] h-[27px] rounded-full bg-white shadow-[0_3px_8px_rgba(0,0,0,0.25),0_1px_1px_rgba(0,0,0,0.16)] transition-transform duration-200 ${
+                (settings.emergencyNotificationsEnabled ?? true) ? 'translate-x-[20px]' : 'translate-x-0'
               }`}
             />
           </button>
@@ -606,8 +719,18 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               data-testid="ztoe-address-lookup-section"
               className="w-full flex flex-col gap-3.5 p-5 rounded-3xl bg-white/[0.05] border-2 border-white/25 shadow-[inset_0_1px_0_rgba(255,255,255,0.15)]"
             >
-              <div className="text-sm font-extrabold text-white uppercase tracking-wider">
-                {lang === 'uk' ? 'Пошук черги за адресою' : 'Find Queue by Address'}
+              <div className="flex flex-col gap-1">
+                <div className="text-sm font-extrabold text-white uppercase tracking-wider">
+                  {lang === 'uk' ? 'Пошук черги за адресою' : 'Find Queue by Address'}
+                </div>
+                <div
+                  data-testid="ztoe-address-lookup-subtitle"
+                  className="text-xs font-medium text-sky-200/80"
+                >
+                  {lang === 'uk'
+                    ? '(Або закрийте це вікно та виберіть тільки чергу)'
+                    : '(Or close this window and select directly)'}
+                </div>
               </div>
 
               <div className="grid grid-cols-1 gap-3">
@@ -622,16 +745,19 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                       const nextRem = e.target.value;
                       setSelectedRemId(nextRem);
                       const nextSettlements = getSettlementsForRem(nextRem);
+                      setSettlements(nextSettlements);
                       const firstSettlement = nextSettlements[0]?.id || '';
                       setSelectedSettlementId(firstSettlement);
                       const nextStreets = getStreetsForSettlement(firstSettlement);
+                      setStreets(nextStreets);
                       const firstStreet = nextStreets[0]?.id || '';
                       setSelectedStreetId(firstStreet);
+                      setHouses(getHousesForStreet(firstStreet));
                       setSelectedHouseNumber('');
                     }}
                     className="w-full text-base font-bold bg-white/[0.08] border-2 border-white/20 rounded-2xl px-4 py-3.5 text-white focus:outline-none focus:ring-2 focus:ring-[#FF5E3A] cursor-pointer"
                   >
-                    {ZTOE_REM_OPTIONS.map((rem) => (
+                    {rems.map((rem) => (
                       <option key={rem.id} value={rem.id} className="bg-[#141A29] text-white">
                         {lang === 'uk' ? rem.nameUk : rem.nameEn}
                       </option>
@@ -650,8 +776,10 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                       const nextSettlement = e.target.value;
                       setSelectedSettlementId(nextSettlement);
                       const nextStreets = getStreetsForSettlement(nextSettlement);
+                      setStreets(nextStreets);
                       const firstStreet = nextStreets[0]?.id || '';
                       setSelectedStreetId(firstStreet);
+                      setHouses(getHousesForStreet(firstStreet));
                       setSelectedHouseNumber('');
                     }}
                     className="w-full text-base font-bold bg-white/[0.08] border-2 border-white/20 rounded-2xl px-4 py-3.5 text-white focus:outline-none focus:ring-2 focus:ring-[#FF5E3A] cursor-pointer"
@@ -672,7 +800,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                     data-testid="ztoe-select-street"
                     value={selectedStreetId}
                     onChange={(e) => {
-                      setSelectedStreetId(e.target.value);
+                      const nextStreet = e.target.value;
+                      setSelectedStreetId(nextStreet);
+                      setHouses(getHousesForStreet(nextStreet));
                       setSelectedHouseNumber('');
                     }}
                     className="w-full text-base font-bold bg-white/[0.08] border-2 border-white/20 rounded-2xl px-4 py-3.5 text-white focus:outline-none focus:ring-2 focus:ring-[#FF5E3A] cursor-pointer"
@@ -777,6 +907,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                         activeEmergencyOutage: matchedHouseRecord.emergencyOutage ?? null
                       });
                       setShowQueueHelp(false);
+                      onNavigateToMain?.();
                       showToast(
                         matchedHouseRecord.queue
                           ? `${t.queue} ${matchedHouseRecord.queue}`

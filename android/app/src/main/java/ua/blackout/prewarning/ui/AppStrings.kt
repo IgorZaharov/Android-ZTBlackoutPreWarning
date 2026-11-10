@@ -59,6 +59,7 @@ object AppStrings {
     fun notifications(lang: String) = if (lang == "uk") "Увімкнути сповіщення" else "Enable notifications"
     fun sound(lang: String) = if (lang == "uk") "Звуковий сигнал" else "Sound"
     fun vibration(lang: String) = if (lang == "uk") "Вібрація" else "Vibration"
+    fun emergencyNotifications(lang: String) = if (lang == "uk") "Сповіщення про аварійні відключення" else "Emergency outage notifications"
     fun languageTitle(lang: String) = if (lang == "uk") "МОВА ІНТЕРФЕЙСУ" else "INTERFACE LANGUAGE"
     fun testAlertBtn(lang: String) = if (lang == "uk") "Тест сповіщення" else "Test notification"
     fun refreshBtn(lang: String) = if (lang == "uk") "Оновити дані" else "Refresh data"
@@ -74,6 +75,7 @@ object AppStrings {
     // Numbered instruction for Users on how to find their queue ("?" Help popup in Settings)
     // =========================================================================================
     fun queueHelpTitle(lang: String) = if (lang == "uk") "Як дізнатися свою чергу" else "How to find your queue"
+    fun queueHelpAddressSubtitle(lang: String) = if (lang == "uk") "(Або закрийте це вікно та виберіть тільки чергу)" else "(Or close this window and select directly)"
     fun queueHelpManualSearchTitle(lang: String) = if (lang == "uk") "Пошук вручну" else "Manual search"
     fun queueHelpSteps(lang: String): List<String> = if (lang == "uk") {
         listOf(

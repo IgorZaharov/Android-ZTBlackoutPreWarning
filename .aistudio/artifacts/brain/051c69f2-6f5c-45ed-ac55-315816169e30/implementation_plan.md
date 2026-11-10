@@ -1,123 +1,103 @@
-# Feature Parity Update Plan — Світло в Житомирі (`ANDROID_UPDATE_SPEC.md` Port)
+# Background Address Indexing & Persistent Disk Cache for Instant "?" Dropdowns
 
-This plan ports all features, UI/UX flows, emergency outage algorithms, address lookup capabilities, and battery/caching optimizations documented in `ANDROID_UPDATE_SPEC.md` from `https://github.com/IgorZaharov/iOS-ZTPreBlackoutNotification` into both the **Native Android Application (`/android`)** and the **Interactive Web Emulator (`/src`)**, ensuring 100% parity across iOS, Android, and the Emulator.
+Eliminate loading delays when opening the REM, City/Settlement, Street, and House dropdowns in the "?" Address Lookup window by combining a persistent on-device disk cache (`stale-while-revalidate`) with automatic background prefetching on application launch and predictive next-step prefetching during selection.
 
 ## User Review & Critical Decisions
 
 > [!IMPORTANT]
-> All specifications below come directly from `ANDROID_UPDATE_SPEC.md` and the reference code in `IgorZaharov/iOS-ZTPreBlackoutNotification`. Both the Web Emulator and Native Android (Kotlin + Jetpack Compose + Glance) will be updated in lockstep, keeping Android `compileSdk = 36` / `targetSdk = 36` and existing signing configurations intact.
+> The decisions below reflect your confirmed preferences from our clarification step and preserve 100% of the existing Workbench UI, colors, labels, and layout.
 
-- **Confirmed Decision 1 — First Launch Unselected Queue UX (`queue = ""` Default)**:
-  - Fresh installs start with `queue = ""` and `language = "system"` (`Auto`).
-  - When `isQueueUnselected == true`, the Main screen content and bottom navigation bar are dimmed (`alpha = 0.15`) and disabled, while a centered full-screen overlay displays the primary `"Виберіть чергу"` / `"Select queue"` button (`#FF5E3A`, subtitle `"Житомиробленерго (ZTOE)"`) directly **above** the 3-segment language selector (`Auto` / `English` / `Українська`).
-  - Tapping `"Виберіть чергу"` / `"Select queue"` navigates to Settings and automatically opens the full-screen `"?"` Address Lookup & Help modal; confirming a queue or address for the first time automatically switches back to the Main window.
-- **Confirmed Decision 2 — Full-Screen `"?"` Address Lookup Modal & Queue `5.2` Preservation Fix**:
-  - Upgrades the `"?"` dialog in Settings into a full-screen modal (`#141A29`) with an interactive **Search by Address** block (`2.dp` `white/25` border) at the top (РЕМ defaulting to `"Житомирський РЕМ"`, Settlement defaulting to `"м. Житомир"`, and Street/House unselected by default on first launch, then persisted across sessions), followed by `"Пошук вручну"` / `"Manual search"` and numbered steps `1–4`.
-  - Enforces the `5.2 -> 3.2` preservation safeguard: if a house selected from the directory already has a known queue (e.g., `вул. Київська, буд. 77` -> `5.2`), live HTML table refreshes (`checkAddressOnZtoeWebsite` and `loadSchedules`) never overwrite `5.2` with a conflicting row (`3.2`); live HTML only assigns a queue if the house previously had no queue (`queue == ""`).
-- **Confirmed Decision 3 — No-Queue Houses (`буд. 104`) & Emergency Outages (`"Аварійне відключення"`) Priority Overlap**:
-  - Houses without a scheduled queue (e.g., `вул. Київська, буд. 104`) set `queue = ""`, display the full unshortened message `"В цей час не вимикається, за винятком випадків аварійних відключень"` with a line break (`\n`) after the city in the formatted address, hide the top queue header, display `"--:--:--"` on the main counter, and render all 24 hour columns of the Drum Chart with light internal squares (`POWER_ON`).
-  - Active emergency outages parsed from ZTOE `pw_accidents` JSON and HTML tables override and merge with regular scheduled slots (`applyEmergencyOutageToSchedule`) across Today and Tomorrow (including midnight-spanning and coinciding outages), driving the Main countdown, 24h Drum Chart, Today/Tomorrow interval lists (`20x20` leading slot with `"!"` icon vs centered dot), Home Screen Widgets, and one-time state-transition notifications (detect & restore).
+- **Confirmed Decision 1 — Pre-loading & Caching Strategy**: Use **background prefetching on application launch combined with a persistent disk cache** (`localStorage` on Web Workbench; `SharedPreferences` / local JSON storage on Android). Any previously indexed REM, city list, street list, or house list is loaded into memory immediately on startup so dropdowns open in `0 ms`, while background revalidation silently updates the index when online.
+- **Confirmed Decision 2 — Startup Prefetch Scope**: Automatically prefetch and index **all 19 REMs, the full city/settlement lists across all REMs (bounded concurrency), the full street list for the active/default city (`м. Житомир` and the user's saved settlement), and the house list for the user's saved street** as soon as the application launches.
 
 ---
 
 ## 1. Overview & Core Concept
 
-- **What It Does**: Synchronizes the Android application and AI Studio Web Emulator with the latest iOS release by adding interactive ZTOE address-to-queue lookup, first-launch onboarding overlay, no-queue house support, real-time emergency outage detection and schedule merging, aligned `"!"` emergency indicators in the Today/Tomorrow interval lists, and battery/caching optimizations.
-- **Target Audience / Persona**: Residents of Zhytomyr and Zhytomyr Oblast who look up their blackout queue by street and house number, including residents in buildings with special no-outage status or active emergency accidents (`pw_accidents`).
-- **Key Value**: Eliminates manual queue lookup friction, prevents false queue overwrites on live refreshes, surfaces emergency outages with full countdown and widget integration, and keeps the iOS and Android codebases 100% aligned.
+- **What It Does**:
+  - Persists all fetched REM, Settlement (City/Village), Street, and House/Queue lists to on-device storage so that once fetched, dropdown lists are available immediately across sessions without waiting for network round-trips.
+  - Launches a non-blocking background indexer as soon as the application starts (including on first launch while the `"Виберіть чергу"` / `"Select queue"` prompt is shown) to download and index all 19 REMs, their settlements, and the streets for the default/selected city before the user opens the `"?"` modal.
+  - Uses a `stale-while-revalidate` flow when the user enters the `"?"` screen: cached lists render immediately (`0 ms` delay) while a silent background refresh updates the in-memory and on-disk index only if new items are found.
+- **Target Audience / Persona**: Users in Zhytomyr Oblast looking up their blackout queue or emergency outage status by address who expect instant, responsive dropdowns on both first launch and repeat visits.
+- **Key Value**: Removes network wait times when tapping REM, City, Street, and House dropdowns in the `"?"` screen while keeping the address database fresh from `ztoe.com.ua`.
 
 ---
 
 ## 2. User Experience & Visual Design
 
 - **Key User Flows**:
-  1. **First-Launch Onboarding Flow**:
-     - On a fresh launch (`queue == ""`, no custom status text, no active emergency outage), the Main screen and bottom dock are dimmed (`15%` opacity, non-interactive).
-     - A centered overlay presents the orange `"Виберіть чергу"` / `"Select queue"` button (`min-w-[260px]`, `#FF5E3A`, subtitle `"Житомиробленерго (ZTOE)"`) above the `Auto | English | Українська` segmented switch.
-     - Tapping the button opens the Settings tab and automatically launches the full-screen `"?"` Address Lookup modal.
-     - Once the user confirms an address or selects a queue for the first time, the app immediately navigates back to the Main screen (`selectedPage = 0`).
-  2. **Full-Screen `"?"` Address Lookup & Manual Search Flow**:
-     - Opens a full-screen `#141A29` modal containing:
-       1. **Block 1 — Search by Address (`"Пошук черги за адресою"` / `"Find Queue by Address"`)**: Boxed with an expanded `2px` (`2.dp`) `white/25` border and 4 stacked dropdowns (`РЕМ`, `Населений пункт`, `Вулиця`, `Будинок`). Street (`"Оберіть вулицю"` / `"Select street"`) and House (`"Оберіть будинок"` / `"Select house"`) start unselected on first launch and persist in `UserSettings` (`selectedAddressQuery`) once confirmed.
-       2. **Block 2 — Manual Search Heading**: `"Пошук вручну"` / `"Manual search"`.
-       3. **Block 3 — Steps 1–4**: Numbered instructions (Step 1 URL without a trailing period).
-  3. **No-Queue Building Display Flow (`вул. Київська, буд. 104`)**:
-     - Sets `queue = ""` and `customQueueStatusText = "В цей час не вимикається, за винятком випадків аварійних відключень"`.
-     - Top header queue badge is hidden; formatted address wraps onto a new line right after the city (`"Житомирський РЕМ, м. Житомир,\nвул. Київська, буд. 104"`).
-     - Main countdown shows `"--:--:--"` (hiding the `"--:-- - --:--"` slot range line), and the 24-hour Drum Chart renders all 24 hours with light internal squares (`POWER_ON`).
-  4. **Emergency Outage Detection & Overlap Flow**:
-     - Parses ZTOE `pw_accidents` JSON and emergency HTML tables for the user's `selectedAddressQuery`.
-     - Renders an Emergency Outage banner on the Main screen with start time (`Початок`) and estimated restoration time (`Орієнтовне відновлення`).
-     - Merges emergency half-hour slots (`POWER_OFF`, `isEmergency = true`) into Today and Tomorrow schedules so the Main countdown, 24h Drum Chart, Today/Tomorrow interval lists, and Small/Big Home Screen Widgets reflect the combined outage window.
-     - Today/Tomorrow list headers dynamically read `"Години відключень на сьогодні:"` / `"Blackout hours for today:"` and `"Години відключень на завтра:"` / `"Blackout hours for tomorrow:"`, with a fixed `20x20` leading indicator container (`"!"` inside an orange circle for emergency intervals, or a centered `10x10` orange dot for regular intervals) so all timeslot strings align horizontally.
+  1. **First Launch (`"Виберіть чергу"` Screen)**:
+     - While the user is on the initial screen, the background indexer immediately fetches all 19 REMs, prefetches the full street list for default `м. Житомир` (`rem_id=4`, `naspunkt_id=16657`), and prefetches settlements for all REMs using bounded parallel requests.
+     - By the time the user taps `"Виберіть чергу"` and opens the `"?"` modal, the REM, City (`м. Житомир`), and Street dropdowns are already populated and open with zero delay.
+  2. **Switching REM or City in `"?"` Screen**:
+     - Selecting any REM immediately displays its pre-indexed cities/settlements from the in-memory/disk cache (`0 ms`), and immediately triggers a background prefetch of the first/selected settlement's streets before the user even taps the Street dropdown.
+     - Selecting any Street immediately displays any cached houses (`0 ms`) and fetches/updates the street's house & queue table in the background.
+  3. **Re-entering `"?"` Screen**:
+     - Cached REMs, Cities, Streets, and Houses appear immediately with no flicker or empty-list delay, while the background refresh silently updates the cache if `ztoe.com.ua` returns changes.
+- **Visual Identity & Theme**:
+  - Strictly preserves the existing Workbench UI, colors (`#FF5E3A`, `#141A29`), typography, button positions, and captions without any visual modifications.
 
 ---
 
 ## 3. Key Product Decisions & Trade-Offs
 
-- **Decision 1: Queue Preservation Safeguard on Live Refreshes (`5.2 -> 3.2` Fix)**
-  - *Chosen Approach*: When `checkAddressOnZtoeWebsite` and `loadSchedules` re-check `selectedAddressQuery` against `/unhooking-search.php`, live HTML table rows are only allowed to assign or change `settings.queue` if the house previously had **no queue** (`localMatch.queue.isEmpty()` / `currentSettings.queue.isBlank()`). If a house has both a queue row and a no-outage status row in the table (such as `буд. 104`), the no-outage status row takes precedence.
-  - *Why*: ZTOE's live HTML lookup can return multi-row sub-tables where a commercial sub-meter row (`3.2`) appears alongside a residential building (`5.2`). Preserving the directory-verified queue prevents the user's selected queue (`5.2`) from unexpectedly flipping to `3.2` on refresh.
-
-- **Decision 2: Priority Merging of Emergency Outages (`applyEmergencyOutageToSchedule`)**
-  - *Chosen Approach*: Apply `applyEmergencyOutageToSchedule` to both Today and Tomorrow schedules before computing `getBlackoutIntervals`, `calculateOutageCountdown`, or rendering the 24-hour Drum Chart and Glance Widgets. Even when an emergency outage coincides with an existing scheduled `POWER_OFF` slot, `isEmergency = true` is propagated onto the slot and merged interval.
-  - *Why*: Ensures that cross-midnight and overlapping emergency outages produce a single continuous countdown to the true power restoration time and display the `"!"` indicator in the Today/Tomorrow interval list.
-
-- **Decision 3: State-Transition Deduplication for Emergency Notifications**
-  - *Chosen Approach*: `checkAndTriggerEmergencyOutageAlert` tracks `emergency_detect_${id}_${startTime}_${estimatedRestoreTime}` and `emergency_restore_${id}_${startTime}` in `AlertRegistry`.
-  - *Why*: Guarantees the user receives exactly one notification when an emergency outage starts, zero duplicate notifications on periodic refreshes while it remains active, and one notification when power is restored.
+- **Decision 1: Stale-While-Revalidate + Persistent Disk Cache**
+  - *Chosen Approach*: Hydrate the in-memory address lookup maps from persistent disk storage on startup and serve cached lists immediately to the UI while refreshing in the background.
+  - *Why*: Guarantees `0 ms` dropdown opening latency after the initial background prefetch, works seamlessly across app restarts, and still honors the requirement to refresh REMs, Cities, Streets, and Houses when entering the `"?"` screen without blocking the UI thread.
+  - *Alternatives Considered*: Blocking the dropdown on a fresh network request every time `"?"` opens, which causes noticeable delays on mobile networks.
+- **Decision 2: Priority-Ordered Bounded Parallel Prefetching on Launch**
+  - *Chosen Approach*:
+    - **Priority 1 (Immediate)**: Fetch all 19 REMs + settlements for the active/default REM (`Житомирський РЕМ` + user's saved REM) + streets for the active/default settlement (`м. Житомир` + user's saved settlement) + houses for the user's saved street.
+    - **Priority 2 (Background Batch)**: Prefetch settlement lists for the remaining 18 REMs with bounded concurrency (e.g., 4 concurrent requests) so every REM's city list is ready in memory and persisted on disk within ~1.5 seconds of app launch without overloading the device or `ztoe.com.ua`.
+  - *Why*: Ensures the most likely dropdowns (`Житомирський РЕМ` -> `м. Житомир` -> all streets) are ready in under 500 ms, while all 19 REMs' city lists finish indexing right behind them.
 
 ---
 
 ## 4. Technical Architecture & Data Strategy *(Technical Reference)*
 
-- **Architecture & Data Flow Diagram**:
+- **Architecture & Component Diagram**:
 
 ```
-┌────────────────────────────────────────────────────────────────────────────┐
-│                ZTOE Website (/unhooking-search.php)                        │
-│   [Schedule Leaf Tables] · [Address Lookup POST] · [pw_accidents JSON]     │
-└───────────────┬───────────────────────┬────────────────────────┬───────────┘
-                │                       │                        │
-                ▼                       ▼                        ▼
-┌────────────────────────────────────────────────────────────────────────────┐
-│         ZtoeParser & ZtoeAddressLookup (Web TS & Android Kotlin)           │
-│  • Single-pass 12-queue 48-slot parser + ETag / HTTP 304 cache             │
-│  • Address directory (РЕМ -> Settlement -> Street -> House) + live check   │
-│  • Queue 5.2 preservation guard + No-Queue house (буд. 104) handler        │
-│  • pw_accidents & HTML emergency matcher -> EmergencyOutageInfo            │
-└───────────────┬────────────────────────────────────────────────────────────┘
-                │
-                ▼
-┌────────────────────────────────────────────────────────────────────────────┐
-│           applyEmergencyOutageToSchedule (Today & Tomorrow)                │
-│  • Overrides overlapping half-hour slots with POWER_OFF & isEmergency=true │
-│  • Propagates isEmergency into merged BlackoutIntervals / DetailedInterval │
-└───────┬───────────────────────┬────────────────────────┬───────────────────┘
-        │                       │                        │
-        ▼                       ▼                        ▼
-┌───────────────────┐ ┌────────────────────────┐ ┌───────────────────────────┐
-│ MainScreen &      │ │ SettingsScreen &       │ │ BlackoutGlanceWidget &    │
-│ First-Launch UX   │ │ Full-Screen "?" Modal  │ │ NotificationScheduler     │
-│ • Unselected Lock │ │ • 2dp bordered Search  │ │ • Merged Widget Countdown │
-│ • No-Queue Card   │ │   by Address block     │ │ • 24h Drum Chart Parity   │
-│ • Emergency Card  │ │ • Persistent 4 fields  │ │ • 1x Detect & 1x Restore  │
-│ • 20x20 "!" List  │ │ • Auto-return to Main  │ │   Emergency Notifications │
-└───────────────────┘ └────────────────────────┘ └───────────────────────────┘
+┌───────────────────────────────────────────────────────────────────────────┐
+│                         Application Startup                               │
+│         (Main Web Workbench Mount / Android Navigation Launch)            │
+└─────────────────────────────────────┬─────────────────────────────────────┘
+                                      │
+                                      ▼
+┌───────────────────────────────────────────────────────────────────────────┐
+│                Address Indexer & Persistent Cache Layer                   │
+│                                                                           │
+│  1. Hydrate In-Memory Maps from Disk Cache (0 ms synchronous/fast read)   │
+│     • REMs Index             • Settlements by REM ID                      │
+│     • Streets by City ID     • Houses & Queues by Street ID               │
+│                                                                           │
+│  2. Priority-1 Background Prefetch (Active / Default Address Path)        │
+│     • All 19 REMs + Active REM Cities + Active City Streets + Saved House │
+│                                                                           │
+│  3. Priority-2 Background Batch Prefetch (All 19 REMs' Cities)            │
+│     • Bounded concurrency (4 workers) -> Persist to Disk Cache            │
+└─────────────────────────────────────┬─────────────────────────────────────┘
+                                      │
+                                      ▼
+┌───────────────────────────────────────────────────────────────────────────┐
+│                     "?" Address Lookup Modal (Settings)                   │
+│                                                                           │
+│  • Opens Dropdowns Immediately from Pre-Indexed In-Memory Cache (0 ms)    │
+│  • On Modal Open: Silent Background Revalidation (Stale-While-Revalidate) │
+│  • On REM/City Change: Instant Cache Read + Predictive Next-Level Fetch   │
+└───────────────────────────────────────────────────────────────────────────┘
 ```
 
-- **Data Model Extensions (`UserSettings`, `BlackoutSlot`, `BlackoutInterval`)**:
-  - `EmergencyOutageInfo`: `id`, `remName`, `settlementName`, `streetName`, `house`, `outageType`, `startTime` (`"DD.MM.YYYY HH:MM"`), `estimatedRestoreTime` (`"DD.MM.YYYY HH:MM"`).
-  - `SelectedAddressQuery`: `remId`, `settlementId`, `streetId`, `house`.
-  - `UserSettings`: Adds `customQueueStatusText: String?`, `selectedAddress: String?`, `selectedAddressQuery: SelectedAddressQuery?`, `activeEmergencyOutage: EmergencyOutageInfo?`, with `queue` defaulting to `""` on fresh install and `language` defaulting to `"system"` (`Auto`).
-  - `BlackoutSlot` & `BlackoutInterval` / `DetailedInterval`: Adds `isEmergency: Boolean = false`.
-
-- **Battery, Performance & Caching Optimizations**:
-  - **Lifecycle & Screen Gated 1-Second Ticker**: Runs only when the app is in the foreground (`Lifecycle.State.RESUMED`), on the Main tab (`selectedPage == 0`), and `isRouletteOpen == false`.
-  - **Midnight Rollover Promotion**: When `00:00` (`Europe/Kyiv`) passes and `cached_schedule_date == yesterdayIsoString(now)`, promotes cached `tomorrow` slots into `today` slots automatically.
-  - **Bounded Caches & Smart Rescheduling**: Caps interval memoization cache at `64` entries and `AlertRegistry` at `100` entries; only updates `WorkManager` periodic work when `refreshIntervalMinutes` changes; syncs `AlarmScheduler` immediately when toggling notifications from the Home Screen Widget.
-
-- **Verification & Unit Testing**:
-  - Port the complete `ztoeAddressLookup.ts` / `ZtoeAddressLookup.kt` module and update `MainScreen`, `SettingsScreen`, `BlackoutAppNavigation`, `BlackoutGlanceWidget`, `ScheduleRepository`, `SettingsRepository`, and `ZtoeParser` across both `/src` and `/android`.
-  - Update `CHANGELOG.md` and `scripts/generate_android_project.cjs` to sync `src/data/androidProjectFiles.ts` and `/public/Android-ZTBlackoutPreWarning.zip`.
-  - Add unit test suites in `tests/unit.test.ts` and `android/app/src/test/java/ua/blackout/prewarning/ZtoeParserTest.kt` covering all 10 checklist items from `ANDROID_UPDATE_SPEC.md` (First Launch zero-state & overlay, `"?"` modal defaults & persistence, Queue `5.2` preservation on `буд. 77`, No-Queue house `буд. 104`, Emergency outage priority overlap & notifications, `"!"` indicator alignment, and battery/caching optimizations).
+- **Data Model & State**:
+  - **In-Memory Maps**:
+    - `cachedRems`: List of all 19 REM records.
+    - `dynamicSettlementsByRem`: Map of `remId -> List<Settlement>`.
+    - `dynamicStreetsBySettlement`: Map of `settlementId -> List<Street>`.
+    - `dynamicHousesByStreet`: Map of `streetId -> List<HouseRecord>`.
+  - **Persistent Disk Storage**:
+    - Serialized JSON snapshot stored in `localStorage` (Web) and dedicated `SharedPreferences` (`"zt_address_index_cache_v1"` on Android), automatically hydrated on initialization and updated whenever new lists are fetched.
+    - Bounded house-table cache (retaining the most recently accessed street house tables) to keep disk footprint compact while keeping all REMs, all settlements, and active city street lists cached in full.
+- **Interactive Component & State Mapping**:
+  - **Startup Hook**: Invokes `prefetchAddressIndexInBackground(siteUrl, savedAddressQuery)` once on app startup in both Web and Android.
+  - **Modal Entry (`"?"` Window)**: Reads pre-indexed lists immediately into component state so dropdowns open without delay, then triggers background revalidation (`forceRefresh = true`) that updates state and disk cache seamlessly.
+  - **Unit Tests**: Adds unit tests verifying disk cache hydration/persistence, startup prefetching of REMs/cities/active city streets, and zero-delay synchronous lookup after indexing.

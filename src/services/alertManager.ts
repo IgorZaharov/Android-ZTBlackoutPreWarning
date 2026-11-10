@@ -25,6 +25,7 @@ export const DEFAULT_SETTINGS: UserSettings = {
   refreshIntervalMinutes: 30,
   advanceNoticeMinutes: 15,
   notificationsEnabled: true,
+  emergencyNotificationsEnabled: true,
   soundEnabled: true,
   vibrationEnabled: true,
   prevSoundEnabled: true,
@@ -41,8 +42,13 @@ export function loadUserSettings(): UserSettings {
       const raw = localStorage.getItem(SETTINGS_KEY);
       if (raw) {
         const parsed = JSON.parse(raw);
-        const merged: UserSettings = { ...DEFAULT_SETTINGS, ...parsed };
-        if (!merged.notificationsEnabled) {
+        const merged: UserSettings = {
+          ...DEFAULT_SETTINGS,
+          ...parsed,
+          emergencyNotificationsEnabled: parsed.emergencyNotificationsEnabled ?? true
+        };
+        const anyAlertsEnabled = Boolean(merged.notificationsEnabled || merged.emergencyNotificationsEnabled);
+        if (!anyAlertsEnabled) {
           merged.soundEnabled = false;
           merged.vibrationEnabled = false;
         }
@@ -59,14 +65,17 @@ export function loadUserSettings(): UserSettings {
 
 export function saveUserSettings(settings: UserSettings): void {
   try {
+    const emergencyEnabled = settings.emergencyNotificationsEnabled ?? true;
+    const anyAlertsEnabled = Boolean(settings.notificationsEnabled || emergencyEnabled);
     const normalized: UserSettings = {
       ...settings,
-      soundEnabled: settings.notificationsEnabled ? settings.soundEnabled : false,
-      vibrationEnabled: settings.notificationsEnabled ? settings.vibrationEnabled : false,
-      prevSoundEnabled: settings.notificationsEnabled
+      emergencyNotificationsEnabled: emergencyEnabled,
+      soundEnabled: anyAlertsEnabled ? settings.soundEnabled : false,
+      vibrationEnabled: anyAlertsEnabled ? settings.vibrationEnabled : false,
+      prevSoundEnabled: anyAlertsEnabled
         ? settings.soundEnabled
         : (settings.prevSoundEnabled ?? true),
-      prevVibrationEnabled: settings.notificationsEnabled
+      prevVibrationEnabled: anyAlertsEnabled
         ? settings.vibrationEnabled
         : (settings.prevVibrationEnabled ?? true)
     };
@@ -80,33 +89,93 @@ export function saveUserSettings(settings: UserSettings): void {
 }
 
 /**
- * Toggles master notifications ON/OFF:
- * - Turning OFF saves current sound & vibration states and sets both to false (disabled).
- * - Turning ON restores sound & vibration to their previous states.
+ * Toggles master notifications ON/OFF (from widget, settings, or main screen):
+ * - Does NOT turn off emergencyNotificationsEnabled.
+ * - Sound & Vibration remain active if emergencyNotificationsEnabled is ON, and save/disable only when both main and emergency notifications are OFF.
  */
 export function toggleMasterNotifications(settings: UserSettings, enabled?: boolean): UserSettings {
   const targetEnabled = enabled !== undefined ? enabled : !settings.notificationsEnabled;
-  if (!targetEnabled) {
-    const soundToSave = settings.notificationsEnabled
+  const emergencyEnabled = settings.emergencyNotificationsEnabled ?? true;
+  const anyWasEnabled = Boolean(settings.notificationsEnabled || emergencyEnabled);
+  const anyNowEnabled = Boolean(targetEnabled || emergencyEnabled);
+
+  if (!anyNowEnabled) {
+    const soundToSave = anyWasEnabled
       ? settings.soundEnabled
       : (settings.prevSoundEnabled ?? true);
-    const vibeToSave = settings.notificationsEnabled
+    const vibeToSave = anyWasEnabled
       ? settings.vibrationEnabled
       : (settings.prevVibrationEnabled ?? true);
     return {
       ...settings,
       notificationsEnabled: false,
+      emergencyNotificationsEnabled: emergencyEnabled,
       soundEnabled: false,
       vibrationEnabled: false,
       prevSoundEnabled: soundToSave,
       prevVibrationEnabled: vibeToSave
     };
+  } else if (!anyWasEnabled && anyNowEnabled) {
+    return {
+      ...settings,
+      notificationsEnabled: targetEnabled,
+      emergencyNotificationsEnabled: emergencyEnabled,
+      soundEnabled: settings.prevSoundEnabled ?? true,
+      vibrationEnabled: settings.prevVibrationEnabled ?? true
+    };
   } else {
     return {
       ...settings,
-      notificationsEnabled: true,
+      notificationsEnabled: targetEnabled,
+      emergencyNotificationsEnabled: emergencyEnabled,
+      soundEnabled: settings.soundEnabled,
+      vibrationEnabled: settings.vibrationEnabled,
+      prevSoundEnabled: settings.soundEnabled,
+      prevVibrationEnabled: settings.vibrationEnabled
+    };
+  }
+}
+
+/**
+ * Toggles emergency power outages notifications ON/OFF independently from main notifications,
+ * while sharing the Sound and Vibration switches.
+ */
+export function toggleEmergencyNotifications(settings: UserSettings, enabled?: boolean): UserSettings {
+  const currentEmergency = settings.emergencyNotificationsEnabled ?? true;
+  const targetEmergency = enabled !== undefined ? enabled : !currentEmergency;
+  const anyWasEnabled = Boolean(settings.notificationsEnabled || currentEmergency);
+  const anyNowEnabled = Boolean(settings.notificationsEnabled || targetEmergency);
+
+  if (!anyNowEnabled) {
+    const soundToSave = anyWasEnabled
+      ? settings.soundEnabled
+      : (settings.prevSoundEnabled ?? true);
+    const vibeToSave = anyWasEnabled
+      ? settings.vibrationEnabled
+      : (settings.prevVibrationEnabled ?? true);
+    return {
+      ...settings,
+      emergencyNotificationsEnabled: false,
+      soundEnabled: false,
+      vibrationEnabled: false,
+      prevSoundEnabled: soundToSave,
+      prevVibrationEnabled: vibeToSave
+    };
+  } else if (!anyWasEnabled && anyNowEnabled) {
+    return {
+      ...settings,
+      emergencyNotificationsEnabled: targetEmergency,
       soundEnabled: settings.prevSoundEnabled ?? true,
       vibrationEnabled: settings.prevVibrationEnabled ?? true
+    };
+  } else {
+    return {
+      ...settings,
+      emergencyNotificationsEnabled: targetEmergency,
+      soundEnabled: settings.soundEnabled,
+      vibrationEnabled: settings.vibrationEnabled,
+      prevSoundEnabled: settings.soundEnabled,
+      prevVibrationEnabled: settings.vibrationEnabled
     };
   }
 }
@@ -297,7 +366,8 @@ export function checkAndTriggerAdvanceAlert(
  * Triggers a state-transition notification for Emergency Outages ("Аварійне відключення"):
  * 1) Fires once when an emergency outage is first detected for the user's selected house upon refresh.
  * 2) Fires once when an active emergency outage is cleared/restored upon refresh.
- * Controlled by the existing Notifications switch (settings.notificationsEnabled).
+ * Controlled independently by settings.emergencyNotificationsEnabled (default true),
+ * working independently from the main settings.notificationsEnabled switch.
  */
 export function checkAndTriggerEmergencyOutageAlert(
   prevOutage: EmergencyOutageInfo | null | undefined,
@@ -306,11 +376,14 @@ export function checkAndTriggerEmergencyOutageAlert(
   lang: 'uk' | 'en',
   onNotificationFired?: (record: NotificationRecord) => void
 ): NotificationRecord | null {
-  if (!settings.notificationsEnabled) {
+  const emergencySwitchEnabled = settings.emergencyNotificationsEnabled ?? true;
+  if (!emergencySwitchEnabled) {
     return null;
   }
 
   const notifiedSet = loadNotifiedSlotIds();
+  const shouldPlaySound = Boolean(settings.soundEnabled);
+  const shouldVibrate = Boolean(settings.vibrationEnabled);
 
   // Case 1: Emergency outage detected (transition from none or different outage ID -> active)
   if (nextOutage && (!prevOutage || prevOutage.id !== nextOutage.id)) {
@@ -354,10 +427,10 @@ export function checkAndTriggerEmergencyOutageAlert(
 
     appendAlertLog(record);
 
-    if (settings.soundEnabled) {
+    if (shouldPlaySound) {
       playNotificationTone();
     }
-    if (settings.vibrationEnabled) {
+    if (shouldVibrate) {
       triggerDeviceVibration();
     }
     if (onNotificationFired) {
@@ -395,10 +468,10 @@ export function checkAndTriggerEmergencyOutageAlert(
 
     appendAlertLog(record);
 
-    if (settings.soundEnabled) {
+    if (shouldPlaySound) {
       playNotificationTone();
     }
-    if (settings.vibrationEnabled) {
+    if (shouldVibrate) {
       triggerDeviceVibration();
     }
     if (onNotificationFired) {

@@ -3,7 +3,7 @@
 <!-- LATEST_RELEASE_START -->
 ## Завантажити застосунок на телефон (Android)
 
-**[Завантажити останню версію APK (v1.3.3)](https://github.com/IgorZaharov/Android-ZTBlackoutPreWarning/releases/latest/download/app-release.apk)**
+**[Завантажити останню версію APK (v1.3.4)](https://github.com/IgorZaharov/Android-ZTBlackoutPreWarning/releases/latest/download/app-release.apk)**
 
 Як встановити:
 1. Натисніть на посилання вище на своєму Android-телефоні — файл `app-release.apk` завантажиться автоматично.

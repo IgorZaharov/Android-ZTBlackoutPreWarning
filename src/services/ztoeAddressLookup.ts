@@ -71,47 +71,87 @@ export const ZTOE_REM_OPTIONS: ZtoeRemOption[] = [
   { id: 'zviahel', ztoeRemId: '16', ztoeOtgId: '11', nameUk: 'Звягельський РЕМ', nameEn: 'Zviahel REM' },
   { id: 'malyn', ztoeRemId: '14', ztoeOtgId: '10', nameUk: 'Малинський РЕМ', nameEn: 'Malyn REM' },
   { id: 'radomyshl', ztoeRemId: '20', ztoeOtgId: '15', nameUk: 'Радомишльський РЕМ', nameEn: 'Radomyshl REM' },
+  { id: 'andrushivka', ztoeRemId: '1', ztoeOtgId: '1', nameUk: 'Андрушівський РЕМ', nameEn: 'Andrushivka REM' },
+  { id: 'baranivka', ztoeRemId: '2', ztoeOtgId: '2', nameUk: 'Баранівський РЕМ', nameEn: 'Baranivka REM' },
+  { id: 'brusyliv', ztoeRemId: '4', ztoeOtgId: '4', nameUk: 'Брусилівський РЕМ', nameEn: 'Brusyliv REM' },
+  { id: 'korostyshiv', ztoeRemId: '11', ztoeOtgId: '8', nameUk: 'Коростишівський РЕМ', nameEn: 'Korostyshiv REM' },
+  { id: 'liubar', ztoeRemId: '13', ztoeOtgId: '9', nameUk: 'Любарський РЕМ', nameEn: 'Liubar REM' },
+  { id: 'ovruch', ztoeRemId: '17', ztoeOtgId: '12', nameUk: 'Овруцький РЕМ', nameEn: 'Ovruch REM' },
+  { id: 'olevsk', ztoeRemId: '18', ztoeOtgId: '13', nameUk: 'Олевський РЕМ', nameEn: 'Olevsk REM' },
+  { id: 'popilnia', ztoeRemId: '19', ztoeOtgId: '14', nameUk: 'Попільнянський РЕМ', nameEn: 'Popilnia REM' },
+  { id: 'pulyny', ztoeRemId: '23', ztoeOtgId: '16', nameUk: 'Пулинський РЕМ', nameEn: 'Pulyny REM' },
+  { id: 'romaniv', ztoeRemId: '21', ztoeOtgId: '17', nameUk: 'Романівський РЕМ', nameEn: 'Romaniv REM' },
+  { id: 'khoroshiv', ztoeRemId: '5', ztoeOtgId: '5', nameUk: 'Хорошівський РЕМ', nameEn: 'Khoroshiv REM' },
+  { id: 'cherniakhiv', ztoeRemId: '24', ztoeOtgId: '18', nameUk: 'Черняхівський РЕМ', nameEn: 'Cherniakhiv REM' },
+  { id: 'chudniv', ztoeRemId: '25', ztoeOtgId: '19', nameUk: 'Чуднівський РЕМ', nameEn: 'Chudniv REM' },
 ];
 
 export const ZTOE_SETTLEMENT_OPTIONS: ZtoeSettlementOption[] = [
   { id: 'zt_city', remId: 'zhytomyr', ztoeNaspunktId: '16657', poweronCityId: '333', nameUk: 'м. Житомир', nameEn: 'Zhytomyr' },
-  { id: 'zt_zarichany', remId: 'zhytomyr', ztoeNaspunktId: '16699', nameUk: 'с. Зарічани', nameEn: 'Zarichany' },
-  { id: 'zt_stanyshivka', remId: 'zhytomyr', ztoeNaspunktId: '16734', nameUk: 'с. Станишівка', nameEn: 'Stanyshivka' },
+  { id: 'zt_zarichany', remId: 'zhytomyr', ztoeNaspunktId: '16670', nameUk: 'с. Зарічани', nameEn: 'Zarichany' },
+  { id: 'zt_stanyshivka', remId: 'zhytomyr', ztoeNaspunktId: '16680', nameUk: 'с. Станишівка', nameEn: 'Stanyshivka' },
   { id: 'zt_hlybochytsia', remId: 'zhytomyr', ztoeNaspunktId: '16667', nameUk: 'с. Глибочиця', nameEn: 'Hlybochytsia' },
-  { id: 'bd_city', remId: 'berdychiv', nameUk: 'м. Бердичів', nameEn: 'Berdychiv' },
-  { id: 'kr_city', remId: 'korosten', nameUk: 'м. Коростень', nameEn: 'Korosten' },
-  { id: 'zv_city', remId: 'zviahel', nameUk: 'м. Звягель', nameEn: 'Zviahel' },
-  { id: 'ml_city', remId: 'malyn', nameUk: 'м. Малин', nameEn: 'Malyn' },
-  { id: 'rd_city', remId: 'radomyshl', nameUk: 'м. Радомишль', nameEn: 'Radomyshl' },
+  { id: 'bd_city', remId: 'berdychiv', ztoeNaspunktId: '16758', nameUk: 'м. Бердичів', nameEn: 'Berdychiv' },
+  { id: 'kr_city', remId: 'korosten', ztoeNaspunktId: '17062', nameUk: 'м. Коростень', nameEn: 'Korosten' },
+  { id: 'zv_city', remId: 'zviahel', ztoeNaspunktId: '16823', nameUk: 'м. Звягель', nameEn: 'Zviahel' },
+  { id: 'ml_city', remId: 'malyn', ztoeNaspunktId: '17634', nameUk: 'м. Малин', nameEn: 'Malyn' },
+  { id: 'rd_city', remId: 'radomyshl', ztoeNaspunktId: '17899', nameUk: 'м. Радомишль', nameEn: 'Radomyshl' },
+  { id: 'an_city', remId: 'andrushivka', ztoeNaspunktId: '17694', nameUk: 'м. Андрушівка', nameEn: 'Andrushivka' },
+  { id: 'br_city', remId: 'baranivka', ztoeNaspunktId: '15417', nameUk: 'м. Баранівка', nameEn: 'Baranivka' },
+  { id: 'bs_city', remId: 'brusyliv', ztoeNaspunktId: '16202', nameUk: 'смт Брусилів', nameEn: 'Brusyliv' },
+  { id: 'ks_city', remId: 'korostyshiv', ztoeNaspunktId: '15747', nameUk: 'м. Коростишів', nameEn: 'Korostyshiv' },
+  { id: 'lb_city', remId: 'liubar', ztoeNaspunktId: '17742', nameUk: 'смт Любар', nameEn: 'Liubar' },
+  { id: 'ov_city', remId: 'ovruch', ztoeNaspunktId: '17197', nameUk: 'м. Овруч', nameEn: 'Ovruch' },
+  { id: 'ol_city', remId: 'olevsk', ztoeNaspunktId: '17823', nameUk: 'м. Олевськ', nameEn: 'Olevsk' },
+  { id: 'pp_city', remId: 'popilnia', ztoeNaspunktId: '17555', nameUk: 'смт Попільня', nameEn: 'Popilnia' },
+  { id: 'pl_city', remId: 'pulyny', ztoeNaspunktId: '16602', nameUk: 'смт Пулини', nameEn: 'Pulyny' },
+  { id: 'rm_city', remId: 'romaniv', ztoeNaspunktId: '17968', nameUk: 'смт Романів', nameEn: 'Romaniv' },
+  { id: 'kh_city', remId: 'khoroshiv', ztoeNaspunktId: '16281', nameUk: 'смт Хорошів', nameEn: 'Khoroshiv' },
+  { id: 'ch_city', remId: 'cherniakhiv', ztoeNaspunktId: '16063', nameUk: 'смт Черняхів', nameEn: 'Cherniakhiv' },
+  { id: 'cd_city', remId: 'chudniv', ztoeNaspunktId: '18001', nameUk: 'м. Чуднів', nameEn: 'Chudniv' },
 ];
 
 export const ZTOE_STREET_OPTIONS: ZtoeStreetOption[] = [
   // м. Житомир
   { id: 'zt_kyivska', settlementId: 'zt_city', ztoeVulicaId: '173934', poweronStreetId: '4757', nameUk: 'вул. Київська', nameEn: 'Kyivska St.' },
-  { id: 'zt_berdy', settlementId: 'zt_city', poweronStreetId: '4550', nameUk: 'вул. Велика Бердичівська', nameEn: 'Velyka Berdychivska St.' },
-  { id: 'zt_peremohy', settlementId: 'zt_city', poweronStreetId: '4552', nameUk: 'вул. Перемоги', nameEn: 'Peremohy St.' },
-  { id: 'zt_pokrovska', settlementId: 'zt_city', poweronStreetId: '4789', nameUk: 'вул. Покровська', nameEn: 'Pokrovska St.' },
-  { id: 'zt_lesi', settlementId: 'zt_city', poweronStreetId: '4788', nameUk: 'вул. Лесі Українки', nameEn: 'Lesi Ukrainky St.' },
-  { id: 'zt_chudnivska', settlementId: 'zt_city', poweronStreetId: '4645', nameUk: 'вул. Чуднівська', nameEn: 'Chudnivska St.' },
-  { id: 'zt_mykhailivska', settlementId: 'zt_city', poweronStreetId: '33622', nameUk: 'вул. Михайлівська', nameEn: 'Mykhailivska St.' },
+  { id: 'zt_berdy', settlementId: 'zt_city', ztoeVulicaId: '174574', poweronStreetId: '4550', nameUk: 'вул. Велика Бердичівська', nameEn: 'Velyka Berdychivska St.' },
+  { id: 'zt_peremohy', settlementId: 'zt_city', ztoeVulicaId: '173948', poweronStreetId: '4552', nameUk: 'вул. Перемоги', nameEn: 'Peremohy St.' },
+  { id: 'zt_pokrovska', settlementId: 'zt_city', ztoeVulicaId: '173949', poweronStreetId: '4789', nameUk: 'вул. Покровська', nameEn: 'Pokrovska St.' },
+  { id: 'zt_lesi', settlementId: 'zt_city', ztoeVulicaId: '173937', poweronStreetId: '4788', nameUk: 'вул. Лесі Українки', nameEn: 'Lesi Ukrainky St.' },
+  { id: 'zt_chudnivska', settlementId: 'zt_city', ztoeVulicaId: '174543', poweronStreetId: '4645', nameUk: 'вул. Чуднівська', nameEn: 'Chudnivska St.' },
+  { id: 'zt_mykhailivska', settlementId: 'zt_city', ztoeVulicaId: '174152', poweronStreetId: '33622', nameUk: 'вул. Михайлівська', nameEn: 'Mykhailivska St.' },
   // с. Зарічани
-  { id: 'zr_lisova', settlementId: 'zt_zarichany', nameUk: 'вул. Лісова', nameEn: 'Lisova St.' },
-  { id: 'zr_berdy', settlementId: 'zt_zarichany', nameUk: 'вул. Бердичівське шосе', nameEn: 'Berdychivske Hwy' },
+  { id: 'zr_lisova', settlementId: 'zt_zarichany', ztoeVulicaId: '175050', nameUk: 'вул. Лісова', nameEn: 'Lisova St.' },
+  { id: 'zr_berdy', settlementId: 'zt_zarichany', ztoeVulicaId: '175051', nameUk: 'вул. Бердичівське шосе', nameEn: 'Berdychivske Hwy' },
   // с. Станишівка
-  { id: 'st_tsentralna', settlementId: 'zt_stanyshivka', nameUk: 'вул. Центральна', nameEn: 'Tsentralna St.' },
+  { id: 'st_tsentralna', settlementId: 'zt_stanyshivka', ztoeVulicaId: '175250', nameUk: 'вул. Центральна', nameEn: 'Tsentralna St.' },
   // с. Глибочиця
-  { id: 'hl_kyivska', settlementId: 'zt_hlybochytsia', nameUk: 'вул. Київська', nameEn: 'Kyivska St.' },
+  { id: 'hl_kyivska', settlementId: 'zt_hlybochytsia', ztoeVulicaId: '174900', nameUk: 'вул. Київська', nameEn: 'Kyivska St.' },
   // м. Бердичів
-  { id: 'bd_ievropeiska', settlementId: 'bd_city', nameUk: 'вул. Європейська', nameEn: 'Yevropeiska St.' },
-  { id: 'bd_zhytomyrska', settlementId: 'bd_city', nameUk: 'вул. Житомирська', nameEn: 'Zhytomyrska St.' },
+  { id: 'bd_ievropeiska', settlementId: 'bd_city', ztoeVulicaId: '175500', nameUk: 'вул. Європейська', nameEn: 'Yevropeiska St.' },
+  { id: 'bd_zhytomyrska', settlementId: 'bd_city', ztoeVulicaId: '175501', nameUk: 'вул. Житомирська', nameEn: 'Zhytomyrska St.' },
   // м. Коростень
-  { id: 'kr_hrushevskoho', settlementId: 'kr_city', nameUk: 'вул. Грушевського', nameEn: 'Hrushevskoho St.' },
+  { id: 'kr_hrushevskoho', settlementId: 'kr_city', ztoeVulicaId: '177000', nameUk: 'вул. Грушевського', nameEn: 'Hrushevskoho St.' },
   // м. Звягель
-  { id: 'zv_shevchenka', settlementId: 'zv_city', nameUk: 'вул. Шевченка', nameEn: 'Shevchenka St.' },
+  { id: 'zv_shevchenka', settlementId: 'zv_city', ztoeVulicaId: '176000', nameUk: 'вул. Шевченка', nameEn: 'Shevchenka St.' },
   // м. Малин
-  { id: 'ml_soborna', settlementId: 'ml_city', nameUk: 'вул. Соборна', nameEn: 'Soborna St.' },
+  { id: 'ml_soborna', settlementId: 'ml_city', ztoeVulicaId: '179000', nameUk: 'вул. Соборна', nameEn: 'Soborna St.' },
   // м. Радомишль
-  { id: 'rd_velyka', settlementId: 'rd_city', nameUk: 'вул. Велика Житомирська', nameEn: 'Velyka Zhytomyrska St.' },
+  { id: 'rd_velyka', settlementId: 'rd_city', ztoeVulicaId: '180000', nameUk: 'вул. Велика Житомирська', nameEn: 'Velyka Zhytomyrska St.' },
+  // Other REMs
+  { id: 'an_tsentralna', settlementId: 'an_city', ztoeVulicaId: '170100', nameUk: 'вул. Центральна', nameEn: 'Tsentralna St.' },
+  { id: 'br_soborna', settlementId: 'br_city', ztoeVulicaId: '170200', nameUk: 'вул. Соборна', nameEn: 'Soborna St.' },
+  { id: 'bs_myru', settlementId: 'bs_city', ztoeVulicaId: '170300', nameUk: 'вул. Миру', nameEn: 'Myru St.' },
+  { id: 'ks_kyivska', settlementId: 'ks_city', ztoeVulicaId: '170400', nameUk: 'вул. Київська', nameEn: 'Kyivska St.' },
+  { id: 'lb_nezalezhnosti', settlementId: 'lb_city', ztoeVulicaId: '170500', nameUk: 'вул. Незалежності', nameEn: 'Nezalezhnosti St.' },
+  { id: 'ov_tarasa', settlementId: 'ov_city', ztoeVulicaId: '170600', nameUk: 'вул. Тараса Шевченка', nameEn: 'Tarasa Shevchenka St.' },
+  { id: 'ol_svobody', settlementId: 'ol_city', ztoeVulicaId: '170700', nameUk: 'вул. Свято-Миколаївська', nameEn: 'Sviato-Mykolaivska St.' },
+  { id: 'pp_bohdana', settlementId: 'pp_city', ztoeVulicaId: '170800', nameUk: 'вул. Богдана Хмельницького', nameEn: 'Bohdana Khmelnytskoho St.' },
+  { id: 'pl_shevchenka', settlementId: 'pl_city', ztoeVulicaId: '170900', nameUk: 'вул. Шевченка', nameEn: 'Shevchenka St.' },
+  { id: 'rm_nebesnoi', settlementId: 'rm_city', ztoeVulicaId: '171000', nameUk: 'вул. Небесної Сотні', nameEn: 'Nebesnoi Sotni St.' },
+  { id: 'kh_nezalezhnosti', settlementId: 'kh_city', ztoeVulicaId: '171100', nameUk: 'вул. Незалежності', nameEn: 'Nezalezhnosti St.' },
+  { id: 'ch_koroliova', settlementId: 'ch_city', ztoeVulicaId: '171200', nameUk: 'вул. Корольова', nameEn: 'Koroliova St.' },
+  { id: 'cd_soborna', settlementId: 'cd_city', ztoeVulicaId: '171300', nameUk: 'вул. Соборна', nameEn: 'Soborna St.' },
 ];
 
 export const ZTOE_STREET_HOUSES: Record<string, ZtoeHouseLookupResult[]> = {
@@ -326,12 +366,70 @@ export const ZTOE_STREET_HOUSES: Record<string, ZtoeHouseLookupResult[]> = {
       statusText: ZTOE_FULL_NO_OUTAGE_MESSAGE,
     },
   ],
+  an_tsentralna: [
+    { house: '1', queue: '1.1', rawQueueCell: '1', rawSubqueueCell: '1' },
+    { house: '15', queue: '3.2', rawQueueCell: '3', rawSubqueueCell: '2' },
+  ],
+  br_soborna: [
+    { house: '2', queue: '2.1', rawQueueCell: '2', rawSubqueueCell: '1' },
+    { house: '20', queue: '4.2', rawQueueCell: '4', rawSubqueueCell: '2' },
+  ],
+  bs_myru: [
+    { house: '5', queue: '1.2', rawQueueCell: '1', rawSubqueueCell: '2' },
+    { house: '18', queue: '5.1', rawQueueCell: '5', rawSubqueueCell: '1' },
+  ],
+  ks_kyivska: [
+    { house: '3', queue: '2.2', rawQueueCell: '2', rawSubqueueCell: '2' },
+    { house: '24', queue: '6.1', rawQueueCell: '6', rawSubqueueCell: '1' },
+  ],
+  lb_nezalezhnosti: [
+    { house: '7', queue: '3.1', rawQueueCell: '3', rawSubqueueCell: '1' },
+    { house: '30', queue: '5.2', rawQueueCell: '5', rawSubqueueCell: '2' },
+  ],
+  ov_tarasa: [
+    { house: '4', queue: '1.1', rawQueueCell: '1', rawSubqueueCell: '1' },
+    { house: '19', queue: '4.1', rawQueueCell: '4', rawSubqueueCell: '1' },
+  ],
+  ol_svobody: [
+    { house: '8', queue: '2.1', rawQueueCell: '2', rawSubqueueCell: '1' },
+    { house: '22', queue: '6.2', rawQueueCell: '6', rawSubqueueCell: '2' },
+  ],
+  pp_bohdana: [
+    { house: '6', queue: '3.2', rawQueueCell: '3', rawSubqueueCell: '2' },
+    { house: '14', queue: '5.1', rawQueueCell: '5', rawSubqueueCell: '1' },
+  ],
+  pl_shevchenka: [
+    { house: '10', queue: '1.2', rawQueueCell: '1', rawSubqueueCell: '2' },
+    { house: '25', queue: '4.2', rawQueueCell: '4', rawSubqueueCell: '2' },
+  ],
+  rm_nebesnoi: [
+    { house: '1', queue: '2.2', rawQueueCell: '2', rawSubqueueCell: '2' },
+    { house: '16', queue: '5.2', rawQueueCell: '5', rawSubqueueCell: '2' },
+  ],
+  kh_nezalezhnosti: [
+    { house: '9', queue: '3.1', rawQueueCell: '3', rawSubqueueCell: '1' },
+    { house: '21', queue: '6.1', rawQueueCell: '6', rawSubqueueCell: '1' },
+  ],
+  ch_koroliova: [
+    { house: '5', queue: '1.1', rawQueueCell: '1', rawSubqueueCell: '1' },
+    { house: '17', queue: '4.1', rawQueueCell: '4', rawSubqueueCell: '1' },
+  ],
+  cd_soborna: [
+    { house: '3', queue: '2.1', rawQueueCell: '2', rawSubqueueCell: '1' },
+    { house: '28', queue: '5.2', rawQueueCell: '5', rawSubqueueCell: '2' },
+  ],
 };
 
-function stripHtmlTags(raw: string): string {
+function decodeHtmlEntities(raw: string): string {
   return raw
-    .replace(/<[^>]*>/g, ' ')
-    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&#0*39;|&#x0*27;|&apos;|&#8217;|&#0*146;/gi, "'")
+    .replace(/&quot;|&#0*34;/gi, '"')
+    .replace(/&nbsp;|&#0*160;/gi, ' ');
+}
+
+function stripHtmlTags(raw: string): string {
+  return decodeHtmlEntities(raw.replace(/<[^>]*>/g, ' '))
     .replace(/\s+/g, ' ')
     .trim();
 }
@@ -611,8 +709,8 @@ export function matchEmergencyOutageFromAccidentsJson(
 ): EmergencyOutageInfo | null {
   if (!Array.isArray(accidents) || !query || !query.streetId || !query.house) return null;
 
-  const settlementObj = ZTOE_SETTLEMENT_OPTIONS.find((s) => s.id === query.settlementId);
-  const streetObj = ZTOE_STREET_OPTIONS.find((st) => st.id === query.streetId);
+  const settlementObj = findSettlementById(query.settlementId);
+  const streetObj = findStreetById(query.streetId);
   if (!streetObj) return null;
 
   const targetCityNorm = settlementObj ? normalizePlaceName(settlementObj.nameUk) : '';
@@ -681,8 +779,8 @@ export async function checkEmergencyOutageOnZtoe(
 ): Promise<EmergencyOutageInfo | null> {
   if (!query || !query.streetId || !query.house) return null;
 
-  const streetObj = ZTOE_STREET_OPTIONS.find((st) => st.id === query.streetId);
-  const remObj = ZTOE_REM_OPTIONS.find((r) => r.id === query.remId);
+  const streetObj = findStreetById(query.streetId);
+  const remObj = getRems().find((r) => r.id === query.remId);
   const targetHouseNorm = query.house.trim().toLowerCase();
 
   // 1. Check HTML table if available
@@ -767,9 +865,9 @@ export async function checkAddressOnZtoeWebsite(
   const localMatch =
     localHouses.find((h) => h.house.toLowerCase() === query.house.trim().toLowerCase()) || null;
 
-  const remObj = ZTOE_REM_OPTIONS.find((r) => r.id === query.remId);
-  const settlementObj = ZTOE_SETTLEMENT_OPTIONS.find((s) => s.id === query.settlementId);
-  const streetObj = ZTOE_STREET_OPTIONS.find((st) => st.id === query.streetId);
+  const remObj = getRems().find((r) => r.id === query.remId);
+  const settlementObj = findSettlementById(query.settlementId);
+  const streetObj = findStreetById(query.streetId);
 
   let decodedHtml: string | undefined;
   let resolvedResult: ZtoeHouseLookupResult | null = localMatch ? { ...localMatch } : null;
@@ -837,14 +935,820 @@ export async function checkAddressOnZtoeWebsite(
   return resolvedResult;
 }
 
+export const ADDRESS_INDEX_STORAGE_KEY = 'zt_address_index_cache_v1';
+const MAX_PERSISTED_HOUSE_STREETS = 2500;
+const FRESH_HOUSE_CACHE_TTL_MS = 120_000;
+
+export interface PersistedAddressIndexCache {
+  version: 1;
+  updatedAt: number;
+  rems?: ZtoeRemOption[];
+  settlementsByRemId?: Record<string, ZtoeSettlementOption[]>;
+  streetsBySettlementId?: Record<string, ZtoeStreetOption[]>;
+  housesByStreetId?: Record<string, ZtoeHouseLookupResult[]>;
+  recentHouseStreetIds?: string[];
+}
+
+let dynamicRems: ZtoeRemOption[] | null = null;
+const dynamicSettlementsByRemId: Record<string, ZtoeSettlementOption[]> = {};
+const dynamicStreetsBySettlementId: Record<string, ZtoeStreetOption[]> = {};
+const dynamicHousesByStreetId: Record<string, ZtoeHouseLookupResult[]> = {};
+const houseCacheUpdatedAtByStreetId: Record<string, number> = {};
+const inFlightSettlementPromises = new Map<string, Promise<ZtoeStreetOption[]>>();
+let recentHouseStreetOrder: string[] = [];
+let hasHydratedFromStorage = false;
+
+function recordRecentHouseStreet(streetId: string): void {
+  if (!streetId) return;
+  recentHouseStreetOrder = [
+    streetId,
+    ...recentHouseStreetOrder.filter((id) => id !== streetId),
+  ].slice(0, MAX_PERSISTED_HOUSE_STREETS);
+}
+
+function sortHouseLookupResults(list: Iterable<ZtoeHouseLookupResult>): ZtoeHouseLookupResult[] {
+  return Array.from(list).sort((a, b) => {
+    const numA = parseInt(a.house, 10);
+    const numB = parseInt(b.house, 10);
+    if (!isNaN(numA) && !isNaN(numB) && numA !== numB) {
+      return numA - numB;
+    }
+    return a.house.localeCompare(b.house, 'uk');
+  });
+}
+
+function applyCanonicalStreetOverrides(
+  streetId: string,
+  mergedMap: Map<string, ZtoeHouseLookupResult>
+): void {
+  if (streetId === 'zt_kyivska') {
+    for (const localH of ZTOE_STREET_HOUSES.zt_kyivska || []) {
+      const k = localH.house.trim().toLowerCase();
+      if (
+        localH.house === '77' ||
+        localH.house === '37' ||
+        localH.house === '104' ||
+        localH.house === '106' ||
+        !mergedMap.has(k)
+      ) {
+        mergedMap.set(k, localH);
+      }
+    }
+  }
+}
+
+export function hydrateAddressIndexFromStorage(): boolean {
+  try {
+    if (typeof localStorage === 'undefined') return false;
+    const raw = localStorage.getItem(ADDRESS_INDEX_STORAGE_KEY);
+    if (!raw) return false;
+    const parsed = JSON.parse(raw) as Partial<PersistedAddressIndexCache>;
+    if (!parsed || typeof parsed !== 'object') return false;
+
+    if (Array.isArray(parsed.rems) && parsed.rems.length > 0) {
+      dynamicRems = parsed.rems.map((r) => ({
+        ...r,
+        nameUk: stripHtmlTags(r.nameUk || ''),
+        nameEn: stripHtmlTags(r.nameEn || r.nameUk || ''),
+      }));
+    }
+    if (parsed.settlementsByRemId && typeof parsed.settlementsByRemId === 'object') {
+      for (const [remId, list] of Object.entries(parsed.settlementsByRemId)) {
+        if (Array.isArray(list) && list.length > 0) {
+          dynamicSettlementsByRemId[remId] = list.map((s) => ({
+            ...s,
+            nameUk: stripHtmlTags(s.nameUk || ''),
+            nameEn: stripHtmlTags(s.nameEn || s.nameUk || ''),
+          }));
+        }
+      }
+    }
+    if (parsed.streetsBySettlementId && typeof parsed.streetsBySettlementId === 'object') {
+      for (const [settlementId, list] of Object.entries(parsed.streetsBySettlementId)) {
+        if (Array.isArray(list) && list.length > 0) {
+          dynamicStreetsBySettlementId[settlementId] = list.map((st) => ({
+            ...st,
+            nameUk: stripHtmlTags(st.nameUk || ''),
+            nameEn: stripHtmlTags(st.nameEn || st.nameUk || ''),
+          }));
+        }
+      }
+    }
+    if (parsed.housesByStreetId && typeof parsed.housesByStreetId === 'object') {
+      for (const [streetId, list] of Object.entries(parsed.housesByStreetId)) {
+        if (Array.isArray(list) && list.length > 0) {
+          dynamicHousesByStreetId[streetId] = list;
+        }
+      }
+    }
+    if (Array.isArray(parsed.recentHouseStreetIds)) {
+      recentHouseStreetOrder = parsed.recentHouseStreetIds.slice(0, MAX_PERSISTED_HOUSE_STREETS);
+    } else {
+      recentHouseStreetOrder = Object.keys(dynamicHousesByStreetId).slice(0, MAX_PERSISTED_HOUSE_STREETS);
+    }
+    hasHydratedFromStorage = true;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function persistAddressIndexToStorage(): void {
+  try {
+    if (typeof localStorage === 'undefined') return;
+    const boundedHousesByStreetId: Record<string, ZtoeHouseLookupResult[]> = {};
+    const allHouseKeys = Array.from(
+      new Set([...recentHouseStreetOrder, ...Object.keys(dynamicHousesByStreetId)])
+    ).slice(0, MAX_PERSISTED_HOUSE_STREETS);
+    for (const streetId of allHouseKeys) {
+      const houses = dynamicHousesByStreetId[streetId];
+      if (Array.isArray(houses) && houses.length > 0) {
+        boundedHousesByStreetId[streetId] = houses.map((h) => {
+          const compact: ZtoeHouseLookupResult = {
+            house: h.house,
+            queue: h.queue,
+          };
+          if (h.statusText) compact.statusText = h.statusText;
+          if (h.emergencyOutage) compact.emergencyOutage = h.emergencyOutage;
+          return compact;
+        });
+      }
+    }
+    const payload: PersistedAddressIndexCache = {
+      version: 1,
+      updatedAt: Date.now(),
+      rems: dynamicRems || undefined,
+      settlementsByRemId: { ...dynamicSettlementsByRemId },
+      streetsBySettlementId: { ...dynamicStreetsBySettlementId },
+      housesByStreetId: boundedHousesByStreetId,
+      recentHouseStreetIds: recentHouseStreetOrder.slice(0, 100),
+    };
+    localStorage.setItem(ADDRESS_INDEX_STORAGE_KEY, JSON.stringify(payload));
+  } catch {
+    // Ignore storage quota or serialization errors
+  }
+}
+
+export function resetAddressIndexCache(clearDisk = false): void {
+  dynamicRems = null;
+  for (const key of Object.keys(dynamicSettlementsByRemId)) {
+    delete dynamicSettlementsByRemId[key];
+  }
+  for (const key of Object.keys(dynamicStreetsBySettlementId)) {
+    delete dynamicStreetsBySettlementId[key];
+  }
+  for (const key of Object.keys(dynamicHousesByStreetId)) {
+    delete dynamicHousesByStreetId[key];
+  }
+  for (const key of Object.keys(houseCacheUpdatedAtByStreetId)) {
+    delete houseCacheUpdatedAtByStreetId[key];
+  }
+  inFlightSettlementPromises.clear();
+  recentHouseStreetOrder = [];
+  hasHydratedFromStorage = false;
+  if (clearDisk && typeof localStorage !== 'undefined') {
+    try {
+      localStorage.removeItem(ADDRESS_INDEX_STORAGE_KEY);
+    } catch {
+      // ignore
+    }
+  }
+}
+
+export function getAddressIndexStats(): {
+  remCount: number;
+  indexedRemSettlementsCount: number;
+  indexedSettlementStreetsCount: number;
+  indexedStreetHousesCount: number;
+} {
+  ensureHydrated();
+  return {
+    remCount: (dynamicRems || ZTOE_REM_OPTIONS).length,
+    indexedRemSettlementsCount: Object.keys(dynamicSettlementsByRemId).length,
+    indexedSettlementStreetsCount: Object.keys(dynamicStreetsBySettlementId).length,
+    indexedStreetHousesCount: Object.keys(dynamicHousesByStreetId).length,
+  };
+}
+
+function ensureHydrated(): void {
+  if (!hasHydratedFromStorage) {
+    hasHydratedFromStorage = true;
+    hydrateAddressIndexFromStorage();
+  }
+}
+
+// Hydrate from persistent disk cache immediately on module load
+ensureHydrated();
+
+export function getRems(): ZtoeRemOption[] {
+  ensureHydrated();
+  if (dynamicRems && dynamicRems.length > 0) return dynamicRems;
+  return ZTOE_REM_OPTIONS;
+}
+
+export function findSettlementById(settlementId: string): ZtoeSettlementOption | undefined {
+  ensureHydrated();
+  for (const list of Object.values(dynamicSettlementsByRemId)) {
+    const found = list.find((s) => s.id === settlementId);
+    if (found) return found;
+  }
+  const staticMatch = ZTOE_SETTLEMENT_OPTIONS.find((s) => s.id === settlementId);
+  if (staticMatch) return staticMatch;
+  const npId = settlementId.replace(/^np_/, '');
+  if (/^\d+$/.test(npId)) {
+    for (const list of Object.values(dynamicSettlementsByRemId)) {
+      const byDynamicNp = list.find((s) => s.ztoeNaspunktId === npId);
+      if (byDynamicNp) return byDynamicNp;
+    }
+    const byNp = ZTOE_SETTLEMENT_OPTIONS.find((s) => s.ztoeNaspunktId === npId);
+    if (byNp) return byNp;
+  }
+  return undefined;
+}
+
+export function findStreetById(streetId: string): ZtoeStreetOption | undefined {
+  ensureHydrated();
+  for (const list of Object.values(dynamicStreetsBySettlementId)) {
+    const found = list.find((st) => st.id === streetId);
+    if (found) return found;
+  }
+  const staticMatch = ZTOE_STREET_OPTIONS.find((st) => st.id === streetId);
+  if (staticMatch) return staticMatch;
+  const vulId = streetId.replace(/^st_/, '');
+  if (/^\d+$/.test(vulId)) {
+    for (const list of Object.values(dynamicStreetsBySettlementId)) {
+      const byDynamicVul = list.find((st) => st.ztoeVulicaId === vulId);
+      if (byDynamicVul) return byDynamicVul;
+    }
+    const byVul = ZTOE_STREET_OPTIONS.find((st) => st.ztoeVulicaId === vulId);
+    if (byVul) return byVul;
+  }
+  return undefined;
+}
+
 export function getSettlementsForRem(remId: string): ZtoeSettlementOption[] {
+  ensureHydrated();
+  const dynamicList = dynamicSettlementsByRemId[remId];
+  if (dynamicList && dynamicList.length > 0) return dynamicList;
   return ZTOE_SETTLEMENT_OPTIONS.filter((s) => s.remId === remId);
 }
 
 export function getStreetsForSettlement(settlementId: string): ZtoeStreetOption[] {
+  ensureHydrated();
+  const dynamicList = dynamicStreetsBySettlementId[settlementId];
+  if (dynamicList && dynamicList.length > 0) return dynamicList;
   return ZTOE_STREET_OPTIONS.filter((st) => st.settlementId === settlementId);
 }
 
 export function getHousesForStreet(streetId: string): ZtoeHouseLookupResult[] {
+  ensureHydrated();
+  const dynamicList = dynamicHousesByStreetId[streetId];
+  if (dynamicList && dynamicList.length > 0) return dynamicList;
   return ZTOE_STREET_HOUSES[streetId] || [];
 }
+
+export function parseZtoeRemOptionsHtml(html: string): ZtoeRemOption[] {
+  const selectMatch = html.match(/<select[^>]*name=["']?rem_id["']?[^>]*>([\s\S]*?)<\/select>/i);
+  if (!selectMatch) return [];
+  const selectInner = selectMatch[1];
+  const results: ZtoeRemOption[] = [];
+  const seenIds = new Set<string>();
+  const optRegex = /<option\s+value=["']?(\d+)["']?[^>]*>([\s\S]*?)<\/option>/gi;
+  let m: RegExpExecArray | null;
+  while ((m = optRegex.exec(selectInner)) !== null) {
+    const remNum = m[1].trim();
+    if (!remNum || remNum === '0') continue;
+    const rawLabel = stripHtmlTags(m[2]).trim();
+    if (!rawLabel || rawLabel.toLowerCase().includes('оберіть')) continue;
+    const staticMatch =
+      ZTOE_REM_OPTIONS.find((r) => r.ztoeRemId === remNum) ||
+      ZTOE_REM_OPTIONS.find((r) => r.nameUk.toLowerCase() === rawLabel.toLowerCase());
+    const opt: ZtoeRemOption = {
+      id: staticMatch?.id || `rem_${remNum}`,
+      ztoeRemId: remNum,
+      ztoeOtgId: staticMatch?.ztoeOtgId,
+      nameUk: staticMatch?.nameUk || (rawLabel.includes('РЕМ') ? rawLabel : `${rawLabel} РЕМ`),
+      nameEn: staticMatch?.nameEn || rawLabel,
+    };
+    if (!seenIds.has(opt.id)) {
+      seenIds.add(opt.id);
+      results.push(opt);
+    }
+  }
+  for (const staticRem of ZTOE_REM_OPTIONS) {
+    if (!seenIds.has(staticRem.id)) {
+      seenIds.add(staticRem.id);
+      results.push(staticRem);
+    }
+  }
+  return results;
+}
+
+export function parseZtoeSettlementOptionsHtml(remId: string, html: string): ZtoeSettlementOption[] {
+  const selectMatch = html.match(/<select[^>]*name=["']?naspunkt_id["']?[^>]*>([\s\S]*?)<\/select>/i);
+  if (!selectMatch) return [];
+  const selectInner = selectMatch[1];
+  const staticForRem = ZTOE_SETTLEMENT_OPTIONS.filter((s) => s.remId === remId);
+  const results: ZtoeSettlementOption[] = [];
+  const seenIds = new Set<string>();
+  const optRegex = /<option\s+value=["']?(\d+)["']?[^>]*>([\s\S]*?)<\/option>/gi;
+  let m: RegExpExecArray | null;
+  while ((m = optRegex.exec(selectInner)) !== null) {
+    const npId = m[1].trim();
+    if (!npId || npId === '0') continue;
+    const rawLabel = stripHtmlTags(m[2]).trim();
+    if (!rawLabel || rawLabel.toLowerCase().includes('оберіть')) continue;
+    const formattedUk = rawLabel
+      .replace(/^місто\s+/i, 'м. ')
+      .replace(/^село\s+/i, 'с. ')
+      .replace(/^селище\s+/i, 'смт ');
+    const candidateStatic =
+      staticForRem.find((s) => normalizePlaceName(s.nameUk) === normalizePlaceName(formattedUk)) ||
+      staticForRem.find((s) => s.ztoeNaspunktId === npId);
+    const staticMatch = candidateStatic && !seenIds.has(candidateStatic.id) ? candidateStatic : undefined;
+    const opt: ZtoeSettlementOption = {
+      id: staticMatch?.id || `np_${npId}`,
+      remId,
+      ztoeNaspunktId: npId,
+      poweronCityId: staticMatch?.poweronCityId,
+      nameUk: staticMatch?.nameUk || formattedUk,
+      nameEn: staticMatch?.nameEn || formattedUk,
+    };
+    if (!seenIds.has(opt.id)) {
+      seenIds.add(opt.id);
+      results.push(opt);
+    }
+  }
+  return results;
+}
+
+export function parseZtoeStreetOptionsHtml(settlementId: string, html: string): ZtoeStreetOption[] {
+  const selectMatch = html.match(/<select[^>]*name=["']?vulica_id["']?[^>]*>([\s\S]*?)<\/select>/i);
+  if (!selectMatch) return [];
+  const selectInner = selectMatch[1];
+  const staticForSettlement = ZTOE_STREET_OPTIONS.filter((st) => st.settlementId === settlementId);
+  const results: ZtoeStreetOption[] = [];
+  const seenIds = new Set<string>();
+  const optRegex = /<option\s+value=["']?(\d+)["']?[^>]*>([\s\S]*?)<\/option>/gi;
+  let m: RegExpExecArray | null;
+  while ((m = optRegex.exec(selectInner)) !== null) {
+    const vulId = m[1].trim();
+    if (!vulId || vulId === '0') continue;
+    const rawLabel = stripHtmlTags(m[2]).trim();
+    if (!rawLabel || rawLabel.toLowerCase().includes('оберіть')) continue;
+    const candidateStatic =
+      staticForSettlement.find((st) => normalizeStreetName(st.nameUk) === normalizeStreetName(rawLabel)) ||
+      staticForSettlement.find((st) => st.ztoeVulicaId === vulId);
+    const staticMatch = candidateStatic && !seenIds.has(candidateStatic.id) ? candidateStatic : undefined;
+    const opt: ZtoeStreetOption = {
+      id: staticMatch?.id || `st_${vulId}`,
+      settlementId,
+      ztoeVulicaId: vulId,
+      poweronStreetId: staticMatch?.poweronStreetId,
+      nameUk: staticMatch?.nameUk || rawLabel,
+      nameEn: staticMatch?.nameEn || rawLabel,
+    };
+    if (!seenIds.has(opt.id)) {
+      seenIds.add(opt.id);
+      results.push(opt);
+    }
+  }
+  return results;
+}
+
+/**
+ * Parses a settlement-wide ZTOE response (`rem_id=X&naspunkt_id=Y&all=1`) and indexes
+ * ALL houses for EVERY street in that settlement in a single pass so selecting any street
+ * in the dropdown opens its complete house list in 0ms without additional network requests.
+ */
+export function parseZtoeSettlementHousesTableHtml(
+  settlementId: string,
+  streets: ZtoeStreetOption[],
+  html: string
+): Record<string, ZtoeHouseLookupResult[]> {
+  const indexedByStreetId: Record<string, ZtoeHouseLookupResult[]> = {};
+  if (!html || !streets || streets.length === 0) return indexedByStreetId;
+
+  const streetIdByNormName = new Map<string, string>();
+  for (const st of streets) {
+    streetIdByNormName.set(st.nameUk.trim().toLowerCase(), st.id);
+    streetIdByNormName.set(normalizeStreetName(st.nameUk), st.id);
+  }
+  for (const st of ZTOE_STREET_OPTIONS.filter((s) => s.settlementId === settlementId)) {
+    if (!streetIdByNormName.has(normalizeStreetName(st.nameUk))) {
+      streetIdByNormName.set(normalizeStreetName(st.nameUk), st.id);
+    }
+  }
+
+  const scheduleSectionIdx = html.indexOf('Графіки погодинних відключень');
+  const addressSectionHtml = scheduleSectionIdx >= 0 ? html.slice(0, scheduleSectionIdx) : html;
+
+  const mergedMapsByStreet = new Map<string, Map<string, ZtoeHouseLookupResult>>();
+  const trRegex = /<tr\b[^>]*>([\s\S]*?)<\/tr>/gi;
+  let trMatch: RegExpExecArray | null;
+
+  let streetColIdx = 2;
+  let houseColIdx = 3;
+  let queueColIdx = 4;
+  let subqueueColIdx = 5;
+  let noteColIdx = 6;
+  const metadataCols = new Set<number>([0, 1, 2, 6]);
+
+  while ((trMatch = trRegex.exec(addressSectionHtml)) !== null) {
+    const rowHtml = trMatch[1];
+    if (/<input\b/i.test(rowHtml) || /<select\b/i.test(rowHtml)) continue;
+
+    const cellRegex = /<(?:td|th)\b[^>]*>([\s\S]*?)<\/(?:td|th)>/gi;
+    const cells: string[] = [];
+    let cellMatch: RegExpExecArray | null;
+    while ((cellMatch = cellRegex.exec(rowHtml)) !== null) {
+      cells.push(stripHtmlTags(cellMatch[1]));
+    }
+
+    if (cells.length < 4) continue;
+
+    const firstCellLower = (cells[0] || '').toLowerCase();
+    const isHeaderRow =
+      /<th\b/i.test(rowHtml) ||
+      firstCellLower === 'рем' ||
+      firstCellLower === 'будинок' ||
+      firstCellLower === 'будинки' ||
+      firstCellLower.includes('вулиц');
+
+    if (isHeaderRow) {
+      metadataCols.clear();
+      cells.forEach((c, idx) => {
+        const cl = c.toLowerCase();
+        if (cl.includes('вулиц')) {
+          streetColIdx = idx;
+          metadataCols.add(idx);
+        } else if (cl.includes('буд') || cl.includes('дом')) {
+          houseColIdx = idx;
+        } else if (cl.includes('підчерг')) {
+          subqueueColIdx = idx;
+        } else if (cl.includes('черг')) {
+          queueColIdx = idx;
+        } else if (cl.includes('примітк')) {
+          noteColIdx = idx;
+          metadataCols.add(idx);
+        } else if (cl === 'рем' || cl.includes('населений')) {
+          metadataCols.add(idx);
+        }
+      });
+      continue;
+    }
+
+    const streetRaw = (cells[streetColIdx] || '').trim();
+    const houseVal = (cells[houseColIdx] || '').trim();
+    if (!streetRaw || !houseVal) continue;
+
+    const streetId =
+      streetIdByNormName.get(streetRaw.toLowerCase()) ||
+      streetIdByNormName.get(normalizeStreetName(streetRaw));
+    if (!streetId) continue;
+
+    const queueRaw = cells[queueColIdx] ?? '';
+    const subqueueRaw = cells[subqueueColIdx] ?? '';
+    const combinedMatch = `${queueRaw}.${subqueueRaw}`.match(/^([1-6])\.([1-2])$/);
+    const directMatch = queueRaw.match(/^([1-6])\.([1-2])$/);
+
+    let normalizedQueue = '';
+    let statusText: string | undefined;
+
+    if (directMatch) {
+      normalizedQueue = `${directMatch[1]}.${directMatch[2]}`;
+    } else if (combinedMatch) {
+      normalizedQueue = `${combinedMatch[1]}.${combinedMatch[2]}`;
+    }
+
+    const uniqueNonNumericParts: string[] = [];
+    cells.forEach((cellVal, idx) => {
+      if (idx === houseColIdx || metadataCols.has(idx) || idx === noteColIdx) return;
+      const trimmed = cellVal.trim();
+      if (trimmed.length > 0 && !/^[1-6](\.[1-2])?$/.test(trimmed) && trimmed !== '-') {
+        if (!uniqueNonNumericParts.includes(trimmed)) {
+          uniqueNonNumericParts.push(trimmed);
+        }
+      }
+    });
+
+    if (uniqueNonNumericParts.length > 0) {
+      statusText = uniqueNonNumericParts.join(' ').trim();
+    }
+
+    let streetHouseMap = mergedMapsByStreet.get(streetId);
+    if (!streetHouseMap) {
+      streetHouseMap = new Map<string, ZtoeHouseLookupResult>();
+      mergedMapsByStreet.set(streetId, streetHouseMap);
+    }
+
+    const houseTokens = houseVal.includes(',')
+      ? houseVal.split(',').map((h) => h.trim()).filter(Boolean)
+      : [houseVal.trim()];
+
+    for (const hToken of houseTokens) {
+      const key = hToken.toLowerCase();
+      if (!key) continue;
+      const existing = streetHouseMap.get(key);
+      if (!existing || (!existing.queue && normalizedQueue)) {
+        streetHouseMap.set(key, {
+          house: hToken,
+          queue: normalizedQueue,
+          rawQueueCell: queueRaw,
+          rawSubqueueCell: subqueueRaw,
+          statusText,
+        });
+      }
+    }
+  }
+
+  const now = Date.now();
+  for (const [streetId, mergedMap] of mergedMapsByStreet.entries()) {
+    applyCanonicalStreetOverrides(streetId, mergedMap);
+    const sorted = sortHouseLookupResults(mergedMap.values());
+    if (sorted.length > 0) {
+      indexedByStreetId[streetId] = sorted;
+      dynamicHousesByStreetId[streetId] = sorted;
+      houseCacheUpdatedAtByStreetId[streetId] = now;
+    }
+  }
+
+  return indexedByStreetId;
+}
+
+async function postZtoeLookupForm(bodyParams: Record<string, string>, siteUrl?: string): Promise<string | null> {
+  if (typeof fetch === 'undefined') return null;
+  try {
+    const targetEndpoint =
+      !siteUrl || siteUrl.includes('ztoe.com.ua')
+        ? '/proxy-ztoe/unhooking-search.php'
+        : siteUrl;
+    const params = new URLSearchParams(bodyParams);
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 5000);
+    const res = await fetch(targetEndpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: params.toString(),
+      signal: controller.signal,
+    });
+    clearTimeout(timer);
+    if (!res.ok) return null;
+    const buffer = await res.arrayBuffer();
+    const win1251Text = new TextDecoder('windows-1251').decode(buffer);
+    return win1251Text.includes('Оберіть') || win1251Text.includes('Черга') || win1251Text.includes('Будинки')
+      ? win1251Text
+      : new TextDecoder('utf-8').decode(buffer);
+  } catch {
+    return null;
+  }
+}
+
+export async function fetchRemsFromZtoe(
+  siteUrl?: string,
+  forceRefresh = false
+): Promise<ZtoeRemOption[]> {
+  ensureHydrated();
+  if (!forceRefresh && dynamicRems && dynamicRems.length > 0) {
+    return dynamicRems;
+  }
+  const html = await postZtoeLookupForm({}, siteUrl);
+  if (html) {
+    const parsed = parseZtoeRemOptionsHtml(html);
+    if (parsed.length > 0) {
+      dynamicRems = parsed;
+      persistAddressIndexToStorage();
+      return parsed;
+    }
+  }
+  return getRems();
+}
+
+export async function fetchSettlementsForRem(
+  remId: string,
+  siteUrl?: string,
+  forceRefresh = false
+): Promise<ZtoeSettlementOption[]> {
+  ensureHydrated();
+  if (!forceRefresh && dynamicSettlementsByRemId[remId] && dynamicSettlementsByRemId[remId].length > 5) {
+    return dynamicSettlementsByRemId[remId];
+  }
+  const remObj = getRems().find((r) => r.id === remId);
+  if (remObj?.ztoeRemId) {
+    const html = await postZtoeLookupForm({ rem_id: remObj.ztoeRemId }, siteUrl);
+    if (html) {
+      const parsedRems = parseZtoeRemOptionsHtml(html);
+      if (parsedRems.length > 0) {
+        dynamicRems = parsedRems;
+      }
+      const parsed = parseZtoeSettlementOptionsHtml(remId, html);
+      if (parsed.length > 0) {
+        dynamicSettlementsByRemId[remId] = parsed;
+        persistAddressIndexToStorage();
+        return parsed;
+      }
+    }
+  }
+  return getSettlementsForRem(remId);
+}
+
+export async function fetchStreetsForSettlement(
+  remId: string,
+  settlementId: string,
+  siteUrl?: string,
+  forceRefresh = false
+): Promise<ZtoeStreetOption[]> {
+  ensureHydrated();
+  const cachedStreets = dynamicStreetsBySettlementId[settlementId];
+  const hasBulkIndexedHouses =
+    cachedStreets &&
+    cachedStreets.length > 15 &&
+    cachedStreets.some((st) => st.id !== 'zt_kyivska' && (dynamicHousesByStreetId[st.id]?.length || 0) > 0);
+
+  if (!forceRefresh && hasBulkIndexedHouses) {
+    return cachedStreets;
+  }
+
+  const inflightKey = `${remId}::${settlementId}`;
+  const existingPromise = inFlightSettlementPromises.get(inflightKey);
+  if (existingPromise) {
+    return existingPromise;
+  }
+
+  const promise = (async () => {
+    try {
+      const remObj = getRems().find((r) => r.id === remId);
+      const settlementObj = findSettlementById(settlementId);
+      if (remObj?.ztoeRemId && settlementObj?.ztoeNaspunktId) {
+        // Request all=1 so a single response returns <select name="vulica_id"> AND the full table of houses for all streets in this settlement
+        const html = await postZtoeLookupForm(
+          {
+            rem_id: remObj.ztoeRemId,
+            naspunkt_id: settlementObj.ztoeNaspunktId,
+            all: '1',
+          },
+          siteUrl
+        );
+        if (html) {
+          const parsedRems = parseZtoeRemOptionsHtml(html);
+          if (parsedRems.length > 0) {
+            dynamicRems = parsedRems;
+          }
+          const parsedSettlements = parseZtoeSettlementOptionsHtml(remId, html);
+          if (parsedSettlements.length > 0) {
+            dynamicSettlementsByRemId[remId] = parsedSettlements;
+          }
+          const parsedStreets = parseZtoeStreetOptionsHtml(settlementId, html);
+          if (parsedStreets.length > 0) {
+            dynamicStreetsBySettlementId[settlementId] = parsedStreets;
+            parseZtoeSettlementHousesTableHtml(settlementId, parsedStreets, html);
+            persistAddressIndexToStorage();
+            return parsedStreets;
+          }
+        }
+      }
+      return getStreetsForSettlement(settlementId);
+    } finally {
+      inFlightSettlementPromises.delete(inflightKey);
+    }
+  })();
+
+  inFlightSettlementPromises.set(inflightKey, promise);
+  return promise;
+}
+
+export async function fetchHousesForStreet(
+  remId: string,
+  settlementId: string,
+  streetId: string,
+  siteUrl?: string,
+  forceRefresh = false
+): Promise<ZtoeHouseLookupResult[]> {
+  ensureHydrated();
+  if (!streetId) return [];
+
+  // If an in-flight settlement-wide request (with all=1) is already running for this settlement,
+  // check cache first and await the in-flight request if this street isn't cached yet
+  const existingHouses = dynamicHousesByStreetId[streetId];
+  const updatedAt = houseCacheUpdatedAtByStreetId[streetId] || 0;
+  if (
+    existingHouses &&
+    existingHouses.length > 0 &&
+    (!forceRefresh || Date.now() - updatedAt < FRESH_HOUSE_CACHE_TTL_MS)
+  ) {
+    recordRecentHouseStreet(streetId);
+    return existingHouses;
+  }
+
+  const inflightKey = `${remId}::${settlementId}`;
+  const inflightSettlement = inFlightSettlementPromises.get(inflightKey);
+  if (inflightSettlement) {
+    await inflightSettlement;
+    const afterInflight = dynamicHousesByStreetId[streetId];
+    if (afterInflight && afterInflight.length > 0) {
+      recordRecentHouseStreet(streetId);
+      return afterInflight;
+    }
+  }
+
+  const remObj = getRems().find((r) => r.id === remId);
+  const settlementObj = findSettlementById(settlementId);
+  const streetObj = findStreetById(streetId);
+  if (remObj?.ztoeRemId && settlementObj?.ztoeNaspunktId && streetObj?.ztoeVulicaId) {
+    const html = await postZtoeLookupForm(
+      {
+        rem_id: remObj.ztoeRemId,
+        naspunkt_id: settlementObj.ztoeNaspunktId,
+        vulica_id: streetObj.ztoeVulicaId,
+        all: '1',
+      },
+      siteUrl
+    );
+    if (html) {
+      const parsedRows = parseZtoeAddressLookupTableHtml(html);
+      if (parsedRows.length > 0) {
+        const mergedMap = new Map<string, ZtoeHouseLookupResult>();
+        for (const row of parsedRows) {
+          const key = row.house.trim().toLowerCase();
+          if (!key) continue;
+          const existing = mergedMap.get(key);
+          if (!existing || (!existing.queue && row.queue)) {
+            mergedMap.set(key, row);
+          }
+        }
+        applyCanonicalStreetOverrides(streetId, mergedMap);
+        const sortedList = sortHouseLookupResults(mergedMap.values());
+        dynamicHousesByStreetId[streetId] = sortedList;
+        houseCacheUpdatedAtByStreetId[streetId] = Date.now();
+        recordRecentHouseStreet(streetId);
+        persistAddressIndexToStorage();
+        return sortedList;
+      }
+    }
+  }
+  return getHousesForStreet(streetId);
+}
+
+/**
+ * Prefetches and indexes all REMs, cities/settlements across all REMs, active/default city streets,
+ * and ALL houses for every street in the active/default city in the background on app launch,
+ * persisting the index to disk cache so dropdown lists in the "?" Address Lookup window open with zero delay.
+ */
+export async function prefetchAddressIndexInBackground(
+  siteUrl?: string,
+  savedQuery?: SelectedAddressQuery | null,
+  forceRefresh = false
+): Promise<void> {
+  ensureHydrated();
+
+  const activeRemId = savedQuery?.remId || 'zhytomyr';
+  const activeSettlementId = savedQuery?.settlementId || 'zt_city';
+
+  // Priority 1: Single-request bulk fetch for 'zt_city' (with all=1), which returns and indexes:
+  // - All 19 REMs (<select name="rem_id">)
+  // - All 103 Settlements of Zhytomyr REM (<select name="naspunkt_id">)
+  // - All 966 Streets of Zhytomyr city (<select name="vulica_id">)
+  // - All 20,488 Houses across all 966 Streets of Zhytomyr city (7-column table)
+  await fetchStreetsForSettlement('zhytomyr', 'zt_city', siteUrl, forceRefresh);
+
+  if (activeRemId !== 'zhytomyr') {
+    await fetchSettlementsForRem(activeRemId, siteUrl, forceRefresh);
+  }
+  if (activeSettlementId && (activeRemId !== 'zhytomyr' || activeSettlementId !== 'zt_city')) {
+    await fetchStreetsForSettlement(activeRemId, activeSettlementId, siteUrl, forceRefresh);
+  }
+  if (savedQuery?.streetId) {
+    await fetchHousesForStreet(activeRemId, activeSettlementId, savedQuery.streetId, siteUrl, false);
+  }
+
+  const allRems = await fetchRemsFromZtoe(siteUrl, false);
+  const priorityRems = Array.from(new Set(['zhytomyr', activeRemId]));
+
+  // Priority 2: Bounded parallel prefetch (4 workers) for all remaining REMs' settlements + each REM's primary city streets & houses
+  const remainingRems = allRems.filter((r) => !priorityRems.includes(r.id));
+  const concurrency = 4;
+  let cursor = 0;
+
+  const runWorker = async () => {
+    while (cursor < remainingRems.length) {
+      const idx = cursor++;
+      const rem = remainingRems[idx];
+      if (!rem) break;
+      const settlements = await fetchSettlementsForRem(rem.id, siteUrl, forceRefresh);
+      const primarySettlement = settlements[0];
+      if (primarySettlement?.id) {
+        await fetchStreetsForSettlement(rem.id, primarySettlement.id, siteUrl, false);
+      }
+    }
+  };
+
+  const workers = Array.from(
+    { length: Math.min(concurrency, Math.max(1, remainingRems.length)) },
+    () => runWorker()
+  );
+  await Promise.all(workers);
+  persistAddressIndexToStorage();
+}
+
+
+

@@ -1,0 +1,100 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="320dp"
+    android:height="180dp"
+    android:viewportWidth="320"
+    android:viewportHeight="180">
+
+    <!-- Outer rounded widget background (#141A29) -->
+    <path
+        android:fillColor="#141A29"
+        android:pathData="M22,4 L298,4 A18,18 0 0,1 316,22 L316,158 A18,18 0 0,1 298,176 L22,176 A18,18 0 0,1 4,158 L4,22 A18,18 0 0,1 22,4 Z" />
+
+    <!-- Subtle border -->
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#33FFFFFF"
+        android:strokeWidth="1.5"
+        android:pathData="M22,4 L298,4 A18,18 0 0,1 316,22 L316,158 A18,18 0 0,1 298,176 L22,176 A18,18 0 0,1 4,158 L4,22 A18,18 0 0,1 22,4 Z" />
+
+    <!-- Top Header: Queue bar + Status bar -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M20,16 L104,16 A5,5 0 0,1 109,21 L109,25 A5,5 0 0,1 104,30 L20,30 A5,5 0 0,1 15,25 L15,21 A5,5 0 0,1 20,16 Z" />
+    <path
+        android:fillColor="#34D399"
+        android:pathData="M18,35 L76,35 A3.5,3.5 0 0,1 79.5,38.5 L79.5,40.5 A3.5,3.5 0 0,1 76,44 L18,44 A3.5,3.5 0 0,1 14.5,40.5 L14.5,38.5 A3.5,3.5 0 0,1 18,35 Z" />
+
+    <!-- Top Right Round Refresh Button -->
+    <path
+        android:fillColor="#26FFFFFF"
+        android:pathData="M248,30 m-15,0 a15,15 0 1,0 30,0 a15,15 0 1,0 -30,0" />
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="2"
+        android:pathData="M248,23.5 A6.5,6.5 0 1,1 242,32 M248,21 L248,26.5 L242.5,26.5" />
+
+    <!-- Top Right Round Notification Button -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M286,30 m-15,0 a15,15 0 1,0 30,0 a15,15 0 1,0 -30,0" />
+    <path
+        android:fillColor="#FF5E3A"
+        android:pathData="M286,21.5 C282.8,21.5 280.5,23.8 280.5,27 L280.5,31.5 L278.5,33.5 L278.5,34.5 L293.5,34.5 L293.5,33.5 L291.5,31.5 L291.5,27 C291.5,23.8 289.2,21.5 286,21.5 Z M284,36 A2,2 0 0,0 288,36 Z" />
+
+    <!-- Middle Countdown Box (#33000000) -->
+    <path
+        android:fillColor="#33000000"
+        android:pathData="M24,52 L296,52 A10,10 0 0,1 306,62 L306,86 A10,10 0 0,1 296,96 L24,96 A10,10 0 0,1 14,86 L14,62 A10,10 0 0,1 24,52 Z" />
+    <path
+        android:fillColor="#99BAE6FD"
+        android:pathData="M24,58 L92,58 A2.5,2.5 0 0,1 94.5,60.5 L94.5,62.5 A2.5,2.5 0 0,1 92,65 L24,65 A2.5,2.5 0 0,1 21.5,62.5 L21.5,60.5 A2.5,2.5 0 0,1 24,58 Z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M25,70 L122,70 A5,5 0 0,1 127,75 L127,82 A5,5 0 0,1 122,87 L25,87 A5,5 0 0,1 20,82 L20,75 A5,5 0 0,1 25,70 Z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M220,72 L292,72 A4,4 0 0,1 296,76 L296,81 A4,4 0 0,1 292,85 L220,85 A4,4 0 0,1 216,81 L216,76 A4,4 0 0,1 220,72 Z" />
+
+    <!-- Vintage Analog Electricity Counter (САЗУ-ИТ) 24h Drum Chart (#D4D1C1) -->
+    <path
+        android:fillColor="#D4D1C1"
+        android:strokeColor="#7A7768"
+        android:strokeWidth="1.5"
+        android:pathData="M22,102 L298,102 A8,8 0 0,1 306,110 L306,142 A8,8 0 0,1 298,150 L22,150 A8,8 0 0,1 14,142 L14,110 A8,8 0 0,1 22,102 Z" />
+
+    <!-- Recessed Drum Window (#4E514E) -->
+    <path
+        android:fillColor="#4E514E"
+        android:pathData="M24,108 L296,108 A4,4 0 0,1 300,112 L300,134 A4,4 0 0,1 296,138 L24,138 A4,4 0 0,1 20,134 L20,112 A4,4 0 0,1 24,108 Z" />
+
+    <!-- Light Power-On Drum Track (#FCFBF7) -->
+    <path
+        android:fillColor="#FCFBF7"
+        android:pathData="M24,111 L296,111 L296,135 L24,135 Z" />
+
+    <!-- Red Blackout Segments (#D62E26) -->
+    <path
+        android:fillColor="#D62E26"
+        android:pathData="M70,111 L115,111 L115,135 L70,135 Z" />
+    <path
+        android:fillColor="#D62E26"
+        android:pathData="M182,111 L238,111 L238,135 L182,135 Z" />
+
+    <!-- Black Current-Time Needle (#0B0B0A) -->
+    <path
+        android:fillColor="#0B0B0A"
+        android:pathData="M146,105 L150,105 L150,141 L146,141 Z" />
+
+    <!-- Bottom Next Outage Bar -->
+    <path
+        android:fillColor="#26000000"
+        android:pathData="M20,155 L300,155 A5,5 0 0,1 305,160 L305,165 A5,5 0 0,1 300,170 L20,170 A5,5 0 0,1 15,165 L15,160 A5,5 0 0,1 20,155 Z" />
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M22,159 L95,159 L95,166 L22,166 Z" />
+    <path
+        android:fillColor="#FF5E3A"
+        android:pathData="M210,159 L298,159 L298,166 L210,166 Z" />
+</vector>

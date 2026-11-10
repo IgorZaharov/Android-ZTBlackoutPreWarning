@@ -56,6 +56,7 @@ export interface UserSettings {
   refreshIntervalMinutes: number; // default 30
   advanceNoticeMinutes: number; // default 15
   notificationsEnabled: boolean;
+  emergencyNotificationsEnabled?: boolean;
   soundEnabled: boolean;
   vibrationEnabled: boolean;
   prevSoundEnabled?: boolean;

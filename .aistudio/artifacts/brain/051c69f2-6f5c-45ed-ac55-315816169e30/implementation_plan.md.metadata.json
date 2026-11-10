@@ -1,6 +1,6 @@
 {
-  "summary":  "Implementation Plan for porting all features from ANDROID_UPDATE_SPEC.md in IgorZaharov/iOS-ZTPreBlackoutNotification into the Android application and Web Emulator to achieve 100% functional and UI parity.",
-  "updatedAt":  "2026-11-09T23:12:51.154916866Z",
+  "summary":  "Implementation plan for background prefetching and persistent on-device disk caching of ZTOE REMs, cities/settlements, streets, and house/queue lists so dropdowns in the \"?\" Address Lookup modal open with zero delay.",
+  "updatedAt":  "2026-11-10T11:52:01.812085801Z",
   "requestFeedback":  true,
   "userFacing":  true
 }

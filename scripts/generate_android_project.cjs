@@ -30,17 +30,42 @@ while ((match = entryRegex.exec(existingTs)) !== null) {
   }
 }
 
-const addressLookupRelPath = 'app/src/main/java/ua/blackout/prewarning/data/parser/ZtoeAddressLookup.kt';
-const addressLookupDiskPath = path.join(androidDir, addressLookupRelPath);
-if (fs.existsSync(addressLookupDiskPath) && !entries.some((e) => e.path === addressLookupRelPath)) {
-  entries.push({
-    path: addressLookupRelPath,
+const additionalFiles = [
+  {
+    path: 'app/src/main/java/ua/blackout/prewarning/data/parser/ZtoeAddressLookup.kt',
     language: 'kotlin',
     description: 'ZTOE Address Queue Lookup & Emergency Outage Parser',
-    content: fs.readFileSync(addressLookupDiskPath, 'utf8'),
-  });
-  console.log(`Added new file from /android: ${addressLookupRelPath}`);
+  },
+  {
+    path: 'app/src/main/res/xml/blackout_widget_big_info.xml',
+    language: 'xml',
+    description: 'Big (4x2) Home Screen AppWidget Provider Metadata',
+  },
+  {
+    path: 'app/src/main/res/drawable/widget_preview_small.xml',
+    language: 'xml',
+    description: 'Small (2x1) Widget Picker Thumbnail Vector Drawable',
+  },
+  {
+    path: 'app/src/main/res/drawable/widget_preview_big.xml',
+    language: 'xml',
+    description: 'Big (4x2) Widget Picker Thumbnail Vector Drawable',
+  },
+];
+
+for (const extra of additionalFiles) {
+  const extraDiskPath = path.join(androidDir, extra.path);
+  if (fs.existsSync(extraDiskPath) && !entries.some((e) => e.path === extra.path)) {
+    entries.push({
+      path: extra.path,
+      language: extra.language,
+      description: extra.description,
+      content: fs.readFileSync(extraDiskPath, 'utf8'),
+    });
+    console.log(`Added new file from /android: ${extra.path}`);
+  }
 }
+
 
 if (entries.length > 0) {
   const escapeTemplateLiteral = (str) =>

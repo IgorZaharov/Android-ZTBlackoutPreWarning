@@ -74,6 +74,7 @@ fun MainScreen(
     notificationsEnabled: Boolean = true,
     lastUpdated: String = "19:27",
     nextUpdated: String = "19:57",
+    currentTime: LocalTime = LocalTime.now(KYIV_ZONE),
     lang: String = "uk",
     selectedLanguage: String = "SYSTEM",
     onToggleNotifications: () -> Unit = {},
@@ -152,7 +153,12 @@ fun MainScreen(
         1f
     }
 
-    val kyivNow = remember(countdownText) {
+    var entryRefreshTick by remember { mutableStateOf(0) }
+    LaunchedEffect(Unit) {
+        entryRefreshTick++
+    }
+
+    val kyivNow = remember(countdownText, currentTime, entryRefreshTick) {
         LocalTime.now(KYIV_ZONE)
     }
     val currentTimeStr = remember(kyivNow.hour, kyivNow.minute) {
@@ -180,31 +186,22 @@ fun MainScreen(
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
-                    Text(
-                        text = when {
-                            hasCustomNoQueueStatus -> if (lang == "uk") "Черга відсутня" else "No queue"
-                            isQueueUnselected -> "${AppStrings.queue(lang)} —"
-                            else -> "${AppStrings.queue(lang)} $queue"
-                        },
-                        fontSize = 24.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = Color.White
-                    )
-                    Text(
-                        text = "Житомиробленерго (ZTOE)",
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Medium,
-                        color = Color(0xB3BAE6FD)
-                    )
-                    if (formattedSelectedAddress != null) {
-                        Spacer(modifier = Modifier.height(2.dp))
+                if (isQueueUnselected || hasCustomNoQueueStatus || queue.isBlank()) {
+                    Box(modifier = Modifier.weight(1f).defaultMinSize(minHeight = 44.dp))
+                } else {
+                    Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
                         Text(
-                            text = formattedSelectedAddress,
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            color = Color(0xD9FFFFFF),
-                            lineHeight = 14.sp
+                            text = "${AppStrings.queue(lang)} $queue",
+                            fontSize = 24.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White
+                        )
+                        Text(
+                            text = formattedSelectedAddress ?: "Житомиробленерго (ZTOE)",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = Color(0xB3BAE6FD),
+                            lineHeight = 16.sp
                         )
                     }
                 }
@@ -236,223 +233,237 @@ fun MainScreen(
                 }
             }
 
+            // 1b. Custom ZTOE Queue/House Status Message Bar — exact same style/color/placement as Workbench MainView.tsx
+            if (!isQueueUnselected && hasCustomNoQueueStatus) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(24.dp))
+                        .background(Color(0xBF141A29))
+                        .border(1.dp, Color(0x26FFFFFF), RoundedCornerShape(24.dp))
+                        .padding(16.dp)
+                ) {
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        if (!formattedSelectedAddress.isNullOrBlank()) {
+                            Text(
+                                text = formattedSelectedAddress,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = Color(0xB3BAE6FD),
+                                lineHeight = 16.sp
+                            )
+                        }
+                        Text(
+                            text = customQueueStatusText ?: "",
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White,
+                            lineHeight = 19.sp
+                        )
+                    }
+                }
+            }
+
+            // 1c. Active Emergency Outage ("Аварійне відключення") Banner with Start & Estimated Restore Times — matching Workbench MainView.tsx
+            if (!isQueueUnselected && hasEmergencyOutage) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(24.dp))
+                        .background(Color(0xBF141A29))
+                        .border(1.dp, Color(0x26FFFFFF), RoundedCornerShape(24.dp))
+                        .padding(16.dp)
+                ) {
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text(
+                            text = AppStrings.emergencyOutageTitle(lang),
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFFFF5E3A),
+                            lineHeight = 19.sp
+                        )
+                        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = AppStrings.emergencyStartLabel(lang),
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    color = Color(0xB3BAE6FD)
+                                )
+                                Text(
+                                    text = emergencyOutageStartTime ?: "--:--",
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    fontFamily = FontFamily.Monospace,
+                                    color = Color.White,
+                                    textAlign = TextAlign.End
+                                )
+                            }
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = AppStrings.emergencyRestoreLabel(lang),
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    color = Color(0xB3BAE6FD)
+                                )
+                                Text(
+                                    text = emergencyOutageRestoreTime ?: "--:--",
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    fontFamily = FontFamily.Monospace,
+                                    color = Color.White,
+                                    textAlign = TextAlign.End
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
             // 2. Hero Outage Status Card (Translucent Frosted Glass)
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
                     .clip(RoundedCornerShape(24.dp))
                     .background(Color(0xBF141A29))
+                    .border(1.dp, Color(0x26FFFFFF), RoundedCornerShape(24.dp))
                     .padding(18.dp)
             ) {
-                Column {
-                    // Status Line
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(10.dp)
-                                    .scale(if (!isStatusUnclear && isBlackoutNow) pulseScale else 1f)
-                                    .clip(CircleShape)
-                                    .background(
-                                        when {
-                                            isStatusUnclear -> Color(0xFF9CA3AF)
-                                            isBlackoutNow -> Color(0xFFFF5E3A)
-                                            else -> Color(0xFF34D399)
-                                        }
-                                    )
-                            )
-                            Text(
-                                text = when {
-                                    isStatusUnclear -> AppStrings.powerUnclear(lang)
-                                    isBlackoutNow -> AppStrings.powerOff(lang)
-                                    else -> AppStrings.powerOn(lang)
-                                },
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Color.White
-                            )
-                        }
-
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(4.dp)
-                        ) {
-                            Icon(
-                                Icons.Default.Schedule,
-                                contentDescription = null,
-                                tint = Color(0xB3BAE6FD),
-                                modifier = Modifier.size(14.dp)
-                            )
-                            Text(
-                                text = currentTimeStr,
-                                fontSize = 12.sp,
-                                fontFamily = FontFamily.Monospace,
-                                fontWeight = FontWeight.Bold,
-                                color = Color(0xB3BAE6FD)
-                            )
-                        }
-                    }
-
-                    // Active Emergency Outage Warning Banner
-                    if (hasEmergencyOutage) {
-                        Spacer(modifier = Modifier.height(12.dp))
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(16.dp))
-                                .background(Color(0x33FF5E3A))
-                                .border(1.5.dp, Color(0x99FF5E3A), RoundedCornerShape(16.dp))
-                                .padding(horizontal = 14.dp, vertical = 10.dp)
-                        ) {
-                            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                ) {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(20.dp)
-                                            .clip(CircleShape)
-                                            .background(Color(0xFFFF5E3A)),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Text(
-                                            text = "!",
-                                            fontSize = 12.sp,
-                                            fontWeight = FontWeight.Black,
-                                            color = Color.White
-                                        )
-                                    }
-                                    Text(
-                                        text = AppStrings.emergencyOutageTitle(lang),
-                                        fontSize = 13.sp,
-                                        fontWeight = FontWeight.ExtraBold,
-                                        color = Color(0xFFFF5E3A)
-                                    )
-                                }
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceBetween
-                                ) {
-                                    Text(
-                                        text = AppStrings.emergencyStartLabel(lang),
-                                        fontSize = 11.sp,
-                                        color = Color(0xCCBAE6FD)
-                                    )
-                                    Text(
-                                        text = emergencyOutageStartTime ?: "",
-                                        fontSize = 11.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        fontFamily = FontFamily.Monospace,
-                                        color = Color.White
-                                    )
-                                }
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceBetween
-                                ) {
-                                    Text(
-                                        text = AppStrings.emergencyRestoreLabel(lang),
-                                        fontSize = 11.sp,
-                                        color = Color(0xCCBAE6FD)
-                                    )
-                                    Text(
-                                        text = emergencyOutageRestoreTime ?: "",
-                                        fontSize = 11.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        fontFamily = FontFamily.Monospace,
-                                        color = Color.White
-                                    )
-                                }
-                            }
-                        }
-                    }
-
-                    // Special ZTOE status message for buildings without an assigned outage queue
-                    if (hasCustomNoQueueStatus && !hasEmergencyOutage) {
-                        Spacer(modifier = Modifier.height(12.dp))
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(16.dp))
-                                .background(Color(0x2610B981))
-                                .border(1.dp, Color(0x6634D399), RoundedCornerShape(16.dp))
-                                .padding(horizontal = 14.dp, vertical = 10.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                text = customQueueStatusText ?: "",
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Color.White,
-                                textAlign = TextAlign.Center,
-                                lineHeight = 16.sp
-                            )
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(14.dp))
-
-                    // Big Countdown Digits
-                    Column(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalAlignment = Alignment.CenterHorizontally
+                if (hasCustomNoQueueStatus && !hasEmergencyOutage) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 16.dp),
+                        contentAlignment = Alignment.Center
                     ) {
                         Text(
-                            text = if (!isStatusUnclear && isBlackoutNow) AppStrings.powerOnIn(lang) else AppStrings.powerOffIn(lang),
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            color = Color(0xB3BAE6FD)
-                        )
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Text(
-                            text = if (hasCustomNoQueueStatus && !hasEmergencyOutage) "--:--:--" else countdownText,
+                            text = "--:--:--",
                             fontSize = 44.sp,
                             fontWeight = FontWeight.Black,
                             fontFamily = FontFamily.Monospace,
                             color = Color.White
                         )
                     }
-
-                    val effectiveSlotTimeText = when {
-                        hasCustomNoQueueStatus && !hasEmergencyOutage -> ""
-                        isStatusUnclear -> "--:-- - --:--"
-                        else -> slotTimeText
-                    }
-                    if (effectiveSlotTimeText.isNotEmpty() && effectiveSlotTimeText != "Відключень немає") {
-                        Spacer(modifier = Modifier.height(14.dp))
-                        Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(Color(0x1AFFFFFF)))
-                        Spacer(modifier = Modifier.height(10.dp))
+                } else {
+                    Column {
+                        // Status Line
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Text(
-                                text = if (!isStatusUnclear && isBlackoutNow) AppStrings.outagePeriod(lang) else AppStrings.nextPeriod(lang),
-                                fontSize = 13.sp,
-                                color = Color(0xB3BAE6FD)
-                            )
-                            Box(
-                                modifier = Modifier
-                                    .clip(RoundedCornerShape(10.dp))
-                                    .background(Color(0x26FFFFFF))
-                                    .padding(horizontal = 10.dp, vertical = 4.dp)
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(10.dp)
+                                        .scale(if (!isStatusUnclear && isBlackoutNow) pulseScale else 1f)
+                                        .clip(CircleShape)
+                                        .background(
+                                            when {
+                                                isStatusUnclear -> Color(0xFF9CA3AF)
+                                                isBlackoutNow -> Color(0xFFFF5E3A)
+                                                else -> Color(0xFF34D399)
+                                            }
+                                        )
+                                )
                                 Text(
-                                    text = effectiveSlotTimeText,
-                                    fontSize = 14.sp,
+                                    text = when {
+                                        isStatusUnclear -> AppStrings.powerUnclear(lang)
+                                        isBlackoutNow -> AppStrings.powerOff(lang)
+                                        else -> AppStrings.powerOn(lang)
+                                    },
+                                    fontSize = 13.sp,
                                     fontWeight = FontWeight.Bold,
-                                    fontFamily = FontFamily.Monospace,
                                     color = Color.White
                                 )
+                            }
+
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                Icon(
+                                    Icons.Default.Schedule,
+                                    contentDescription = null,
+                                    tint = Color(0xB3BAE6FD),
+                                    modifier = Modifier.size(14.dp)
+                                )
+                                Text(
+                                    text = currentTimeStr,
+                                    fontSize = 12.sp,
+                                    fontFamily = FontFamily.Monospace,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color(0xB3BAE6FD)
+                                )
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(14.dp))
+
+                        // Big Countdown Digits
+                        Column(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Text(
+                                text = if (!isStatusUnclear && isBlackoutNow) AppStrings.powerOnIn(lang) else AppStrings.powerOffIn(lang),
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = Color(0xB3BAE6FD)
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = countdownText,
+                                fontSize = 44.sp,
+                                fontWeight = FontWeight.Black,
+                                fontFamily = FontFamily.Monospace,
+                                color = Color.White
+                            )
+                        }
+
+                        val effectiveSlotTimeText = when {
+                            isStatusUnclear -> "--:-- - --:--"
+                            else -> slotTimeText
+                        }
+                        if (effectiveSlotTimeText.isNotEmpty() && effectiveSlotTimeText != "Відключень немає") {
+                            Spacer(modifier = Modifier.height(14.dp))
+                            Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(Color(0x1AFFFFFF)))
+                            Spacer(modifier = Modifier.height(10.dp))
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Text(
+                                    text = if (!isStatusUnclear && isBlackoutNow) AppStrings.outagePeriod(lang) else AppStrings.nextPeriod(lang),
+                                    fontSize = 13.sp,
+                                    color = Color(0xB3BAE6FD)
+                                )
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(10.dp))
+                                        .background(Color(0x26FFFFFF))
+                                        .padding(horizontal = 10.dp, vertical = 4.dp)
+                                ) {
+                                    Text(
+                                        text = effectiveSlotTimeText,
+                                        fontSize = 14.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        fontFamily = FontFamily.Monospace,
+                                        color = Color.White
+                                    )
+                                }
                             }
                         }
                     }
@@ -534,14 +545,16 @@ fun MainScreen(
             ) {
                 key(queue, selectedDayTab, activeSlotsSignature) {
                     Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                        // 24-Hour Timeline Bar
-                        TimelineBar(
-                            slots = activeSlots,
-                            currentHour = kyivNow.hour,
-                            currentMinute = kyivNow.minute,
-                            showNeedle = selectedDayTab == "today",
-                            lang = lang
-                        )
+                        // 24-Hour Timeline Bar (automatically refreshed on main screen entry and every minute)
+                        key(kyivNow.hour, kyivNow.minute, entryRefreshTick) {
+                            TimelineBar(
+                                slots = activeSlots,
+                                currentHour = kyivNow.hour,
+                                currentMinute = kyivNow.minute,
+                                showNeedle = selectedDayTab == "today",
+                                lang = lang
+                            )
+                        }
 
                         // List of Outage Hours for this day (removed when outages are unclear)
                         if (!isUnclear) {
@@ -838,46 +851,63 @@ fun MainScreen(
             Spacer(modifier = Modifier.height(96.dp))
         }
 
-        // First-launch / Unselected Queue Overlay: centered "Виберіть чергу" button + 3-segment language switch
+        // First-launch / Unselected Queue Overlay: dark dimming + centered #FF5E3A "Виберіть чергу" button with subtitle + 3-segment language switch
         if (isQueueUnselected) {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
+                    .background(Color(0xD9070A12))
+                    .clickable(enabled = false) {}
                     .padding(horizontal = 24.dp),
                 contentAlignment = Alignment.Center
             ) {
                 Column(
                     horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                    verticalArrangement = Arrangement.spacedBy(24.dp)
                 ) {
                     Box(
                         modifier = Modifier
+                            .defaultMinSize(minWidth = 260.dp)
                             .clip(RoundedCornerShape(24.dp))
-                            .background(Color(0xF2141A29))
-                            .border(2.dp, Color(0xB3FF5E3A), RoundedCornerShape(24.dp))
+                            .background(Color(0xFFFF5E3A))
+                            .border(1.dp, Color(0x40FFFFFF), RoundedCornerShape(24.dp))
                             .clickable { onOpenQueueSelection() }
-                            .padding(horizontal = 32.dp, vertical = 18.dp),
+                            .padding(horizontal = 32.dp, vertical = 20.dp),
                         contentAlignment = Alignment.Center
                     ) {
-                        Text(
-                            text = AppStrings.selectQueueAction(lang),
-                            fontSize = 18.sp,
-                            fontWeight = FontWeight.ExtraBold,
-                            color = Color.White
-                        )
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            Text(
+                                text = AppStrings.selectQueueAction(lang),
+                                fontSize = 24.sp,
+                                fontWeight = FontWeight.ExtraBold,
+                                color = Color.White,
+                                textAlign = TextAlign.Center
+                            )
+                            Text(
+                                text = "Житомиробленерго (ZTOE)",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = Color(0xE6FFFFFF),
+                                textAlign = TextAlign.Center
+                            )
+                        }
                     }
 
                     Row(
                         modifier = Modifier
+                            .width(260.dp)
                             .clip(RoundedCornerShape(16.dp))
-                            .background(Color(0xF2141A29))
-                            .border(1.dp, Color(0x26FFFFFF), RoundedCornerShape(16.dp))
+                            .background(Color(0xE6141A29))
+                            .border(1.dp, Color(0x33FFFFFF), RoundedCornerShape(16.dp))
                             .padding(6.dp),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         val langOptions = listOf(
-                            "SYSTEM" to (if (lang == "uk") "Авто" else "Auto"),
+                            "SYSTEM" to "Auto",
                             "en" to "English",
                             "uk" to "Українська"
                         )
@@ -885,17 +915,19 @@ fun MainScreen(
                             val isActive = selectedLanguage.equals(code, ignoreCase = true)
                             Box(
                                 modifier = Modifier
+                                    .weight(1f)
                                     .clip(RoundedCornerShape(12.dp))
                                     .background(if (isActive) Color.White else Color.Transparent)
                                     .clickable { onChangeLanguage(code) }
-                                    .padding(horizontal = 12.dp, vertical = 6.dp),
+                                    .padding(horizontal = 8.dp, vertical = 8.dp),
                                 contentAlignment = Alignment.Center
                             ) {
                                 Text(
                                     text = label,
                                     fontSize = 12.sp,
                                     fontWeight = FontWeight.Bold,
-                                    color = if (isActive) Color.Black else Color(0xB3BAE6FD)
+                                    color = if (isActive) Color.Black else Color(0xCCBAE6FD),
+                                    maxLines = 1
                                 )
                             }
                         }

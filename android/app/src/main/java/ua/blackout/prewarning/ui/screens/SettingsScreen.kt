@@ -44,11 +44,13 @@ fun SettingsScreen(
     currentQueue: String = "",
     customQueueStatusText: String? = null,
     selectedAddressQuery: SelectedAddressQuery? = null,
+    activeEmergencyOutage: EmergencyOutageInfo? = null,
     siteUrl: String = "https://www.ztoe.com.ua/unhooking-search.php",
     // CRITICAL CONSTANTS — Default values: advanceMinutes = 15, refreshMinutes = 30. Never modify on your own.
     advanceMinutes: Int = 15,
     refreshMinutes: Int = 30,
     notificationsEnabled: Boolean = true,
+    emergencyNotificationsEnabled: Boolean = true,
     soundEnabled: Boolean = true,
     vibrationEnabled: Boolean = true,
     currentLanguage: String = "SYSTEM",
@@ -67,6 +69,7 @@ fun SettingsScreen(
     onAdvanceMinutesChanged: (Int) -> Unit = {},
     onRefreshMinutesChanged: (Int) -> Unit = {},
     onToggleNotifications: (Boolean) -> Unit = {},
+    onToggleEmergencyNotifications: (Boolean) -> Unit = {},
     onToggleSound: (Boolean) -> Unit = {},
     onToggleVibration: (Boolean) -> Unit = {},
     onLanguageSelected: (String) -> Unit = {},
@@ -181,39 +184,48 @@ fun SettingsScreen(
                 .background(Color(0xBF141A29))
                 .padding(18.dp)
         ) {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    Column(
+                        modifier = Modifier
+                            .weight(1f)
+                            .padding(end = 12.dp),
+                        verticalArrangement = Arrangement.spacedBy(2.dp)
                     ) {
                         Text(
                             text = AppStrings.queueTitle(lang),
-                            fontSize = 11.sp,
+                            fontSize = 12.sp,
                             fontWeight = FontWeight.Bold,
                             color = Color.White
                         )
-                        Box(
-                            modifier = Modifier
-                                .size(22.dp)
-                                .clip(CircleShape)
-                                .background(Color(0x26FFFFFF))
-                                .clickable { showQueueHelpDialog = true },
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text("?", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.White)
-                        }
+                        Text(
+                            text = AppStrings.queueDesc(lang),
+                            fontSize = 11.sp,
+                            color = Color(0xB3BAE6FD)
+                        )
+                    }
+                    // Prominent "?" button on the right matching Workbench size (40x40dp), color (#FF5E3A), and rounded-2xl (16.dp) shape
+                    Box(
+                        modifier = Modifier
+                            .size(40.dp)
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(Color(0xFFFF5E3A))
+                            .border(1.dp, Color(0x40FFFFFF), RoundedCornerShape(16.dp))
+                            .clickable { showQueueHelpDialog = true },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.HelpOutline,
+                            contentDescription = AppStrings.queueHelpTitle(lang),
+                            tint = Color.White,
+                            modifier = Modifier.size(20.dp)
+                        )
                     }
                 }
-                Text(
-                    text = AppStrings.queueDesc(lang),
-                    fontSize = 11.sp,
-                    color = Color(0xB3BAE6FD)
-                )
 
                 // Clean Native Exposed Dropdown Menu
                 ExposedDropdownMenuBox(
@@ -463,12 +475,14 @@ fun SettingsScreen(
             }
         }
 
-        // 4. Notification Toggles (All synchronized; Sound & Vibration turn off and disable when Notifications are off)
+        // 4. Notification Toggles (Sound & Vibration shared by Notifications and Emergency Power Outages)
+        val anyAlertsEnabled = notificationsEnabled || emergencyNotificationsEnabled
         Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(24.dp))
                 .background(Color(0xBF141A29))
+                .border(1.dp, Color(0x26FFFFFF), RoundedCornerShape(24.dp))
                 .padding(18.dp)
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -477,7 +491,18 @@ fun SettingsScreen(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(AppStrings.notifications(lang), fontSize = 14.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Notifications,
+                            contentDescription = null,
+                            tint = Color.White,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Text(AppStrings.notifications(lang), fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                    }
                     Switch(
                         checked = notificationsEnabled,
                         onCheckedChange = onToggleNotifications,
@@ -497,15 +522,26 @@ fun SettingsScreen(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(
-                        text = AppStrings.sound(lang),
-                        fontSize = 13.sp,
-                        color = if (notificationsEnabled) Color.White else Color(0x66FFFFFF)
-                    )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.VolumeUp,
+                            contentDescription = null,
+                            tint = if (anyAlertsEnabled) Color(0xB3BAE6FD) else Color(0x4DBAE6FD),
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Text(
+                            text = AppStrings.sound(lang),
+                            fontSize = 12.sp,
+                            color = if (anyAlertsEnabled) Color.White else Color(0x66FFFFFF)
+                        )
+                    }
                     Switch(
-                        checked = notificationsEnabled && soundEnabled,
+                        checked = anyAlertsEnabled && soundEnabled,
                         onCheckedChange = onToggleSound,
-                        enabled = notificationsEnabled,
+                        enabled = anyAlertsEnabled,
                         colors = SwitchDefaults.colors(
                             checkedThumbColor = Color.White,
                             checkedTrackColor = Color(0xFFFF5E3A),
@@ -525,15 +561,26 @@ fun SettingsScreen(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(
-                        text = AppStrings.vibration(lang),
-                        fontSize = 13.sp,
-                        color = if (notificationsEnabled) Color.White else Color(0x66FFFFFF)
-                    )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Vibration,
+                            contentDescription = null,
+                            tint = if (anyAlertsEnabled) Color(0xB3BAE6FD) else Color(0x4DBAE6FD),
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Text(
+                            text = AppStrings.vibration(lang),
+                            fontSize = 12.sp,
+                            color = if (anyAlertsEnabled) Color.White else Color(0x66FFFFFF)
+                        )
+                    }
                     Switch(
-                        checked = notificationsEnabled && vibrationEnabled,
+                        checked = anyAlertsEnabled && vibrationEnabled,
                         onCheckedChange = onToggleVibration,
-                        enabled = notificationsEnabled,
+                        enabled = anyAlertsEnabled,
                         colors = SwitchDefaults.colors(
                             checkedThumbColor = Color.White,
                             checkedTrackColor = Color(0xFFFF5E3A),
@@ -548,42 +595,108 @@ fun SettingsScreen(
             }
         }
 
+        // 4b. Emergency Power Outages Switch (Separate block below Notifications block; always visible even when no outages detected; ON by default)
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(24.dp))
+                .background(Color(0xBF141A29))
+                .border(1.dp, Color(0x26FFFFFF), RoundedCornerShape(24.dp))
+                .padding(18.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(
+                    modifier = Modifier
+                        .weight(1f)
+                        .padding(end = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Warning,
+                        contentDescription = null,
+                        tint = Color(0xFFFF5E3A),
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Text(
+                        text = AppStrings.emergencyNotifications(lang),
+                        fontSize = 12.sp,
+                        lineHeight = 16.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White
+                    )
+                }
+                Switch(
+                    checked = emergencyNotificationsEnabled,
+                    onCheckedChange = onToggleEmergencyNotifications,
+                    enabled = true,
+                    colors = SwitchDefaults.colors(
+                        checkedThumbColor = Color.White,
+                        checkedTrackColor = Color(0xFFFF5E3A),
+                        uncheckedThumbColor = Color.LightGray,
+                        uncheckedTrackColor = Color(0x33FFFFFF)
+                    )
+                )
+            }
+        }
+
         // 5. Language Selection Card (Dynamic Localization!)
         Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(24.dp))
                 .background(Color(0xBF141A29))
+                .border(1.dp, Color(0x26FFFFFF), RoundedCornerShape(24.dp))
                 .padding(18.dp)
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text(
-                    text = AppStrings.languageTitle(lang),
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = Color.White
-                )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Language,
+                        contentDescription = null,
+                        tint = Color(0xFFFF5E3A),
+                        modifier = Modifier.size(14.dp)
+                    )
+                    Text(
+                        text = AppStrings.languageTitle(lang),
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White
+                    )
+                }
 
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(Color(0x59000000))
+                        .border(1.dp, Color(0x1AFFFFFF), RoundedCornerShape(12.dp))
+                        .padding(4.dp),
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
                     listOf("SYSTEM" to (if (lang == "uk") "Системна" else "System"), "uk" to "Українська", "en" to "English").forEach { (code, label) ->
                         val isSelected = currentLanguage.equals(code, ignoreCase = true)
                         Box(
                             modifier = Modifier
                                 .weight(1f)
-                                .clip(RoundedCornerShape(14.dp))
-                                .background(if (isSelected) Color.White else Color(0x1AFFFFFF))
+                                .clip(RoundedCornerShape(9.dp))
+                                .background(if (isSelected) Color.White else Color.Transparent)
                                 .clickable { onLanguageSelected(code) }
-                                .padding(vertical = 10.dp),
+                                .padding(vertical = 8.dp, horizontal = 8.dp),
                             contentAlignment = Alignment.Center
                         ) {
                             Text(
                                 text = label,
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = if (isSelected) Color.Black else Color(0xB3BAE6FD)
+                                fontSize = 11.sp,
+                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.SemiBold,
+                                color = if (isSelected) Color.Black else Color(0xBFE0F2FE)
                             )
                         }
                     }
@@ -597,6 +710,7 @@ fun SettingsScreen(
                 .fillMaxWidth()
                 .clip(RoundedCornerShape(24.dp))
                 .background(Color(0xBF141A29))
+                .border(1.dp, Color(0x26FFFFFF), RoundedCornerShape(24.dp))
                 .padding(18.dp)
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -631,7 +745,8 @@ fun SettingsScreen(
                         modifier = Modifier
                             .weight(1f)
                             .clip(RoundedCornerShape(16.dp))
-                            .background(Color(0x26FFFFFF))
+                            .background(Color(0x1AFFFFFF))
+                            .border(1.dp, Color(0x26FFFFFF), RoundedCornerShape(16.dp))
                             .clickable {
                                 onForceRefresh()
                             }
@@ -642,8 +757,8 @@ fun SettingsScreen(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
-                            Icon(Icons.Default.Refresh, contentDescription = null, tint = Color.White, modifier = Modifier.size(14.dp))
-                            Text(AppStrings.refreshBtn(lang), fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.White)
+                            Icon(Icons.Default.Language, contentDescription = null, tint = Color.White, modifier = Modifier.size(14.dp))
+                            Text(AppStrings.refreshBtn(lang), fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = Color.White)
                         }
                     }
                 }
@@ -652,12 +767,19 @@ fun SettingsScreen(
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .clip(RoundedCornerShape(14.dp))
+                        .clip(RoundedCornerShape(16.dp))
+                        .border(1.dp, Color(0x1AFFFFFF), RoundedCornerShape(16.dp))
                         .clickable { showResetConfirmDialog = true }
-                        .padding(vertical = 8.dp),
+                        .padding(vertical = 10.dp),
                     contentAlignment = Alignment.Center
                 ) {
-                    Text(AppStrings.resetDefaultsBtn(lang), fontSize = 12.sp, color = Color(0x99BAE6FD))
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Icon(Icons.Default.Refresh, contentDescription = null, tint = Color(0xB3BAE6FD), modifier = Modifier.size(14.dp))
+                        Text(AppStrings.resetDefaultsBtn(lang), fontSize = 12.sp, fontWeight = FontWeight.Medium, color = Color(0xB3BAE6FD))
+                    }
                 }
             }
         }
@@ -669,12 +791,101 @@ fun SettingsScreen(
     // Full-Screen Queue Help & Interactive ZTOE Address Lookup Dialog ("?" Button)
     // =========================================================================================
     if (showQueueHelpDialog) {
-        val currentRem = ZtoeAddressLookup.DIRECTORY.find { it.id == selectedRemId } ?: ZtoeAddressLookup.DIRECTORY.first()
-        val currentSettlement = currentRem.settlements.find { it.id == selectedSettlementId } ?: currentRem.settlements.first()
-        val currentStreet = currentSettlement.streets.find { it.id == selectedStreetId }
-        val currentHouseRecord = currentStreet?.houses?.find { it.house == selectedHouse }
+        var allRems by remember {
+            mutableStateOf(ZtoeAddressLookup.getRems())
+        }
+        val currentRem = allRems.find { it.id == selectedRemId } ?: allRems.first()
 
-        // Automatically query ZTOE when a valid street and house are selected
+        var settlementsList by remember(selectedRemId) {
+            mutableStateOf(ZtoeAddressLookup.getSettlementsForRem(selectedRemId))
+        }
+        var streetsList by remember(selectedSettlementId) {
+            mutableStateOf(
+                if (selectedSettlementId.isNotBlank()) {
+                    ZtoeAddressLookup.getStreetsForSettlement(selectedSettlementId)
+                } else {
+                    emptyList()
+                }
+            )
+        }
+        var housesList by remember(selectedStreetId) {
+            mutableStateOf(
+                if (selectedStreetId.isNotBlank()) {
+                    ZtoeAddressLookup.getHousesForStreet(selectedStreetId)
+                } else {
+                    emptyList()
+                }
+            )
+        }
+
+        // Refresh the list of all REMs, Cities, Streets and Houses whenever User enters the "?" screen
+        LaunchedEffect(siteUrl) {
+            val fetchedRems = withContext(Dispatchers.IO) {
+                ZtoeAddressLookup.fetchRemsFromZtoe(siteUrl, forceRefresh = true)
+            }
+            if (fetchedRems.isNotEmpty()) {
+                allRems = fetchedRems
+            }
+        }
+
+        // Dynamically load full settlement list for selected REM from ZTOE (refreshed when entering "?" screen)
+        LaunchedEffect(selectedRemId, siteUrl) {
+            val fetched = withContext(Dispatchers.IO) {
+                ZtoeAddressLookup.fetchSettlementsForRem(selectedRemId, siteUrl, forceRefresh = true)
+            }
+            if (fetched.isNotEmpty()) {
+                settlementsList = fetched
+                if (selectedSettlementId.isBlank() || fetched.none { it.id == selectedSettlementId }) {
+                    selectedSettlementId = fetched.first().id
+                }
+            }
+        }
+
+        // Dynamically load full street list (and bulk-index all houses for every street in the settlement) from ZTOE
+        LaunchedEffect(selectedRemId, selectedSettlementId, siteUrl) {
+            if (selectedSettlementId.isBlank()) {
+                streetsList = emptyList()
+                return@LaunchedEffect
+            }
+            val fetched = withContext(Dispatchers.IO) {
+                ZtoeAddressLookup.fetchStreetsForSettlement(selectedRemId, selectedSettlementId, siteUrl, forceRefresh = true)
+            }
+            if (fetched.isNotEmpty()) {
+                streetsList = fetched
+                allRems = ZtoeAddressLookup.getRems()
+                settlementsList = ZtoeAddressLookup.getSettlementsForRem(selectedRemId)
+                if (selectedStreetId.isNotBlank()) {
+                    val bulkIndexed = ZtoeAddressLookup.getHousesForStreet(selectedStreetId)
+                    if (bulkIndexed.isNotEmpty()) {
+                        housesList = bulkIndexed
+                    }
+                }
+            }
+        }
+
+        // Dynamically load full house list for selected street from ZTOE (served in 0ms when already bulk-indexed)
+        LaunchedEffect(selectedRemId, selectedSettlementId, selectedStreetId, siteUrl) {
+            if (selectedStreetId.isBlank()) {
+                housesList = emptyList()
+                return@LaunchedEffect
+            }
+            housesList = ZtoeAddressLookup.getHousesForStreet(selectedStreetId)
+            val fetched = withContext(Dispatchers.IO) {
+                ZtoeAddressLookup.fetchHousesForStreet(selectedRemId, selectedSettlementId, selectedStreetId, siteUrl, forceRefresh = true)
+            }
+            if (fetched.isNotEmpty()) {
+                housesList = fetched
+            }
+        }
+
+        val currentSettlement = settlementsList.find { it.id == selectedSettlementId }
+            ?: ZtoeAddressLookup.findSettlementById(selectedSettlementId)
+            ?: settlementsList.firstOrNull()
+        val currentStreet = streetsList.find { it.id == selectedStreetId }
+            ?: ZtoeAddressLookup.findStreetById(selectedStreetId)
+        val currentHouseRecord = housesList.find { it.house.equals(selectedHouse, ignoreCase = true) }
+
+        // Automatically query ZTOE when a valid street and house are selected (do NOT close or apply until user clicks button)
         LaunchedEffect(selectedRemId, selectedSettlementId, selectedStreetId, selectedHouse) {
             if (selectedStreetId.isBlank() || selectedHouse.isBlank()) {
                 addressLookupResult = null
@@ -687,24 +898,24 @@ fun SettingsScreen(
                     remId = selectedRemId,
                     settlementId = selectedSettlementId,
                     streetId = selectedStreetId,
-                    house = selectedHouse
+                    house = selectedHouse,
+                    siteUrl = siteUrl
                 )
             }
             isCheckingAddressOnSite = false
             addressLookupResult = res
-            if (res != null) {
-                val query = SelectedAddressQuery(
-                    remId = selectedRemId,
-                    settlementId = selectedSettlementId,
-                    streetId = selectedStreetId,
-                    house = selectedHouse
-                )
-                if (!res.queue.isNullOrBlank()) {
-                    onAddressQueueResolved(res.queue, null, res.addressLabel, res.emergencyOutage, query)
-                } else if (!res.statusText.isNullOrBlank()) {
-                    onAddressQueueResolved("", res.statusText, res.addressLabel, res.emergencyOutage, query)
-                }
-            }
+        }
+
+        val selectedAddressStr = if (currentStreet != null && selectedHouse.isNotBlank()) {
+            val remName = if (lang == "uk") currentRem.nameUk else currentRem.nameEn
+            val settlementName = if (currentSettlement != null) {
+                if (lang == "uk") currentSettlement.nameUk else currentSettlement.nameEn
+            } else ""
+            val streetName = if (lang == "uk") currentStreet.nameUk else currentStreet.nameEn
+            val housePrefix = if (lang == "uk") "буд." else "bldg."
+            "$remName, $settlementName,\n$streetName, $housePrefix $selectedHouse"
+        } else {
+            ""
         }
 
         Dialog(
@@ -714,417 +925,511 @@ fun SettingsScreen(
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .background(Color(0xFA0F1420))
+                    .background(Color(0xFF141A29))
                     .statusBarsPadding()
                     .navigationBarsPadding()
             ) {
-                Column(modifier = Modifier.fillMaxSize()) {
-                    // Top Sticky Bar
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .background(Color(0xFF141A29))
-                            .padding(horizontal = 20.dp, vertical = 14.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = AppStrings.queueHelpTitle(lang),
-                            fontSize = 18.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Color.White,
-                            modifier = Modifier.weight(1f)
-                        )
-                        Box(
-                            modifier = Modifier
-                                .size(34.dp)
-                                .clip(CircleShape)
-                                .background(Color(0x1AFFFFFF))
-                                .clickable { showQueueHelpDialog = false },
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                Icons.Default.Close,
-                                contentDescription = "Close",
-                                tint = Color.White,
-                                modifier = Modifier.size(18.dp)
-                            )
-                        }
-                    }
-
-                    Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(Color(0x1AFFFFFF)))
-
-                    // Scrollable Body: 1) Interactive Address Search, 2) "Пошук вручну" heading, 3) Numbered steps 1-4
-                    Column(
-                        modifier = Modifier
-                            .weight(1f)
-                            .verticalScroll(rememberScrollState())
-                            .padding(horizontal = 20.dp, vertical = 16.dp),
-                        verticalArrangement = Arrangement.spacedBy(16.dp)
-                    ) {
-                        // 1) Interactive Search by Address Card with 2dp internal border
-                        Box(
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .verticalScroll(rememberScrollState())
+                        .padding(horizontal = 14.dp, vertical = 16.dp),
+                    verticalArrangement = Arrangement.spacedBy(20.dp)
+                ) {
+                    // Modal Header matching Workbench
+                    Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                        Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .clip(RoundedCornerShape(20.dp))
-                                .background(Color(0xE6141A29))
-                                .border(2.dp, Color.White.copy(alpha = 0.25f), RoundedCornerShape(20.dp))
-                                .padding(16.dp)
+                                .padding(horizontal = 4.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(40.dp)
+                                        .clip(RoundedCornerShape(12.dp))
+                                        .background(Color(0xFFFF5E3A)),
+                                    contentAlignment = Alignment.Center
                                 ) {
                                     Text(
-                                        text = if (lang == "uk") "Пошук черги за адресою" else "Find Queue by Address",
-                                        fontSize = 15.sp,
-                                        fontWeight = FontWeight.ExtraBold,
+                                        text = "?",
+                                        fontSize = 20.sp,
+                                        fontWeight = FontWeight.Black,
                                         color = Color.White
                                     )
-                                    Box(
-                                        modifier = Modifier
-                                            .clip(RoundedCornerShape(8.dp))
-                                            .background(Color(0x26FF5E3A))
-                                            .padding(horizontal = 8.dp, vertical = 3.dp)
-                                    ) {
-                                        Text(
-                                            text = "ztoe.com.ua",
-                                            fontSize = 11.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            fontFamily = FontFamily.Monospace,
-                                            color = Color(0xFFFF5E3A)
-                                        )
-                                    }
                                 }
+                                Text(
+                                    text = AppStrings.queueHelpTitle(lang),
+                                    fontSize = 20.sp,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    color = Color.White
+                                )
+                            }
+                            Box(
+                                modifier = Modifier
+                                    .size(40.dp)
+                                    .clip(CircleShape)
+                                    .background(Color(0x1AFFFFFF))
+                                    .border(1.dp, Color(0x26FFFFFF), CircleShape)
+                                    .clickable { showQueueHelpDialog = false },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    Icons.Default.Close,
+                                    contentDescription = "Close",
+                                    tint = Color.White,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                        }
+                        Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(Color(0x33FFFFFF)))
+                    }
 
-                                // 1. РЕМ Dropdown
-                                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                    Text(
-                                        text = if (lang == "uk") "1. РЕМ (Район електромереж)" else "1. Distribution District (РЕМ)",
-                                        fontSize = 12.sp,
-                                        fontWeight = FontWeight.SemiBold,
-                                        color = Color(0xCCBAE6FD)
+                    // 1) Interactive Search by Address Card matching Workbench
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(24.dp))
+                            .background(Color(0x0DFFFFFF))
+                            .border(2.dp, Color.White.copy(alpha = 0.25f), RoundedCornerShape(24.dp))
+                            .padding(20.dp)
+                    ) {
+                        Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Text(
+                                    text = (if (lang == "uk") "Пошук черги за адресою" else "Find Queue by Address").uppercase(),
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    color = Color.White,
+                                    letterSpacing = 0.8.sp
+                                )
+                                Text(
+                                    text = AppStrings.queueHelpAddressSubtitle(lang),
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    color = Color(0xCCBAE6FD)
+                                )
+                            }
+
+                            // 1. РЕМ Dropdown
+                            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Text(
+                                    text = if (lang == "uk") "РЕМ" else "District (РЕМ)",
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color(0xE6BAE6FD)
+                                )
+                                ExposedDropdownMenuBox(
+                                    expanded = remDropdownExpanded,
+                                    onExpandedChange = { remDropdownExpanded = it }
+                                ) {
+                                    OutlinedTextField(
+                                        value = if (lang == "uk") currentRem.nameUk else currentRem.nameEn,
+                                        onValueChange = {},
+                                        readOnly = true,
+                                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = remDropdownExpanded) },
+                                        modifier = Modifier.menuAnchor().fillMaxWidth(),
+                                        shape = RoundedCornerShape(16.dp),
+                                        colors = OutlinedTextFieldDefaults.colors(
+                                            focusedTextColor = Color.White,
+                                            unfocusedTextColor = Color.White,
+                                            focusedBorderColor = Color(0xFFFF5E3A),
+                                            unfocusedBorderColor = Color(0x33FFFFFF),
+                                            focusedContainerColor = Color(0x14FFFFFF),
+                                            unfocusedContainerColor = Color(0x14FFFFFF)
+                                        )
                                     )
-                                    ExposedDropdownMenuBox(
+                                    ExposedDropdownMenu(
                                         expanded = remDropdownExpanded,
-                                        onExpandedChange = { remDropdownExpanded = it }
-                                    ) {
-                                        OutlinedTextField(
-                                            value = if (lang == "uk") currentRem.nameUk else currentRem.nameEn,
-                                            onValueChange = {},
-                                            readOnly = true,
-                                            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = remDropdownExpanded) },
-                                            modifier = Modifier.menuAnchor().fillMaxWidth(),
-                                            shape = RoundedCornerShape(14.dp),
-                                            colors = OutlinedTextFieldDefaults.colors(
-                                                focusedTextColor = Color.White,
-                                                unfocusedTextColor = Color.White,
-                                                focusedBorderColor = Color(0xFFFF5E3A),
-                                                unfocusedBorderColor = Color(0x33FFFFFF),
-                                                focusedContainerColor = Color(0x1AFFFFFF),
-                                                unfocusedContainerColor = Color(0x14FFFFFF)
-                                            )
-                                        )
-                                        ExposedDropdownMenu(
-                                            expanded = remDropdownExpanded,
-                                            onDismissRequest = { remDropdownExpanded = false },
-                                            modifier = Modifier.background(Color(0xFF141A29))
-                                        ) {
-                                            ZtoeAddressLookup.DIRECTORY.forEach { rem ->
-                                                DropdownMenuItem(
-                                                    text = {
-                                                        Text(
-                                                            if (lang == "uk") rem.nameUk else rem.nameEn,
-                                                            fontWeight = FontWeight.Bold,
-                                                            color = Color.White
-                                                        )
-                                                    },
-                                                    onClick = {
-                                                        selectedRemId = rem.id
-                                                        val firstSettlement = rem.settlements.firstOrNull()
-                                                        selectedSettlementId = firstSettlement?.id ?: ""
-                                                        selectedStreetId = ""
-                                                        selectedHouse = ""
-                                                        remDropdownExpanded = false
-                                                    }
-                                                )
-                                            }
-                                        }
-                                    }
-                                }
-
-                                // 2. Населений пункт Dropdown
-                                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                    Text(
-                                        text = if (lang == "uk") "2. Населений пункт" else "2. Settlement",
-                                        fontSize = 12.sp,
-                                        fontWeight = FontWeight.SemiBold,
-                                        color = Color(0xCCBAE6FD)
-                                    )
-                                    ExposedDropdownMenuBox(
-                                        expanded = settlementDropdownExpanded,
-                                        onExpandedChange = { settlementDropdownExpanded = it }
-                                    ) {
-                                        OutlinedTextField(
-                                            value = if (lang == "uk") currentSettlement.nameUk else currentSettlement.nameEn,
-                                            onValueChange = {},
-                                            readOnly = true,
-                                            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = settlementDropdownExpanded) },
-                                            modifier = Modifier.menuAnchor().fillMaxWidth(),
-                                            shape = RoundedCornerShape(14.dp),
-                                            colors = OutlinedTextFieldDefaults.colors(
-                                                focusedTextColor = Color.White,
-                                                unfocusedTextColor = Color.White,
-                                                focusedBorderColor = Color(0xFFFF5E3A),
-                                                unfocusedBorderColor = Color(0x33FFFFFF),
-                                                focusedContainerColor = Color(0x1AFFFFFF),
-                                                unfocusedContainerColor = Color(0x14FFFFFF)
-                                            )
-                                        )
-                                        ExposedDropdownMenu(
-                                            expanded = settlementDropdownExpanded,
-                                            onDismissRequest = { settlementDropdownExpanded = false },
-                                            modifier = Modifier.background(Color(0xFF141A29))
-                                        ) {
-                                            currentRem.settlements.forEach { settlement ->
-                                                DropdownMenuItem(
-                                                    text = {
-                                                        Text(
-                                                            if (lang == "uk") settlement.nameUk else settlement.nameEn,
-                                                            fontWeight = FontWeight.Bold,
-                                                            color = Color.White
-                                                        )
-                                                    },
-                                                    onClick = {
-                                                        selectedSettlementId = settlement.id
-                                                        selectedStreetId = ""
-                                                        selectedHouse = ""
-                                                        settlementDropdownExpanded = false
-                                                    }
-                                                )
-                                            }
-                                        }
-                                    }
-                                }
-
-                                // 3. Вулиця Dropdown (unselected by default on first launch)
-                                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                    Text(
-                                        text = if (lang == "uk") "3. Вулиця" else "3. Street",
-                                        fontSize = 12.sp,
-                                        fontWeight = FontWeight.SemiBold,
-                                        color = Color(0xCCBAE6FD)
-                                    )
-                                    ExposedDropdownMenuBox(
-                                        expanded = streetDropdownExpanded,
-                                        onExpandedChange = { streetDropdownExpanded = it }
-                                    ) {
-                                        val streetDisplay = when {
-                                            currentStreet == null -> if (lang == "uk") "Оберіть вулицю" else "Select street"
-                                            lang == "uk" -> currentStreet.nameUk
-                                            else -> currentStreet.nameEn
-                                        }
-                                        OutlinedTextField(
-                                            value = streetDisplay,
-                                            onValueChange = {},
-                                            readOnly = true,
-                                            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = streetDropdownExpanded) },
-                                            modifier = Modifier.menuAnchor().fillMaxWidth(),
-                                            shape = RoundedCornerShape(14.dp),
-                                            colors = OutlinedTextFieldDefaults.colors(
-                                                focusedTextColor = Color.White,
-                                                unfocusedTextColor = Color.White,
-                                                focusedBorderColor = Color(0xFFFF5E3A),
-                                                unfocusedBorderColor = Color(0x33FFFFFF),
-                                                focusedContainerColor = Color(0x1AFFFFFF),
-                                                unfocusedContainerColor = Color(0x14FFFFFF)
-                                            )
-                                        )
-                                        ExposedDropdownMenu(
-                                            expanded = streetDropdownExpanded,
-                                            onDismissRequest = { streetDropdownExpanded = false },
-                                            modifier = Modifier.background(Color(0xFF141A29))
-                                        ) {
-                                            currentSettlement.streets.forEach { street ->
-                                                DropdownMenuItem(
-                                                    text = {
-                                                        Text(
-                                                            if (lang == "uk") street.nameUk else street.nameEn,
-                                                            fontWeight = FontWeight.Bold,
-                                                            color = Color.White
-                                                        )
-                                                    },
-                                                    onClick = {
-                                                        selectedStreetId = street.id
-                                                        selectedHouse = ""
-                                                        streetDropdownExpanded = false
-                                                    }
-                                                )
-                                            }
-                                        }
-                                    }
-                                }
-
-                                // 4. Будинок Dropdown (unselected by default on first launch)
-                                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                    Text(
-                                        text = if (lang == "uk") "4. Будинок" else "4. Building / House",
-                                        fontSize = 12.sp,
-                                        fontWeight = FontWeight.SemiBold,
-                                        color = Color(0xCCBAE6FD)
-                                    )
-                                    ExposedDropdownMenuBox(
-                                        expanded = houseDropdownExpanded,
-                                        onExpandedChange = {
-                                            if (currentStreet != null) {
-                                                houseDropdownExpanded = it
-                                            }
-                                        }
-                                    ) {
-                                        val houseDisplay = when {
-                                            currentHouseRecord == null -> if (lang == "uk") "Оберіть будинок" else "Select house"
-                                            else -> "${if (lang == "uk") "буд." else "bldg."} ${currentHouseRecord.house}"
-                                        }
-                                        OutlinedTextField(
-                                            value = houseDisplay,
-                                            onValueChange = {},
-                                            readOnly = true,
-                                            enabled = currentStreet != null,
-                                            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = houseDropdownExpanded) },
-                                            modifier = Modifier.menuAnchor().fillMaxWidth(),
-                                            shape = RoundedCornerShape(14.dp),
-                                            colors = OutlinedTextFieldDefaults.colors(
-                                                focusedTextColor = Color.White,
-                                                unfocusedTextColor = Color.White,
-                                                disabledTextColor = Color(0x80FFFFFF),
-                                                focusedBorderColor = Color(0xFFFF5E3A),
-                                                unfocusedBorderColor = Color(0x33FFFFFF),
-                                                disabledBorderColor = Color(0x1AFFFFFF),
-                                                focusedContainerColor = Color(0x1AFFFFFF),
-                                                unfocusedContainerColor = Color(0x14FFFFFF),
-                                                disabledContainerColor = Color(0x0DFFFFFF)
-                                            )
-                                        )
-                                        ExposedDropdownMenu(
-                                            expanded = houseDropdownExpanded,
-                                            onDismissRequest = { houseDropdownExpanded = false },
-                                            modifier = Modifier.background(Color(0xFF141A29))
-                                        ) {
-                                            currentStreet?.houses?.forEach { h ->
-                                                DropdownMenuItem(
-                                                    text = {
-                                                        Text(
-                                                            "${if (lang == "uk") "буд." else "bldg."} ${h.house}",
-                                                            fontWeight = FontWeight.Bold,
-                                                            color = Color.White
-                                                        )
-                                                    },
-                                                    onClick = {
-                                                        selectedHouse = h.house
-                                                        houseDropdownExpanded = false
-                                                    }
-                                                )
-                                            }
-                                        }
-                                    }
-                                }
-
-                                // Result & Live Site Check Row
-                                val resolvedLookup = addressLookupResult
-                                if (resolvedLookup != null && !resolvedLookup.statusText.isNullOrBlank()) {
-                                    Box(
+                                        onDismissRequest = { remDropdownExpanded = false },
                                         modifier = Modifier
-                                            .fillMaxWidth()
-                                            .clip(RoundedCornerShape(14.dp))
-                                            .background(Color(0x2610B981))
-                                            .border(1.dp, Color(0x6634D399), RoundedCornerShape(14.dp))
-                                            .padding(12.dp),
-                                        contentAlignment = Alignment.Center
+                                            .background(Color(0xFF141A29))
+                                            .heightIn(max = 320.dp)
                                     ) {
-                                        Text(
-                                            text = resolvedLookup.statusText,
-                                            fontSize = 13.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            color = Color.White,
-                                            textAlign = TextAlign.Center
-                                        )
-                                    }
-                                } else {
-                                    Row(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .clip(RoundedCornerShape(14.dp))
-                                            .background(Color(0x33000000))
-                                            .border(1.dp, Color(0x1AFFFFFF), RoundedCornerShape(14.dp))
-                                            .padding(horizontal = 12.dp, vertical = 10.dp),
-                                        horizontalArrangement = Arrangement.SpaceBetween,
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        Column(modifier = Modifier.weight(1f)) {
-                                            Text(
-                                                text = if (lang == "uk") "Визначена підчерга:" else "Detected sub-queue:",
-                                                fontSize = 11.sp,
-                                                color = Color(0xB3BAE6FD)
-                                            )
-                                            val detectedQ = resolvedLookup?.queue ?: currentHouseRecord?.queue
-                                            Text(
-                                                text = if (!detectedQ.isNullOrBlank()) {
-                                                    "${AppStrings.queue(lang)} $detectedQ"
-                                                } else {
-                                                    "—"
+                                        allRems.forEach { rem ->
+                                            DropdownMenuItem(
+                                                text = {
+                                                    Text(
+                                                        if (lang == "uk") rem.nameUk else rem.nameEn,
+                                                        fontWeight = FontWeight.Bold,
+                                                        color = Color.White
+                                                    )
                                                 },
-                                                fontSize = 16.sp,
-                                                fontWeight = FontWeight.ExtraBold,
-                                                fontFamily = FontFamily.Monospace,
-                                                color = if (!detectedQ.isNullOrBlank()) Color(0xFFFF5E3A) else Color(0x80FFFFFF)
+                                                onClick = {
+                                                    selectedRemId = rem.id
+                                                    val nextSettlements = ZtoeAddressLookup.getSettlementsForRem(rem.id)
+                                                    settlementsList = nextSettlements
+                                                    val nextSettlementId = nextSettlements.firstOrNull()?.id ?: ""
+                                                    selectedSettlementId = nextSettlementId
+                                                    streetsList = if (nextSettlementId.isNotBlank()) {
+                                                        ZtoeAddressLookup.getStreetsForSettlement(nextSettlementId)
+                                                    } else {
+                                                        emptyList()
+                                                    }
+                                                    selectedStreetId = ""
+                                                    housesList = emptyList()
+                                                    selectedHouse = ""
+                                                    remDropdownExpanded = false
+                                                }
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+
+                            // 2. Населений пункт Dropdown
+                            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Text(
+                                    text = if (lang == "uk") "Населений пункт" else "City / Settlement",
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color(0xE6BAE6FD)
+                                )
+                                ExposedDropdownMenuBox(
+                                    expanded = settlementDropdownExpanded,
+                                    onExpandedChange = { settlementDropdownExpanded = it }
+                                ) {
+                                    val settlementDisplay = if (currentSettlement != null) {
+                                        if (lang == "uk") currentSettlement.nameUk else currentSettlement.nameEn
+                                    } else {
+                                        if (lang == "uk") "Оберіть населений пункт" else "Select settlement"
+                                    }
+                                    OutlinedTextField(
+                                        value = settlementDisplay,
+                                        onValueChange = {},
+                                        readOnly = true,
+                                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = settlementDropdownExpanded) },
+                                        modifier = Modifier.menuAnchor().fillMaxWidth(),
+                                        shape = RoundedCornerShape(16.dp),
+                                        colors = OutlinedTextFieldDefaults.colors(
+                                            focusedTextColor = Color.White,
+                                            unfocusedTextColor = Color.White,
+                                            focusedBorderColor = Color(0xFFFF5E3A),
+                                            unfocusedBorderColor = Color(0x33FFFFFF),
+                                            focusedContainerColor = Color(0x14FFFFFF),
+                                            unfocusedContainerColor = Color(0x14FFFFFF)
+                                        )
+                                    )
+                                    ExposedDropdownMenu(
+                                        expanded = settlementDropdownExpanded,
+                                        onDismissRequest = { settlementDropdownExpanded = false },
+                                        modifier = Modifier
+                                            .background(Color(0xFF141A29))
+                                            .heightIn(max = 320.dp)
+                                    ) {
+                                        settlementsList.forEach { settlement ->
+                                            DropdownMenuItem(
+                                                text = {
+                                                    Text(
+                                                        if (lang == "uk") settlement.nameUk else settlement.nameEn,
+                                                        fontWeight = FontWeight.Bold,
+                                                        color = Color.White
+                                                    )
+                                                },
+                                                onClick = {
+                                                    selectedSettlementId = settlement.id
+                                                    streetsList = ZtoeAddressLookup.getStreetsForSettlement(settlement.id)
+                                                    selectedStreetId = ""
+                                                    housesList = emptyList()
+                                                    selectedHouse = ""
+                                                    settlementDropdownExpanded = false
+                                                }
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+
+                            // 3. Вулиця Dropdown (unselected by default on first launch)
+                            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Text(
+                                    text = if (lang == "uk") "Вулиця" else "Street",
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color(0xE6BAE6FD)
+                                )
+                                ExposedDropdownMenuBox(
+                                    expanded = streetDropdownExpanded,
+                                    onExpandedChange = { streetDropdownExpanded = it }
+                                ) {
+                                    val streetDisplay = when {
+                                        currentStreet == null -> if (lang == "uk") "Оберіть вулицю" else "Select street"
+                                        lang == "uk" -> currentStreet.nameUk
+                                        else -> currentStreet.nameEn
+                                    }
+                                    OutlinedTextField(
+                                        value = streetDisplay,
+                                        onValueChange = {},
+                                        readOnly = true,
+                                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = streetDropdownExpanded) },
+                                        modifier = Modifier.menuAnchor().fillMaxWidth(),
+                                        shape = RoundedCornerShape(16.dp),
+                                        colors = OutlinedTextFieldDefaults.colors(
+                                            focusedTextColor = Color.White,
+                                            unfocusedTextColor = Color.White,
+                                            focusedBorderColor = Color(0xFFFF5E3A),
+                                            unfocusedBorderColor = Color(0x33FFFFFF),
+                                            focusedContainerColor = Color(0x14FFFFFF),
+                                            unfocusedContainerColor = Color(0x14FFFFFF)
+                                        )
+                                    )
+                                    ExposedDropdownMenu(
+                                        expanded = streetDropdownExpanded,
+                                        onDismissRequest = { streetDropdownExpanded = false },
+                                        modifier = Modifier
+                                            .background(Color(0xFF141A29))
+                                            .heightIn(max = 320.dp)
+                                    ) {
+                                        streetsList.forEach { street ->
+                                            DropdownMenuItem(
+                                                text = {
+                                                    Text(
+                                                        if (lang == "uk") street.nameUk else street.nameEn,
+                                                        fontWeight = FontWeight.Bold,
+                                                        color = Color.White
+                                                    )
+                                                },
+                                                onClick = {
+                                                    selectedStreetId = street.id
+                                                    housesList = ZtoeAddressLookup.getHousesForStreet(street.id)
+                                                    selectedHouse = ""
+                                                    streetDropdownExpanded = false
+                                                }
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+
+                            // 4. Будинок Dropdown (unselected by default on first launch)
+                            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                Text(
+                                    text = if (lang == "uk") "Будинок" else "House Number",
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color(0xE6BAE6FD)
+                                )
+                                ExposedDropdownMenuBox(
+                                    expanded = houseDropdownExpanded,
+                                    onExpandedChange = {
+                                        if (currentStreet != null) {
+                                            houseDropdownExpanded = it
+                                        }
+                                    }
+                                ) {
+                                    val houseDisplay = when {
+                                        selectedHouse.isBlank() -> if (lang == "uk") "Оберіть будинок" else "Select house"
+                                        else -> selectedHouse
+                                    }
+                                    OutlinedTextField(
+                                        value = houseDisplay,
+                                        onValueChange = {},
+                                        readOnly = true,
+                                        enabled = currentStreet != null,
+                                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = houseDropdownExpanded) },
+                                        modifier = Modifier.menuAnchor().fillMaxWidth(),
+                                        shape = RoundedCornerShape(16.dp),
+                                        colors = OutlinedTextFieldDefaults.colors(
+                                            focusedTextColor = Color.White,
+                                            unfocusedTextColor = Color.White,
+                                            disabledTextColor = Color(0x80FFFFFF),
+                                            focusedBorderColor = Color(0xFFFF5E3A),
+                                            unfocusedBorderColor = Color(0x33FFFFFF),
+                                            disabledBorderColor = Color(0x1AFFFFFF),
+                                            focusedContainerColor = Color(0x14FFFFFF),
+                                            unfocusedContainerColor = Color(0x14FFFFFF),
+                                            disabledContainerColor = Color(0x0DFFFFFF)
+                                        )
+                                    )
+                                    ExposedDropdownMenu(
+                                        expanded = houseDropdownExpanded,
+                                        onDismissRequest = { houseDropdownExpanded = false },
+                                        modifier = Modifier
+                                            .background(Color(0xFF141A29))
+                                            .heightIn(max = 320.dp)
+                                    ) {
+                                        housesList.forEach { h ->
+                                            DropdownMenuItem(
+                                                text = {
+                                                    Text(
+                                                        h.house,
+                                                        fontWeight = FontWeight.Bold,
+                                                        color = Color.White
+                                                    )
+                                                },
+                                                onClick = {
+                                                    selectedHouse = h.house
+                                                    houseDropdownExpanded = false
+                                                }
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Result Card matching Workbench (shown when a house is selected)
+                            val matchedRecord = addressLookupResult
+                                ?: currentHouseRecord
+                                ?: if (selectedHouse.isNotBlank()) {
+                                    AddressLookupResult(
+                                        house = selectedHouse,
+                                        queue = "",
+                                        addressLabel = selectedAddressStr
+                                    )
+                                } else null
+                            if (selectedHouse.isNotBlank() && matchedRecord != null) {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(top = 6.dp)
+                                        .clip(RoundedCornerShape(16.dp))
+                                        .background(Color(0xD9141A29))
+                                        .border(2.dp, Color.White.copy(alpha = 0.25f), RoundedCornerShape(16.dp))
+                                        .padding(16.dp)
+                                ) {
+                                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                                        if (selectedAddressStr.isNotBlank()) {
+                                            Text(
+                                                text = selectedAddressStr,
+                                                fontSize = 14.sp,
+                                                fontWeight = FontWeight.SemiBold,
+                                                color = Color(0xE6BAE6FD),
+                                                lineHeight = 19.sp
                                             )
                                         }
 
+                                        if (matchedRecord.queue.isNotBlank()) {
+                                            Row(
+                                                modifier = Modifier.fillMaxWidth(),
+                                                horizontalArrangement = Arrangement.SpaceBetween,
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                Text(
+                                                    text = if (lang == "uk") "Знайдена черга:" else "Found Queue:",
+                                                    fontSize = 14.sp,
+                                                    fontWeight = FontWeight.Medium,
+                                                    color = Color(0xCCBAE6FD)
+                                                )
+                                                Text(
+                                                    text = "${AppStrings.queue(lang)} ${matchedRecord.queue}",
+                                                    fontSize = 16.sp,
+                                                    fontWeight = FontWeight.ExtraBold,
+                                                    fontFamily = FontFamily.Monospace,
+                                                    color = Color.White
+                                                )
+                                            }
+                                        }
+
+                                        if (!matchedRecord.statusText.isNullOrBlank()) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .clip(RoundedCornerShape(16.dp))
+                                                    .background(Color(0x0FFFFFFF))
+                                                    .border(2.dp, Color(0x33FFFFFF), RoundedCornerShape(16.dp))
+                                                    .padding(horizontal = 16.dp, vertical = 12.dp)
+                                            ) {
+                                                Text(
+                                                    text = matchedRecord.statusText,
+                                                    fontSize = 14.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = Color.White,
+                                                    lineHeight = 19.sp
+                                                )
+                                            }
+                                        }
+
+                                        val emerg = matchedRecord.emergencyOutage
+                                        if (emerg != null) {
+                                            Box(
+                                                modifier = Modifier
+                                                    .fillMaxWidth()
+                                                    .clip(RoundedCornerShape(16.dp))
+                                                    .background(Color(0x1AFF5E3A))
+                                                    .border(2.dp, Color(0x59FF5E3A), RoundedCornerShape(16.dp))
+                                                    .padding(horizontal = 16.dp, vertical = 12.dp)
+                                            ) {
+                                                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                                    Text(
+                                                        text = if (lang == "uk") {
+                                                            emerg.outageType.ifBlank { "Аварійне відключення" }
+                                                        } else {
+                                                            "Emergency Outage"
+                                                        },
+                                                        fontSize = 14.sp,
+                                                        fontWeight = FontWeight.Bold,
+                                                        color = Color(0xFFFF5E3A)
+                                                    )
+                                                    Text(
+                                                        text = if (lang == "uk") {
+                                                            "Початок: ${emerg.startTime} · Відновлення: ${emerg.estimatedRestoreTime}"
+                                                        } else {
+                                                            "Start: ${emerg.startTime} · Restore: ${emerg.estimatedRestoreTime}"
+                                                        },
+                                                        fontSize = 12.sp,
+                                                        fontFamily = FontFamily.Monospace,
+                                                        color = Color.White
+                                                    )
+                                                }
+                                            }
+                                        }
+
+                                        // Full-width "Обрати чергу X.Y" / "Apply Queue X.Y" button UNDER address matching Workbench
                                         Box(
                                             modifier = Modifier
-                                                .clip(RoundedCornerShape(12.dp))
-                                                .background(if (selectedStreetId.isNotBlank() && selectedHouse.isNotBlank()) Color(0xFFFF5E3A) else Color(0x33FFFFFF))
-                                                .clickable(enabled = selectedStreetId.isNotBlank() && selectedHouse.isNotBlank() && !isCheckingAddressOnSite) {
-                                                    coroutineScope.launch {
-                                                        isCheckingAddressOnSite = true
-                                                        val res = withContext(Dispatchers.IO) {
-                                                            ZtoeAddressLookup.checkAddressOnZtoeWebsite(
-                                                                remId = selectedRemId,
-                                                                settlementId = selectedSettlementId,
-                                                                streetId = selectedStreetId,
-                                                                house = selectedHouse
-                                                            )
-                                                        }
-                                                        isCheckingAddressOnSite = false
-                                                        addressLookupResult = res
-                                                        if (res != null) {
-                                                            val query = SelectedAddressQuery(
-                                                                remId = selectedRemId,
-                                                                settlementId = selectedSettlementId,
-                                                                streetId = selectedStreetId,
-                                                                house = selectedHouse
-                                                            )
-                                                            if (!res.queue.isNullOrBlank()) {
-                                                                onAddressQueueResolved(res.queue, null, res.addressLabel, res.emergencyOutage, query)
-                                                            } else if (!res.statusText.isNullOrBlank()) {
-                                                                onAddressQueueResolved("", res.statusText, res.addressLabel, res.emergencyOutage, query)
-                                                            }
-                                                        }
+                                                .fillMaxWidth()
+                                                .clip(RoundedCornerShape(16.dp))
+                                                .background(Color(0xFFFF5E3A))
+                                                .clickable {
+                                                    val query = SelectedAddressQuery(
+                                                        remId = selectedRemId,
+                                                        settlementId = selectedSettlementId,
+                                                        streetId = selectedStreetId,
+                                                        house = selectedHouse
+                                                    )
+                                                    val addressToSave = selectedAddressStr.ifBlank { matchedRecord.addressLabel }
+                                                    if (matchedRecord.queue.isNotBlank()) {
+                                                        onAddressQueueResolved(
+                                                            matchedRecord.queue,
+                                                            null,
+                                                            addressToSave,
+                                                            matchedRecord.emergencyOutage,
+                                                            query
+                                                        )
+                                                        showQueueHelpDialog = false
+                                                        onShowAppBanner("${AppStrings.queue(lang)} ${matchedRecord.queue}")
+                                                    } else {
+                                                        onAddressQueueResolved(
+                                                            "",
+                                                            matchedRecord.statusText,
+                                                            addressToSave,
+                                                            matchedRecord.emergencyOutage,
+                                                            query
+                                                        )
+                                                        showQueueHelpDialog = false
+                                                        onShowAppBanner(
+                                                            matchedRecord.statusText
+                                                                ?: if (lang == "uk") "Адресу збережено" else "Address saved"
+                                                        )
                                                     }
                                                 }
-                                                .padding(horizontal = 12.dp, vertical = 8.dp),
+                                                .padding(vertical = 14.dp, horizontal = 16.dp),
                                             contentAlignment = Alignment.Center
                                         ) {
                                             Text(
-                                                text = if (isCheckingAddressOnSite) {
-                                                    if (lang == "uk") "Перевірка..." else "Checking..."
+                                                text = if (matchedRecord.queue.isNotBlank()) {
+                                                    if (lang == "uk") "Обрати чергу ${matchedRecord.queue}" else "Apply Queue ${matchedRecord.queue}"
                                                 } else {
-                                                    if (lang == "uk") "Перевірити на сайті" else "Verify on website"
+                                                    if (lang == "uk") "Підтвердити вибір" else "Confirm selection"
                                                 },
-                                                fontSize = 11.sp,
-                                                fontWeight = FontWeight.Bold,
+                                                fontSize = 16.sp,
+                                                fontWeight = FontWeight.ExtraBold,
                                                 color = Color.White
                                             )
                                         }
@@ -1132,87 +1437,113 @@ fun SettingsScreen(
                                 }
                             }
                         }
+                    }
 
-                        // 2) "Пошук вручну" / "Manual search" Heading
-                        Text(
-                            text = AppStrings.queueHelpManualSearchTitle(lang),
-                            fontSize = 15.sp,
-                            fontWeight = FontWeight.ExtraBold,
-                            color = Color.White,
-                            modifier = Modifier.padding(top = 4.dp)
-                        )
+                    // 2) "Пошук вручну" / "Manual search" Heading matching Workbench
+                    Text(
+                        text = AppStrings.queueHelpManualSearchTitle(lang).uppercase(),
+                        fontSize = 14.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        color = Color.White,
+                        letterSpacing = 0.8.sp,
+                        modifier = Modifier.padding(top = 4.dp, start = 4.dp)
+                    )
 
-                        // 3) Numbered instructions 1-4
-                        Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                            AppStrings.queueHelpSteps(lang).forEach { step ->
-                                val targetUrl = "https://www.ztoe.com.ua/unhooking-search.php"
-                                val urlStart = step.indexOf(targetUrl)
-                                if (urlStart >= 0) {
-                                    val urlEnd = urlStart + targetUrl.length
-                                    val annotatedStep = buildAnnotatedString {
-                                        append(step)
-                                        addStyle(
-                                            style = SpanStyle(
-                                                color = Color(0xFFFF5E3A),
-                                                fontWeight = FontWeight.SemiBold,
-                                                textDecoration = TextDecoration.Underline
-                                            ),
-                                            start = urlStart,
-                                            end = urlEnd
+                    // 3) Numbered instructions 1-4 inside cards matching Workbench
+                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        AppStrings.queueHelpSteps(lang).forEachIndexed { idx, step ->
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(16.dp))
+                                    .background(Color(0x0AFFFFFF))
+                                    .border(2.dp, Color(0x26FFFFFF), RoundedCornerShape(16.dp))
+                                    .padding(16.dp)
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.Top,
+                                    horizontalArrangement = Arrangement.spacedBy(14.dp)
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .padding(top = 2.dp)
+                                            .size(24.dp)
+                                            .clip(CircleShape)
+                                            .background(Color(0x26FFFFFF)),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text(
+                                            text = "${idx + 1}",
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            fontFamily = FontFamily.Monospace,
+                                            color = Color.White
                                         )
                                     }
-                                    Text(
-                                        text = annotatedStep,
-                                        color = Color.LightGray,
-                                        fontSize = 14.sp,
-                                        lineHeight = 20.sp,
-                                        modifier = Modifier.clickable {
-                                            try {
-                                                val intent = android.content.Intent(
-                                                    android.content.Intent.ACTION_VIEW,
-                                                    android.net.Uri.parse(targetUrl)
-                                                )
-                                                context.startActivity(intent)
-                                            } catch (_: Exception) {}
+                                    val targetUrl = "https://www.ztoe.com.ua/unhooking-search.php"
+                                    val urlStart = step.indexOf(targetUrl)
+                                    if (urlStart >= 0) {
+                                        val urlEnd = urlStart + targetUrl.length
+                                        val annotatedStep = buildAnnotatedString {
+                                            append(step)
+                                            addStyle(
+                                                style = SpanStyle(
+                                                    color = Color(0xFFFF5E3A),
+                                                    fontWeight = FontWeight.SemiBold,
+                                                    textDecoration = TextDecoration.Underline
+                                                ),
+                                                start = urlStart,
+                                                end = urlEnd
+                                            )
                                         }
-                                    )
-                                } else {
-                                    Text(
-                                        text = step,
-                                        color = Color.LightGray,
-                                        fontSize = 14.sp,
-                                        lineHeight = 20.dp.value.sp
-                                    )
+                                        Text(
+                                            text = annotatedStep,
+                                            color = Color(0xFFF4F4F5),
+                                            fontSize = 14.sp,
+                                            lineHeight = 20.sp,
+                                            modifier = Modifier
+                                                .weight(1f)
+                                                .clickable {
+                                                    try {
+                                                        val intent = android.content.Intent(
+                                                            android.content.Intent.ACTION_VIEW,
+                                                            android.net.Uri.parse(targetUrl)
+                                                        )
+                                                        context.startActivity(intent)
+                                                    } catch (_: Exception) {}
+                                                }
+                                        )
+                                    } else {
+                                        Text(
+                                            text = step,
+                                            color = Color(0xFFF4F4F5),
+                                            fontSize = 14.sp,
+                                            lineHeight = 20.sp,
+                                            modifier = Modifier.weight(1f)
+                                        )
+                                    }
                                 }
                             }
                         }
                     }
 
-                    Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(Color(0x1AFFFFFF)))
-
-                    // Bottom Sticky Confirmation Button
+                    // Bottom "Зрозуміло" / "Got it" button matching Workbench (white bg, black text)
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .background(Color(0xFF141A29))
-                            .padding(horizontal = 20.dp, vertical = 12.dp)
+                            .padding(top = 4.dp)
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(Color.White)
+                            .clickable { showQueueHelpDialog = false }
+                            .padding(vertical = 14.dp, horizontal = 20.dp),
+                        contentAlignment = Alignment.Center
                     ) {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(16.dp))
-                                .background(Color(0xFFFF5E3A))
-                                .clickable { showQueueHelpDialog = false }
-                                .padding(vertical = 14.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                text = AppStrings.queueHelpGotIt(lang),
-                                color = Color.White,
-                                fontSize = 15.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
+                        Text(
+                            text = AppStrings.queueHelpGotIt(lang),
+                            color = Color.Black,
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.ExtraBold
+                        )
                     }
                 }
             }

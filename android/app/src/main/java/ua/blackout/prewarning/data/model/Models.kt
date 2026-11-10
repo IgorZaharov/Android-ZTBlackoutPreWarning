@@ -78,6 +78,7 @@ data class UserSettings(
     val refreshIntervalMinutes: Long = 30L,
     val advanceNoticeMinutes: Int = 15,
     val notificationsEnabled: Boolean = true,
+    val emergencyNotificationsEnabled: Boolean = true,
     val soundEnabled: Boolean = true,
     val vibrationEnabled: Boolean = true,
     val prevSoundEnabled: Boolean = true,

@@ -20,7 +20,7 @@ import {
 } from 'lucide-react';
 import { DaySchedule, UserSettings, NotificationRecord, Language } from './types';
 import { fetchFullSchedules, applyEmergencyOutageToSchedule } from './services/ztoeParser';
-import { checkAddressOnZtoeWebsite, getKyivska37DemoEmergencyOutage } from './services/ztoeAddressLookup';
+import { checkAddressOnZtoeWebsite, getKyivska37DemoEmergencyOutage, prefetchAddressIndexInBackground } from './services/ztoeAddressLookup';
 import { 
   loadUserSettings, 
   saveUserSettings, 
@@ -152,6 +152,14 @@ export default function App() {
     loadSchedules(settings);
   }, [loadSchedules, settings.queue, settings.url, settings.selectedAddress]);
 
+  // Automatically refresh timer and drum bar when User enters main screen
+  useEffect(() => {
+    if (activeMode === 'app' && phoneTab === 'schedule') {
+      setNow(new Date());
+      loadSchedules(settings);
+    }
+  }, [activeMode, phoneTab]);
+
   // Periodic background refresh that also re-checks selectedAddressQuery against the ZTOE website
   useEffect(() => {
     const intervalMs = Math.max(1, settings.refreshIntervalMinutes || 30) * 60 * 1000;
@@ -166,6 +174,11 @@ export default function App() {
       getDonationsWithDailyRefresh(Date.now(), false).catch(() => {});
     });
   }, []);
+
+  // Pre-load and index REMs, cities, and active city streets in the background on app launch
+  useEffect(() => {
+    prefetchAddressIndexInBackground(settings.url, settings.selectedAddressQuery).catch(() => {});
+  }, [settings.url]);
 
   // Battery & Power optimization: shared system clock state
   const [now, setNow] = useState<Date>(() => new Date());

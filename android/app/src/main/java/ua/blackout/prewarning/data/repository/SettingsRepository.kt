@@ -121,6 +121,7 @@ class SettingsRepository(context: Context) {
     fun getSettings(): UserSettings {
         val allMap = try { prefs.all } catch (_: Exception) { emptyMap<String, Any?>() }
         val notificationsEnabled = readSafeBoolean(allMap, "notifications_enabled", true)
+        val emergencyNotificationsEnabled = readSafeBoolean(allMap, "emergency_notifications_enabled", true)
         val prevSound = readSafeBoolean(allMap, "prev_sound_enabled", true)
         val prevVibration = readSafeBoolean(allMap, "prev_vibration_enabled", true)
         val rawSound = readSafeBoolean(allMap, "sound_enabled", true)
@@ -158,6 +159,8 @@ class SettingsRepository(context: Context) {
             null
         }
 
+        val anyAlertsEnabled = notificationsEnabled || emergencyNotificationsEnabled
+
         return UserSettings(
             cityUrl = readSafeString(allMap, "city_url", "https://www.ztoe.com.ua/unhooking-search.php").ifBlank { "https://www.ztoe.com.ua/unhooking-search.php" },
             queue = readSafeString(allMap, "queue", ""),
@@ -168,8 +171,9 @@ class SettingsRepository(context: Context) {
             refreshIntervalMinutes = readSafeLong(allMap, "refresh_minutes", 30L).coerceIn(1L, 240L),
             advanceNoticeMinutes = readSafeInt(allMap, "advance_minutes", 15).coerceIn(1, 240),
             notificationsEnabled = notificationsEnabled,
-            soundEnabled = if (notificationsEnabled) rawSound else false,
-            vibrationEnabled = if (notificationsEnabled) rawVibration else false,
+            emergencyNotificationsEnabled = emergencyNotificationsEnabled,
+            soundEnabled = if (anyAlertsEnabled) rawSound else false,
+            vibrationEnabled = if (anyAlertsEnabled) rawVibration else false,
             prevSoundEnabled = prevSound,
             prevVibrationEnabled = prevVibration,
             themeMode = readSafeString(allMap, "theme_mode", "SYSTEM").ifBlank { "SYSTEM" },
@@ -178,6 +182,7 @@ class SettingsRepository(context: Context) {
     }
 
     fun saveSettings(settings: UserSettings) {
+        val anyAlertsEnabled = settings.notificationsEnabled || settings.emergencyNotificationsEnabled
         val editor = prefs.edit()
             .putString("city_url", settings.cityUrl)
             .putString("queue", settings.queue)
@@ -194,12 +199,13 @@ class SettingsRepository(context: Context) {
             .putLong("refresh_minutes", settings.refreshIntervalMinutes.coerceIn(1L, 240L))
             .putInt("advance_minutes", settings.advanceNoticeMinutes.coerceIn(1, 240))
             .putBoolean("notifications_enabled", settings.notificationsEnabled)
-            .putBoolean("sound_enabled", if (settings.notificationsEnabled) settings.soundEnabled else false)
-            .putBoolean("vibration_enabled", if (settings.notificationsEnabled) settings.vibrationEnabled else false)
+            .putBoolean("emergency_notifications_enabled", settings.emergencyNotificationsEnabled)
+            .putBoolean("sound_enabled", if (anyAlertsEnabled) settings.soundEnabled else false)
+            .putBoolean("vibration_enabled", if (anyAlertsEnabled) settings.vibrationEnabled else false)
             .putString("theme_mode", settings.themeMode)
             .putString("language", settings.language)
 
-        if (settings.notificationsEnabled) {
+        if (anyAlertsEnabled) {
             editor.putBoolean("prev_sound_enabled", settings.soundEnabled)
             editor.putBoolean("prev_vibration_enabled", settings.vibrationEnabled)
         } else {
@@ -218,10 +224,13 @@ class SettingsRepository(context: Context) {
 
     fun updateNotificationsEnabled(enabled: Boolean): UserSettings {
         val current = getSettings()
-        if (!enabled) {
-            // Save current active states before turning off
-            val soundToSave = if (current.notificationsEnabled) current.soundEnabled else current.prevSoundEnabled
-            val vibeToSave = if (current.notificationsEnabled) current.vibrationEnabled else current.prevVibrationEnabled
+        val anyWasEnabled = current.notificationsEnabled || current.emergencyNotificationsEnabled
+        val anyNowEnabled = enabled || current.emergencyNotificationsEnabled
+
+        if (!anyNowEnabled) {
+            // Both main and emergency notifications are now off -> save current active sound & vibration states before turning off
+            val soundToSave = if (anyWasEnabled) current.soundEnabled else current.prevSoundEnabled
+            val vibeToSave = if (anyWasEnabled) current.vibrationEnabled else current.prevVibrationEnabled
             prefs.edit()
                 .putBoolean("prev_sound_enabled", soundToSave)
                 .putBoolean("prev_vibration_enabled", vibeToSave)
@@ -229,14 +238,58 @@ class SettingsRepository(context: Context) {
                 .putBoolean("sound_enabled", false)
                 .putBoolean("vibration_enabled", false)
                 .apply()
-        } else {
-            // Restore previous states when turned back on
+        } else if (!anyWasEnabled) {
+            // Transitioning from all-off back to enabled -> restore previous sound & vibration states
             val restoredSound = prefs.getBoolean("prev_sound_enabled", true)
             val restoredVibe = prefs.getBoolean("prev_vibration_enabled", true)
             prefs.edit()
-                .putBoolean("notifications_enabled", true)
+                .putBoolean("notifications_enabled", enabled)
                 .putBoolean("sound_enabled", restoredSound)
                 .putBoolean("vibration_enabled", restoredVibe)
+                .apply()
+        } else {
+            // Emergency notifications are still enabled, so keep sound & vibration active and do not turn off emergency_notifications_enabled
+            prefs.edit()
+                .putBoolean("notifications_enabled", enabled)
+                .putBoolean("sound_enabled", current.soundEnabled)
+                .putBoolean("vibration_enabled", current.vibrationEnabled)
+                .putBoolean("prev_sound_enabled", current.soundEnabled)
+                .putBoolean("prev_vibration_enabled", current.vibrationEnabled)
+                .apply()
+        }
+        return getSettings()
+    }
+
+    fun updateEmergencyNotificationsEnabled(enabled: Boolean): UserSettings {
+        val current = getSettings()
+        val anyWasEnabled = current.notificationsEnabled || current.emergencyNotificationsEnabled
+        val anyNowEnabled = current.notificationsEnabled || enabled
+
+        if (!anyNowEnabled) {
+            val soundToSave = if (anyWasEnabled) current.soundEnabled else current.prevSoundEnabled
+            val vibeToSave = if (anyWasEnabled) current.vibrationEnabled else current.prevVibrationEnabled
+            prefs.edit()
+                .putBoolean("prev_sound_enabled", soundToSave)
+                .putBoolean("prev_vibration_enabled", vibeToSave)
+                .putBoolean("emergency_notifications_enabled", false)
+                .putBoolean("sound_enabled", false)
+                .putBoolean("vibration_enabled", false)
+                .apply()
+        } else if (!anyWasEnabled) {
+            val restoredSound = prefs.getBoolean("prev_sound_enabled", true)
+            val restoredVibe = prefs.getBoolean("prev_vibration_enabled", true)
+            prefs.edit()
+                .putBoolean("emergency_notifications_enabled", enabled)
+                .putBoolean("sound_enabled", restoredSound)
+                .putBoolean("vibration_enabled", restoredVibe)
+                .apply()
+        } else {
+            prefs.edit()
+                .putBoolean("emergency_notifications_enabled", enabled)
+                .putBoolean("sound_enabled", current.soundEnabled)
+                .putBoolean("vibration_enabled", current.vibrationEnabled)
+                .putBoolean("prev_sound_enabled", current.soundEnabled)
+                .putBoolean("prev_vibration_enabled", current.vibrationEnabled)
                 .apply()
         }
         return getSettings()

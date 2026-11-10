@@ -149,7 +149,7 @@ object NotificationHelper {
         settings: UserSettings,
         lang: String
     ): Pair<String, String>? {
-        if (!settings.notificationsEnabled) return null
+        if (!settings.emergencyNotificationsEnabled) return null
         val registry = AlertRegistry(context.applicationContext)
 
         // 1. Outage Restored (prev active -> next null)
@@ -168,7 +168,8 @@ object NotificationHelper {
                 notificationId = restoreKey.hashCode(),
                 title = title,
                 body = body,
-                isTest = false
+                isTest = false,
+                isEmergencyAlert = true
             )
             return title to body
         }
@@ -193,7 +194,8 @@ object NotificationHelper {
                 notificationId = detectKey.hashCode(),
                 title = title,
                 body = body,
-                isTest = false
+                isTest = false,
+                isEmergencyAlert = true
             )
             return title to body
         }
@@ -206,17 +208,28 @@ object NotificationHelper {
         notificationId: Int,
         title: String,
         body: String,
-        isTest: Boolean = false
+        isTest: Boolean = false,
+        isEmergencyAlert: Boolean = false
     ) {
         val settings = SettingsRepository(context).getSettings()
 
-        // If notifications are disabled globally in the app, do NOT send unless this is an explicit Test
-        if (!settings.notificationsEnabled && !isTest) {
+        // If notifications are disabled globally in the app, do NOT send unless this is an explicit Test or an enabled Emergency Alert
+        if (isEmergencyAlert) {
+            if (!settings.emergencyNotificationsEnabled) return
+        } else if (!settings.notificationsEnabled && !isTest) {
             return
         }
 
-        val activeSound = settings.notificationsEnabled && settings.soundEnabled
-        val activeVibe = settings.notificationsEnabled && settings.vibrationEnabled
+        val activeSound = if (isEmergencyAlert) {
+            settings.emergencyNotificationsEnabled && settings.soundEnabled
+        } else {
+            settings.notificationsEnabled && settings.soundEnabled
+        }
+        val activeVibe = if (isEmergencyAlert) {
+            settings.emergencyNotificationsEnabled && settings.vibrationEnabled
+        } else {
+            settings.notificationsEnabled && settings.vibrationEnabled
+        }
 
         createNotificationChannels(context)
 
