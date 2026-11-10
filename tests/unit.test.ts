@@ -2930,6 +2930,17 @@ async function runUnitTestE_AddressLookupAndUnsetQueue() {
     house: '77',
   });
   assert.equal(getRems().length, 19, 'After prefetchAddressIndexInBackground, all 19 REMs must be available');
+  const ztoeParserTestKt = fs.readFileSync(
+    path.join(ROOT_DIR, 'android/app/src/test/java/ua/blackout/prewarning/ZtoeParserTest.kt'),
+    'utf-8'
+  );
+  assert.ok(
+    ztoeParserTestKt.includes('assertEquals(16657, parsedSettlements[0].ztoeNaspunktId)') &&
+      ztoeParserTestKt.includes('assertEquals(173934, parsedStreets[0].ztoeVulicaId)') &&
+      ztoeParserTestKt.includes('assertEquals(4, parsedRems.first { it.id == "zhytomyr" }.ztoeRemId)') &&
+      ztoeAddressLookupKt.includes('fun formatSettlementLabelUk('),
+    'ZtoeParserTest.kt must compare Int IDs against Int literals and ZtoeAddressLookup.kt must format settlement labels (село -> с., місто -> м.)'
+  );
   assert.ok(
     appTsx.includes('prefetchAddressIndexInBackground(settings.url, settings.selectedAddressQuery)') &&
       ztoeAddressLookupKt.includes('fun prefetchAddressIndexInBackground(') &&

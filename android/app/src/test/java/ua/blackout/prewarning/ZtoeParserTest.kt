@@ -862,14 +862,14 @@ class ZtoeParserTest {
         val parsedSettlements = ua.blackout.prewarning.data.parser.ZtoeAddressLookup.parseZtoeSettlementOptionsHtml("zhytomyr", sampleSelectHtml)
         assertEquals(3, parsedSettlements.size)
         assertEquals("zt_city", parsedSettlements[0].id)
-        assertEquals("16657", parsedSettlements[0].ztoeNaspunktId)
+        assertEquals(16657, parsedSettlements[0].ztoeNaspunktId)
         assertEquals("np_99999", parsedSettlements[2].id)
         assertEquals("с. Кам'янка", parsedSettlements[2].nameUk)
 
         val parsedStreets = ua.blackout.prewarning.data.parser.ZtoeAddressLookup.parseZtoeStreetOptionsHtml("zt_city", sampleSelectHtml)
         assertEquals(3, parsedStreets.size)
         assertEquals("zt_kyivska", parsedStreets[0].id)
-        assertEquals("173934", parsedStreets[0].ztoeVulicaId)
+        assertEquals(173934, parsedStreets[0].ztoeVulicaId)
         assertEquals("st_888888", parsedStreets[2].id)
         assertEquals("вул. В'ячеслава Чорновола", parsedStreets[2].nameUk)
 
@@ -883,7 +883,7 @@ class ZtoeParserTest {
         """.trimIndent()
         val parsedRems = ua.blackout.prewarning.data.parser.ZtoeAddressLookup.parseZtoeRemOptionsHtml(sampleRemHtml)
         assertTrue(parsedRems.size >= 19)
-        assertEquals("4", parsedRems.first { it.id == "zhytomyr" }.ztoeRemId)
+        assertEquals(4, parsedRems.first { it.id == "zhytomyr" }.ztoeRemId)
 
         assertEquals(
             "(Або закрийте це вікно та виберіть тільки чергу)",

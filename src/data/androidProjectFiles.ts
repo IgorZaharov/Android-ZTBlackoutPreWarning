@@ -5768,7 +5768,9 @@ object ZtoeAddressLookup {
             val label = stripHtmlFast(m.groupValues[2])
             if (label.isEmpty() || label.contains("Оберіть", ignoreCase = true)) continue
             val matchedExisting = ZTOE_REM_OPTIONS.firstOrNull {
-                it.ztoeRemId == remNum || it.nameUk.equals(label, ignoreCase = true)
+                it.nameUk.equals(label, ignoreCase = true)
+            } ?: ZTOE_REM_OPTIONS.firstOrNull {
+                it.ztoeRemId == remNum
             }
             if (matchedExisting != null) {
                 if (seenIds.add(matchedExisting.id)) {
@@ -5810,6 +5812,13 @@ object ZtoeAddressLookup {
         return getRems()
     }
 
+    private fun formatSettlementLabelUk(rawLabel: String): String {
+        return rawLabel
+            .replace(Regex("^село\\\\s+", RegexOption.IGNORE_CASE), "с. ")
+            .replace(Regex("^місто\\\\s+", RegexOption.IGNORE_CASE), "м. ")
+            .trim()
+    }
+
     fun parseZtoeSettlementOptionsHtml(remId: String, html: String): List<ZtoeSettlementOption> {
         val selectInner = SELECT_NASPUNKT_REGEX.find(html)?.groupValues?.get(1) ?: return emptyList()
         val existingForRem = ZTOE_SETTLEMENTS.filter { it.remId == remId }
@@ -5818,7 +5827,7 @@ object ZtoeAddressLookup {
         for (m in OPTION_TAG_REGEX.findAll(selectInner)) {
             val npId = m.groupValues[1].trim().toIntOrNull() ?: continue
             if (npId <= 0) continue
-            val label = stripHtmlFast(m.groupValues[2])
+            val label = formatSettlementLabelUk(stripHtmlFast(m.groupValues[2]))
             if (label.isEmpty() || label.contains("Оберіть", ignoreCase = true)) continue
             val candidateExisting = existingForRem.firstOrNull {
                 normalizeUkText(it.nameUk) == normalizeUkText(label)
