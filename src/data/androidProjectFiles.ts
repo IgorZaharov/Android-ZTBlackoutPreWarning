@@ -123,6 +123,10 @@ android {
         checkReleaseBuilds = false
         abortOnError = false
     }
+
+    testOptions {
+        unitTests.isReturnDefaultValues = true
+    }
 }
 
 dependencies {
@@ -4751,7 +4755,6 @@ fun SettingsScreen(
     description: 'ZTOE Address Queue Lookup & Emergency Outage Parser',
     content: `package ua.blackout.prewarning.data.parser
 
-import org.json.JSONArray
 import org.jsoup.Jsoup
 import ua.blackout.prewarning.data.KYIV_ZONE
 import ua.blackout.prewarning.data.model.EmergencyOutageInfo
@@ -5169,6 +5172,101 @@ object ZtoeAddressLookup {
             .trim()
     }
 
+    private fun extractTopLevelJsonObjects(jsonStr: String): List<String> {
+        val objects = mutableListOf<String>()
+        var depth = 0
+        var objStart = -1
+        var inString = false
+        var escaped = false
+        for (i in jsonStr.indices) {
+            val ch = jsonStr[i]
+            if (escaped) {
+                escaped = false
+                continue
+            }
+            if (ch == '\\\\' && inString) {
+                escaped = true
+                continue
+            }
+            if (ch == '"') {
+                inString = !inString
+                continue
+            }
+            if (!inString) {
+                if (ch == '{') {
+                    if (depth == 0) objStart = i
+                    depth++
+                } else if (ch == '}') {
+                    depth--
+                    if (depth == 0 && objStart != -1) {
+                        objects.add(jsonStr.substring(objStart, i + 1))
+                        objStart = -1
+                    }
+                }
+            }
+        }
+        return objects
+    }
+
+    private fun extractBalancedBracketBlock(src: String, openIdx: Int, openChar: Char, closeChar: Char): String? {
+        if (openIdx < 0 || openIdx >= src.length || src[openIdx] != openChar) return null
+        var depth = 0
+        var inString = false
+        var escaped = false
+        for (i in openIdx until src.length) {
+            val ch = src[i]
+            if (escaped) {
+                escaped = false
+                continue
+            }
+            if (ch == '\\\\' && inString) {
+                escaped = true
+                continue
+            }
+            if (ch == '"') {
+                inString = !inString
+                continue
+            }
+            if (!inString) {
+                if (ch == openChar) {
+                    depth++
+                } else if (ch == closeChar) {
+                    depth--
+                    if (depth == 0) {
+                        return src.substring(openIdx, i + 1)
+                    }
+                }
+            }
+        }
+        return null
+    }
+
+    private fun extractJsonArrayField(objStr: String, fieldName: String): String? {
+        val keyRegex = Regex(""""\\s*\${Regex.escape(fieldName)}\\s*"\\s*:\\s*\\[""")
+        val m = keyRegex.find(objStr) ?: return null
+        val bracketIdx = objStr.indexOf('[', m.range.first)
+        return extractBalancedBracketBlock(objStr, bracketIdx, '[', ']')
+    }
+
+    private fun extractJsonObjectField(objStr: String, fieldName: String): String? {
+        val keyRegex = Regex(""""\\s*\${Regex.escape(fieldName)}\\s*"\\s*:\\s*\\{""")
+        val m = keyRegex.find(objStr) ?: return null
+        val braceIdx = objStr.indexOf('{', m.range.first)
+        return extractBalancedBracketBlock(objStr, braceIdx, '{', '}')
+    }
+
+    private fun extractJsonStringField(objStr: String, fieldName: String): String? {
+        val keyRegex = Regex(""""\\s*\${Regex.escape(fieldName)}\\s*"\\s*:\\s*"((?:\\\\"|[^"])*)"""")
+        val m = keyRegex.find(objStr) ?: return null
+        return m.groupValues[1].replace("\\\\\\"", "\\"")
+    }
+
+    private fun extractJsonIntField(objStr: String, fieldName: String): Int? {
+        val keyRegex = Regex(""""\\s*\${Regex.escape(fieldName)}\\s*"\\s*:\\s*(-?\\d+)""")
+        val m = keyRegex.find(objStr) ?: return null
+        return m.groupValues[1].toIntOrNull()
+    }
+
     fun matchEmergencyOutageFromAccidentsJson(
         accidentsJsonStr: String,
         query: SelectedAddressQuery
@@ -5208,29 +5306,33 @@ object ZtoeAddressLookup {
         }
 
         return try {
-            val arr = JSONArray(extractedJson)
-            for (i in 0 until arr.length()) {
-                val item = arr.optJSONObject(i) ?: continue
-
+            val items = extractTopLevelJsonObjects(extractedJson)
+            for (itemStr in items) {
                 // Support Nested Schema: {"rem_name": ..., " date_begin": ..., "date_plan": ..., "naspunkt": [{"name": ..., "streets": [{"name": "вул. Київська, 37"}]}]}
-                val naspunktArr = item.optJSONArray("naspunkt")
-                if (naspunktArr != null) {
-                    val startRaw = item.optString("date_begin", item.optString(" date_begin", "")).trim()
-                    val restoreRaw = item.optString("date_plan", "").trim()
-                    val outageType = item.optString("Otkl_Type_Name", "Аварійне відключення").ifBlank { "Аварійне відключення" }
-                    for (nIdx in 0 until naspunktArr.length()) {
-                        val npObj = naspunktArr.optJSONObject(nIdx) ?: continue
-                        val npName = npObj.optString("name", "")
+                val naspunktArrStr = extractJsonArrayField(itemStr, "naspunkt")
+                if (naspunktArrStr != null) {
+                    val startRaw = (extractJsonStringField(itemStr, "date_begin") ?: "").trim()
+                    val restoreRaw = (extractJsonStringField(itemStr, "date_plan") ?: "").trim()
+                    val outageType = (extractJsonStringField(itemStr, "Otkl_Type_Name") ?: "Аварійне відключення")
+                        .ifBlank { "Аварійне відключення" }
+                    val itemRemName = extractJsonStringField(itemStr, "rem_name") ?: ""
+                    val itemId = extractJsonIntField(itemStr, "id")?.toString()
+                        ?: extractJsonStringField(itemStr, "id")
+                        ?: "\${targetStreetNorm}_$targetHouseNorm"
+
+                    val npObjects = extractTopLevelJsonObjects(naspunktArrStr)
+                    for (npObjStr in npObjects) {
+                        val npName = extractJsonStringField(npObjStr, "name") ?: ""
                         if (targetCityNorm.isNotEmpty() && npName.isNotBlank()) {
                             val itemCityNorm = normalizeUkText(npName)
                             if (!itemCityNorm.contains(targetCityNorm) && !targetCityNorm.contains(itemCityNorm)) {
                                 continue
                             }
                         }
-                        val streetsArr = npObj.optJSONArray("streets") ?: continue
-                        for (sIdx in 0 until streetsArr.length()) {
-                            val stObj = streetsArr.optJSONObject(sIdx) ?: continue
-                            val stRaw = stObj.optString("name", "")
+                        val streetsArrStr = extractJsonArrayField(npObjStr, "streets") ?: continue
+                        val stObjects = extractTopLevelJsonObjects(streetsArrStr)
+                        for (stObjStr in stObjects) {
+                            val stRaw = extractJsonStringField(stObjStr, "name") ?: ""
                             val stNorm = normalizeUkText(stRaw)
                             if (targetStreetNorm.isNotEmpty() && !stNorm.contains(targetStreetNorm)) {
                                 continue
@@ -5238,8 +5340,8 @@ object ZtoeAddressLookup {
                             val tokens = stRaw.split(Regex("[,;]")).map { normalizeHouseNumber(it) }
                             if (tokens.contains(targetHouseNorm)) {
                                 return EmergencyOutageInfo(
-                                    id = "pw_accident_\${item.opt("id") ?: "\${targetStreetNorm}_$targetHouseNorm"}",
-                                    remName = remName.ifBlank { item.optString("rem_name", "") },
+                                    id = "pw_accident_$itemId",
+                                    remName = remName.ifBlank { itemRemName },
                                     settlementName = settlementName.ifBlank { npName },
                                     streetName = streetName.ifBlank { stRaw },
                                     house = house,
@@ -5254,14 +5356,14 @@ object ZtoeAddressLookup {
                 }
 
                 // Support Flat Schema: {"id": 391476673, "city": {"name": "Житомир"}, "street": {"name": "вул. Київська"}, "buildingNames": "18, 37", "dateEvent": "...", "datePlanIn": "..."}
-                val switchSubReason = item.optInt("switchSubReason", -1)
-                val typeOff = item.optInt("typeOff", 1)
+                val switchSubReason = extractJsonIntField(itemStr, "switchSubReason") ?: -1
+                val typeOff = extractJsonIntField(itemStr, "typeOff") ?: 1
                 val isEmergency = (switchSubReason == 0 || switchSubReason == 2) && typeOff == 1
                 if (!isEmergency) continue
 
-                val cityName = item.optJSONObject("city")?.optString("name", "") ?: ""
-                val itemStreetName = item.optJSONObject("street")?.optString("name", "") ?: ""
-                val buildingNames = item.optString("buildingNames", "")
+                val cityName = extractJsonObjectField(itemStr, "city")?.let { extractJsonStringField(it, "name") } ?: ""
+                val itemStreetName = extractJsonObjectField(itemStr, "street")?.let { extractJsonStringField(it, "name") } ?: ""
+                val buildingNames = extractJsonStringField(itemStr, "buildingNames") ?: ""
 
                 if (targetCityNorm.isNotEmpty() && cityName.isNotBlank()) {
                     val itemCityNorm = normalizeUkText(cityName)
@@ -5282,9 +5384,11 @@ object ZtoeAddressLookup {
                     .filter { it.isNotEmpty() }
 
                 if (houses.contains(targetHouseNorm)) {
-                    val idVal = item.opt("id")?.toString() ?: "\${targetStreetNorm}_$targetHouseNorm"
-                    val dateEvent = item.optString("dateEvent", "")
-                    val datePlanIn = item.optString("datePlanIn", "")
+                    val idVal = extractJsonIntField(itemStr, "id")?.toString()
+                        ?: extractJsonStringField(itemStr, "id")
+                        ?: "\${targetStreetNorm}_$targetHouseNorm"
+                    val dateEvent = extractJsonStringField(itemStr, "dateEvent") ?: ""
+                    val datePlanIn = extractJsonStringField(itemStr, "datePlanIn") ?: ""
                     return EmergencyOutageInfo(
                         id = "pw_accident_$idVal",
                         remName = remName.ifBlank { null },
