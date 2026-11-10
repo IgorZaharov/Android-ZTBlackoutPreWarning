@@ -3051,8 +3051,9 @@ async function runUnitTestE_AddressLookupAndUnsetQueue() {
       !buildGradleKts.includes('isDebuggable = true') &&
       settingsRepoKt.includes('ZtoeAddressLookup.isValidEmergencyOutage(rawEmergencyCandidate)') &&
       ztoeAddressLookupKt.includes('fun isValidOutageTimestamp(') &&
-      ztoeAddressLookupKt.includes('fun isValidEmergencyOutage('),
-    'build.gradle.kts must keep unified applicationId and isDebuggable = false across debug and release APKs for v1.3.3 upgrades, and SettingsRepository.kt must validate emergency outages'
+      ztoeAddressLookupKt.includes('fun isValidEmergencyOutage(') &&
+      ztoeAddressLookupKt.includes('fun parseZtoeEmergencyOutagesTableHtml(html: String, targetHouse: String)'),
+    'build.gradle.kts must keep unified applicationId and isDebuggable = false across debug and release APKs for v1.3.3 upgrades, and ZtoeAddressLookup.kt must provide 2-arg parseZtoeEmergencyOutagesTableHtml'
   );
 
   resetAddressIndexCache(true);

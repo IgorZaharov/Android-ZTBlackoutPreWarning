@@ -60,7 +60,7 @@ object ZtoeAddressLookup {
     private val STREET_PREFIX_REGEX = Regex("""^(вул\.|вулиця|пров\.|провулок|просп\.|проспект|майдан|бульвар|б-р|шосе)\s*""", RegexOption.IGNORE_CASE)
     private val HOUSE_PREFIX_REGEX = Regex("""^(буд\.|будинок)\s*""", RegexOption.IGNORE_CASE)
 
-    private val VALID_OUTAGE_TIMESTAMP_REGEX = Regex("""(?:\b\d{1,2}\.\d{1,2}(?:\.\d{2,4})?\b|\b\d{4}-\d{2}-\d{2}\b).*?\b\d{1,2}:\d{2}\b""")
+    private val VALID_OUTAGE_TIMESTAMP_REGEX = Regex("""(?:\b\d{1,2}\.\d{1,2}(?:\.\d{2,4})?\b|\b\d{4}-\d{2}-\d{2}\b)?[\sT]*\b([01]?\d|2[0-3]):[0-5]\d\b""")
 
     private const val PREFS_NAME = "zt_address_index_cache_v1"
     private const val KEY_INDEX_JSON = "address_index_json_v1"
@@ -1289,6 +1289,13 @@ object ZtoeAddressLookup {
             }
         }
         return results
+    }
+
+    fun parseZtoeEmergencyOutagesTableHtml(html: String, targetHouse: String): EmergencyOutageInfo? {
+        val normTarget = normalizeHouseNumber(targetHouse)
+        return parseZtoeEmergencyOutagesTableHtml(html).firstOrNull {
+            normalizeHouseNumber(it.house ?: "") == normTarget
+        }
     }
 
     private fun normalizeUkText(value: String): String {

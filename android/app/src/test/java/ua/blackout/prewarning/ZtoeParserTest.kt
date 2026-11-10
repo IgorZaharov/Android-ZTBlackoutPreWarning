@@ -1004,6 +1004,8 @@ class ZtoeParserTest {
         val parsedKyivska74 = ua.blackout.prewarning.data.parser.ZtoeAddressLookup.parseZtoeAddressLookupTableHtml(kyivska74Html, "74")
         assertEquals(null, parsedKyivska74?.first)
         assertEquals("В цей час не вимикається, за винятком випадків аварійних відключень", parsedKyivska74?.second)
+        val parsedKyivska74EmergencyList = ua.blackout.prewarning.data.parser.ZtoeAddressLookup.parseZtoeEmergencyOutagesTableHtml(kyivska74Html)
+        assertTrue(parsedKyivska74EmergencyList.isEmpty())
         val parsedKyivska74Emergency = ua.blackout.prewarning.data.parser.ZtoeAddressLookup.parseZtoeEmergencyOutagesTableHtml(kyivska74Html, "74")
         assertEquals(null, parsedKyivska74Emergency)
         assertEquals(false, ua.blackout.prewarning.data.parser.ZtoeAddressLookup.isValidOutageTimestamp("В цей час не вимикається, за винятком випадків аварійних відключень"))
