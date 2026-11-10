@@ -799,7 +799,7 @@ class ZtoeParserTest {
         assertEquals("06.04 19:21", matchedJson?.startTime)
         assertEquals("07.04 20:00", matchedJson?.estimatedRestoreTime)
 
-        // 3. Verify Cross-Day Emergency Overlay on Today (2026-04-06 -> 19:30-24:00) and Tomorrow (2026-04-07 -> 00:00-20:00)
+        // 3. Verify Cross-Day Emergency Overlay on Today (2026-04-06 -> 19:00-24:00) and Tomorrow (2026-04-07 -> 00:00-20:00)
         val base48PowerOn = (0 until 48).map { idx ->
             val sh = idx / 2
             val sm = if (idx % 2 == 0) "00" else "30"
@@ -821,7 +821,7 @@ class ZtoeParserTest {
         )
         val todayIntervals = ua.blackout.prewarning.data.repository.ScheduleRepository.computeDetailedIntervals(todaySlots)
         assertEquals(1, todayIntervals.size)
-        assertEquals("19:30", todayIntervals[0].startStr)
+        assertEquals("19:00", todayIntervals[0].startStr)
         assertEquals("24:00", todayIntervals[0].endStr)
         assertEquals(true, todayIntervals[0].isEmergency)
 

@@ -33,7 +33,31 @@ data class BlackoutSlot(
     val endTimeStr: String, // "18:00" or "15:00"
     val status: SlotStatus,
     val isEmergency: Boolean = false
-)
+) {
+    val hour: Int get() = startHour
+    val startStr: String get() = startTimeStr
+    val endStr: String get() = endTimeStr
+    val label: String get() = "$startTimeStr - $endTimeStr"
+
+    constructor(
+        hour: Int,
+        startStr: String,
+        endStr: String,
+        status: SlotStatus,
+        label: String = "$startStr - $endStr",
+        isEmergency: Boolean = false
+    ) : this(
+        id = "slot_${startStr}_$label",
+        startHour = hour,
+        endHour = if (endStr == "24:00") 24 else (endStr.substringBefore(":").toIntOrNull() ?: (hour + 1)),
+        startMinute = startStr.substringAfter(":", "0").toIntOrNull() ?: 0,
+        endMinute = endStr.substringAfter(":", "0").toIntOrNull() ?: 0,
+        startTimeStr = startStr,
+        endTimeStr = endStr,
+        status = status,
+        isEmergency = isEmergency
+    )
+}
 
 data class DaySchedule(
     val dateStr: String,

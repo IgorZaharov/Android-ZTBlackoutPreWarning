@@ -128,6 +128,22 @@ object NotificationHelper {
 
     fun checkAndTriggerEmergencyOutageAlert(
         context: Context,
+        settings: UserSettings,
+        previousEmergency: EmergencyOutageInfo?,
+        currentEmergency: EmergencyOutageInfo?
+    ): Pair<String, String>? {
+        val lang = ua.blackout.prewarning.ui.AppStrings.resolveLang(settings.language)
+        return checkAndTriggerEmergencyOutageAlert(
+            context = context,
+            prevOutage = previousEmergency,
+            nextOutage = currentEmergency,
+            settings = settings,
+            lang = lang
+        )
+    }
+
+    fun checkAndTriggerEmergencyOutageAlert(
+        context: Context,
         prevOutage: EmergencyOutageInfo?,
         nextOutage: EmergencyOutageInfo?,
         settings: UserSettings,

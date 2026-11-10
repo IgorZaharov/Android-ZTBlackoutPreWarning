@@ -16,7 +16,20 @@ data class ScheduleStatusInfo(
     val nextSlotTime: String,
     val totalBlackoutHours: Double = 0.0,
     val isUnclear: Boolean = false
-)
+) {
+    constructor(
+        isBlackoutNow: Boolean,
+        countdownText: String,
+        nextSlotTime: String,
+        isUnclear: Boolean
+    ) : this(
+        isBlackoutNow = isBlackoutNow,
+        countdownText = countdownText,
+        nextSlotTime = nextSlotTime,
+        totalBlackoutHours = 0.0,
+        isUnclear = isUnclear
+    )
+}
 
 data class OutageInterval(
     val startStr: String,
@@ -35,23 +48,53 @@ class ScheduleRepository(context: Context) {
     companion object {
         const val MAX_INTERVAL_CACHE_ENTRIES = 64
 
+        fun StatusAndCountdown(
+            isBlackoutNow: Boolean,
+            countdownText: String,
+            nextSlotTime: String,
+            isUnclear: Boolean = false
+        ): ScheduleStatusInfo = ScheduleStatusInfo(
+            isBlackoutNow = isBlackoutNow,
+            countdownText = countdownText,
+            nextSlotTime = nextSlotTime,
+            totalBlackoutHours = 0.0,
+            isUnclear = isUnclear
+        )
+
         // Process-wide in-memory cache of decoded slots and intervals to eliminate
         // 48 BlackoutSlot allocations and 96 String.format calls on every 1-second UI countdown tick
         private val decodedSlotsCache = java.util.concurrent.ConcurrentHashMap<String, List<BlackoutSlot>>()
         private val detailedIntervalsCache = java.util.concurrent.ConcurrentHashMap<String, List<OutageInterval>>()
 
-        private val ZTOE_DATE_TIME_REGEX = Regex("""^(\d{2})\.(\d{2})\.(\d{4})\s+(\d{2}):(\d{2})""")
+        private val ZTOE_DATE_TIME_REGEX = Regex("""^(\d{2})\.(\d{2})(?:\.(\d{4}))?\s+(\d{2}):(\d{2})""")
 
-        private fun parseZtoeDateTimeMinutes(str: String?): Pair<LocalDate, Int>? {
+        private fun parseZtoeDateTimeMinutes(str: String?, defaultYear: Int = LocalDate.now(KYIV_ZONE).year): Pair<LocalDate, Int>? {
             if (str.isNullOrBlank()) return null
             val m = ZTOE_DATE_TIME_REGEX.find(str.trim()) ?: return null
             val day = m.groupValues[1].toIntOrNull() ?: return null
             val month = m.groupValues[2].toIntOrNull() ?: return null
-            val year = m.groupValues[3].toIntOrNull() ?: return null
+            val year = m.groupValues[3].takeIf { it.isNotEmpty() }?.toIntOrNull() ?: defaultYear
             val hour = m.groupValues[4].toIntOrNull() ?: return null
             val minute = m.groupValues[5].toIntOrNull() ?: return null
             val date = runCatching { LocalDate.of(year, month, day) }.getOrNull() ?: return null
             return date to (hour * 60 + minute).coerceIn(0, 1440)
+        }
+
+        fun applyEmergencyOutageToSlots(
+            slots: List<BlackoutSlot>,
+            targetDateIso: String,
+            emergencyOutage: EmergencyOutageInfo?,
+            queue: String = ""
+        ): List<BlackoutSlot> {
+            val parsedDate = runCatching { LocalDate.parse(targetDateIso, DateTimeFormatter.ISO_LOCAL_DATE) }
+                .getOrNull() ?: LocalDate.now(KYIV_ZONE)
+            return applyEmergencyOutageToSlots(
+                slots = slots,
+                emergencyOutage = emergencyOutage,
+                targetDate = parsedDate,
+                isTomorrow = false,
+                queue = queue
+            )
         }
 
         fun applyEmergencyOutageToSlots(
@@ -62,8 +105,8 @@ class ScheduleRepository(context: Context) {
             queue: String = ""
         ): List<BlackoutSlot> {
             if (emergencyOutage == null) return slots
-            val startParsed = parseZtoeDateTimeMinutes(emergencyOutage.startTime) ?: return slots
-            val endParsed = parseZtoeDateTimeMinutes(emergencyOutage.estimatedRestoreTime) ?: return slots
+            val startParsed = parseZtoeDateTimeMinutes(emergencyOutage.startTime, targetDate.year) ?: return slots
+            val endParsed = parseZtoeDateTimeMinutes(emergencyOutage.estimatedRestoreTime, targetDate.year) ?: return slots
 
             val effectiveDate = if (isTomorrow && slots.isEmpty()) targetDate else targetDate
             val startEpochDay = startParsed.first.toEpochDay()
