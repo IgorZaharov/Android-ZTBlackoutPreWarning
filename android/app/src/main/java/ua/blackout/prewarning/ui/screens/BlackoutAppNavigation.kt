@@ -23,6 +23,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
@@ -40,7 +41,12 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import ua.blackout.prewarning.data.model.BlackoutSlot
+import ua.blackout.prewarning.data.model.EmergencyOutageInfo
+import ua.blackout.prewarning.data.model.SelectedAddressQuery
+import ua.blackout.prewarning.data.model.SlotStatus
 import ua.blackout.prewarning.data.parser.FetchStatus
+import ua.blackout.prewarning.data.parser.ZtoeAddressLookup
 import ua.blackout.prewarning.data.parser.ZtoeParser
 import ua.blackout.prewarning.data.repository.ScheduleRepository
 import ua.blackout.prewarning.data.repository.SettingsRepository
@@ -49,6 +55,7 @@ import ua.blackout.prewarning.notification.NotificationHelper
 import ua.blackout.prewarning.ui.AppStrings
 import ua.blackout.prewarning.ui.theme.TimeOfDayPalette
 import ua.blackout.prewarning.widget.BlackoutGlanceWidget
+import java.time.LocalDate
 import java.time.LocalTime
 import java.time.format.DateTimeFormatter
 import ua.blackout.prewarning.data.KYIV_ZONE
@@ -75,6 +82,24 @@ private fun smoothGaussianRadialBrush(
     )
 }
 
+private fun buildLightNoOutageSlots(): List<BlackoutSlot> {
+    return (0 until 48).map { idx ->
+        val sh = idx / 2
+        val sm = if (idx % 2 == 0) "00" else "30"
+        val eh = (idx + 1) / 2
+        val em = if ((idx + 1) % 2 == 0) "00" else "30"
+        val startStr = "${sh.toString().padStart(2, '0')}:$sm"
+        val endStr = "${eh.toString().padStart(2, '0')}:$em"
+        BlackoutSlot(
+            hour = sh,
+            startStr = startStr,
+            endStr = endStr,
+            status = SlotStatus.POWER_ON,
+            label = "$startStr - $endStr"
+        )
+    }
+}
+
 @Composable
 fun BlackoutAppNavigation(
     onThemeChanged: (Boolean) -> Unit = {}
@@ -89,6 +114,10 @@ fun BlackoutAppNavigation(
 
     var siteUrl by remember { mutableStateOf(initialSettings.cityUrl) }
     var queue by remember { mutableStateOf(initialSettings.queue) }
+    var customQueueStatusText by remember { mutableStateOf(initialSettings.customQueueStatusText) }
+    var selectedAddress by remember { mutableStateOf(initialSettings.selectedAddress) }
+    var selectedAddressQuery by remember { mutableStateOf(initialSettings.selectedAddressQuery) }
+    var activeEmergencyOutage by remember { mutableStateOf(initialSettings.activeEmergencyOutage) }
     var advanceMinutes by remember { mutableStateOf(initialSettings.advanceNoticeMinutes) }
     var refreshMinutes by remember { mutableStateOf(initialSettings.refreshIntervalMinutes.toInt()) }
     var notificationsEnabled by remember { mutableStateOf(initialSettings.notificationsEnabled) }
@@ -96,6 +125,12 @@ fun BlackoutAppNavigation(
     var vibrationEnabled by remember { mutableStateOf(initialSettings.vibrationEnabled) }
     var currentLanguage by remember { mutableStateOf(initialSettings.language) }
     var isRouletteOpen by remember { mutableStateOf(false) }
+    var autoOpenQueueHelp by remember { mutableStateOf(false) }
+
+    val isQueueUnselected = queue.isBlank() && customQueueStatusText.isNullOrBlank()
+
+    // Pager for swipe left/right between windows with beyondViewportPageCount = 2 to eliminate swipe jittering
+    val pagerState = rememberPagerState(initialPage = 0, pageCount = { 3 })
 
     // Custom In-App Banner with Application Icon (replaces raw OS Toast so Android robot icon never appears)
     var appBannerMessage by remember { mutableStateOf<String?>(null) }
@@ -126,23 +161,69 @@ fun BlackoutAppNavigation(
         mutableStateOf(nowTime.plusMinutes(refreshMinutes.toLong()).format(DateTimeFormatter.ofPattern("HH:mm")))
     }
 
-    // Slots for Today and Tomorrow from ScheduleRepository
-    var slots by remember {
+    // Base slots for Today and Tomorrow from ScheduleRepository
+    var baseSlots by remember {
         mutableStateOf(scheduleRepo.getTodaySlots(queue))
     }
-    var tomorrowSlots by remember {
+    var baseTomorrowSlots by remember {
         mutableStateOf(scheduleRepo.getTomorrowSlots(queue))
     }
     var hasTomorrowSchedule by remember {
         mutableStateOf(scheduleRepo.hasTomorrowSchedule(queue))
     }
 
-    // Dynamic real-time countdown info updated every second ONLY while Lifecycle is RESUMED (zero background battery drain)
-    var statusInfo by remember {
-        mutableStateOf(scheduleRepo.getCurrentStatusAndCountdown(queue))
+    val todayDateIso = remember(lastUpdated) {
+        LocalDate.now(KYIV_ZONE).format(DateTimeFormatter.ISO_LOCAL_DATE)
+    }
+    val tomorrowDateIso = remember(lastUpdated) {
+        LocalDate.now(KYIV_ZONE).plusDays(1).format(DateTimeFormatter.ISO_LOCAL_DATE)
     }
 
-    LaunchedEffect(lifecycleOwner, slots, tomorrowSlots, hasTomorrowSchedule, queue) {
+    // Effective slots with active emergency outage overlaid across Today and Tomorrow
+    val effectiveSlots = remember(baseSlots, customQueueStatusText, activeEmergencyOutage, todayDateIso) {
+        val raw = if (!customQueueStatusText.isNullOrBlank() && baseSlots.isEmpty()) {
+            buildLightNoOutageSlots()
+        } else {
+            baseSlots
+        }
+        ScheduleRepository.applyEmergencyOutageToSlots(raw, todayDateIso, activeEmergencyOutage)
+    }
+    val effectiveTomorrowSlots = remember(baseTomorrowSlots, activeEmergencyOutage, tomorrowDateIso) {
+        baseTomorrowSlots?.let {
+            ScheduleRepository.applyEmergencyOutageToSlots(it, tomorrowDateIso, activeEmergencyOutage)
+        }
+    }
+
+    // Dynamic real-time countdown info updated every second ONLY while Lifecycle is RESUMED and MainScreen is visible
+    var statusInfo by remember {
+        mutableStateOf(
+            ScheduleRepository.calculateStatusAndCountdown(
+                slots = effectiveSlots,
+                tomorrowSlots = if (hasTomorrowSchedule) effectiveTomorrowSlots else null,
+                now = LocalTime.now(KYIV_ZONE)
+            )
+        )
+    }
+
+    val isCountdownScreenActive = pagerState.currentPage == 0 && !isRouletteOpen && !isQueueUnselected
+
+    LaunchedEffect(
+        lifecycleOwner,
+        effectiveSlots,
+        effectiveTomorrowSlots,
+        hasTomorrowSchedule,
+        queue,
+        customQueueStatusText,
+        isCountdownScreenActive
+    ) {
+        if (!isCountdownScreenActive) {
+            statusInfo = ScheduleRepository.calculateStatusAndCountdown(
+                slots = effectiveSlots,
+                tomorrowSlots = if (hasTomorrowSchedule) effectiveTomorrowSlots else null,
+                now = LocalTime.now(KYIV_ZONE)
+            )
+            return@LaunchedEffect
+        }
         lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
             withContext(Dispatchers.IO) {
                 try {
@@ -151,8 +232,8 @@ fun BlackoutAppNavigation(
             }
             while (true) {
                 val updatedStatus = ScheduleRepository.calculateStatusAndCountdown(
-                    slots = slots,
-                    tomorrowSlots = if (hasTomorrowSchedule) tomorrowSlots else null,
+                    slots = effectiveSlots,
+                    tomorrowSlots = if (hasTomorrowSchedule) effectiveTomorrowSlots else null,
                     now = LocalTime.now(KYIV_ZONE)
                 )
                 statusInfo = updatedStatus
@@ -171,6 +252,10 @@ fun BlackoutAppNavigation(
             val updated = settingsRepo.getSettings()
             val queueChanged = queue != updated.queue
             queue = updated.queue
+            customQueueStatusText = updated.customQueueStatusText
+            selectedAddress = updated.selectedAddress
+            selectedAddressQuery = updated.selectedAddressQuery
+            activeEmergencyOutage = updated.activeEmergencyOutage
             siteUrl = updated.cityUrl
             advanceMinutes = updated.advanceNoticeMinutes
             refreshMinutes = updated.refreshIntervalMinutes.toInt()
@@ -179,14 +264,9 @@ fun BlackoutAppNavigation(
             vibrationEnabled = updated.vibrationEnabled
             currentLanguage = updated.language
             if (queueChanged) {
-                slots = scheduleRepo.getTodaySlots(updated.queue)
-                tomorrowSlots = scheduleRepo.getTomorrowSlots(updated.queue)
+                baseSlots = scheduleRepo.getTodaySlots(updated.queue)
+                baseTomorrowSlots = scheduleRepo.getTomorrowSlots(updated.queue)
                 hasTomorrowSchedule = scheduleRepo.hasTomorrowSchedule(updated.queue)
-                statusInfo = ScheduleRepository.calculateStatusAndCountdown(
-                    slots = slots,
-                    tomorrowSlots = if (hasTomorrowSchedule) tomorrowSlots else null,
-                    now = LocalTime.now(KYIV_ZONE)
-                )
             }
         }
     }
@@ -194,19 +274,13 @@ fun BlackoutAppNavigation(
     val scheduleListener = remember(settingsRepo, scheduleRepo) {
         SharedPreferences.OnSharedPreferenceChangeListener { _, _ ->
             val currentQ = settingsRepo.getSettings().queue
-            slots = scheduleRepo.getTodaySlots(currentQ)
-            tomorrowSlots = scheduleRepo.getTomorrowSlots(currentQ)
+            baseSlots = scheduleRepo.getTodaySlots(currentQ)
+            baseTomorrowSlots = scheduleRepo.getTomorrowSlots(currentQ)
             hasTomorrowSchedule = scheduleRepo.hasTomorrowSchedule(currentQ)
-            statusInfo = ScheduleRepository.calculateStatusAndCountdown(
-                slots = slots,
-                tomorrowSlots = if (hasTomorrowSchedule) tomorrowSlots else null,
-                now = LocalTime.now(KYIV_ZONE)
-            )
         }
     }
 
     // Listen to SharedPreferences changes from Widget (ToggleAlertsActionCallback / RefreshWidgetActionCallback)
-    // Properly unregistered in onDispose to prevent memory leaks
     DisposableEffect(settingsRepo, scheduleRepo, settingsListener, scheduleListener) {
         val settingsPrefs = settingsRepo.getSharedPreferences()
         val schedulePrefs = scheduleRepo.getSharedPreferences()
@@ -220,13 +294,13 @@ fun BlackoutAppNavigation(
         }
     }
 
-    // Refresh donations links from .json on GitHub when Application is started
+    // Refresh donations links from .json on GitHub using daily 24h cache
     LaunchedEffect(Unit) {
         withContext(Dispatchers.IO) {
             try {
                 val links = ua.blackout.prewarning.data.repository.DonationsRepository.getDonationsWithDailyRefresh(
                     appContext,
-                    forceRefresh = true
+                    forceRefresh = false
                 )
                 for (item in links) {
                     ua.blackout.prewarning.data.repository.DonationsRepository.fetchFaviconBitmap(appContext, item.url)
@@ -236,41 +310,38 @@ fun BlackoutAppNavigation(
     }
 
     // Fetch schedule when queue or siteUrl changes; update all Compose states on the Main UI thread
-    LaunchedEffect(queue, siteUrl) {
+    LaunchedEffect(queue, customQueueStatusText, siteUrl) {
         val activeQ = queue
-        slots = scheduleRepo.getTodaySlots(activeQ)
-        tomorrowSlots = scheduleRepo.getTomorrowSlots(activeQ)
+        if (activeQ.isBlank()) {
+            baseSlots = emptyList()
+            baseTomorrowSlots = null
+            hasTomorrowSchedule = false
+            return@LaunchedEffect
+        }
+
+        baseSlots = scheduleRepo.getTodaySlots(activeQ)
+        baseTomorrowSlots = scheduleRepo.getTomorrowSlots(activeQ)
         hasTomorrowSchedule = scheduleRepo.hasTomorrowSchedule(activeQ)
-        statusInfo = ScheduleRepository.calculateStatusAndCountdown(
-            slots = slots,
-            tomorrowSlots = if (hasTomorrowSchedule) tomorrowSlots else null,
-            now = LocalTime.now(KYIV_ZONE)
-        )
 
         val res = withContext(Dispatchers.IO) {
             ZtoeParser.fetchFullSchedule(siteUrl, activeQ, appContext)
         }
         if (res.status == FetchStatus.SUCCESS) {
-            slots = res.todaySlots
-            tomorrowSlots = res.tomorrowSlots
+            baseSlots = res.todaySlots
+            baseTomorrowSlots = res.tomorrowSlots
             hasTomorrowSchedule = res.hasTomorrowSchedule && res.tomorrowSlots != null
             withContext(Dispatchers.IO) {
                 scheduleRepo.saveSchedule(activeQ, res.todaySlots, res.tomorrowSlots)
             }
         } else {
-            slots = emptyList()
-            tomorrowSlots = null
+            baseSlots = emptyList()
+            baseTomorrowSlots = null
             hasTomorrowSchedule = false
             withContext(Dispatchers.IO) {
                 scheduleRepo.clearScheduleCache()
             }
         }
         val now = LocalTime.now(KYIV_ZONE)
-        statusInfo = ScheduleRepository.calculateStatusAndCountdown(
-            slots = slots,
-            tomorrowSlots = if (hasTomorrowSchedule) tomorrowSlots else null,
-            now = now
-        )
         lastUpdated = now.format(DateTimeFormatter.ofPattern("HH:mm"))
         nextUpdated = now.plusMinutes(refreshMinutes.toLong()).format(DateTimeFormatter.ofPattern("HH:mm"))
 
@@ -284,9 +355,63 @@ fun BlackoutAppNavigation(
         }
     }
 
-    // Helper for manual refresh with strict verification & error reporting
+    // Helper for manual refresh with strict verification, address/emergency re-check & error reporting
     val performManualRefresh: () -> Unit = {
         coroutineScope.launch {
+            // Re-check selected address on ZTOE for emergency outages and dynamic queue updates
+            val addrQuery = selectedAddressQuery
+            if (addrQuery != null && addrQuery.streetId.isNotBlank() && addrQuery.house.isNotBlank()) {
+                val addrRes = withContext(Dispatchers.IO) {
+                    ZtoeAddressLookup.checkAddressOnZtoeWebsite(
+                        remId = addrQuery.remId,
+                        settlementId = addrQuery.settlementId,
+                        streetId = addrQuery.streetId,
+                        house = addrQuery.house
+                    )
+                }
+                if (addrRes != null) {
+                    val prevEmergency = activeEmergencyOutage
+                    activeEmergencyOutage = addrRes.emergencyOutage
+                    selectedAddress = addrRes.addressLabel
+                    if (!addrRes.queue.isNullOrBlank()) {
+                        queue = addrRes.queue
+                        customQueueStatusText = null
+                    } else if (!addrRes.statusText.isNullOrBlank()) {
+                        queue = ""
+                        customQueueStatusText = addrRes.statusText
+                    }
+                    val current = settingsRepo.getSettings()
+                    val updatedSettings = current.copy(
+                        queue = queue,
+                        customQueueStatusText = customQueueStatusText,
+                        selectedAddress = selectedAddress,
+                        selectedAddressQuery = addrQuery,
+                        activeEmergencyOutage = activeEmergencyOutage
+                    )
+                    settingsRepo.saveSettings(updatedSettings)
+                    NotificationHelper.checkAndTriggerEmergencyOutageAlert(
+                        context = appContext,
+                        settings = updatedSettings,
+                        previousEmergency = prevEmergency,
+                        currentEmergency = activeEmergencyOutage
+                    )
+                }
+            }
+
+            if (queue.isBlank() && !customQueueStatusText.isNullOrBlank()) {
+                val now = LocalTime.now(KYIV_ZONE)
+                lastUpdated = now.format(DateTimeFormatter.ofPattern("HH:mm"))
+                nextUpdated = now.plusMinutes(refreshMinutes.toLong()).format(DateTimeFormatter.ofPattern("HH:mm"))
+                withContext(Dispatchers.IO) {
+                    try {
+                        AlarmScheduler.syncAlarms(appContext)
+                        BlackoutGlanceWidget.syncAllWidgets(appContext)
+                    } catch (_: Exception) {}
+                }
+                showAppBanner(AppStrings.refreshSuccessToast(resolvedLang))
+                return@launch
+            }
+
             val res = withContext(Dispatchers.IO) {
                 ZtoeParser.fetchFullSchedule(siteUrl, queue, appContext, forceNetwork = true)
             }
@@ -295,14 +420,9 @@ fun BlackoutAppNavigation(
                     val now = LocalTime.now(KYIV_ZONE)
                     lastUpdated = now.format(DateTimeFormatter.ofPattern("HH:mm"))
                     nextUpdated = now.plusMinutes(refreshMinutes.toLong()).format(DateTimeFormatter.ofPattern("HH:mm"))
-                    slots = res.todaySlots
-                    tomorrowSlots = res.tomorrowSlots
+                    baseSlots = res.todaySlots
+                    baseTomorrowSlots = res.tomorrowSlots
                     hasTomorrowSchedule = res.hasTomorrowSchedule && res.tomorrowSlots != null
-                    statusInfo = ScheduleRepository.calculateStatusAndCountdown(
-                        slots = res.todaySlots,
-                        tomorrowSlots = if (hasTomorrowSchedule) res.tomorrowSlots else null,
-                        now = now
-                    )
                     withContext(Dispatchers.IO) {
                         scheduleRepo.saveSchedule(queue, res.todaySlots, res.tomorrowSlots)
                         try {
@@ -318,14 +438,9 @@ fun BlackoutAppNavigation(
                     val now = LocalTime.now(KYIV_ZONE)
                     lastUpdated = now.format(DateTimeFormatter.ofPattern("HH:mm"))
                     nextUpdated = now.plusMinutes(refreshMinutes.toLong()).format(DateTimeFormatter.ofPattern("HH:mm"))
-                    slots = emptyList()
-                    tomorrowSlots = null
+                    baseSlots = emptyList()
+                    baseTomorrowSlots = null
                     hasTomorrowSchedule = false
-                    statusInfo = ScheduleRepository.calculateStatusAndCountdown(
-                        slots = emptyList(),
-                        tomorrowSlots = null,
-                        now = now
-                    )
                     withContext(Dispatchers.IO) {
                         scheduleRepo.clearScheduleCache()
                         try {
@@ -354,9 +469,6 @@ fun BlackoutAppNavigation(
     val bgColors = remember(currentMinuteOfDay) {
         TimeOfDayPalette.getInterpolatedColors(LocalTime.now(KYIV_ZONE))
     }
-
-    // Pager for swipe left/right between windows with beyondViewportPageCount = 2 to eliminate swipe jittering
-    val pagerState = rememberPagerState(initialPage = 0, pageCount = { 3 })
 
     Box(
         modifier = Modifier
@@ -441,23 +553,28 @@ fun BlackoutAppNavigation(
         HorizontalPager(
             state = pagerState,
             beyondViewportPageCount = 2,
-            userScrollEnabled = !isRouletteOpen,
+            userScrollEnabled = !isRouletteOpen && !isQueueUnselected,
             modifier = Modifier.fillMaxSize()
         ) { page ->
             when (page) {
                 0 -> {
                     MainScreen(
                         queue = queue,
+                        customQueueStatusText = customQueueStatusText,
+                        selectedAddress = selectedAddress,
+                        emergencyOutageStartTime = activeEmergencyOutage?.startTime,
+                        emergencyOutageRestoreTime = activeEmergencyOutage?.estimatedRestoreTime,
                         isBlackoutNow = statusInfo.isBlackoutNow,
                         countdownText = statusInfo.countdownText,
                         slotTimeText = statusInfo.nextSlotTime,
-                        slots = slots,
-                        tomorrowSlots = tomorrowSlots,
+                        slots = effectiveSlots,
+                        tomorrowSlots = effectiveTomorrowSlots,
                         hasTomorrowSchedule = hasTomorrowSchedule,
                         notificationsEnabled = notificationsEnabled,
                         lastUpdated = lastUpdated,
                         nextUpdated = nextUpdated,
                         lang = resolvedLang,
+                        selectedLanguage = currentLanguage,
                         onToggleNotifications = {
                             val updated = settingsRepo.updateNotificationsEnabled(!notificationsEnabled)
                             notificationsEnabled = updated.notificationsEnabled
@@ -472,12 +589,30 @@ fun BlackoutAppNavigation(
                         },
                         onRefresh = {
                             performManualRefresh()
+                        },
+                        onOpenQueueSelection = {
+                            autoOpenQueueHelp = true
+                            coroutineScope.launch {
+                                pagerState.animateScrollToPage(1)
+                            }
+                        },
+                        onChangeLanguage = { newLang ->
+                            currentLanguage = newLang
+                            val current = settingsRepo.getSettings()
+                            settingsRepo.saveSettings(current.copy(language = newLang))
+                            coroutineScope.launch(Dispatchers.IO) {
+                                try {
+                                    BlackoutGlanceWidget.syncAllWidgets(appContext)
+                                } catch (_: Exception) {}
+                            }
                         }
                     )
                 }
                 1 -> {
                     SettingsScreen(
                         currentQueue = queue,
+                        customQueueStatusText = customQueueStatusText,
+                        selectedAddressQuery = selectedAddressQuery,
                         siteUrl = siteUrl,
                         advanceMinutes = advanceMinutes,
                         refreshMinutes = refreshMinutes,
@@ -486,15 +621,78 @@ fun BlackoutAppNavigation(
                         vibrationEnabled = vibrationEnabled,
                         currentLanguage = currentLanguage,
                         lang = resolvedLang,
+                        autoOpenQueueHelp = autoOpenQueueHelp,
+                        onAutoOpenQueueHelpHandled = { autoOpenQueueHelp = false },
                         onQueueSelected = { newQueue ->
+                            val wasUnselected = queue.isBlank() && customQueueStatusText.isNullOrBlank()
                             queue = newQueue
+                            customQueueStatusText = null
+                            selectedAddress = null
+                            selectedAddressQuery = null
+                            activeEmergencyOutage = null
                             val current = settingsRepo.getSettings()
-                            settingsRepo.saveSettings(current.copy(queue = newQueue))
+                            settingsRepo.saveSettings(
+                                current.copy(
+                                    queue = newQueue,
+                                    customQueueStatusText = null,
+                                    selectedAddress = null,
+                                    selectedAddressQuery = null,
+                                    activeEmergencyOutage = null
+                                )
+                            )
                             // Immediately update MainScreen chart and status on the Main UI thread
-                            slots = scheduleRepo.getTodaySlots(newQueue)
-                            tomorrowSlots = scheduleRepo.getTomorrowSlots(newQueue)
+                            baseSlots = scheduleRepo.getTodaySlots(newQueue)
+                            baseTomorrowSlots = scheduleRepo.getTomorrowSlots(newQueue)
                             hasTomorrowSchedule = scheduleRepo.hasTomorrowSchedule(newQueue)
-                            statusInfo = scheduleRepo.getCurrentStatusAndCountdown(newQueue)
+                            if (wasUnselected) {
+                                coroutineScope.launch {
+                                    pagerState.animateScrollToPage(0)
+                                }
+                            }
+                            coroutineScope.launch(Dispatchers.IO) {
+                                try {
+                                    AlarmScheduler.syncAlarms(appContext)
+                                    BlackoutGlanceWidget.syncAllWidgets(appContext)
+                                } catch (_: Exception) {}
+                            }
+                        },
+                        onAddressQueueResolved = { resolvedQueue, statusText, addressLabel, emergencyOutage, query ->
+                            val wasUnselected = queue.isBlank() && customQueueStatusText.isNullOrBlank()
+                            val prevEmergency = activeEmergencyOutage
+                            queue = resolvedQueue
+                            customQueueStatusText = statusText
+                            selectedAddress = addressLabel
+                            selectedAddressQuery = query
+                            activeEmergencyOutage = emergencyOutage
+                            val current = settingsRepo.getSettings()
+                            val updatedSettings = current.copy(
+                                queue = resolvedQueue,
+                                customQueueStatusText = statusText,
+                                selectedAddress = addressLabel,
+                                selectedAddressQuery = query,
+                                activeEmergencyOutage = emergencyOutage
+                            )
+                            settingsRepo.saveSettings(updatedSettings)
+                            NotificationHelper.checkAndTriggerEmergencyOutageAlert(
+                                context = appContext,
+                                settings = updatedSettings,
+                                previousEmergency = prevEmergency,
+                                currentEmergency = emergencyOutage
+                            )
+                            if (resolvedQueue.isNotBlank()) {
+                                baseSlots = scheduleRepo.getTodaySlots(resolvedQueue)
+                                baseTomorrowSlots = scheduleRepo.getTomorrowSlots(resolvedQueue)
+                                hasTomorrowSchedule = scheduleRepo.hasTomorrowSchedule(resolvedQueue)
+                            } else {
+                                baseSlots = emptyList()
+                                baseTomorrowSlots = null
+                                hasTomorrowSchedule = false
+                            }
+                            if (wasUnselected) {
+                                coroutineScope.launch {
+                                    pagerState.animateScrollToPage(0)
+                                }
+                            }
                             coroutineScope.launch(Dispatchers.IO) {
                                 try {
                                     AlarmScheduler.syncAlarms(appContext)
@@ -518,15 +716,18 @@ fun BlackoutAppNavigation(
                             }
                         },
                         onRefreshMinutesChanged = {
+                            val intervalChanged = refreshMinutes != it
                             refreshMinutes = it
                             val current = settingsRepo.getSettings()
                             settingsRepo.saveSettings(current.copy(refreshIntervalMinutes = it.toLong()))
                             val now = LocalTime.now(KYIV_ZONE)
                             nextUpdated = now.plusMinutes(it.toLong()).format(DateTimeFormatter.ofPattern("HH:mm"))
-                            ua.blackout.prewarning.worker.ScheduleSyncWorker.schedulePeriodicWork(
-                                appContext,
-                                androidx.work.ExistingPeriodicWorkPolicy.UPDATE
-                            )
+                            if (intervalChanged) {
+                                ua.blackout.prewarning.worker.ScheduleSyncWorker.schedulePeriodicWork(
+                                    appContext,
+                                    androidx.work.ExistingPeriodicWorkPolicy.UPDATE
+                                )
+                            }
                         },
                         onToggleNotifications = { newEnabled ->
                             val updated = settingsRepo.updateNotificationsEnabled(newEnabled)
@@ -561,15 +762,15 @@ fun BlackoutAppNavigation(
                             }
                         },
                         onSendTestAlert = {
-                            // Test notification strictly respects sound and vibration settings
+                            val displayQ = queue.ifBlank { "1.1" }
                             NotificationHelper.showPreWarningNotification(
                                 context = appContext,
                                 notificationId = 9999,
                                 title = if (resolvedLang == "uk") "Тестове попередження" else "Test notification",
                                 body = if (resolvedLang == "uk")
-                                    "Черга $queue: відключення розпочнеться о 14:00 (через $advanceMinutes хв)."
+                                    "Черга $displayQ: відключення розпочнеться о 14:00 (через $advanceMinutes хв)."
                                 else
-                                    "Queue $queue: blackout begins at 14:00 (in $advanceMinutes min).",
+                                    "Queue $displayQ: blackout begins at 14:00 (in $advanceMinutes min).",
                                 isTest = true
                             )
                         },
@@ -578,41 +779,30 @@ fun BlackoutAppNavigation(
                         },
                         onResetDefaults = {
                             // CRITICAL CONSTANTS — Default values: advanceMinutes = 15, refreshMinutes = 30
-                            queue = "1.1"
-                            siteUrl = "https://www.ztoe.com.ua/unhooking-search.php"
-                            advanceMinutes = 15
-                            refreshMinutes = 30
-                            notificationsEnabled = true
-                            soundEnabled = true
-                            vibrationEnabled = true
-                            currentLanguage = "SYSTEM"
+                            val resetState = settingsRepo.resetAllAppDataToFirstLaunch()
+                            queue = resetState.queue
+                            customQueueStatusText = resetState.customQueueStatusText
+                            selectedAddress = resetState.selectedAddress
+                            selectedAddressQuery = resetState.selectedAddressQuery
+                            activeEmergencyOutage = resetState.activeEmergencyOutage
+                            siteUrl = resetState.cityUrl
+                            advanceMinutes = resetState.advanceNoticeMinutes
+                            refreshMinutes = resetState.refreshIntervalMinutes.toInt()
+                            notificationsEnabled = resetState.notificationsEnabled
+                            soundEnabled = resetState.soundEnabled
+                            vibrationEnabled = resetState.vibrationEnabled
+                            currentLanguage = resetState.language
 
-                            val current = settingsRepo.getSettings()
-                            settingsRepo.saveSettings(
-                                current.copy(
-                                    cityUrl = "https://www.ztoe.com.ua/unhooking-search.php",
-                                    queue = "1.1",
-                                    advanceNoticeMinutes = 15,
-                                    refreshIntervalMinutes = 30L,
-                                    notificationsEnabled = true,
-                                    soundEnabled = true,
-                                    vibrationEnabled = true,
-                                    prevSoundEnabled = true,
-                                    prevVibrationEnabled = true,
-                                    language = "SYSTEM"
-                                )
-                            )
-                            slots = scheduleRepo.getTodaySlots("1.1")
-                            tomorrowSlots = scheduleRepo.getTomorrowSlots("1.1")
-                            hasTomorrowSchedule = scheduleRepo.hasTomorrowSchedule("1.1")
-                            statusInfo = scheduleRepo.getCurrentStatusAndCountdown("1.1")
+                            baseSlots = emptyList()
+                            baseTomorrowSlots = null
+                            hasTomorrowSchedule = false
 
-                            ua.blackout.prewarning.worker.ScheduleSyncWorker.schedulePeriodicWork(
-                                appContext,
-                                androidx.work.ExistingPeriodicWorkPolicy.UPDATE
-                            )
+                            coroutineScope.launch {
+                                pagerState.animateScrollToPage(0)
+                            }
                             coroutineScope.launch(Dispatchers.IO) {
                                 try {
+                                    scheduleRepo.clearScheduleCache()
                                     AlarmScheduler.syncAlarms(appContext)
                                     BlackoutGlanceWidget.syncAllWidgets(appContext)
                                 } catch (_: Exception) {}
@@ -634,7 +824,7 @@ fun BlackoutAppNavigation(
             ZhytomyrRouletteDialog(
                 lang = resolvedLang,
                 providerUrl = siteUrl,
-                queue = queue,
+                queue = queue.ifBlank { "1.1" },
                 onShowAppBanner = showAppBanner,
                 onDismiss = { isRouletteOpen = false }
             )
@@ -684,13 +874,14 @@ fun BlackoutAppNavigation(
             }
         }
 
-        // Floating Capsule Bottom Navigation Dock matching emulator (hidden when Житомирська Рулетка is open)
+        // Floating Capsule Bottom Navigation Dock matching emulator (hidden when Житомирська Рулетка is open; dimmed & disabled when queue unselected)
         if (!isRouletteOpen) {
             Box(
                 modifier = Modifier
                     .align(Alignment.BottomCenter)
                     .navigationBarsPadding()
                     .padding(bottom = 16.dp)
+                    .alpha(if (isQueueUnselected) 0.15f else 1f)
             ) {
                 Box(
                     modifier = Modifier
@@ -709,7 +900,7 @@ fun BlackoutAppNavigation(
                                 .size(44.dp)
                                 .clip(CircleShape)
                                 .background(if (isSchedule) Color.White else Color.Transparent)
-                                .clickable {
+                                .clickable(enabled = !isQueueUnselected) {
                                     coroutineScope.launch { pagerState.animateScrollToPage(0) }
                                 },
                             contentAlignment = Alignment.Center
@@ -729,7 +920,7 @@ fun BlackoutAppNavigation(
                                 .size(44.dp)
                                 .clip(CircleShape)
                                 .background(if (isSettings) Color.White else Color.Transparent)
-                                .clickable {
+                                .clickable(enabled = !isQueueUnselected) {
                                     coroutineScope.launch { pagerState.animateScrollToPage(1) }
                                 },
                             contentAlignment = Alignment.Center
@@ -749,7 +940,7 @@ fun BlackoutAppNavigation(
                                 .size(44.dp)
                                 .clip(CircleShape)
                                 .background(if (isAbout) Color.White else Color.Transparent)
-                                .clickable {
+                                .clickable(enabled = !isQueueUnselected) {
                                     coroutineScope.launch { pagerState.animateScrollToPage(2) }
                                 },
                             contentAlignment = Alignment.Center

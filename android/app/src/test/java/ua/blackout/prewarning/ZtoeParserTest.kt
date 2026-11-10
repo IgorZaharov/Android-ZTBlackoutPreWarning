@@ -135,7 +135,7 @@ class ZtoeParserTest {
         assertEquals("Світло в Житомирі", AppStrings.aboutTitle("uk"))
         val steps = AppStrings.queueHelpSteps("uk")
         assertEquals(4, steps.size)
-        assertEquals("1. Відкрийте сторінку пошуку черги на сайті https://www.ztoe.com.ua/unhooking-search.php.", steps[0])
+        assertEquals("1. Відкрийте сторінку пошуку черги на сайті https://www.ztoe.com.ua/unhooking-search.php", steps[0])
         assertEquals("2. Оберіть свій РЕМ, населений пункт і вулицю.", steps[1])
         assertEquals(
             "3. У таблиці знайдіть свій будинок і подивіться стовпці «Черга» і «Підчерга». Наприклад, черга 5 і підчерга 2 - це 5.2.",
@@ -762,5 +762,87 @@ class ZtoeParserTest {
         ua.blackout.prewarning.ui.screens.RouletteSoundEngine.playScratchSound(force = true)
         assertTrue(ua.blackout.prewarning.ui.screens.RouletteSoundEngine.getRemainingScratchSoundDelayMs() > 0L)
     }
+
+    @Test
+    fun testUnitE_AddressLookupAndEmergencyOutages() {
+        val defaults = UserSettings()
+        assertEquals("", defaults.queue)
+        assertEquals("SYSTEM", defaults.language)
+
+        // 1. Verify HTML Address Lookup Table parser (numeric queue 5.2 and no-queue house 104)
+        val queueHtml = "<table><tr><td>15</td><td>5</td><td>2</td></tr></table>"
+        val parsedQueue = ua.blackout.prewarning.data.parser.ZtoeAddressLookup.parseZtoeAddressLookupTableHtml(queueHtml, "15")
+        assertEquals("5.2", parsedQueue?.first)
+
+        val noQueueHtml = "<table><tr><td>104</td><td colspan=\"2\">В цей час не вимикається, за винятком випадків аварійних відключень</td></tr></table>"
+        val parsedNoQueue = ua.blackout.prewarning.data.parser.ZtoeAddressLookup.parseZtoeAddressLookupTableHtml(noQueueHtml, "104")
+        assertEquals(null, parsedNoQueue?.first)
+        assertEquals("В цей час не вимикається, за винятком випадків аварійних відключень", parsedNoQueue?.second)
+
+        // 2. Verify Emergency Outages parser (pw_accidents JSON & HTML table) and Kyivska 37 Demo Outage
+        val demoEmergency = ua.blackout.prewarning.data.parser.ZtoeAddressLookup.getKyivska37DemoEmergencyOutage()
+        assertEquals("06.04 19:21", demoEmergency.startTime)
+        assertEquals("07.04 20:00", demoEmergency.estimatedRestoreTime)
+
+        val sampleAccidentsHtml = """
+            <script>
+            let pw_accidents = [{"rem_id":4,"rem_name":"Житомирський"," date_begin":"06.04 19:21","date_plan":"07.04 20:00","Otkl_Type_Name":"Аварійне відключення","naspunkt":[{"id":2,"name":"м. Житомир","streets":[{"id":22,"name":"вул. Київська, 37"}]}]}];
+            </script>
+        """.trimIndent()
+        val matchedJson = ua.blackout.prewarning.data.parser.ZtoeAddressLookup.matchEmergencyOutageFromAccidentsJson(
+            sampleAccidentsHtml,
+            "Житомирський РЕМ",
+            "м. Житомир",
+            "вул. Київська",
+            "37"
+        )
+        assertEquals("06.04 19:21", matchedJson?.startTime)
+        assertEquals("07.04 20:00", matchedJson?.estimatedRestoreTime)
+
+        // 3. Verify Cross-Day Emergency Overlay on Today (2026-04-06 -> 19:30-24:00) and Tomorrow (2026-04-07 -> 00:00-20:00)
+        val base48PowerOn = (0 until 48).map { idx ->
+            val sh = idx / 2
+            val sm = if (idx % 2 == 0) "00" else "30"
+            val eh = (idx + 1) / 2
+            val em = if ((idx + 1) % 2 == 0) "00" else "30"
+            ua.blackout.prewarning.data.model.BlackoutSlot(
+                hour = sh,
+                startStr = "${sh.toString().padStart(2, '0')}:$sm",
+                endStr = "${eh.toString().padStart(2, '0')}:$em",
+                status = SlotStatus.POWER_ON,
+                label = "${sh.toString().padStart(2, '0')}:$sm - ${eh.toString().padStart(2, '0')}:$em"
+            )
+        }
+
+        val todaySlots = ua.blackout.prewarning.data.repository.ScheduleRepository.applyEmergencyOutageToSlots(
+            base48PowerOn,
+            "2026-04-06",
+            demoEmergency
+        )
+        val todayIntervals = ua.blackout.prewarning.data.repository.ScheduleRepository.computeDetailedIntervals(todaySlots)
+        assertEquals(1, todayIntervals.size)
+        assertEquals("19:30", todayIntervals[0].startStr)
+        assertEquals("24:00", todayIntervals[0].endStr)
+        assertEquals(true, todayIntervals[0].isEmergency)
+
+        val tomorrowSlots = ua.blackout.prewarning.data.repository.ScheduleRepository.applyEmergencyOutageToSlots(
+            base48PowerOn,
+            "2026-04-07",
+            demoEmergency
+        )
+        val tomorrowIntervals = ua.blackout.prewarning.data.repository.ScheduleRepository.computeDetailedIntervals(tomorrowSlots)
+        assertEquals(1, tomorrowIntervals.size)
+        assertEquals("00:00", tomorrowIntervals[0].startStr)
+        assertEquals("20:00", tomorrowIntervals[0].endStr)
+        assertEquals(true, tomorrowIntervals[0].isEmergency)
+
+        assertEquals("Години відключень на сьогодні:", AppStrings.blackoutHoursForDayHeader("uk"))
+        assertEquals("Години відключень на завтра:", AppStrings.blackoutHoursForTomorrowHeader("uk"))
+        assertEquals("Blackout hours for today:", AppStrings.blackoutHoursForDayHeader("en"))
+        assertEquals("Blackout hours for tomorrow:", AppStrings.blackoutHoursForTomorrowHeader("en"))
+        assertEquals("Пошук вручну", AppStrings.queueHelpManualSearchTitle("uk"))
+        assertEquals("Manual search", AppStrings.queueHelpManualSearchTitle("en"))
+    }
 }
+
 

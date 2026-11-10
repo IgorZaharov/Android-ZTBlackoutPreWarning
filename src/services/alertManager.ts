@@ -3,7 +3,7 @@
  * Handles advance alert thresholds, deduplication (strictly once per blackout slot),
  * sound & vibration independence, master toggle state memory, and local storage persistence.
  */
-import { BlackoutSlot, DaySchedule, NotificationRecord, UserSettings } from '../types';
+import { BlackoutSlot, DaySchedule, EmergencyOutageInfo, NotificationRecord, UserSettings } from '../types';
 import { calculateOutageCountdown, DEFAULT_ZTOE_URL } from './ztoeParser';
 import { translations } from './i18n';
 
@@ -17,7 +17,11 @@ const ALERT_LOG_KEY = 'zt_blackout_alert_log_v1';
 export const DEFAULT_SETTINGS: UserSettings = {
   city: 'Житомир (ZTOE)',
   url: DEFAULT_ZTOE_URL,
-  queue: '1.1',
+  queue: '',
+  customQueueStatusText: undefined,
+  selectedAddress: undefined,
+  selectedAddressQuery: undefined,
+  activeEmergencyOutage: null,
   refreshIntervalMinutes: 30,
   advanceNoticeMinutes: 15,
   notificationsEnabled: true,
@@ -29,22 +33,28 @@ export const DEFAULT_SETTINGS: UserSettings = {
   language: 'system'
 };
 
+let memorySettings: UserSettings | null = null;
+
 export function loadUserSettings(): UserSettings {
   try {
-    const raw = localStorage.getItem(SETTINGS_KEY);
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      const merged: UserSettings = { ...DEFAULT_SETTINGS, ...parsed };
-      if (!merged.notificationsEnabled) {
-        merged.soundEnabled = false;
-        merged.vibrationEnabled = false;
+    if (typeof localStorage !== 'undefined') {
+      const raw = localStorage.getItem(SETTINGS_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        const merged: UserSettings = { ...DEFAULT_SETTINGS, ...parsed };
+        if (!merged.notificationsEnabled) {
+          merged.soundEnabled = false;
+          merged.vibrationEnabled = false;
+        }
+        return merged;
       }
-      return merged;
+    } else if (memorySettings) {
+      return { ...memorySettings };
     }
   } catch {
     // fallback
   }
-  return DEFAULT_SETTINGS;
+  return { ...DEFAULT_SETTINGS };
 }
 
 export function saveUserSettings(settings: UserSettings): void {
@@ -60,7 +70,10 @@ export function saveUserSettings(settings: UserSettings): void {
         ? settings.vibrationEnabled
         : (settings.prevVibrationEnabled ?? true)
     };
-    localStorage.setItem(SETTINGS_KEY, JSON.stringify(normalized));
+    memorySettings = normalized;
+    if (typeof localStorage !== 'undefined') {
+      localStorage.setItem(SETTINGS_KEY, JSON.stringify(normalized));
+    }
   } catch (err) {
     console.error('Failed to save settings:', err);
   }
@@ -98,38 +111,63 @@ export function toggleMasterNotifications(settings: UserSettings, enabled?: bool
   }
 }
 
+const memoryNotifiedSlots = new Set<string>();
+
 export function loadNotifiedSlotIds(): Set<string> {
   try {
-    const raw = localStorage.getItem(NOTIFIED_SLOTS_KEY);
-    if (raw) {
-      const arr = JSON.parse(raw);
-      return new Set(arr);
+    if (typeof localStorage !== 'undefined') {
+      const raw = localStorage.getItem(NOTIFIED_SLOTS_KEY);
+      if (raw) {
+        const arr = JSON.parse(raw);
+        return new Set(arr);
+      }
     }
   } catch {
     // fallback
   }
-  return new Set();
+  return new Set(memoryNotifiedSlots);
 }
 
 export function markSlotAsNotified(slotId: string): void {
+  memoryNotifiedSlots.add(slotId);
   try {
-    const set = loadNotifiedSlotIds();
-    set.add(slotId);
-    // Keep max 100 recent entries to avoid unbounded growth
-    const arr = Array.from(set).slice(-100);
-    localStorage.setItem(NOTIFIED_SLOTS_KEY, JSON.stringify(arr));
+    if (typeof localStorage !== 'undefined') {
+      const set = loadNotifiedSlotIds();
+      set.add(slotId);
+      // Keep max 100 recent entries to avoid unbounded growth
+      const arr = Array.from(set).slice(-100);
+      localStorage.setItem(NOTIFIED_SLOTS_KEY, JSON.stringify(arr));
+    }
   } catch (err) {
     console.error('Failed to mark slot as notified:', err);
   }
 }
 
 export function clearNotifiedHistory(): void {
+  memoryNotifiedSlots.clear();
   try {
-    localStorage.removeItem(NOTIFIED_SLOTS_KEY);
-    localStorage.removeItem(ALERT_LOG_KEY);
+    if (typeof localStorage !== 'undefined') {
+      localStorage.removeItem(NOTIFIED_SLOTS_KEY);
+      localStorage.removeItem(ALERT_LOG_KEY);
+    }
   } catch {
     // ignore
   }
+}
+
+export function resetAllAppDataToFirstLaunch(): UserSettings {
+  memoryNotifiedSlots.clear();
+  memorySettings = null;
+  try {
+    if (typeof localStorage !== 'undefined') {
+      localStorage.removeItem(SETTINGS_KEY);
+      localStorage.removeItem(NOTIFIED_SLOTS_KEY);
+      localStorage.removeItem(ALERT_LOG_KEY);
+    }
+  } catch {
+    // ignore
+  }
+  return { ...DEFAULT_SETTINGS };
 }
 
 export function loadAlertLog(): NotificationRecord[] {
@@ -176,7 +214,7 @@ export function checkAndTriggerAdvanceAlert(
   lang: 'uk' | 'en',
   onNotificationFired?: (record: NotificationRecord) => void
 ): NotificationRecord | null {
-  if (!settings.notificationsEnabled) {
+  if (!settings.notificationsEnabled || !settings.queue) {
     return null;
   }
 
@@ -253,6 +291,123 @@ export function checkAndTriggerAdvanceAlert(
   }
 
   return record;
+}
+
+/**
+ * Triggers a state-transition notification for Emergency Outages ("Аварійне відключення"):
+ * 1) Fires once when an emergency outage is first detected for the user's selected house upon refresh.
+ * 2) Fires once when an active emergency outage is cleared/restored upon refresh.
+ * Controlled by the existing Notifications switch (settings.notificationsEnabled).
+ */
+export function checkAndTriggerEmergencyOutageAlert(
+  prevOutage: EmergencyOutageInfo | null | undefined,
+  nextOutage: EmergencyOutageInfo | null | undefined,
+  settings: UserSettings,
+  lang: 'uk' | 'en',
+  onNotificationFired?: (record: NotificationRecord) => void
+): NotificationRecord | null {
+  if (!settings.notificationsEnabled) {
+    return null;
+  }
+
+  const notifiedSet = loadNotifiedSlotIds();
+
+  // Case 1: Emergency outage detected (transition from none or different outage ID -> active)
+  if (nextOutage && (!prevOutage || prevOutage.id !== nextOutage.id)) {
+    const detectKey = `emerg_detected_${nextOutage.id}`;
+    if (notifiedSet.has(detectKey)) {
+      return null;
+    }
+    markSlotAsNotified(detectKey);
+
+    const title =
+      lang === 'uk'
+        ? nextOutage.outageType || 'Аварійне відключення'
+        : 'Emergency Outage';
+    const timeWindowUk = [
+      nextOutage.startTime ? `Початок: ${nextOutage.startTime}` : '',
+      nextOutage.estimatedRestoreTime ? `Орієнтовне відновлення: ${nextOutage.estimatedRestoreTime}` : '',
+    ]
+      .filter(Boolean)
+      .join(' · ');
+    const timeWindowEn = [
+      nextOutage.startTime ? `Start: ${nextOutage.startTime}` : '',
+      nextOutage.estimatedRestoreTime ? `Estimated restore: ${nextOutage.estimatedRestoreTime}` : '',
+    ]
+      .filter(Boolean)
+      .join(' · ');
+
+    const message =
+      lang === 'uk'
+        ? `За вашою адресою зафіксовано аварійне відключення.${timeWindowUk ? ` ${timeWindowUk}` : ''}`
+        : `An emergency power outage was detected at your address.${timeWindowEn ? ` ${timeWindowEn}` : ''}`;
+
+    const record: NotificationRecord = {
+      id: `emerg_alert_${Date.now()}`,
+      slotId: detectKey,
+      timestamp: Date.now(),
+      title,
+      message,
+      queue: settings.queue || '—',
+      advanceMinutes: 0,
+    };
+
+    appendAlertLog(record);
+
+    if (settings.soundEnabled) {
+      playNotificationTone();
+    }
+    if (settings.vibrationEnabled) {
+      triggerDeviceVibration();
+    }
+    if (onNotificationFired) {
+      onNotificationFired(record);
+    }
+    return record;
+  }
+
+  // Case 2: Emergency outage restored (transition from active -> none)
+  if (prevOutage && !nextOutage) {
+    const restoreKey = `emerg_restored_${prevOutage.id}`;
+    if (notifiedSet.has(restoreKey)) {
+      return null;
+    }
+    markSlotAsNotified(restoreKey);
+
+    const title =
+      lang === 'uk'
+        ? 'Аварійне відключення завершено'
+        : 'Emergency Outage Resolved';
+    const message =
+      lang === 'uk'
+        ? 'Аварійне відключення за вашою адресою завершено, електропостачання відновлено.'
+        : 'The emergency outage at your address has ended and power has been restored.';
+
+    const record: NotificationRecord = {
+      id: `emerg_restore_${Date.now()}`,
+      slotId: restoreKey,
+      timestamp: Date.now(),
+      title,
+      message,
+      queue: settings.queue || '—',
+      advanceMinutes: 0,
+    };
+
+    appendAlertLog(record);
+
+    if (settings.soundEnabled) {
+      playNotificationTone();
+    }
+    if (settings.vibrationEnabled) {
+      triggerDeviceVibration();
+    }
+    if (onNotificationFired) {
+      onNotificationFired(record);
+    }
+    return record;
+  }
+
+  return null;
 }
 
 export function createTestNotification(

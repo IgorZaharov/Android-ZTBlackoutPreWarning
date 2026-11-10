@@ -8,29 +8,54 @@ class AlertRegistry(context: Context) {
     private val prefs: SharedPreferences =
         appContext.getSharedPreferences("zt_notified_blackouts_v1", Context.MODE_PRIVATE)
 
+    companion object {
+        const val MAX_STORED_ENTRIES = 100
+    }
+
     /**
-     * Checks if this specific blackout slot has already been notified.
-     * Guarantees 100% adherence to "notification sent only once per blackout slot".
+     * Checks if this specific blackout slot or emergency transition key has already been notified.
+     * Guarantees 100% adherence to "notification sent only once per blackout slot / state transition".
      */
     fun hasNotified(slotId: String): Boolean {
         return prefs.getBoolean("notified_$slotId", false)
     }
 
+    fun hasFired(key: String): Boolean = hasNotified(key)
+
+    fun markFired(key: String) = markNotified(key)
+
     /**
-     * Marks the slot as notified with timestamp and prunes entries older than 7 days
-     * to prevent unbounded SharedPreferences memory growth.
+     * Marks the slot as notified with timestamp, prunes entries older than 7 days,
+     * and bounds total stored entries to MAX_STORED_ENTRIES = 100.
      */
     fun markNotified(slotId: String) {
         val now = System.currentTimeMillis()
         val cutoff = now - 7L * 24L * 60L * 60L * 1000L
         val editor = prefs.edit()
+        val timestampEntries = mutableListOf<Pair<String, Long>>()
+
         for ((key, value) in prefs.all) {
-            if (key.startsWith("ts_") && value is Long && value < cutoff) {
+            if (key.startsWith("ts_") && value is Long) {
                 val oldSlotId = key.removePrefix("ts_")
-                editor.remove(key)
-                editor.remove("notified_$oldSlotId")
+                if (value < cutoff) {
+                    editor.remove(key)
+                    editor.remove("notified_$oldSlotId")
+                } else {
+                    timestampEntries.add(oldSlotId to value)
+                }
             }
         }
+
+        if (timestampEntries.size >= MAX_STORED_ENTRIES) {
+            val sortedOldestFirst = timestampEntries.sortedBy { it.second }
+            val excessCount = (timestampEntries.size - MAX_STORED_ENTRIES) + 1
+            for (i in 0 until excessCount.coerceAtMost(sortedOldestFirst.size)) {
+                val evictSlotId = sortedOldestFirst[i].first
+                editor.remove("ts_$evictSlotId")
+                editor.remove("notified_$evictSlotId")
+            }
+        }
+
         editor
             .putBoolean("notified_$slotId", true)
             .putLong("ts_$slotId", now)

@@ -6,11 +6,18 @@ import {
   Layers
 } from 'lucide-react';
 import { DaySchedule, UserSettings } from '../types';
-import { calculateOutageCountdown, getBlackoutIntervals, getChartHalfHourBlocks } from '../services/ztoeParser';
+import {
+  applyEmergencyOutageToSchedule,
+  calculateOutageCountdown,
+  getBlackoutIntervals,
+  getChartHalfHourBlocks
+} from '../services/ztoeParser';
 import { translations } from '../services/i18n';
 
 interface WidgetSimulatorProps {
   schedule: DaySchedule;
+  tomorrowSchedule?: DaySchedule | null;
+  now?: Date;
   settings: UserSettings;
   lang: 'uk' | 'en';
   onToggleNotifications: () => void;
@@ -21,6 +28,8 @@ interface WidgetSimulatorProps {
 
 export const WidgetSimulator: React.FC<WidgetSimulatorProps> = ({
   schedule,
+  tomorrowSchedule = null,
+  now = new Date(),
   settings,
   lang,
   onToggleNotifications,
@@ -30,10 +39,53 @@ export const WidgetSimulator: React.FC<WidgetSimulatorProps> = ({
 }) => {
   const t = translations[lang];
   const [widgetSize, setWidgetSize] = useState<'2x1' | '3x2'>('2x1');
-  const now = new Date();
-  const countdown = calculateOutageCountdown(schedule, now);
-  const blackoutIntervals = getBlackoutIntervals(schedule.slots);
-  const chartBlocks = useMemo(() => getChartHalfHourBlocks(schedule.slots), [schedule.slots]);
+
+  const hasActiveEmergencyOutage = Boolean(settings.activeEmergencyOutage);
+  const hasNoQueueMessage = Boolean(
+    settings.customQueueStatusText &&
+      (!settings.queue || settings.queue.trim() === '') &&
+      !hasActiveEmergencyOutage
+  );
+  const isQueueUnselected =
+    (!settings.queue || settings.queue.trim() === '') &&
+    !hasNoQueueMessage &&
+    !hasActiveEmergencyOutage;
+
+  const effectiveTodaySchedule = useMemo(
+    () => applyEmergencyOutageToSchedule(schedule, settings.activeEmergencyOutage, false) || schedule,
+    [schedule, settings.activeEmergencyOutage]
+  );
+
+  const effectiveTomorrowSchedule = useMemo(
+    () => applyEmergencyOutageToSchedule(tomorrowSchedule, settings.activeEmergencyOutage, true),
+    [tomorrowSchedule, settings.activeEmergencyOutage]
+  );
+
+  const countdown = useMemo(
+    () => calculateOutageCountdown(effectiveTodaySchedule, now, effectiveTomorrowSchedule),
+    [effectiveTodaySchedule, now, effectiveTomorrowSchedule]
+  );
+
+  const blackoutIntervals = useMemo(
+    () => getBlackoutIntervals(effectiveTodaySchedule.slots),
+    [effectiveTodaySchedule.slots]
+  );
+
+  const tomorrowBlackoutIntervals = useMemo(
+    () => (effectiveTomorrowSchedule ? getBlackoutIntervals(effectiveTomorrowSchedule.slots) : []),
+    [effectiveTomorrowSchedule]
+  );
+
+  const chartBlocks = useMemo(() => {
+    if (hasNoQueueMessage) {
+      return Array.from({ length: 24 }, (_, h) => ({
+        hour: h,
+        half1Off: false,
+        half2Off: false,
+      }));
+    }
+    return getChartHalfHourBlocks(effectiveTodaySchedule.slots);
+  }, [effectiveTodaySchedule.slots, hasNoQueueMessage]);
 
   const currentHour = now.getHours();
   const currentMinute = now.getMinutes();
@@ -47,28 +99,56 @@ export const WidgetSimulator: React.FC<WidgetSimulatorProps> = ({
 
   const isUk = lang === 'uk';
   const isUnclear =
-    schedule.slots.length === 0 || Boolean(schedule.isUnclear) || Boolean(countdown.isUnclear);
-  const queueLabel = isUk ? `Черга ${settings.queue}` : `Queue ${settings.queue}`;
+    isQueueUnselected ||
+    (!hasNoQueueMessage &&
+      (effectiveTodaySchedule.slots.length === 0 ||
+        Boolean(effectiveTodaySchedule.isUnclear) ||
+        Boolean(countdown.isUnclear)));
+  const queueLabel = settings.queue
+    ? isUk
+      ? `Черга ${settings.queue}`
+      : `Queue ${settings.queue}`
+    : hasActiveEmergencyOutage
+    ? isUk
+      ? 'Аварійне відключення'
+      : 'Emergency Outage'
+    : hasNoQueueMessage
+    ? isUk
+      ? 'Без черги'
+      : 'No queue'
+    : isUk
+    ? 'Виберіть чергу'
+    : 'Queue not selected';
   const statusLabel = isUnclear
     ? t.statusUnclear
+    : hasNoQueueMessage
+    ? (isUk ? 'СВІТЛО Є' : 'POWER ON')
     : countdown.isCurrentlyBlackout 
     ? (isUk ? 'СВІТЛА НЕМАЄ' : 'POWER OFF')
     : (isUk ? 'СВІТЛО Є' : 'POWER ON');
   const statusColorClass = isUnclear
     ? 'text-zinc-400'
+    : hasNoQueueMessage
+    ? 'text-emerald-400'
     : countdown.isCurrentlyBlackout
     ? 'text-[#FF5E3A]'
     : 'text-emerald-400';
   
-  const countdownLabel = !isUnclear && countdown.isCurrentlyBlackout
+  const countdownLabel = !isUnclear && !hasNoQueueMessage && countdown.isCurrentlyBlackout
     ? (isUk ? 'До увімкнення:' : 'Power on in:')
     : (isUk ? 'До відключення:' : 'Time to blackout:');
 
   const formatWidgetCountdown = (raw: string): string => {
-    const parts = (raw || '').split(':');
+    if (hasNoQueueMessage || !raw || raw === '--:--:--') {
+      return '--:--:--';
+    }
+    const parts = raw.split(':');
     if (parts.length >= 2) {
       const hh = parts[0].trim();
       const mm = parts[1].trim();
+      if (hh === '--' || mm === '--') {
+        return '--:--:--';
+      }
       return isUk ? `${hh}г. ${mm}хв.` : `${hh}hr. ${mm}m.`;
     }
     return raw;
@@ -79,11 +159,12 @@ export const WidgetSimulator: React.FC<WidgetSimulatorProps> = ({
   const periodLabel = isUk ? 'Період' : 'Period';
   const nextBlackoutLabel = isUk ? 'Наступне відключення' : 'Next blackout';
   const currentMinutes = currentHour * 60 + currentMinute;
-  const nextUpcomingInterval = blackoutIntervals.find((iv) => {
-    const [h, m] = iv.start.split(':').map(Number);
-    return h * 60 + m > currentMinutes;
-  });
-  const nextBlackoutText = isUnclear
+  const nextUpcomingInterval =
+    blackoutIntervals.find((iv) => {
+      const [h, m] = iv.start.split(':').map(Number);
+      return h * 60 + m > currentMinutes;
+    }) || tomorrowBlackoutIntervals[0];
+  const nextBlackoutText = isUnclear || hasNoQueueMessage
     ? '--:-- - --:--'
     : nextUpcomingInterval
     ? `${nextUpcomingInterval.start} – ${nextUpcomingInterval.end}`
@@ -283,7 +364,7 @@ export const WidgetSimulator: React.FC<WidgetSimulatorProps> = ({
               <div className="text-right">
                 <div className="text-[10px] text-sky-200/70">{periodLabel}</div>
                 <div className="text-xs font-mono font-bold text-white">
-                  {isUnclear ? '--:-- - --:--' : countdown.slotDescription}
+                  {isUnclear || hasNoQueueMessage ? '--:-- - --:--' : countdown.slotDescription}
                 </div>
               </div>
             </div>

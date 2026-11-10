@@ -52,7 +52,14 @@ object AlarmScheduler {
         val today = LocalDate.now(kyivZone)
         val now = LocalDateTime.now(kyivZone)
 
-        val slots = scheduleRepo.getTodaySlots(settings.queue)
+        val baseSlots = scheduleRepo.getTodaySlots(settings.queue)
+        val slots = ScheduleRepository.applyEmergencyOutageToSlots(
+            slots = baseSlots,
+            emergencyOutage = settings.activeEmergencyOutage,
+            targetDate = today,
+            isTomorrow = false,
+            queue = settings.queue
+        )
         val intervals = scheduleRepo.getDetailedIntervals(slots)
 
         // Identify any blocks for the active queue that are currently in the active pre-warning window
@@ -129,7 +136,7 @@ object AlarmScheduler {
             }
         }
 
-        if (!settings.notificationsEnabled) {
+        if (!settings.notificationsEnabled || (settings.queue.isBlank() && settings.activeEmergencyOutage == null)) {
             alarmPrefs.edit()
                 .putStringSet(KEY_ALERT_IDS, emptySet())
                 .putStringSet(KEY_WIDGET_IDS, newWidgetIds)

@@ -16,6 +16,12 @@ import {
 } from 'lucide-react';
 import { UserSettings, Language } from '../types';
 import { QUEUES, DEFAULT_ZTOE_URL, verifyZtoeSiteAndData } from '../services/ztoeParser';
+import {
+  ZTOE_REM_OPTIONS,
+  getSettlementsForRem,
+  getStreetsForSettlement,
+  getHousesForStreet
+} from '../services/ztoeAddressLookup';
 import { toggleMasterNotifications } from '../services/alertManager';
 import { translations } from '../services/i18n';
 
@@ -26,6 +32,8 @@ interface SettingsViewProps {
   onSendTestAlert: () => void;
   onForceRefresh: () => Promise<'SUCCESS' | 'NO_INTERNET' | 'NO_QUEUES_FOUND' | void> | void;
   onResetDefaults: () => void;
+  autoOpenQueueHelp?: boolean;
+  onQueueHelpOpened?: () => void;
 }
 
 export const SettingsView: React.FC<SettingsViewProps> = ({
@@ -34,12 +42,26 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   onUpdateSettings,
   onSendTestAlert,
   onForceRefresh,
-  onResetDefaults
+  onResetDefaults,
+  autoOpenQueueHelp = false,
+  onQueueHelpOpened
 }) => {
   const t = translations[lang];
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [confirmResetOpen, setConfirmResetOpen] = useState(false);
-  const [showQueueHelp, setShowQueueHelp] = useState(false);
+  const [showQueueHelp, setShowQueueHelp] = useState(Boolean(autoOpenQueueHelp));
+  const [selectedRemId, setSelectedRemId] = useState<string>(
+    settings.selectedAddressQuery?.remId || 'zhytomyr'
+  );
+  const [selectedSettlementId, setSelectedSettlementId] = useState<string>(
+    settings.selectedAddressQuery?.settlementId || 'zt_city'
+  );
+  const [selectedStreetId, setSelectedStreetId] = useState<string>(
+    settings.selectedAddressQuery?.streetId || ''
+  );
+  const [selectedHouseNumber, setSelectedHouseNumber] = useState<string>(
+    settings.selectedAddressQuery?.house || ''
+  );
   const [verification, setVerification] = useState<{
     isChecking: boolean;
     isAvailable: boolean;
@@ -53,6 +75,49 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     status: 'SUCCESS',
     message: ''
   });
+
+  React.useEffect(() => {
+    if (autoOpenQueueHelp) {
+      setShowQueueHelp(true);
+      onQueueHelpOpened?.();
+    }
+  }, [autoOpenQueueHelp, onQueueHelpOpened]);
+
+  // Keep selected address fields in the "?" popup filled in with the user's saved address when re-entering Settings or reopening the "?" popup
+  React.useEffect(() => {
+    if (settings.selectedAddressQuery) {
+      setSelectedRemId(settings.selectedAddressQuery.remId || 'zhytomyr');
+      setSelectedSettlementId(settings.selectedAddressQuery.settlementId || 'zt_city');
+      setSelectedStreetId(settings.selectedAddressQuery.streetId || '');
+      setSelectedHouseNumber(settings.selectedAddressQuery.house || '');
+    } else if (!settings.selectedAddress && !settings.queue) {
+      setSelectedRemId('zhytomyr');
+      setSelectedSettlementId('zt_city');
+      setSelectedStreetId('');
+      setSelectedHouseNumber('');
+    }
+  }, [
+    settings.selectedAddressQuery?.remId,
+    settings.selectedAddressQuery?.settlementId,
+    settings.selectedAddressQuery?.streetId,
+    settings.selectedAddressQuery?.house,
+    settings.selectedAddress,
+    settings.queue,
+    showQueueHelp
+  ]);
+
+  const settlements = getSettlementsForRem(selectedRemId);
+  const streets = getStreetsForSettlement(selectedSettlementId);
+  const houses = getHousesForStreet(selectedStreetId);
+  const matchedHouseRecord = houses.find((h) => h.house === selectedHouseNumber) || null;
+  const selectedRemObj = ZTOE_REM_OPTIONS.find((r) => r.id === selectedRemId);
+  const selectedSettlementObj = settlements.find((s) => s.id === selectedSettlementId);
+  const selectedStreetObj = streets.find((st) => st.id === selectedStreetId);
+  const selectedAddressStr = selectedHouseNumber
+    ? lang === 'uk'
+      ? `${selectedRemObj?.nameUk || ''}, ${selectedSettlementObj?.nameUk || ''},\n${selectedStreetObj?.nameUk || ''}, буд. ${selectedHouseNumber}`
+      : `${selectedRemObj?.nameEn || ''}, ${selectedSettlementObj?.nameEn || ''},\n${selectedStreetObj?.nameEn || ''}, bldg. ${selectedHouseNumber}`
+    : undefined;
 
   // Verify site accessibility and data presence against /valid-urls.json on URL or queue change
   React.useEffect(() => {
@@ -120,35 +185,48 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
       {/* 1. Queue Selection (Only Drop-down List + ? Help Glyph) */}
       <div className="bg-[#141A29]/75 backdrop-blur-2xl rounded-3xl p-5 border border-white/15 shadow-[0_12px_40px_rgba(0,0,0,0.45)] flex flex-col gap-3">
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between gap-3">
           <div>
             <div className="flex items-center gap-2">
               <label className="text-xs font-bold text-white uppercase tracking-wider">
                 {t.settingsQueue}
               </label>
-              {/* Small ? glyph icon which triggers the popup */}
-              <button
-                type="button"
-                onClick={() => setShowQueueHelp(true)}
-                className="w-5 h-5 rounded-full bg-white/10 hover:bg-[#FF5E3A] text-white/80 hover:text-white flex items-center justify-center transition-all cursor-pointer border border-white/20 shadow-sm"
-                title={lang === 'uk' ? 'Як дізнатися свою чергу' : 'How to find your queue'}
-                aria-label={lang === 'uk' ? 'Як дізнатися свою чергу' : 'How to find your queue'}
-              >
-                <HelpCircle className="w-3.5 h-3.5" />
-              </button>
             </div>
             <p className="text-[11px] text-sky-200/70 mt-0.5">
               {t.settingsQueueDesc}
             </p>
           </div>
+          {/* Prominent ? button which triggers the queue lookup & help popup */}
+          <button
+            type="button"
+            data-testid="settings-queue-help-btn"
+            onClick={() => setShowQueueHelp(true)}
+            className="w-10 h-10 rounded-2xl bg-[#FF5E3A] hover:bg-[#ff4b24] text-white flex items-center justify-center transition-all cursor-pointer border border-white/25 shadow-lg shadow-[#FF5E3A]/35 shrink-0 active:scale-95"
+            title={lang === 'uk' ? 'Як дізнатися свою чергу' : 'How to find your queue'}
+            aria-label={lang === 'uk' ? 'Як дізнатися свою чергу' : 'How to find your queue'}
+          >
+            <HelpCircle className="w-5 h-5 stroke-[2.5]" />
+          </button>
         </div>
 
         {/* Clean Dropdown */}
         <select
           value={settings.queue}
-          onChange={(e) => onUpdateSettings({ ...settings, queue: e.target.value })}
+          onChange={(e) =>
+            onUpdateSettings({
+              ...settings,
+              queue: e.target.value,
+              customQueueStatusText: undefined,
+              selectedAddress: undefined,
+              selectedAddressQuery: undefined,
+              activeEmergencyOutage: null
+            })
+          }
           className="w-full text-base font-bold bg-white/[0.08] backdrop-blur-md border border-white/15 rounded-2xl px-4 py-3.5 text-white focus:outline-none focus:ring-2 focus:ring-[#FF5E3A] cursor-pointer"
         >
+          <option value="" className="bg-[#141A29] text-white">
+            {lang === 'uk' ? 'Виберіть чергу' : 'Queue not selected'}
+          </option>
           {QUEUES.map((q) => (
             <option key={q.id} value={q.id} className="bg-[#141A29] text-white">
               {t.queue} {q.id}
@@ -304,16 +382,20 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             </span>
           </div>
           <button
+            type="button"
+            role="switch"
+            aria-checked={settings.notificationsEnabled}
+            data-testid="ios-switch-notifications"
             onClick={() => onUpdateSettings(toggleMasterNotifications(settings))}
-            className={`w-14 h-8 rounded-full p-1 transition-all duration-300 flex items-center cursor-pointer ${
+            className={`w-[51px] h-[31px] rounded-full p-[2px] transition-colors duration-200 flex items-center cursor-pointer shrink-0 ${
               settings.notificationsEnabled
-                ? 'bg-[#FF5E3A] shadow-md shadow-[#FF5E3A]/30'
-                : 'bg-white/10 border border-white/10'
+                ? 'bg-[#FF5E3A] shadow-inner'
+                : 'bg-white/15 border border-white/10'
             }`}
           >
             <div
-              className={`w-6 h-6 rounded-full bg-white shadow-md transition-transform duration-300 ${
-                settings.notificationsEnabled ? 'translate-x-6' : 'translate-x-0'
+              className={`w-[27px] h-[27px] rounded-full bg-white shadow-[0_3px_8px_rgba(0,0,0,0.25),0_1px_1px_rgba(0,0,0,0.16)] transition-transform duration-200 ${
+                settings.notificationsEnabled ? 'translate-x-[20px]' : 'translate-x-0'
               }`}
             />
           </button>
@@ -324,19 +406,35 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             <Volume2 className="w-4 h-4 text-sky-200/70" />
             <span>{t.settingsSound}</span>
           </div>
-          <input
-            type="checkbox"
+          <button
+            type="button"
+            role="switch"
+            aria-checked={Boolean(settings.notificationsEnabled && settings.soundEnabled)}
+            data-testid="ios-switch-sound"
             disabled={!settings.notificationsEnabled}
-            checked={settings.notificationsEnabled && settings.soundEnabled}
-            onChange={(e) =>
+            onClick={() => {
+              if (!settings.notificationsEnabled) return;
+              const nextVal = !settings.soundEnabled;
               onUpdateSettings({
                 ...settings,
-                soundEnabled: e.target.checked,
-                prevSoundEnabled: e.target.checked
-              })
-            }
-            className="w-4 h-4 accent-[#FF5E3A] rounded cursor-pointer disabled:cursor-not-allowed"
-          />
+                soundEnabled: nextVal,
+                prevSoundEnabled: nextVal
+              });
+            }}
+            className={`w-[51px] h-[31px] rounded-full p-[2px] transition-colors duration-200 flex items-center shrink-0 ${
+              !settings.notificationsEnabled ? 'cursor-not-allowed' : 'cursor-pointer'
+            } ${
+              settings.notificationsEnabled && settings.soundEnabled
+                ? 'bg-[#FF5E3A] shadow-inner'
+                : 'bg-white/15 border border-white/10'
+            }`}
+          >
+            <div
+              className={`w-[27px] h-[27px] rounded-full bg-white shadow-[0_3px_8px_rgba(0,0,0,0.25),0_1px_1px_rgba(0,0,0,0.16)] transition-transform duration-200 ${
+                settings.notificationsEnabled && settings.soundEnabled ? 'translate-x-[20px]' : 'translate-x-0'
+              }`}
+            />
+          </button>
         </div>
 
         <div className={`flex items-center justify-between pt-2.5 border-t border-white/10 ${!settings.notificationsEnabled ? 'opacity-45' : ''}`}>
@@ -344,29 +442,49 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             <Vibrate className="w-4 h-4 text-sky-200/70" />
             <span>{t.settingsVibration}</span>
           </div>
-          <input
-            type="checkbox"
+          <button
+            type="button"
+            role="switch"
+            aria-checked={Boolean(settings.notificationsEnabled && settings.vibrationEnabled)}
+            data-testid="ios-switch-vibration"
             disabled={!settings.notificationsEnabled}
-            checked={settings.notificationsEnabled && settings.vibrationEnabled}
-            onChange={(e) =>
+            onClick={() => {
+              if (!settings.notificationsEnabled) return;
+              const nextVal = !settings.vibrationEnabled;
               onUpdateSettings({
                 ...settings,
-                vibrationEnabled: e.target.checked,
-                prevVibrationEnabled: e.target.checked
-              })
-            }
-            className="w-4 h-4 accent-[#FF5E3A] rounded cursor-pointer disabled:cursor-not-allowed"
-          />
+                vibrationEnabled: nextVal,
+                prevVibrationEnabled: nextVal
+              });
+            }}
+            className={`w-[51px] h-[31px] rounded-full p-[2px] transition-colors duration-200 flex items-center shrink-0 ${
+              !settings.notificationsEnabled ? 'cursor-not-allowed' : 'cursor-pointer'
+            } ${
+              settings.notificationsEnabled && settings.vibrationEnabled
+                ? 'bg-[#FF5E3A] shadow-inner'
+                : 'bg-white/15 border border-white/10'
+            }`}
+          >
+            <div
+              className={`w-[27px] h-[27px] rounded-full bg-white shadow-[0_3px_8px_rgba(0,0,0,0.25),0_1px_1px_rgba(0,0,0,0.16)] transition-transform duration-200 ${
+                settings.notificationsEnabled && settings.vibrationEnabled ? 'translate-x-[20px]' : 'translate-x-0'
+              }`}
+            />
+          </button>
         </div>
       </div>
 
-      {/* 5. Language */}
+      {/* 5. Language (iOS Segmented Control) */}
       <div className="bg-[#141A29]/75 backdrop-blur-2xl rounded-3xl p-5 border border-white/15 shadow-[0_12px_40px_rgba(0,0,0,0.45)] flex flex-col gap-3">
         <label className="text-xs font-bold text-white flex items-center gap-1.5 uppercase tracking-wider">
           <Globe className="w-3.5 h-3.5 text-[#FF5E3A]" />
           <span>{t.settingsLanguage}</span>
         </label>
-        <div className="grid grid-cols-3 gap-2">
+        <div
+          data-testid="ios-segmented-language"
+          role="tablist"
+          className="grid grid-cols-3 gap-1 p-1 bg-black/35 rounded-[12px] border border-white/10 items-stretch"
+        >
           {[
             { id: 'system', label: t.settingsLangSystem },
             { id: 'uk', label: 'Українська' },
@@ -374,11 +492,14 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           ].map((item) => (
             <button
               key={item.id}
+              type="button"
+              role="tab"
+              aria-selected={settings.language === item.id}
               onClick={() => onUpdateSettings({ ...settings, language: item.id as Language })}
-              className={`py-2.5 px-3 text-xs font-bold rounded-2xl transition-all ${
+              className={`py-2 px-2 text-[11px] leading-tight text-center flex items-center justify-center font-semibold rounded-[9px] transition-all duration-150 cursor-pointer break-words ${
                 settings.language === item.id
-                  ? 'bg-white text-black shadow-md'
-                  : 'bg-white/10 text-sky-200/70 hover:text-white'
+                  ? 'bg-white text-black shadow-[0_2px_6px_rgba(0,0,0,0.3)] font-bold'
+                  : 'text-sky-100/75 hover:text-white'
               }`}
             >
               {item.label}
@@ -453,37 +574,242 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           ========================================================================================= */}
       {showQueueHelp && (
         <div 
-          className="fixed inset-0 z-50 bg-black/75 backdrop-blur-md flex items-center justify-center p-4"
+          className="fixed inset-0 z-50 bg-[#141A29] flex flex-col w-full h-full"
           onClick={() => setShowQueueHelp(false)}
         >
           <div 
-            className="bg-[#141A29]/95 backdrop-blur-2xl border border-white/20 rounded-3xl p-6 max-w-md w-full shadow-[0_20px_60px_rgba(0,0,0,0.7)] text-white relative flex flex-col gap-4 animate-in fade-in zoom-in-95 duration-200"
+            data-testid="settings-queue-help-modal"
+            className="bg-[#141A29] w-full h-full flex-1 pt-14 pb-10 px-3.5 overflow-y-auto text-white relative flex flex-col gap-5 animate-in fade-in duration-200"
             onClick={(e) => e.stopPropagation()}
           >
             {/* Modal Header */}
-            <div className="flex items-start justify-between gap-3 pb-3 border-b border-white/15">
-              <div className="flex items-center gap-2.5">
-                <div className="w-8 h-8 rounded-xl bg-[#FF5E3A] flex items-center justify-center text-white shadow-md shadow-[#FF5E3A]/30 font-bold text-base">
+            <div className="flex items-center justify-between gap-3 pb-3.5 px-1 border-b border-white/20">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-xl bg-[#FF5E3A] flex items-center justify-center text-white shadow-md shadow-[#FF5E3A]/30 font-black text-xl shrink-0">
                   ?
                 </div>
-                <h3 className="text-base font-bold text-white tracking-tight">
+                <h3 className="text-xl font-extrabold text-white tracking-tight">
                   {lang === 'uk' ? 'Як дізнатися свою чергу' : 'How to find your queue'}
                 </h3>
               </div>
               <button
                 onClick={() => setShowQueueHelp(false)}
-                className="w-8 h-8 rounded-full bg-white/10 hover:bg-white/20 text-white/70 hover:text-white flex items-center justify-center transition-all cursor-pointer border border-white/10"
+                className="w-10 h-10 rounded-full bg-white/10 hover:bg-white/20 text-white/80 hover:text-white flex items-center justify-center transition-all cursor-pointer border border-white/15 shrink-0"
                 aria-label="Close"
               >
-                <X className="w-4 h-4" />
+                <X className="w-5 h-5" />
               </button>
             </div>
 
-            {/* Numbered Instruction Steps (1..4) */}
-            <div className="flex flex-col gap-2.5 text-xs leading-relaxed text-zinc-200">
+            {/* 1. Interactive ZTOE Address Queue Lookup (switched to top, expanded internal block border) */}
+            <div
+              data-testid="ztoe-address-lookup-section"
+              className="w-full flex flex-col gap-3.5 p-5 rounded-3xl bg-white/[0.05] border-2 border-white/25 shadow-[inset_0_1px_0_rgba(255,255,255,0.15)]"
+            >
+              <div className="text-sm font-extrabold text-white uppercase tracking-wider">
+                {lang === 'uk' ? 'Пошук черги за адресою' : 'Find Queue by Address'}
+              </div>
+
+              <div className="grid grid-cols-1 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-sky-200/90 mb-1.5">
+                    {lang === 'uk' ? 'РЕМ' : 'District (РЕМ)'}
+                  </label>
+                  <select
+                    data-testid="ztoe-select-rem"
+                    value={selectedRemId}
+                    onChange={(e) => {
+                      const nextRem = e.target.value;
+                      setSelectedRemId(nextRem);
+                      const nextSettlements = getSettlementsForRem(nextRem);
+                      const firstSettlement = nextSettlements[0]?.id || '';
+                      setSelectedSettlementId(firstSettlement);
+                      const nextStreets = getStreetsForSettlement(firstSettlement);
+                      const firstStreet = nextStreets[0]?.id || '';
+                      setSelectedStreetId(firstStreet);
+                      setSelectedHouseNumber('');
+                    }}
+                    className="w-full text-base font-bold bg-white/[0.08] border-2 border-white/20 rounded-2xl px-4 py-3.5 text-white focus:outline-none focus:ring-2 focus:ring-[#FF5E3A] cursor-pointer"
+                  >
+                    {ZTOE_REM_OPTIONS.map((rem) => (
+                      <option key={rem.id} value={rem.id} className="bg-[#141A29] text-white">
+                        {lang === 'uk' ? rem.nameUk : rem.nameEn}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-sky-200/90 mb-1.5">
+                    {lang === 'uk' ? 'Населений пункт' : 'City / Settlement'}
+                  </label>
+                  <select
+                    data-testid="ztoe-select-settlement"
+                    value={selectedSettlementId}
+                    onChange={(e) => {
+                      const nextSettlement = e.target.value;
+                      setSelectedSettlementId(nextSettlement);
+                      const nextStreets = getStreetsForSettlement(nextSettlement);
+                      const firstStreet = nextStreets[0]?.id || '';
+                      setSelectedStreetId(firstStreet);
+                      setSelectedHouseNumber('');
+                    }}
+                    className="w-full text-base font-bold bg-white/[0.08] border-2 border-white/20 rounded-2xl px-4 py-3.5 text-white focus:outline-none focus:ring-2 focus:ring-[#FF5E3A] cursor-pointer"
+                  >
+                    {settlements.map((s) => (
+                      <option key={s.id} value={s.id} className="bg-[#141A29] text-white">
+                        {lang === 'uk' ? s.nameUk : s.nameEn}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-sky-200/90 mb-1.5">
+                    {lang === 'uk' ? 'Вулиця' : 'Street'}
+                  </label>
+                  <select
+                    data-testid="ztoe-select-street"
+                    value={selectedStreetId}
+                    onChange={(e) => {
+                      setSelectedStreetId(e.target.value);
+                      setSelectedHouseNumber('');
+                    }}
+                    className="w-full text-base font-bold bg-white/[0.08] border-2 border-white/20 rounded-2xl px-4 py-3.5 text-white focus:outline-none focus:ring-2 focus:ring-[#FF5E3A] cursor-pointer"
+                  >
+                    <option value="" className="bg-[#141A29] text-white">
+                      {lang === 'uk' ? 'Оберіть вулицю' : 'Select street'}
+                    </option>
+                    {streets.map((st) => (
+                      <option key={st.id} value={st.id} className="bg-[#141A29] text-white">
+                        {lang === 'uk' ? st.nameUk : st.nameEn}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-sky-200/90 mb-1.5">
+                    {lang === 'uk' ? 'Будинок' : 'House Number'}
+                  </label>
+                  <select
+                    data-testid="ztoe-select-house"
+                    value={selectedHouseNumber}
+                    onChange={(e) => setSelectedHouseNumber(e.target.value)}
+                    className="w-full text-base font-bold bg-white/[0.08] border-2 border-white/20 rounded-2xl px-4 py-3.5 text-white focus:outline-none focus:ring-2 focus:ring-[#FF5E3A] cursor-pointer"
+                  >
+                    <option value="" className="bg-[#141A29] text-white">
+                      {lang === 'uk' ? 'Оберіть будинок' : 'Select house'}
+                    </option>
+                    {houses.map((h) => (
+                      <option key={h.house} value={h.house} className="bg-[#141A29] text-white">
+                        {h.house}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              {matchedHouseRecord && (
+                <div
+                  data-testid="ztoe-lookup-result"
+                  className="mt-1.5 p-4 rounded-2xl bg-[#141A29]/85 backdrop-blur-2xl border-2 border-white/25 shadow-[0_12px_40px_rgba(0,0,0,0.45)] flex flex-col gap-2.5"
+                >
+                  {selectedAddressStr && (
+                    <div
+                      data-testid="ztoe-lookup-selected-address"
+                      className="text-sm text-sky-200/90 font-semibold leading-snug whitespace-pre-line"
+                    >
+                      {selectedAddressStr}
+                    </div>
+                  )}
+                  {matchedHouseRecord.queue && (
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="text-sky-200/80 font-medium">
+                        {lang === 'uk' ? 'Знайдена черга:' : 'Found Queue:'}
+                      </span>
+                      <span className="text-base font-extrabold text-white font-mono">
+                        {t.queue} {matchedHouseRecord.queue}
+                      </span>
+                    </div>
+                  )}
+                  {matchedHouseRecord.statusText && (
+                    <div
+                      data-testid="ztoe-lookup-status-text"
+                      className="text-sm font-bold text-white bg-white/[0.06] border-2 border-white/20 rounded-2xl px-4 py-3 leading-snug whitespace-normal break-words"
+                    >
+                      {matchedHouseRecord.statusText}
+                    </div>
+                  )}
+                  {matchedHouseRecord.emergencyOutage && (
+                    <div
+                      data-testid="ztoe-lookup-emergency-outage"
+                      className="text-sm font-bold text-[#FF5E3A] bg-[#FF5E3A]/10 border-2 border-[#FF5E3A]/35 rounded-2xl px-4 py-3 leading-snug"
+                    >
+                      <div>
+                        {lang === 'uk'
+                          ? matchedHouseRecord.emergencyOutage.outageType || 'Аварійне відключення'
+                          : 'Emergency Outage'}
+                      </div>
+                      <div className="text-xs text-white font-mono mt-1">
+                        {lang === 'uk' ? 'Початок: ' : 'Start: '}
+                        {matchedHouseRecord.emergencyOutage.startTime} ·{' '}
+                        {lang === 'uk' ? 'Відновлення: ' : 'Restore: '}
+                        {matchedHouseRecord.emergencyOutage.estimatedRestoreTime}
+                      </div>
+                    </div>
+                  )}
+                  <button
+                    type="button"
+                    data-testid="ztoe-lookup-confirm-btn"
+                    onClick={() => {
+                      onUpdateSettings({
+                        ...settings,
+                        queue: matchedHouseRecord.queue,
+                        customQueueStatusText: matchedHouseRecord.statusText,
+                        selectedAddress: selectedAddressStr,
+                        selectedAddressQuery: {
+                          remId: selectedRemId,
+                          settlementId: selectedSettlementId,
+                          streetId: selectedStreetId,
+                          house: selectedHouseNumber
+                        },
+                        activeEmergencyOutage: matchedHouseRecord.emergencyOutage ?? null
+                      });
+                      setShowQueueHelp(false);
+                      showToast(
+                        matchedHouseRecord.queue
+                          ? `${t.queue} ${matchedHouseRecord.queue}`
+                          : (matchedHouseRecord.statusText || (lang === 'uk' ? 'Адресу збережено' : 'Address saved'))
+                      );
+                    }}
+                    className="w-full py-3.5 px-4 rounded-2xl bg-[#FF5E3A] hover:bg-[#ff4b24] text-white text-base font-extrabold transition-all cursor-pointer shadow-lg shadow-[#FF5E3A]/30"
+                  >
+                    {matchedHouseRecord.queue
+                      ? lang === 'uk'
+                        ? `Обрати чергу ${matchedHouseRecord.queue}`
+                        : `Apply Queue ${matchedHouseRecord.queue}`
+                      : lang === 'uk'
+                        ? 'Підтвердити вибір'
+                        : 'Confirm selection'}
+                  </button>
+                </div>
+              )}
+            </div>
+
+            {/* 2. Manual Search Section Header ("Пошук вручну" / "Manual search") */}
+            <div
+              data-testid="queue-help-manual-search-title"
+              className="text-sm font-extrabold text-white uppercase tracking-wider pt-1 px-1"
+            >
+              {lang === 'uk' ? 'Пошук вручну' : 'Manual search'}
+            </div>
+
+            {/* 3. Numbered Instruction Steps (1..4) */}
+            <div className="flex flex-col gap-3 text-sm leading-relaxed text-zinc-100">
               {/* Step 1 */}
-              <div className="flex items-start gap-3 p-3 rounded-2xl bg-white/[0.04] border border-white/10">
-                <span className="w-5 h-5 rounded-full bg-white/10 text-white font-bold flex items-center justify-center text-[11px] shrink-0 font-mono mt-0.5">
+              <div className="flex items-start gap-3.5 p-4 rounded-2xl bg-white/[0.04] border-2 border-white/15">
+                <span className="w-6 h-6 rounded-full bg-white/15 text-white font-bold flex items-center justify-center text-xs shrink-0 font-mono mt-0.5">
                   1
                 </span>
                 <div className="flex-1">
@@ -496,8 +822,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                         rel="noopener noreferrer"
                         className="text-[#FF5E3A] underline hover:opacity-80 inline-flex items-center gap-1 font-semibold break-all"
                       >
-                        https://www.ztoe.com.ua/unhooking-search.php <ExternalLink className="w-3 h-3 shrink-0" />
-                      </a>.
+                        https://www.ztoe.com.ua/unhooking-search.php <ExternalLink className="w-3.5 h-3.5 shrink-0" />
+                      </a>
                     </span>
                   ) : (
                     <span>
@@ -508,16 +834,16 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                         rel="noopener noreferrer"
                         className="text-[#FF5E3A] underline hover:opacity-80 inline-flex items-center gap-1 font-semibold break-all"
                       >
-                        https://www.ztoe.com.ua/unhooking-search.php <ExternalLink className="w-3 h-3 shrink-0" />
-                      </a>.
+                        https://www.ztoe.com.ua/unhooking-search.php <ExternalLink className="w-3.5 h-3.5 shrink-0" />
+                      </a>
                     </span>
                   )}
                 </div>
               </div>
 
               {/* Step 2 */}
-              <div className="flex items-start gap-3 p-3 rounded-2xl bg-white/[0.04] border border-white/10">
-                <span className="w-5 h-5 rounded-full bg-white/10 text-white font-bold flex items-center justify-center text-[11px] shrink-0 font-mono mt-0.5">
+              <div className="flex items-start gap-3.5 p-4 rounded-2xl bg-white/[0.04] border-2 border-white/15">
+                <span className="w-6 h-6 rounded-full bg-white/15 text-white font-bold flex items-center justify-center text-xs shrink-0 font-mono mt-0.5">
                   2
                 </span>
                 <div className="flex-1">
@@ -530,8 +856,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               </div>
 
               {/* Step 3 */}
-              <div className="flex items-start gap-3 p-3 rounded-2xl bg-white/[0.04] border border-white/10">
-                <span className="w-5 h-5 rounded-full bg-white/10 text-white font-bold flex items-center justify-center text-[11px] shrink-0 font-mono mt-0.5">
+              <div className="flex items-start gap-3.5 p-4 rounded-2xl bg-white/[0.04] border-2 border-white/15">
+                <span className="w-6 h-6 rounded-full bg-white/15 text-white font-bold flex items-center justify-center text-xs shrink-0 font-mono mt-0.5">
                   3
                 </span>
                 <div className="flex-1">
@@ -548,8 +874,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               </div>
 
               {/* Step 4 */}
-              <div className="flex items-start gap-3 p-3 rounded-2xl bg-white/[0.04] border border-white/10">
-                <span className="w-5 h-5 rounded-full bg-white/10 text-white font-bold flex items-center justify-center text-[11px] shrink-0 font-mono mt-0.5">
+              <div className="flex items-start gap-3.5 p-4 rounded-2xl bg-white/[0.04] border-2 border-white/15">
+                <span className="w-6 h-6 rounded-full bg-white/15 text-white font-bold flex items-center justify-center text-xs shrink-0 font-mono mt-0.5">
                   4
                 </span>
                 <div className="flex-1">
@@ -569,7 +895,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             {/* Got it action button */}
             <button
               onClick={() => setShowQueueHelp(false)}
-              className="w-full mt-1 py-3 px-4 rounded-2xl bg-white hover:bg-zinc-200 text-black font-bold text-xs transition-all shadow-lg text-center cursor-pointer"
+              className="w-full mt-1 py-3.5 px-5 rounded-2xl bg-white hover:bg-zinc-200 text-black font-extrabold text-base transition-all shadow-lg text-center cursor-pointer"
             >
               {lang === 'uk' ? 'Зрозуміло' : 'Got it'}
             </button>

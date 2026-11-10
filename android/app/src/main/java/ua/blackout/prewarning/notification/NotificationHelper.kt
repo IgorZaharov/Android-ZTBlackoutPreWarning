@@ -15,6 +15,9 @@ import android.os.VibratorManager
 import androidx.core.app.NotificationCompat
 import ua.blackout.prewarning.MainActivity
 import ua.blackout.prewarning.R
+import ua.blackout.prewarning.data.model.EmergencyOutageInfo
+import ua.blackout.prewarning.data.model.UserSettings
+import ua.blackout.prewarning.data.repository.AlertRegistry
 import ua.blackout.prewarning.data.repository.SettingsRepository
 
 object NotificationHelper {
@@ -121,6 +124,65 @@ object NotificationHelper {
                 vibrator.vibrate(VIBRATION_PATTERN, -1)
             }
         } catch (_: Exception) {}
+    }
+
+    fun checkAndTriggerEmergencyOutageAlert(
+        context: Context,
+        prevOutage: EmergencyOutageInfo?,
+        nextOutage: EmergencyOutageInfo?,
+        settings: UserSettings,
+        lang: String
+    ): Pair<String, String>? {
+        if (!settings.notificationsEnabled) return null
+        val registry = AlertRegistry(context.applicationContext)
+
+        // 1. Outage Restored (prev active -> next null)
+        if (prevOutage != null && nextOutage == null) {
+            val restoreKey = "emergency_restore_${prevOutage.id}_${prevOutage.startTime}"
+            if (registry.hasFired(restoreKey)) return null
+            registry.markFired(restoreKey)
+            val title = if (lang == "uk") "Аварійне відключення завершено" else "Emergency Outage Restored"
+            val body = if (lang == "uk") {
+                "Електропостачання за вашою адресою відновлено (початок був: ${prevOutage.startTime})."
+            } else {
+                "Power supply at your address has been restored (started: ${prevOutage.startTime})."
+            }
+            showPreWarningNotification(
+                context = context,
+                notificationId = restoreKey.hashCode(),
+                title = title,
+                body = body,
+                isTest = false
+            )
+            return title to body
+        }
+
+        // 2. Outage Detected (next active)
+        if (nextOutage != null) {
+            val detectKey = "emergency_detect_${nextOutage.id}_${nextOutage.startTime}_${nextOutage.estimatedRestoreTime}"
+            if (registry.hasFired(detectKey)) return null
+            registry.markFired(detectKey)
+            val title = if (lang == "uk") {
+                nextOutage.outageType.ifBlank { "Аварійне відключення" }
+            } else {
+                "Emergency Outage"
+            }
+            val body = if (lang == "uk") {
+                "Зафіксовано аварійне відключення. Початок: ${nextOutage.startTime}. Орієнтовне відновлення: ${nextOutage.estimatedRestoreTime}."
+            } else {
+                "Emergency outage detected. Start: ${nextOutage.startTime}. Estimated restore: ${nextOutage.estimatedRestoreTime}."
+            }
+            showPreWarningNotification(
+                context = context,
+                notificationId = detectKey.hashCode(),
+                title = title,
+                body = body,
+                isTest = false
+            )
+            return title to body
+        }
+
+        return null
     }
 
     fun showPreWarningNotification(

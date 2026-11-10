@@ -7,8 +7,13 @@ import {
   Zap,
   ExternalLink
 } from 'lucide-react';
-import { DaySchedule, UserSettings } from '../types';
-import { calculateOutageCountdown, getBlackoutIntervals, getChartHalfHourBlocks } from '../services/ztoeParser';
+import { DaySchedule, Language, UserSettings } from '../types';
+import {
+  applyEmergencyOutageToSchedule,
+  calculateOutageCountdown,
+  getBlackoutIntervals,
+  getChartHalfHourBlocks
+} from '../services/ztoeParser';
 import { translations } from '../services/i18n';
 
 interface MainViewProps {
@@ -21,6 +26,8 @@ interface MainViewProps {
   onRefresh: () => Promise<'SUCCESS' | 'NO_INTERNET' | 'NO_QUEUES_FOUND' | void> | void;
   isRefreshing: boolean;
   onSendTestAlert: () => void;
+  onOpenQueueSelection?: () => void;
+  onChangeLanguage?: (lang: Language) => void;
 }
 
 export const MainView: React.FC<MainViewProps> = ({
@@ -32,21 +39,43 @@ export const MainView: React.FC<MainViewProps> = ({
   onToggleNotifications,
   onRefresh,
   isRefreshing,
+  onOpenQueueSelection,
+  onChangeLanguage,
 }) => {
   const t = translations[lang];
   const [selectedDayTab, setSelectedDayTab] = useState<'today' | 'tomorrow'>('today');
   const [toastMessage, setToastMessage] = useState<string | null>(null);
+  const hasActiveEmergencyOutage = Boolean(settings.activeEmergencyOutage);
+  const hasNoQueueMessage = Boolean(
+    settings.customQueueStatusText &&
+      (!settings.queue || settings.queue.trim() === '') &&
+      !hasActiveEmergencyOutage
+  );
+  const isQueueUnselected =
+    (!settings.queue || settings.queue.trim() === '') &&
+    !hasNoQueueMessage &&
+    !hasActiveEmergencyOutage;
+
+  const effectiveTodaySchedule = useMemo(
+    () => applyEmergencyOutageToSchedule(schedule, settings.activeEmergencyOutage, false) || schedule,
+    [schedule, settings.activeEmergencyOutage]
+  );
+
+  const effectiveTomorrowSchedule = useMemo(
+    () => applyEmergencyOutageToSchedule(tomorrowSchedule, settings.activeEmergencyOutage, true),
+    [tomorrowSchedule, settings.activeEmergencyOutage]
+  );
 
   useEffect(() => {
-    if (!tomorrowSchedule && selectedDayTab === 'tomorrow') {
+    if (!effectiveTomorrowSchedule && selectedDayTab === 'tomorrow') {
       setSelectedDayTab('today');
     }
-  }, [tomorrowSchedule, selectedDayTab]);
+  }, [effectiveTomorrowSchedule, selectedDayTab]);
 
-  const isTomorrowActive = selectedDayTab === 'tomorrow' && tomorrowSchedule !== null;
-  const activeSchedule = isTomorrowActive ? tomorrowSchedule : schedule;
+  const isTomorrowActive = selectedDayTab === 'tomorrow' && effectiveTomorrowSchedule !== null;
+  const activeSchedule = isTomorrowActive ? effectiveTomorrowSchedule! : effectiveTodaySchedule;
   const activeSlotsSignature = useMemo(
-    () => activeSchedule.slots.map(s => (s.status === 'POWER_OFF' ? '1' : '0')).join(''),
+    () => activeSchedule.slots.map(s => (s.isEmergency ? 'E' : s.status === 'POWER_OFF' ? '1' : '0')).join(''),
     [activeSchedule]
   );
 
@@ -61,13 +90,21 @@ export const MainView: React.FC<MainViewProps> = ({
   );
 
   const countdown = useMemo(
-    () => calculateOutageCountdown(schedule, now, tomorrowSchedule),
-    [schedule, now, tomorrowSchedule]
+    () => calculateOutageCountdown(effectiveTodaySchedule, now, effectiveTomorrowSchedule),
+    [effectiveTodaySchedule, now, effectiveTomorrowSchedule]
   );
 
-  const isUnclear = activeSchedule.slots.length === 0 || Boolean(activeSchedule.isUnclear);
+  const isUnclear =
+    isQueueUnselected ||
+    hasNoQueueMessage ||
+    activeSchedule.slots.length === 0 ||
+    Boolean(activeSchedule.isUnclear);
   const isStatusUnclear =
-    schedule.slots.length === 0 || Boolean(schedule.isUnclear) || Boolean(countdown.isUnclear);
+    isQueueUnselected ||
+    hasNoQueueMessage ||
+    effectiveTodaySchedule.slots.length === 0 ||
+    Boolean(effectiveTodaySchedule.isUnclear) ||
+    Boolean(countdown.isUnclear);
 
   const currentHour = now.getHours();
   const currentMinute = now.getMinutes();
@@ -76,6 +113,18 @@ export const MainView: React.FC<MainViewProps> = ({
     const h = d.getHours().toString().padStart(2, '0');
     const m = d.getMinutes().toString().padStart(2, '0');
     return `${h}:${m}`;
+  };
+
+  const formatAddressAfterCity = (address: string): string => {
+    if (address.includes('\n')) return address;
+    const parts = address
+      .split(',')
+      .map((p) => p.trim())
+      .filter(Boolean);
+    if (parts.length >= 3) {
+      return `${parts.slice(0, 2).join(', ')},\n${parts.slice(2).join(', ')}`;
+    }
+    return address;
   };
 
   const nextRefreshTimeStr = useMemo((): string => {
@@ -121,21 +170,84 @@ export const MainView: React.FC<MainViewProps> = ({
         </div>
       )}
 
-      {/* Top Header: Queue title + Sleek pill toggle switch */}
-      <div className="flex items-center justify-between pt-1">
-        <div>
-          <div className="text-2xl font-bold tracking-tight text-white drop-shadow-sm">
-            {t.queue} {settings.queue}
-          </div>
-          <div className="text-xs text-sky-200/70 font-medium">
-            Житомиробленерго (ZTOE)
+      {/* First application start: Full-screen overlay with centered, enlarged "Select queue" button and Auto/English/Ukrainian language switch blocking all other clicks */}
+      {isQueueUnselected && (
+        <div
+          data-testid="first-start-select-queue-overlay"
+          className="fixed inset-0 z-50 flex flex-col items-center justify-center gap-6 px-6 pointer-events-auto"
+        >
+          <button
+            type="button"
+            data-testid="unselected-queue-header-btn"
+            onClick={onOpenQueueSelection}
+            className="group cursor-pointer px-8 py-5 rounded-3xl bg-[#FF5E3A] hover:bg-[#ff4b24] text-white shadow-[0_20px_50px_rgba(255,94,58,0.5)] border border-white/25 transition-all active:scale-95 text-center flex flex-col items-center justify-center gap-1.5 min-w-[260px]"
+          >
+            <div className="text-2xl font-extrabold tracking-tight text-white drop-shadow-sm">
+              {lang === 'uk' ? 'Виберіть чергу' : 'Select queue'}
+            </div>
+            <div className="text-xs text-white/90 font-semibold">
+              Житомиробленерго (ZTOE)
+            </div>
+          </button>
+
+          <div
+            data-testid="first-start-language-switch"
+            role="tablist"
+            className="grid grid-cols-3 gap-1 p-1.5 bg-[#141A29]/90 backdrop-blur-2xl rounded-2xl border border-white/20 shadow-[0_12px_32px_rgba(0,0,0,0.5)] min-w-[260px]"
+          >
+            {[
+              { id: 'system', label: 'Auto' },
+              { id: 'en', label: 'English' },
+              { id: 'uk', label: 'Українська' }
+            ].map((item) => {
+              const currentLangSetting = settings.language || 'system';
+              const isSelected = currentLangSetting === item.id;
+              return (
+                <button
+                  key={item.id}
+                  type="button"
+                  role="tab"
+                  data-testid={`first-start-lang-${item.id}`}
+                  aria-selected={isSelected}
+                  onClick={() => onChangeLanguage?.(item.id as Language)}
+                  className={`py-2 px-3 text-xs leading-tight text-center flex items-center justify-center font-bold rounded-xl transition-all duration-150 cursor-pointer ${
+                    isSelected
+                      ? 'bg-white text-black shadow-[0_2px_6px_rgba(0,0,0,0.3)]'
+                      : 'text-sky-100/80 hover:text-white'
+                  }`}
+                >
+                  {item.label}
+                </button>
+              );
+            })}
           </div>
         </div>
+      )}
 
-        {/* Enlarged Pill Switch (No text ВКЛ/ВИКЛ) */}
+      {/* Top Header: Queue title (or empty if queue is unselected or house has no queue) + Sleek pill toggle switch */}
+      <div className="flex items-center justify-between pt-1">
+        {isQueueUnselected || hasNoQueueMessage || !settings.queue || settings.queue.trim() === '' ? (
+          <div data-testid="empty-queue-header" className="min-h-[44px]" />
+        ) : (
+          <div>
+            <div className="text-2xl font-bold tracking-tight text-white drop-shadow-sm">
+              {t.queue} {settings.queue}
+            </div>
+            <div className="text-xs text-sky-200/70 font-medium whitespace-pre-line leading-snug">
+              {settings.selectedAddress
+                ? formatAddressAfterCity(settings.selectedAddress)
+                : 'Житомиробленерго (ZTOE)'}
+            </div>
+          </div>
+        )}
+
+        {/* Enlarged Pill Switch (No text ВКЛ/ВИКЛ) — dimmed when queue is not selected */}
         <button
           onClick={onToggleNotifications}
+          disabled={isQueueUnselected}
           className={`w-16 h-9 rounded-full p-1 transition-all duration-300 flex items-center shadow-lg ${
+            isQueueUnselected ? 'opacity-15 brightness-50 pointer-events-none select-none' : ''
+          } ${
             settings.notificationsEnabled
               ? 'bg-[#FF5E3A] shadow-[#FF5E3A]/30'
               : 'bg-white/10 backdrop-blur-md border border-white/15'
@@ -156,76 +268,154 @@ export const MainView: React.FC<MainViewProps> = ({
         </button>
       </div>
 
+      {/* All other UI elements dimmed when Queue is not selected */}
+      <div
+        data-testid="main-dimmed-content-wrapper"
+        className={`flex flex-col gap-4 transition-opacity duration-300 ${
+          isQueueUnselected ? 'opacity-15 brightness-50 pointer-events-none select-none' : ''
+        }`}
+      >
+      {/* Custom ZTOE Queue/House Status Message Bar — exact same style/color as other Main screen bars */}
+      {!isQueueUnselected && settings.customQueueStatusText && (
+        <div
+          data-testid="main-custom-queue-status-text"
+          className="bg-[#141A29]/75 backdrop-blur-2xl rounded-3xl p-4 border border-white/15 shadow-[0_12px_40px_rgba(0,0,0,0.45)] flex flex-col gap-1"
+        >
+          {settings.selectedAddress && (
+            <div
+              data-testid="main-selected-address-text"
+              className="text-xs text-sky-200/70 font-medium whitespace-pre-line leading-snug"
+            >
+              {formatAddressAfterCity(settings.selectedAddress)}
+            </div>
+          )}
+          <div className="text-sm font-bold text-white leading-snug whitespace-normal break-words">
+            {settings.customQueueStatusText}
+          </div>
+        </div>
+      )}
+
+      {/* Active Emergency Outage ("Аварійне відключення") Banner with Start & Estimated Restore Times */}
+      {!isQueueUnselected && settings.activeEmergencyOutage && (
+        <div
+          data-testid="main-emergency-outage-banner"
+          className="bg-[#141A29]/75 backdrop-blur-2xl rounded-3xl p-4 border border-white/15 shadow-[0_12px_40px_rgba(0,0,0,0.45)] flex flex-col gap-1.5"
+        >
+          <div
+            data-testid="main-emergency-outage-title"
+            className="text-sm font-bold text-[#FF5E3A] leading-snug"
+          >
+            {lang === 'uk'
+              ? settings.activeEmergencyOutage.outageType || 'Аварійне відключення'
+              : 'Emergency Outage'}
+          </div>
+          <div
+            data-testid="main-emergency-outage-times"
+            className="flex flex-col gap-0.5 text-xs text-white font-mono tabular-nums leading-snug"
+          >
+            <div>
+              <span className="text-sky-200/70 font-sans font-medium">
+                {lang === 'uk' ? 'Початок: ' : 'Start: '}
+              </span>
+              <span className="font-bold">{settings.activeEmergencyOutage.startTime || '--:--'}</span>
+            </div>
+            <div>
+              <span className="text-sky-200/70 font-sans font-medium">
+                {lang === 'uk' ? 'Орієнтовне відновлення: ' : 'Estimated restore: '}
+              </span>
+              <span className="font-bold">
+                {settings.activeEmergencyOutage.estimatedRestoreTime || '--:--'}
+              </span>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Hero Outage Status Card (Frosted Glass with Subtle Blue Glow) */}
-      <div className="rounded-3xl p-5 bg-[#141A29]/75 backdrop-blur-2xl border border-white/15 shadow-[0_12px_40px_rgba(0,0,0,0.45)] transition-all">
-        
-        {/* Status Line */}
-        <div className="flex items-center justify-between mb-3">
-          <div className="flex items-center gap-2.5">
-            <span
-              data-testid="power-status-indicator"
-              className={`w-3 h-3 rounded-full ${
-                isStatusUnclear
-                  ? 'bg-zinc-400 shadow-md shadow-zinc-400/40'
+      <div
+        data-testid="main-counter-card"
+        className="rounded-3xl p-5 bg-[#141A29]/75 backdrop-blur-2xl border border-white/15 shadow-[0_12px_40px_rgba(0,0,0,0.45)] transition-all"
+      >
+        {hasNoQueueMessage ? (
+          <div data-testid="main-counter-empty" className="my-4 text-center">
+            <div
+              data-testid="main-counter-no-queue-placeholder"
+              className="text-4xl sm:text-5xl font-black font-mono tracking-tight text-white drop-shadow-md"
+            >
+              --:--:--
+            </div>
+          </div>
+        ) : (
+          <>
+            {/* Status Line */}
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center gap-2.5">
+                <span
+                  data-testid="power-status-indicator"
+                  className={`w-3 h-3 rounded-full ${
+                    isStatusUnclear
+                      ? 'bg-zinc-400 shadow-md shadow-zinc-400/40'
+                      : countdown.isCurrentlyBlackout
+                      ? 'bg-[#FF5E3A] shadow-md shadow-[#FF5E3A]/60 animate-pulse'
+                      : 'bg-emerald-400 shadow-md shadow-emerald-400/40'
+                  }`}
+                />
+                <span
+                  data-testid="power-status-text"
+                  className="text-sm font-bold tracking-wide uppercase text-white"
+                >
+                  {isStatusUnclear
+                    ? t.statusUnclear
+                    : countdown.isCurrentlyBlackout
+                    ? (lang === 'uk' ? 'Зараз немає світла' : 'Power is OFF')
+                    : (lang === 'uk' ? 'Зараз світло є' : 'Power is ON')}
+                </span>
+              </div>
+
+              <div className="text-xs font-mono text-sky-200/80 flex items-center gap-1.5 font-bold">
+                <Clock className="w-3.5 h-3.5" />
+                <span>{format24Time(now)}</span>
+              </div>
+            </div>
+
+            {/* Big Countdown Digits */}
+            <div className="my-4 text-center">
+              <div className="text-xs uppercase tracking-wider text-sky-200/70 font-semibold mb-1">
+                {isStatusUnclear
+                  ? (lang === 'uk' ? 'До відключення залишилось:' : 'Time until next outage:')
                   : countdown.isCurrentlyBlackout
-                  ? 'bg-[#FF5E3A] shadow-md shadow-[#FF5E3A]/60 animate-pulse'
-                  : 'bg-emerald-400 shadow-md shadow-emerald-400/40'
-              }`}
-            />
-            <span
-              data-testid="power-status-text"
-              className="text-sm font-bold tracking-wide uppercase text-white"
-            >
-              {isStatusUnclear
-                ? t.statusUnclear
-                : countdown.isCurrentlyBlackout
-                ? (lang === 'uk' ? 'Зараз немає світла' : 'Power is OFF')
-                : (lang === 'uk' ? 'Зараз світло є' : 'Power is ON')}
-            </span>
-          </div>
+                  ? (lang === 'uk' ? 'Світло увімкнуть через:' : 'Power on in:')
+                  : countdown.closestBlackoutSlot
+                  ? (lang === 'uk' ? 'До відключення залишилось:' : 'Time until next outage:')
+                  : (lang === 'uk' ? 'Відключень більше немає' : 'No more blackouts today')}
+              </div>
+              <div className="text-5xl font-black font-mono tracking-tight text-white drop-shadow-md">
+                {isStatusUnclear ? '--:--:--' : countdown.formattedTimeLeft}
+              </div>
+            </div>
 
-          <div className="text-xs font-mono text-sky-200/80 flex items-center gap-1.5 font-bold">
-            <Clock className="w-3.5 h-3.5" />
-            <span>{format24Time(now)}</span>
-          </div>
-        </div>
-
-        {/* Big Countdown Digits */}
-        <div className="my-4 text-center">
-          <div className="text-xs uppercase tracking-wider text-sky-200/70 font-semibold mb-1">
-            {isStatusUnclear
-              ? (lang === 'uk' ? 'До відключення залишилось:' : 'Time until next outage:')
-              : countdown.isCurrentlyBlackout
-              ? (lang === 'uk' ? 'Світло увімкнуть через:' : 'Power on in:')
-              : countdown.closestBlackoutSlot
-              ? (lang === 'uk' ? 'До відключення залишилось:' : 'Time until next outage:')
-              : (lang === 'uk' ? 'Відключень більше немає' : 'No more blackouts today')}
-          </div>
-          <div className="text-5xl font-black font-mono tracking-tight text-white drop-shadow-md">
-            {countdown.formattedTimeLeft}
-          </div>
-        </div>
-
-        {/* Outage Window */}
-        {countdown.slotDescription && countdown.slotDescription !== 'Відключень немає' && (
-          <div className="mt-4 pt-3.5 border-t border-white/10 flex items-center justify-between text-sm">
-            <span className="text-sky-200/70">
-              {!isStatusUnclear && countdown.isCurrentlyBlackout 
-                ? (lang === 'uk' ? 'Період відключення:' : 'Outage period:') 
-                : (lang === 'uk' ? 'Найближчий період:' : 'Next period:')}
-            </span>
-            <span
-              data-testid="next-period-value"
-              className="text-base font-bold text-white font-mono bg-white/10 backdrop-blur-md px-3 py-1 rounded-xl border border-white/15"
-            >
-              {isStatusUnclear ? '--:-- - --:--' : countdown.slotDescription}
-            </span>
-          </div>
+            {/* Outage Window */}
+            {countdown.slotDescription && countdown.slotDescription !== 'Відключень немає' && (
+              <div className="mt-4 pt-3.5 border-t border-white/10 flex items-center justify-between text-sm">
+                <span className="text-sky-200/70">
+                  {!isStatusUnclear && countdown.isCurrentlyBlackout 
+                    ? (lang === 'uk' ? 'Період відключення:' : 'Outage period:') 
+                    : (lang === 'uk' ? 'Найближчий період:' : 'Next period:')}
+                </span>
+                <span
+                  data-testid="next-period-value"
+                  className="text-base font-bold text-white font-mono bg-white/10 backdrop-blur-md px-3 py-1 rounded-xl border border-white/15"
+                >
+                  {isStatusUnclear ? '--:-- - --:--' : countdown.slotDescription}
+                </span>
+              </div>
+            )}
+          </>
         )}
       </div>
 
       {/* Day Selector (Today / Tomorrow if Tomorrow table exists on site; otherwise centered Today button) */}
-      {tomorrowSchedule ? (
+      {effectiveTomorrowSchedule ? (
         <div className="flex gap-2 p-1.5 bg-[#141A29]/70 backdrop-blur-xl rounded-2xl border border-white/10">
           <button
             onClick={() => setSelectedDayTab('today')}
@@ -267,7 +457,7 @@ export const MainView: React.FC<MainViewProps> = ({
             
             {/* Recessed metallic counter drum slot */}
             <div className="bg-[#4E514E] p-1.5 rounded-lg border-2 border-[#6E716B] shadow-[inset_0_3px_6px_rgba(0,0,0,0.85)]">
-              {isUnclear ? (
+              {isUnclear && !hasNoQueueMessage ? (
                 <div
                   data-testid="drum-chart-unclear"
                   className="relative flex w-full h-8 items-center justify-center bg-gradient-to-b from-[#7E8287] via-[#94989E] to-[#6E7277] rounded-[2px] overflow-visible"
@@ -284,7 +474,10 @@ export const MainView: React.FC<MainViewProps> = ({
                 </div>
               ) : (
                 /* The 24 hours with 1-2px light gray hour separators and no half-hour separators */
-                <div className="flex w-full items-center justify-between gap-[1.5px] bg-[#C8C6BC] rounded-[2px] overflow-visible">
+                <div
+                  data-testid={hasNoQueueMessage ? 'drum-chart-no-outage-light' : undefined}
+                  className="flex w-full items-center justify-between gap-[1.5px] bg-[#C8C6BC] rounded-[2px] overflow-visible"
+                >
                   {chartBlocks.map(({ hour: h, half1Off, half2Off }) => {
                     const hStr = h.toString().padStart(2, '0');
                     const nextHStr = (h + 1 === 24 ? 24 : h + 1).toString().padStart(2, '0');
@@ -351,7 +544,7 @@ export const MainView: React.FC<MainViewProps> = ({
               )}
             </div>
 
-            {isUnclear && (
+            {isUnclear && !hasNoQueueMessage && (
               <div className="flex justify-between text-[10px] sm:text-[11px] font-mono text-[#1C1B18] font-bold mt-1.5 px-0.5">
                 {['00', '02', '04', '06', '08', '10', '12', '14', '16', '18', '20', '22', '24'].map((lbl) => (
                   <span key={lbl}>{lbl}</span>
@@ -361,11 +554,17 @@ export const MainView: React.FC<MainViewProps> = ({
           </div>
         </div>
 
-        {/* Clear List of Outage Hours for this day (removed when outages are unclear) */}
-        {!isUnclear && (
+        {/* Clear List of Outage Hours for this day (removed when outages are unclear or house has no queue) */}
+        {!isUnclear && !hasNoQueueMessage && (
           <div className="pt-3 border-t border-white/10 flex flex-col gap-2">
             <div className="text-xs font-bold text-sky-200/70 uppercase tracking-wider">
-              {lang === 'uk' ? 'Години без світла на цей день:' : 'Blackout hours for today:'}
+              {selectedDayTab === 'tomorrow'
+                ? lang === 'uk'
+                  ? 'Години відключень на завтра:'
+                  : 'Blackout hours for tomorrow:'
+                : lang === 'uk'
+                ? 'Години відключень на сьогодні:'
+                : 'Blackout hours for today:'}
             </div>
 
             {blackoutIntervals.length > 0 ? (
@@ -373,10 +572,26 @@ export const MainView: React.FC<MainViewProps> = ({
                 {blackoutIntervals.map((interval, idx) => (
                   <div
                     key={`${selectedDayTab}_${interval.start}_${interval.end}_${idx}`}
+                    data-testid={interval.isEmergency ? 'blackout-interval-row-emergency' : 'blackout-interval-row'}
                     className="flex items-center justify-between p-3 rounded-xl bg-white/[0.06] backdrop-blur-md border border-white/10"
                   >
                     <div className="flex items-center gap-3">
-                      <span className="w-2.5 h-2.5 rounded-full bg-[#FF5E3A] shadow-[0_0_8px_#FF5E3A]" />
+                      <span
+                        data-testid="blackout-interval-indicator-slot"
+                        className="w-5 h-5 flex items-center justify-center shrink-0"
+                      >
+                        {interval.isEmergency ? (
+                          <span
+                            data-testid="blackout-interval-emergency-icon"
+                            className="w-5 h-5 rounded-full border-2 border-[#FF5E3A] bg-[#FF5E3A]/20 text-[#FF5E3A] font-black text-xs leading-none flex items-center justify-center shadow-[0_0_8px_rgba(255,94,58,0.45)] shrink-0"
+                            title={lang === 'uk' ? 'Аварійне відключення' : 'Emergency outage'}
+                          >
+                            !
+                          </span>
+                        ) : (
+                          <span className="w-2.5 h-2.5 rounded-full bg-[#FF5E3A] shadow-[0_0_8px_#FF5E3A]" />
+                        )}
+                      </span>
                       <span className="text-base font-black text-white font-mono tracking-tight">
                         {interval.start} – {interval.end}
                       </span>
@@ -467,7 +682,7 @@ export const MainView: React.FC<MainViewProps> = ({
             </div>
             <div className="min-w-0 flex-1">
               <div className="text-xs font-bold text-white group-hover:text-[#FF5E3A] transition-colors whitespace-normal break-words leading-snug">
-                Графіки відключень на сайті
+                {lang === 'uk' ? 'Графіки відключень на сайті' : 'Blackout schedules on website'}
               </div>
               <div className="text-[11px] text-sky-200/70 font-mono truncate mt-0.5">
                 https://www.ztoe.com.ua/unhooking-search.php
@@ -476,6 +691,7 @@ export const MainView: React.FC<MainViewProps> = ({
           </div>
           <ExternalLink className="w-4 h-4 text-sky-200/70 group-hover:text-white transition-colors shrink-0" />
         </a>
+      </div>
       </div>
 
     </div>

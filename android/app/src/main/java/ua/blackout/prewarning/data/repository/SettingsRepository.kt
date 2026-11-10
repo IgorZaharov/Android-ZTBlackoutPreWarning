@@ -2,6 +2,8 @@ package ua.blackout.prewarning.data.repository
 
 import android.content.Context
 import android.content.SharedPreferences
+import ua.blackout.prewarning.data.model.EmergencyOutageInfo
+import ua.blackout.prewarning.data.model.SelectedAddressQuery
 import ua.blackout.prewarning.data.model.UserSettings
 
 class SettingsRepository(context: Context) {
@@ -46,7 +48,7 @@ class SettingsRepository(context: Context) {
 
         fun readSafeString(map: Map<String, *>, key: String, defaultVal: String): String {
             val raw = map[key] ?: return defaultVal
-            return (raw as? String)?.takeIf { it.isNotBlank() } ?: raw.toString()
+            return (raw as? String) ?: raw.toString()
         }
     }
 
@@ -85,7 +87,7 @@ class SettingsRepository(context: Context) {
                         editor.putString("city_url", readSafeString(legacyAll, "city_url", "https://www.ztoe.com.ua/unhooking-search.php"))
                     }
                     if (legacy.contains("queue")) {
-                        editor.putString("queue", readSafeString(legacyAll, "queue", "1.1"))
+                        editor.putString("queue", readSafeString(legacyAll, "queue", ""))
                     }
                     if (legacy.contains("refresh_minutes")) {
                         editor.putLong("refresh_minutes", readSafeLong(legacyAll, "refresh_minutes", 30L))
@@ -123,18 +125,55 @@ class SettingsRepository(context: Context) {
         val prevVibration = readSafeBoolean(allMap, "prev_vibration_enabled", true)
         val rawSound = readSafeBoolean(allMap, "sound_enabled", true)
         val rawVibration = readSafeBoolean(allMap, "vibration_enabled", true)
+
+        val customQueueStatusText = readSafeString(allMap, "custom_queue_status_text", "").takeIf { it.isNotBlank() }
+        val selectedAddress = readSafeString(allMap, "selected_address", "").takeIf { it.isNotBlank() }
+        val remId = readSafeString(allMap, "selected_rem", "")
+        val settlementId = readSafeString(allMap, "selected_settlement", "")
+        val streetId = readSafeString(allMap, "selected_street", "")
+        val house = readSafeString(allMap, "selected_house", "")
+        val selectedAddressQuery = if (remId.isNotBlank() && settlementId.isNotBlank() && streetId.isNotBlank() && house.isNotBlank()) {
+            SelectedAddressQuery(
+                remId = remId,
+                settlementId = settlementId,
+                streetId = streetId,
+                house = house
+            )
+        } else {
+            null
+        }
+
+        val emergencyId = readSafeString(allMap, "active_emergency_outage_id", "")
+        val emergencyType = readSafeString(allMap, "active_emergency_outage_type", "Аварійне відключення")
+        val emergencyStart = readSafeString(allMap, "active_emergency_outage_start", "")
+        val emergencyRestore = readSafeString(allMap, "active_emergency_outage_restore", "")
+        val activeEmergencyOutage = if (emergencyStart.isNotBlank() && emergencyRestore.isNotBlank()) {
+            EmergencyOutageInfo(
+                id = emergencyId.ifBlank { "emergency_outage" },
+                outageType = emergencyType.ifBlank { "Аварійне відключення" },
+                startTime = emergencyStart,
+                estimatedRestoreTime = emergencyRestore
+            )
+        } else {
+            null
+        }
+
         return UserSettings(
-            cityUrl = readSafeString(allMap, "city_url", "https://www.ztoe.com.ua/unhooking-search.php"),
-            queue = readSafeString(allMap, "queue", "1.1"),
-            refreshIntervalMinutes = readSafeLong(allMap, "refresh_minutes", 30L),
-            advanceNoticeMinutes = readSafeInt(allMap, "advance_minutes", 15),
+            cityUrl = readSafeString(allMap, "city_url", "https://www.ztoe.com.ua/unhooking-search.php").ifBlank { "https://www.ztoe.com.ua/unhooking-search.php" },
+            queue = readSafeString(allMap, "queue", ""),
+            customQueueStatusText = customQueueStatusText,
+            selectedAddress = selectedAddress,
+            selectedAddressQuery = selectedAddressQuery,
+            activeEmergencyOutage = activeEmergencyOutage,
+            refreshIntervalMinutes = readSafeLong(allMap, "refresh_minutes", 30L).coerceIn(1L, 240L),
+            advanceNoticeMinutes = readSafeInt(allMap, "advance_minutes", 15).coerceIn(1, 240),
             notificationsEnabled = notificationsEnabled,
             soundEnabled = if (notificationsEnabled) rawSound else false,
             vibrationEnabled = if (notificationsEnabled) rawVibration else false,
             prevSoundEnabled = prevSound,
             prevVibrationEnabled = prevVibration,
-            themeMode = readSafeString(allMap, "theme_mode", "SYSTEM"),
-            language = readSafeString(allMap, "language", "SYSTEM")
+            themeMode = readSafeString(allMap, "theme_mode", "SYSTEM").ifBlank { "SYSTEM" },
+            language = readSafeString(allMap, "language", "SYSTEM").ifBlank { "SYSTEM" }
         )
     }
 
@@ -142,8 +181,18 @@ class SettingsRepository(context: Context) {
         val editor = prefs.edit()
             .putString("city_url", settings.cityUrl)
             .putString("queue", settings.queue)
-            .putLong("refresh_minutes", settings.refreshIntervalMinutes)
-            .putInt("advance_minutes", settings.advanceNoticeMinutes)
+            .putString("custom_queue_status_text", settings.customQueueStatusText ?: "")
+            .putString("selected_address", settings.selectedAddress ?: "")
+            .putString("selected_rem", settings.selectedAddressQuery?.remId ?: "")
+            .putString("selected_settlement", settings.selectedAddressQuery?.settlementId ?: "")
+            .putString("selected_street", settings.selectedAddressQuery?.streetId ?: "")
+            .putString("selected_house", settings.selectedAddressQuery?.house ?: "")
+            .putString("active_emergency_outage_id", settings.activeEmergencyOutage?.id ?: "")
+            .putString("active_emergency_outage_type", settings.activeEmergencyOutage?.outageType ?: "")
+            .putString("active_emergency_outage_start", settings.activeEmergencyOutage?.startTime ?: "")
+            .putString("active_emergency_outage_restore", settings.activeEmergencyOutage?.estimatedRestoreTime ?: "")
+            .putLong("refresh_minutes", settings.refreshIntervalMinutes.coerceIn(1L, 240L))
+            .putInt("advance_minutes", settings.advanceNoticeMinutes.coerceIn(1, 240))
             .putBoolean("notifications_enabled", settings.notificationsEnabled)
             .putBoolean("sound_enabled", if (settings.notificationsEnabled) settings.soundEnabled else false)
             .putBoolean("vibration_enabled", if (settings.notificationsEnabled) settings.vibrationEnabled else false)
@@ -158,6 +207,13 @@ class SettingsRepository(context: Context) {
             editor.putBoolean("prev_vibration_enabled", settings.prevVibrationEnabled)
         }
         editor.apply()
+    }
+
+    fun resetAllAppDataToFirstLaunch(): UserSettings {
+        prefs.edit().clear().apply()
+        val fresh = UserSettings()
+        saveSettings(fresh)
+        return fresh
     }
 
     fun updateNotificationsEnabled(enabled: Boolean): UserSettings {

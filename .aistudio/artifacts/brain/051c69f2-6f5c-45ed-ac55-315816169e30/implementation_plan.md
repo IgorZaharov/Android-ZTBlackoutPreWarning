@@ -1,129 +1,123 @@
-# Житомирська Рулетка (Scratch-Off Blackout Lottery Mini-Game)
+# Feature Parity Update Plan — Світло в Житомирі (`ANDROID_UPDATE_SPEC.md` Port)
 
-An interactive scratch-off lottery mini-game launched from a new **"Житомирська Рулетка"** button at the bottom of the About window (right after the Donations block). Players test their luck by scratching 48 half-hour timeslot tickets arranged in a **2-column hourly grid** (`00:00-00:30` and `00:30-01:00` per row), populated from a randomly selected live ZTOE blackout queue (or randomized offline) to reveal safe beige lightbulbs for escalating streak points while avoiding center-red blackout tickets.
-
----
+This plan ports all features, UI/UX flows, emergency outage algorithms, address lookup capabilities, and battery/caching optimizations documented in `ANDROID_UPDATE_SPEC.md` from `https://github.com/IgorZaharov/iOS-ZTPreBlackoutNotification` into both the **Native Android Application (`/android`)** and the **Interactive Web Emulator (`/src`)**, ensuring 100% parity across iOS, Android, and the Emulator.
 
 ## User Review & Critical Decisions
 
 > [!IMPORTANT]
-> Please review the updated localization, UI mockup, and design/audio specifications below. Once you click **Proceed**, both the native Android (Kotlin + Jetpack Compose) implementation and the Web Simulator (React + TypeScript) implementation will be built and verified with automated unit tests.
+> All specifications below come directly from `ANDROID_UPDATE_SPEC.md` and the reference code in `IgorZaharov/iOS-ZTPreBlackoutNotification`. Both the Web Emulator and Native Android (Kotlin + Jetpack Compose + Glance) will be updated in lockstep, keeping Android `compileSdk = 36` / `targetSdk = 36` and existing signing configurations intact.
 
-- **Bilingual Interface (`uk` / `en` Synchronized with Main App Settings)**: All game screens, HUD counters, rules text, and buttons dynamically render in **Ukrainian (`uk`)** or **English (`en`)** based on the Main Application's language setting (`language` / `AppStrings`), while the launch button in the About window after the Donations block is titled **"Житомирська Рулетка"**.
-- **Entry Point Placement**: A new button titled **"Житомирська Рулетка"** is added at the end of the About window (immediately below the `Donations / Благодійність і Пожертви` card), preserving all existing UI elements, icons, colors, and positions untouched.
-- **2-Column Hourly Grid (`00:00-00:30` | `00:30-01:00` through `23:00-23:30` | `23:30-24:00`)**: The 48 lottery tickets are arranged in 24 rows of 2 columns, pairing the two 30-minute timeslots of each hour side-by-side.
-- **Unscratched Ticket Golden Embroidery**: Unscratched tickets feature a metallic glance foil surface adorned with **intricate golden filigree embroidery** along the borders and corners, with the timeslot label (`00:00-00:30`, `15:30-16:00`, etc.) printed in the center.
-- **Center-Only Red Reveal (Anti-Spoiler Design)**: Scratched-off Red tickets share the exact same warm beige outer background (`#D8D6CC` / `#FCFBF7` / `#CCC9BE`) around their edges and perimeter as safe Beige tickets, placing the crimson Red color (`#9E1E18` / `#D62E26` / `#8C1914`) and exploded lightbulb contour **strictly in the center medallion** so scratching the edges does not reveal a red ticket prematurely.
-- **Two-Stage Red Ticket Audio & Game Over Sequence**: Revealing a Red ticket plays an **electric buzzing sound while the screen fades to black**, followed immediately by the **sound of an exploding lightbulb** synchronized with the shattering lightbulb animation.
+- **Confirmed Decision 1 — First Launch Unselected Queue UX (`queue = ""` Default)**:
+  - Fresh installs start with `queue = ""` and `language = "system"` (`Auto`).
+  - When `isQueueUnselected == true`, the Main screen content and bottom navigation bar are dimmed (`alpha = 0.15`) and disabled, while a centered full-screen overlay displays the primary `"Виберіть чергу"` / `"Select queue"` button (`#FF5E3A`, subtitle `"Житомиробленерго (ZTOE)"`) directly **above** the 3-segment language selector (`Auto` / `English` / `Українська`).
+  - Tapping `"Виберіть чергу"` / `"Select queue"` navigates to Settings and automatically opens the full-screen `"?"` Address Lookup & Help modal; confirming a queue or address for the first time automatically switches back to the Main window.
+- **Confirmed Decision 2 — Full-Screen `"?"` Address Lookup Modal & Queue `5.2` Preservation Fix**:
+  - Upgrades the `"?"` dialog in Settings into a full-screen modal (`#141A29`) with an interactive **Search by Address** block (`2.dp` `white/25` border) at the top (РЕМ defaulting to `"Житомирський РЕМ"`, Settlement defaulting to `"м. Житомир"`, and Street/House unselected by default on first launch, then persisted across sessions), followed by `"Пошук вручну"` / `"Manual search"` and numbered steps `1–4`.
+  - Enforces the `5.2 -> 3.2` preservation safeguard: if a house selected from the directory already has a known queue (e.g., `вул. Київська, буд. 77` -> `5.2`), live HTML table refreshes (`checkAddressOnZtoeWebsite` and `loadSchedules`) never overwrite `5.2` with a conflicting row (`3.2`); live HTML only assigns a queue if the house previously had no queue (`queue == ""`).
+- **Confirmed Decision 3 — No-Queue Houses (`буд. 104`) & Emergency Outages (`"Аварійне відключення"`) Priority Overlap**:
+  - Houses without a scheduled queue (e.g., `вул. Київська, буд. 104`) set `queue = ""`, display the full unshortened message `"В цей час не вимикається, за винятком випадків аварійних відключень"` with a line break (`\n`) after the city in the formatted address, hide the top queue header, display `"--:--:--"` on the main counter, and render all 24 hour columns of the Drum Chart with light internal squares (`POWER_ON`).
+  - Active emergency outages parsed from ZTOE `pw_accidents` JSON and HTML tables override and merge with regular scheduled slots (`applyEmergencyOutageToSchedule`) across Today and Tomorrow (including midnight-spanning and coinciding outages), driving the Main countdown, 24h Drum Chart, Today/Tomorrow interval lists (`20x20` leading slot with `"!"` icon vs centered dot), Home Screen Widgets, and one-time state-transition notifications (detect & restore).
 
 ---
 
 ## 1. Overview & Core Concept
 
-- **What It Does**: Turns the 48 half-hour blackout timeslots of a Zhytomyroblenergo schedule into a tactile scratch-off lottery game inside the application.
-- **Target Audience / Persona**: Users of **Світло в Житомирі** looking for a playful, thematic way to pass the time during or between scheduled power outages.
-- **Key Value**: Blends the authentic САЗУ-ИТ electricity meter palette (warm enamel beige `#FCFBF7` / `#D8D6CC` and deep crimson `#D62E26` / `#9E1E18`) with luxury golden-embroidered scratch-card aesthetics, procedural sound synthesis, bilingual (`uk`/`en`) localization, and risk-vs-reward streak scoring.
+- **What It Does**: Synchronizes the Android application and AI Studio Web Emulator with the latest iOS release by adding interactive ZTOE address-to-queue lookup, first-launch onboarding overlay, no-queue house support, real-time emergency outage detection and schedule merging, aligned `"!"` emergency indicators in the Today/Tomorrow interval lists, and battery/caching optimizations.
+- **Target Audience / Persona**: Residents of Zhytomyr and Zhytomyr Oblast who look up their blackout queue by street and house number, including residents in buildings with special no-outage status or active emergency accidents (`pw_accidents`).
+- **Key Value**: Eliminates manual queue lookup friction, prevents false queue overwrites on live refreshes, surfaces emergency outages with full countdown and widget integration, and keeps the iOS and Android codebases 100% aligned.
 
 ---
 
-## 2. User Experience, Localization & Visual Design
+## 2. User Experience & Visual Design
 
-### Visual Mockup Preview
-
-![Житомирська Рулетка UI Mockup v2](/src/assets/images/zhytomyr_roulette_mockup_v2_1794001448980.jpg)
-
-### Bilingual Localization Table (`uk` / `en`)
-
-The game reads the active application language (`uk` or `en`) from Main Application settings and localizes all in-game UI text accordingly:
-
-| UI Element | Ukrainian (`uk`) | English (`en`) |
-|---|---|---|
-| **About Window Button** | Житомирська Рулетка | Житомирська Рулетка |
-| **Game Title** | Житомирська Рулетка | Zhytomyr Roulette |
-| **Start Screen Description** | Стирайте захисний шар із 30-хвилинних слотів графіка. Світлий білет із цілою лампочкою додає бали (+1, +2, +3...), а червоний білет призводить до блекауту! | Scratch off the 30-minute timeslot tickets. Each beige ticket with an intact lightbulb increases your score (+1, +2, +3...), while a red ticket triggers a blackout! |
-| **Start Button** | Почати гру | Start |
-| **Close Game Button** | Закрити гру | Close Game |
-| **Top HUD Points Counter** | Бали: `0` (Серія: `+1`) | Points: `0` (Streak: `+1`) |
-| **Restart Game Button** | Спочатку | Restart Game |
-| **Get New Tickets Button** | Нові білети | Get New Tickets |
-| **Game Over Header** | БЛЕКАУТ! ГРУ ЗАКІНЧЕНО | BLACKOUT! GAME OVER |
-| **Final Score Label** | Фінальний рахунок: `X` | Final Score: `X` |
-
-### Key User Flows
-
-1. **Launching the Game**:
-   - In the **About** window, below the `Donations / Благодійність і Пожертви` block, the user taps the **"Житомирська Рулетка"** button.
-   - A full-screen modal window opens to the **Game Start Screen** in the user's selected application language (`uk` or `en`).
-2. **Game Start Screen**:
-   - Displays the localized title (**"Житомирська Рулетка"** / **"Zhytomyr Roulette"**), glowing contour lightbulb emblem, localized rules summary, and two action buttons: **"Почати гру" / "Start"** and **"Закрити гру" / "Close Game"**.
-   - Tapping **"Закрити гру" / "Close Game"** dismisses the game window and returns to the **About** window.
-   - Tapping **"Почати гру" / "Start"** initializes `score = 0` and `currentIncrement = 1`, loads a random blackout queue (`1.1`–`6.2`) from the ZTOE schedule (or generates a randomized beige/red distribution if offline), and transitions to the **Active Game Screen**.
-3. **Active Game Screen (2-Column Grid of 48 Scratch-Off Tickets)**:
-   - **Top Sticky HUD**: Displays the localized **Points Counter** (`Бали: 0` / `Points: 0`) starting from `0` (plus the current streak increment `+1`, `+2`, `+3`...).
-   - **2-Column Hourly Ticket Grid (24 Rows x 2 Columns)**:
-     - Each row represents one hour of the day, with the two 30-minute timeslots side-by-side (`00:00-00:30` on the left, `00:30-01:00` on the right, down to `23:00-23:30` and `23:30-24:00`).
-     - **Unscratched Ticket Design**: Premium metallic glance surface with diagonal sheen, **intricate golden ornamental embroidery** framing the ticket perimeter and corners, and the timeslot text (`00:00-00:30`, `15:30-16:00`, etc.) centered on the foil.
-     - **Swiping / Scratching Interaction**: As the user swipes their finger across a ticket, the golden-embroidered glance foil scratches away along the finger path while playing a **scratching sound**:
-       - **Beige Ticket (Safe / Power ON)**: Warm beige background (`#D8D6CC` -> `#FCFBF7` -> `#CCC9BE`) across the entire ticket with a **contour drawing of an intact lightbulb** in the center. Plays a **coin sound** on reveal and increases the user's score by `currentIncrement` (`+1`, `+2`, `+3`, `+4`, etc.).
-       - **Red Ticket (Blackout / Power OFF)**: Uses the same warm beige background (`#D8D6CC` -> `#FCFBF7` -> `#CCC9BE`) along the outer edges so edge-scratching does not give away the color early, with **crimson Red (`#9E1E18` -> `#D62E26` -> `#8C1914`) concentrated only in the center** behind the **contour drawing of an exploded lightbulb**. Once the center is scratched and revealed, triggers the **Red Ticket Reveal & Game Over Sequence**.
-   - **Bottom Pinned Control Bar**:
-     - **"Спочатку" / "Restart Game"**: Resets `score = 0` (and streak increment to `+1`) and returns to the **Game Start Screen**.
-     - **"Нові білети" / "Get New Tickets"**: Retains the current `score`, resets the consecutive increment back to `+1`, loads a new random blackout queue (or randomized offline slots), and refreshes all 48 tickets to their unscratched golden-embroidered state.
-4. **Red Ticket Reveal & Game Over Screen**:
-   - **Stage 1 (Fade-to-Black + Electric Buzz)**: Upon revealing a Red ticket's center, an **electric buzzing sound** plays while the screen fades smoothly to pitch black (`#05070B`).
-   - **Stage 2 (Exploding Lightbulb Animation + Explosion Sound)**: Once faded to black, the **sound of an exploding lightbulb** (glass shatter burst + filament pop) plays in sync with the **exploding lightbulb animation** (bright filament flash, flying glass shards, and radiating sparks).
-   - Displays the player's localized **Final Score** (`Фінальний рахунок` / `Final Score`) and two buttons at the bottom:
-     - **"Спочатку" / "Restart Game"**: Resets `score = 0` and returns to the **Game Start Screen**.
-     - **"Закрити гру" / "Close Game"**: Closes the game window and returns to the **About** window.
+- **Key User Flows**:
+  1. **First-Launch Onboarding Flow**:
+     - On a fresh launch (`queue == ""`, no custom status text, no active emergency outage), the Main screen and bottom dock are dimmed (`15%` opacity, non-interactive).
+     - A centered overlay presents the orange `"Виберіть чергу"` / `"Select queue"` button (`min-w-[260px]`, `#FF5E3A`, subtitle `"Житомиробленерго (ZTOE)"`) above the `Auto | English | Українська` segmented switch.
+     - Tapping the button opens the Settings tab and automatically launches the full-screen `"?"` Address Lookup modal.
+     - Once the user confirms an address or selects a queue for the first time, the app immediately navigates back to the Main screen (`selectedPage = 0`).
+  2. **Full-Screen `"?"` Address Lookup & Manual Search Flow**:
+     - Opens a full-screen `#141A29` modal containing:
+       1. **Block 1 — Search by Address (`"Пошук черги за адресою"` / `"Find Queue by Address"`)**: Boxed with an expanded `2px` (`2.dp`) `white/25` border and 4 stacked dropdowns (`РЕМ`, `Населений пункт`, `Вулиця`, `Будинок`). Street (`"Оберіть вулицю"` / `"Select street"`) and House (`"Оберіть будинок"` / `"Select house"`) start unselected on first launch and persist in `UserSettings` (`selectedAddressQuery`) once confirmed.
+       2. **Block 2 — Manual Search Heading**: `"Пошук вручну"` / `"Manual search"`.
+       3. **Block 3 — Steps 1–4**: Numbered instructions (Step 1 URL without a trailing period).
+  3. **No-Queue Building Display Flow (`вул. Київська, буд. 104`)**:
+     - Sets `queue = ""` and `customQueueStatusText = "В цей час не вимикається, за винятком випадків аварійних відключень"`.
+     - Top header queue badge is hidden; formatted address wraps onto a new line right after the city (`"Житомирський РЕМ, м. Житомир,\nвул. Київська, буд. 104"`).
+     - Main countdown shows `"--:--:--"` (hiding the `"--:-- - --:--"` slot range line), and the 24-hour Drum Chart renders all 24 hours with light internal squares (`POWER_ON`).
+  4. **Emergency Outage Detection & Overlap Flow**:
+     - Parses ZTOE `pw_accidents` JSON and emergency HTML tables for the user's `selectedAddressQuery`.
+     - Renders an Emergency Outage banner on the Main screen with start time (`Початок`) and estimated restoration time (`Орієнтовне відновлення`).
+     - Merges emergency half-hour slots (`POWER_OFF`, `isEmergency = true`) into Today and Tomorrow schedules so the Main countdown, 24h Drum Chart, Today/Tomorrow interval lists, and Small/Big Home Screen Widgets reflect the combined outage window.
+     - Today/Tomorrow list headers dynamically read `"Години відключень на сьогодні:"` / `"Blackout hours for today:"` and `"Години відключень на завтра:"` / `"Blackout hours for tomorrow:"`, with a fixed `20x20` leading indicator container (`"!"` inside an orange circle for emergency intervals, or a centered `10x10` orange dot for regular intervals) so all timeslot strings align horizontally.
 
 ---
 
 ## 3. Key Product Decisions & Trade-Offs
 
-- **Decision 1: Four-Sound Procedural Audio Engine (Web Audio API & Android `AudioTrack` PCM Synthesizer)**
-  - *Chosen Approach*: Synthesize all four distinct sound effects in real time:
-    1. **Scratch Sound**: Bandpass-filtered noise burst during finger swipe over unscratched foil.
-    2. **Coin Sound**: Crisp dual-tone metallic chime (`B5 -> E6`) on Beige ticket reveal.
-    3. **Electric Buzz Sound**: Low-frequency sawtooth/square hum (`50Hz/100Hz` harmonic buzz with crackle modulation) playing while the screen fades to black on Red ticket reveal.
-    4. **Exploding Lightbulb Sound**: Sharp transient filament pop + high-frequency glass-shatter noise bursts synchronized with the exploding lightbulb animation on the black Game Over screen.
-- **Decision 2: Center-Weighted Reveal Detection & Anti-Spoiler Radial Mask**
-  - *Chosen Approach*: Render the underlying ticket canvas with the warm beige gradient across 100% of the card surface and draw the red blackout medallion (`r ≈ 28%` of card width) strictly in the center around the exploded lightbulb contour. Track scratch coverage specifically across the central medallion zone so edge swipes never prematurely trigger or visually spoil a Red ticket.
+- **Decision 1: Queue Preservation Safeguard on Live Refreshes (`5.2 -> 3.2` Fix)**
+  - *Chosen Approach*: When `checkAddressOnZtoeWebsite` and `loadSchedules` re-check `selectedAddressQuery` against `/unhooking-search.php`, live HTML table rows are only allowed to assign or change `settings.queue` if the house previously had **no queue** (`localMatch.queue.isEmpty()` / `currentSettings.queue.isBlank()`). If a house has both a queue row and a no-outage status row in the table (such as `буд. 104`), the no-outage status row takes precedence.
+  - *Why*: ZTOE's live HTML lookup can return multi-row sub-tables where a commercial sub-meter row (`3.2`) appears alongside a residential building (`5.2`). Preserving the directory-verified queue prevents the user's selected queue (`5.2`) from unexpectedly flipping to `3.2` on refresh.
+
+- **Decision 2: Priority Merging of Emergency Outages (`applyEmergencyOutageToSchedule`)**
+  - *Chosen Approach*: Apply `applyEmergencyOutageToSchedule` to both Today and Tomorrow schedules before computing `getBlackoutIntervals`, `calculateOutageCountdown`, or rendering the 24-hour Drum Chart and Glance Widgets. Even when an emergency outage coincides with an existing scheduled `POWER_OFF` slot, `isEmergency = true` is propagated onto the slot and merged interval.
+  - *Why*: Ensures that cross-midnight and overlapping emergency outages produce a single continuous countdown to the true power restoration time and display the `"!"` indicator in the Today/Tomorrow interval list.
+
+- **Decision 3: State-Transition Deduplication for Emergency Notifications**
+  - *Chosen Approach*: `checkAndTriggerEmergencyOutageAlert` tracks `emergency_detect_${id}_${startTime}_${estimatedRestoreTime}` and `emergency_restore_${id}_${startTime}` in `AlertRegistry`.
+  - *Why*: Guarantees the user receives exactly one notification when an emergency outage starts, zero duplicate notifications on periodic refreshes while it remains active, and one notification when power is restored.
 
 ---
 
 ## 4. Technical Architecture & Data Strategy *(Technical Reference)*
 
-### Architecture & Component Diagram
+- **Architecture & Data Flow Diagram**:
 
 ```
-┌──────────────────────────────────────────────────────────────────────────┐
-│                     About Window (AboutScreen / AboutView)               │
-│  [Project Links Card] -> [Donations Card] -> ["Житомирська Рулетка" Btn] │
-└───────────────────────────────────────┬──────────────────────────────────┘
-                                        │ Opens Full-Screen Game Overlay (lang = uk | en)
-                                        ▼
-┌──────────────────────────────────────────────────────────────────────────┐
-│                   Zhytomyr Roulette State Machine & Controller           │
-│   States: START ──► PLAYING (24x2 Grid) ──► FADING_BUZZ ──► GAME_OVER    │
-│   State Store: score (0+), streakIncrement (1+), tickets[0..47], lang    │
-└───────────┬───────────────────────────┬──────────────────────────┬───────┘
-            │                           │                          │
-            ▼                           ▼                          ▼
-┌───────────────────────┐   ┌───────────────────────┐  ┌───────────────────┐
-│ Queue & Slot Provider │   │ 2-Col Scratch Tickets │  │ Procedural Audio  │
-│ - Picks random queue  │   │ - Golden embroidery   │  │ - Scratch friction│
-│   (1.1 .. 6.2)        │   │ - Beige outer border  │  │ - Coin arpeggio   │
-│ - Live ZTOE fetch     │   │ - Center-only Red     │  │ - Electric buzz   │
-│ - Offline randomizer  │   │ - Bulb / Exploded SVG │  │ - Bulb explosion  │
-└───────────────────────┘   └───────────────────────┘  └───────────────────┘
+┌────────────────────────────────────────────────────────────────────────────┐
+│                ZTOE Website (/unhooking-search.php)                        │
+│   [Schedule Leaf Tables] · [Address Lookup POST] · [pw_accidents JSON]     │
+└───────────────┬───────────────────────┬────────────────────────┬───────────┘
+                │                       │                        │
+                ▼                       ▼                        ▼
+┌────────────────────────────────────────────────────────────────────────────┐
+│         ZtoeParser & ZtoeAddressLookup (Web TS & Android Kotlin)           │
+│  • Single-pass 12-queue 48-slot parser + ETag / HTTP 304 cache             │
+│  • Address directory (РЕМ -> Settlement -> Street -> House) + live check   │
+│  • Queue 5.2 preservation guard + No-Queue house (буд. 104) handler        │
+│  • pw_accidents & HTML emergency matcher -> EmergencyOutageInfo            │
+└───────────────┬────────────────────────────────────────────────────────────┘
+                │
+                ▼
+┌────────────────────────────────────────────────────────────────────────────┐
+│           applyEmergencyOutageToSchedule (Today & Tomorrow)                │
+│  • Overrides overlapping half-hour slots with POWER_OFF & isEmergency=true │
+│  • Propagates isEmergency into merged BlackoutIntervals / DetailedInterval │
+└───────┬───────────────────────┬────────────────────────┬───────────────────┘
+        │                       │                        │
+        ▼                       ▼                        ▼
+┌───────────────────┐ ┌────────────────────────┐ ┌───────────────────────────┐
+│ MainScreen &      │ │ SettingsScreen &       │ │ BlackoutGlanceWidget &    │
+│ First-Launch UX   │ │ Full-Screen "?" Modal  │ │ NotificationScheduler     │
+│ • Unselected Lock │ │ • 2dp bordered Search  │ │ • Merged Widget Countdown │
+│ • No-Queue Card   │ │   by Address block     │ │ • 24h Drum Chart Parity   │
+│ • Emergency Card  │ │ • Persistent 4 fields  │ │ • 1x Detect & 1x Restore  │
+│ • 20x20 "!" List  │ │ • Auto-return to Main  │ │   Emergency Notifications │
+└───────────────────┘ └────────────────────────┘ └───────────────────────────┘
 ```
 
-### Data Model & State Transitions
+- **Data Model Extensions (`UserSettings`, `BlackoutSlot`, `BlackoutInterval`)**:
+  - `EmergencyOutageInfo`: `id`, `remName`, `settlementName`, `streetName`, `house`, `outageType`, `startTime` (`"DD.MM.YYYY HH:MM"`), `estimatedRestoreTime` (`"DD.MM.YYYY HH:MM"`).
+  - `SelectedAddressQuery`: `remId`, `settlementId`, `streetId`, `house`.
+  - `UserSettings`: Adds `customQueueStatusText: String?`, `selectedAddress: String?`, `selectedAddressQuery: SelectedAddressQuery?`, `activeEmergencyOutage: EmergencyOutageInfo?`, with `queue` defaulting to `""` on fresh install and `language` defaulting to `"system"` (`Auto`).
+  - `BlackoutSlot` & `BlackoutInterval` / `DetailedInterval`: Adds `isEmergency: Boolean = false`.
 
-| State / Entity | Description & Transitions |
-|---|---|
-| `GameScreenState` | `'START'` \| `'PLAYING'` \| `'GAME_OVER'` (with two-stage fade + explosion transition) |
-| `Language` | `'uk'` \| `'en'` passed directly from Main Application settings (`appLanguage` / `AppStrings`) |
-| `RouletteTicket` | `{ index: 0..47, label: "00:00-00:30", isRed: boolean, scratchProgress: 0..1, isRevealed: boolean }` displayed in a 2-column grid (`row = Math.floor(index / 2)`, `col = index % 2`) |
-| `score` | Starts at `0`. On Beige ticket reveal: `score += streakIncrement; streakIncrement += 1`. On `"Restart Game"`: `score = 0; streakIncrement = 1`. On `"Get New Tickets"`: `score` unchanged, `streakIncrement = 1`. |
-| `Red Reveal Sequence` | `0ms–650ms`: Screen fades to black while `playElectricBuzzSound()` plays. `650ms+`: `playBulbExplosionSound()` fires simultaneously with the exploding lightbulb shatter animation, revealing Final Score + `"Restart Game"` / `"Close Game"`. |
+- **Battery, Performance & Caching Optimizations**:
+  - **Lifecycle & Screen Gated 1-Second Ticker**: Runs only when the app is in the foreground (`Lifecycle.State.RESUMED`), on the Main tab (`selectedPage == 0`), and `isRouletteOpen == false`.
+  - **Midnight Rollover Promotion**: When `00:00` (`Europe/Kyiv`) passes and `cached_schedule_date == yesterdayIsoString(now)`, promotes cached `tomorrow` slots into `today` slots automatically.
+  - **Bounded Caches & Smart Rescheduling**: Caps interval memoization cache at `64` entries and `AlertRegistry` at `100` entries; only updates `WorkManager` periodic work when `refreshIntervalMinutes` changes; syncs `AlarmScheduler` immediately when toggling notifications from the Home Screen Widget.
+
+- **Verification & Unit Testing**:
+  - Port the complete `ztoeAddressLookup.ts` / `ZtoeAddressLookup.kt` module and update `MainScreen`, `SettingsScreen`, `BlackoutAppNavigation`, `BlackoutGlanceWidget`, `ScheduleRepository`, `SettingsRepository`, and `ZtoeParser` across both `/src` and `/android`.
+  - Update `CHANGELOG.md` and `scripts/generate_android_project.cjs` to sync `src/data/androidProjectFiles.ts` and `/public/Android-ZTBlackoutPreWarning.zip`.
+  - Add unit test suites in `tests/unit.test.ts` and `android/app/src/test/java/ua/blackout/prewarning/ZtoeParserTest.kt` covering all 10 checklist items from `ANDROID_UPDATE_SPEC.md` (First Launch zero-state & overlay, `"?"` modal defaults & persistence, Queue `5.2` preservation on `буд. 77`, No-Queue house `буд. 104`, Emergency outage priority overlap & notifications, `"!"` indicator alignment, and battery/caching optimizations).

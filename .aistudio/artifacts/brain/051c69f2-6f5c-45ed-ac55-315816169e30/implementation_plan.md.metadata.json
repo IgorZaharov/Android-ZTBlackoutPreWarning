@@ -1,6 +1,6 @@
 {
-  "summary": "Updated implementation plan for Житомирська Рулетка adding full Ukrainian (uk) and English (en) game interface localization synchronized with the Main Application's language setting.",
-  "updatedAt": "2026-11-06T21:47:25.567900968Z",
-  "requestFeedback": true,
-  "userFacing": true
+  "summary":  "Implementation Plan for porting all features from ANDROID_UPDATE_SPEC.md in IgorZaharov/iOS-ZTPreBlackoutNotification into the Android application and Web Emulator to achieve 100% functional and UI parity.",
+  "updatedAt":  "2026-11-09T23:12:51.154916866Z",
+  "requestFeedback":  true,
+  "userFacing":  true
 }

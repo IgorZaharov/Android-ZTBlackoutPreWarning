@@ -36,6 +36,13 @@ data class ScheduleFetchResult(
 object ZtoeParser {
     private const val USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 
+    // Pre-compiled regexes to avoid repeated allocation during HTML refreshes
+    private val leafTableRegex = Regex("(?is)<table\\b[^>]*>(?:(?!</?table\\b).)*</table>")
+    private val trRegex = Regex("(?is)<tr\\b[^>]*>(.*?)</tr>")
+    private val tdRegex = Regex("(?is)<t[dh]\\b([^>]*)>(.*?)</t[dh]>")
+    private val dateHeaderRegex = Regex("""(?<!\d)(\d{1,2})[./-](\d{1,2})(?:[./-](\d{2,4}))?(?!\d)""")
+    private val pwAccidentsRegex = Regex("""pw_accidents\s*=\s*JSON\.parse\(\s*'((?:\\'|[^'])*)'\s*\)""", RegexOption.IGNORE_CASE)
+
     private val DEFAULT_VALID_URLS = listOf(
         "https://www.ztoe.com.ua/unhooking-search.php",
         "https://example.com"
@@ -62,7 +69,7 @@ object ZtoeParser {
         return validUrls.any { it.equals(trimmed, ignoreCase = true) }
     }
 
-    private val ALL_QUEUES = listOf(
+    val ALL_QUEUES = listOf(
         "1.1", "1.2", "2.1", "2.2", "3.1", "3.2",
         "4.1", "4.2", "5.1", "5.2", "6.1", "6.2"
     )
@@ -108,7 +115,6 @@ object ZtoeParser {
     ): ScheduleFetchResult {
         val kyivZone = KYIV_ZONE
         val today = LocalDate.now(kyivZone)
-        val todayStr = today.format(DateTimeFormatter.ISO_LOCAL_DATE)
 
         val cleanUrl = url.trim()
         val repo = if (context != null) {
@@ -127,17 +133,24 @@ object ZtoeParser {
             )
         }
 
+        val trimmedQueue = queue.trim()
+
         return try {
             val nowMs = System.currentTimeMillis()
             val recentDoc = cachedDoc
-            val canUseConditionalHeaders = !forceNetwork && repo != null && repo.hasValidTodayCache(queue) && repo.hasTomorrowSchedule(queue)
+            val canUseConditionalHeaders = !forceNetwork &&
+                trimmedQueue.isNotEmpty() &&
+                repo != null &&
+                repo.hasValidTodayCache(trimmedQueue) &&
+                repo.hasTomorrowSchedule(trimmedQueue)
 
             val doc: Document? = if (!forceNetwork && recentDoc != null && cachedDocUrl == cleanUrl && cachedDocDate == today && (nowMs - cachedDocTimestampMs) in 0 until DOC_MEMORY_CACHE_MS) {
                 recentDoc
             } else {
                 fetchDocumentWithWindows1251(
                     urlStr = cleanUrl,
-                    sendConditionalHeaders = canUseConditionalHeaders
+                    sendConditionalHeaders = canUseConditionalHeaders,
+                    context = context
                 )?.also { fetched ->
                     cachedDocUrl = cleanUrl
                     cachedDoc = fetched
@@ -147,9 +160,9 @@ object ZtoeParser {
             }
 
             // HTTP 304 Not Modified: reuse already-cached schedule with zero HTML transfer or Jsoup parsing
-            if (doc == null && canUseConditionalHeaders && repo != null && repo.hasValidTodayCache(queue)) {
-                val cachedToday = repo.getTodaySlots(queue)
-                val cachedTomorrow = repo.getTomorrowSlots(queue)
+            if (doc == null && canUseConditionalHeaders && repo != null && repo.hasValidTodayCache(trimmedQueue)) {
+                val cachedToday = repo.getTodaySlots(trimmedQueue)
+                val cachedTomorrow = repo.getTomorrowSlots(trimmedQueue)
                 return ScheduleFetchResult(
                     todaySlots = cachedToday,
                     tomorrowSlots = cachedTomorrow,
@@ -175,11 +188,20 @@ object ZtoeParser {
                     val batchMap = allQueueResults.mapValues { (_, r) ->
                         Pair(r.todaySlots, r.tomorrowSlots)
                     }
-                    repo.saveAllSchedulesBatch(batchMap, queue)
+                    repo.saveAllSchedulesBatch(batchMap, trimmedQueue)
                 } catch (_: Exception) {}
             }
 
-            val finalRes = allQueueResults[queue] ?: parseDocumentFull(effectiveDoc, queue, today)
+            if (trimmedQueue.isEmpty()) {
+                return ScheduleFetchResult(
+                    todaySlots = emptyList(),
+                    tomorrowSlots = null,
+                    hasTomorrowSchedule = false,
+                    status = if (allQueueResults.isNotEmpty()) FetchStatus.SUCCESS else FetchStatus.NO_QUEUES_FOUND
+                )
+            }
+
+            val finalRes = allQueueResults[trimmedQueue] ?: parseDocumentFull(effectiveDoc, trimmedQueue, today)
             if (finalRes.status != FetchStatus.SUCCESS) {
                 repo?.clearScheduleCache()
             }
@@ -293,7 +315,6 @@ object ZtoeParser {
         today: LocalDate = LocalDate.now(KYIV_ZONE)
     ): ScheduleFetchResult {
         val tomorrow = today.plusDays(1)
-        val todayStr = today.format(DateTimeFormatter.ISO_LOCAL_DATE)
         val (todayTable, tomorrowTable) = findTodayAndTomorrowTables(doc, today)
 
         if (todayTable == null) {
@@ -302,6 +323,15 @@ object ZtoeParser {
                 tomorrowSlots = null,
                 hasTomorrowSchedule = false,
                 status = FetchStatus.NO_QUEUES_FOUND
+            )
+        }
+
+        if (queue.isBlank()) {
+            return ScheduleFetchResult(
+                todaySlots = emptyList(),
+                tomorrowSlots = null,
+                hasTomorrowSchedule = false,
+                status = FetchStatus.SUCCESS
             )
         }
 
@@ -377,15 +407,18 @@ object ZtoeParser {
 
     private fun fetchDocumentWithWindows1251(
         urlStr: String,
-        sendConditionalHeaders: Boolean = false
+        sendConditionalHeaders: Boolean = false,
+        context: Context? = null
     ): Document? {
+        val etagPrefs = context?.applicationContext?.getSharedPreferences("zt_schedule_cache_v2", Context.MODE_PRIVATE)
+        val savedEtag = lastETag ?: etagPrefs?.getString("ztoe_last_etag", null)
         val url = URL(urlStr)
         val connection = url.openConnection() as HttpURLConnection
         return try {
             connection.setRequestProperty("User-Agent", USER_AGENT)
             connection.setRequestProperty("Accept-Encoding", "gzip")
-            if (sendConditionalHeaders && cachedDocUrl == urlStr) {
-                lastETag?.let { connection.setRequestProperty("If-None-Match", it) }
+            if (sendConditionalHeaders && (cachedDocUrl == urlStr || !savedEtag.isNullOrBlank())) {
+                savedEtag?.takeIf { it.isNotBlank() }?.let { connection.setRequestProperty("If-None-Match", it) }
                 lastModifiedHeader?.let { connection.setRequestProperty("If-Modified-Since", it) }
             }
             connection.connectTimeout = 8000
@@ -398,7 +431,10 @@ object ZtoeParser {
             if (responseCode !in 200..299) {
                 throw IOException("HTTP $responseCode")
             }
-            connection.getHeaderField("ETag")?.takeIf { it.isNotBlank() }?.let { lastETag = it }
+            connection.getHeaderField("ETag")?.takeIf { it.isNotBlank() }?.let {
+                lastETag = it
+                etagPrefs?.edit()?.putString("ztoe_last_etag", it)?.apply()
+            }
             connection.getHeaderField("Last-Modified")?.takeIf { it.isNotBlank() }?.let { lastModifiedHeader = it }
 
             val contentType = connection.contentType?.lowercase() ?: ""

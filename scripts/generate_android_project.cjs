@@ -30,6 +30,18 @@ while ((match = entryRegex.exec(existingTs)) !== null) {
   }
 }
 
+const addressLookupRelPath = 'app/src/main/java/ua/blackout/prewarning/data/parser/ZtoeAddressLookup.kt';
+const addressLookupDiskPath = path.join(androidDir, addressLookupRelPath);
+if (fs.existsSync(addressLookupDiskPath) && !entries.some((e) => e.path === addressLookupRelPath)) {
+  entries.push({
+    path: addressLookupRelPath,
+    language: 'kotlin',
+    description: 'ZTOE Address Queue Lookup & Emergency Outage Parser',
+    content: fs.readFileSync(addressLookupDiskPath, 'utf8'),
+  });
+  console.log(`Added new file from /android: ${addressLookupRelPath}`);
+}
+
 if (entries.length > 0) {
   const escapeTemplateLiteral = (str) =>
     str.replace(/\\/g, '\\\\').replace(/`/g, '\\`').replace(/\$\{/g, '\\${');

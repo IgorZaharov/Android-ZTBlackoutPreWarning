@@ -214,7 +214,7 @@ function runUnitTestB() {
     path.join(ROOT_DIR, 'src/components/SettingsView.tsx'),
     'utf-8'
   );
-  const step1 = '1. Відкрийте сторінку пошуку черги на сайті https://www.ztoe.com.ua/unhooking-search.php.';
+  const step1 = '1. Відкрийте сторінку пошуку черги на сайті https://www.ztoe.com.ua/unhooking-search.php';
   const step2 = '2. Оберіть свій РЕМ, населений пункт і вулицю.';
   const step3 =
     '3. У таблиці знайдіть свій будинок і подивіться стовпці «Черга» і «Підчерга». Наприклад, черга 5 і підчерга 2 - це 5.2.';
@@ -2217,14 +2217,324 @@ async function runUnitTestC_ZhytomyrRoulette() {
     'SettingsScreen.kt must include Site URL card, Language selector, Test notification and Refresh buttons, and Frosted Glass / Orange colors matching the Emulator'
   );
 
+  // Verify IOS_HANDOVER.md exists and documents the iOS port for IgorZaharov/iOS-ZTPreBlackoutNotification
+  const iosHandoverPath = path.join(ROOT_DIR, 'IOS_HANDOVER.md');
+  assert.ok(fs.existsSync(iosHandoverPath), 'IOS_HANDOVER.md must exist in repository root');
+  const iosHandoverMd = fs.readFileSync(iosHandoverPath, 'utf-8');
+  assert.ok(
+    iosHandoverMd.includes('https://github.com/IgorZaharov/iOS-ZTPreBlackoutNotification') &&
+      iosHandoverMd.includes('ZtoeParser.swift') &&
+      iosHandoverMd.includes('WidgetKit') &&
+      iosHandoverMd.includes('ZhytomyrRouletteScreen.swift') &&
+      iosHandoverMd.includes('Master Bootstrap Prompt'),
+    'IOS_HANDOVER.md must include repository URL, Swift/WidgetKit architecture, and Master Bootstrap Prompt'
+  );
+
   resetAllRouletteProgress();
   console.log('Unit Test C PASSED: Житомирська Рулетка mechanics, 1s Game Over delay, Milestone Progress Bar, Daily Streak, Perseverance, Extra Lives Hearts, Power Shop, Депозит Потужність+, AntiCheat, Nocturnal Creature, Share Card Glyphs, 10s Game Blackout, Max Score 9999999, Score > 999 Shuffle, 2s Top-to-Bottom Deal Animation, Coin-after-Scratch Audio Sequencing, Wider Red Center Reveal, 7 MP3 SFX, and UI verified.');
+}
+
+async function runUnitTestE_AddressLookupAndUnsetQueue() {
+  console.log('--- Running Unit Test E: Interactive ZTOE Address Lookup, First-Launch Unselected Queue, No-Queue Houses & Emergency Outages ---');
+
+  const {
+    ZTOE_REM_OPTIONS,
+    ZTOE_FULL_NO_OUTAGE_MESSAGE,
+    parseZtoeAddressLookupTableHtml,
+    parseZtoeEmergencyOutagesTableHtml,
+    matchEmergencyOutageFromAccidentsJson,
+    checkAddressOnZtoeWebsite,
+    getKyivska37DemoEmergencyOutage,
+  } = await import('../src/services/ztoeAddressLookup');
+  const {
+    applyEmergencyOutageToSchedule,
+    getBlackoutIntervals,
+    fetchFullSchedules,
+  } = await import('../src/services/ztoeParser');
+  const {
+    DEFAULT_SETTINGS,
+    loadUserSettings,
+    saveUserSettings,
+    resetAllAppDataToFirstLaunch,
+    checkAndTriggerEmergencyOutageAlert,
+  } = await import('../src/services/alertManager');
+
+  // 1. Verify First-Launch Defaults (queue: '', language: 'system') and Reset to First Launch
+  assert.equal(DEFAULT_SETTINGS.queue, '', 'DEFAULT_SETTINGS.queue must be empty string on first launch');
+  assert.equal(DEFAULT_SETTINGS.language, 'system', 'DEFAULT_SETTINGS.language must be "system" on first launch');
+
+  saveUserSettings({
+    ...DEFAULT_SETTINGS,
+    queue: '5.2',
+    selectedAddress: 'м. Житомир, вул. Київська, буд. 77',
+    selectedAddressQuery: {
+      remId: 'zhytomyr',
+      settlementId: 'zt_city',
+      streetId: 'zt_kyivska',
+      house: '77',
+    },
+  });
+  const resetSettings = resetAllAppDataToFirstLaunch();
+  assert.equal(resetSettings.queue, '', 'resetAllAppDataToFirstLaunch must reset queue to empty string');
+  assert.equal(resetSettings.selectedAddress, undefined, 'resetAllAppDataToFirstLaunch must clear selectedAddress');
+  assert.equal(resetSettings.selectedAddressQuery, undefined, 'resetAllAppDataToFirstLaunch must clear selectedAddressQuery');
+  assert.equal(loadUserSettings().queue, '', 'loadUserSettings after resetAllAppDataToFirstLaunch must return empty queue');
+
+  // 2. Verify ZTOE Address Directory & Queue 5.2 Preservation Fix (Житомир, Київська, буд. 77 -> 5.2)
+  assert.ok(ZTOE_REM_OPTIONS.length >= 6, 'ZTOE_REM_OPTIONS must include Zhytomyr and regional РЕМ districts');
+  const kyivska77 = await checkAddressOnZtoeWebsite({
+    remId: 'zhytomyr',
+    settlementId: 'zt_city',
+    streetId: 'zt_kyivska',
+    house: '77',
+  });
+  assert.ok(kyivska77 !== null);
+  assert.equal(
+    kyivska77!.queue,
+    '5.2',
+    'м. Житомир, вул. Київська, буд. 77 must resolve to queue 5.2 (never overwritten by 3.2)'
+  );
+
+  // 3. Verify No-Queue House (м. Житомир, вул. Київська, буд. 104)
+  const kyivska104 = await checkAddressOnZtoeWebsite({
+    remId: 'zhytomyr',
+    settlementId: 'zt_city',
+    streetId: 'zt_kyivska',
+    house: '104',
+  });
+  assert.ok(kyivska104 !== null);
+  assert.equal(kyivska104!.queue, '', 'No-queue house (Київська 104) must have queue: ""');
+  assert.equal(
+    kyivska104!.statusText,
+    ZTOE_FULL_NO_OUTAGE_MESSAGE,
+    'No-queue house must return exact ZTOE status message'
+  );
+
+  // Verify HTML table parser for both numeric queue and no-queue status message
+  const sampleQueueHtml = '<table><tr><th>Будинок</th><th>Черга</th><th>Підчерга</th></tr><tr><td>15</td><td>5</td><td>2</td></tr></table>';
+  const parsedQueueRows = parseZtoeAddressLookupTableHtml(sampleQueueHtml);
+  assert.equal(parsedQueueRows.find((r) => r.house === '15')?.queue, '5.2');
+  const sampleNoQueueHtml =
+    '<table><tr><th>Будинок</th><th>Черга</th><th>Підчерга</th></tr><tr><td>104</td><td colspan="2">В цей час не вимикається, за винятком випадків аварійних відключень</td></tr></table>';
+  const parsedNoQueueRows = parseZtoeAddressLookupTableHtml(sampleNoQueueHtml);
+  assert.equal(parsedNoQueueRows.find((r) => r.house === '104')?.queue, '');
+  assert.equal(
+    parsedNoQueueRows.find((r) => r.house === '104')?.statusText,
+    'В цей час не вимикається, за винятком випадків аварійних відключень'
+  );
+
+  // 4. Verify Emergency Outage Detection (pw_accidents JSON & HTML table) and Kyivska 37 Demo Outage
+  const demoBaseDate = new Date('2026-11-09T12:00:00+02:00');
+  const demoEmergency = getKyivska37DemoEmergencyOutage(demoBaseDate);
+  assert.equal(demoEmergency.startTime, '09.11.2026 22:00');
+  assert.equal(demoEmergency.estimatedRestoreTime, '09.11.2026 23:59');
+
+  const kyivska37 = await checkAddressOnZtoeWebsite({
+    remId: 'zhytomyr',
+    settlementId: 'zt_city',
+    streetId: 'zt_kyivska',
+    house: '37',
+  });
+  assert.ok(kyivska37 !== null);
+  assert.equal(kyivska37!.queue, '2.2');
+  assert.ok(kyivska37!.emergencyOutage, 'м. Житомир, вул. Київська, буд. 37 must include active emergencyOutage');
+
+  const sampleAccidentsJson = [
+    {
+      id: 391476673,
+      city: { name: 'м. Житомир' },
+      street: { name: 'вул. Київська' },
+      buildingNames: '35, 37, 39',
+      dateEvent: '2026-04-06T19:21:00+00:00',
+      datePlanIn: '2026-04-07T20:00:00+00:00',
+      typeOff: 1,
+      switchSubReason: 0,
+    },
+  ];
+  const matchedAccident = matchEmergencyOutageFromAccidentsJson(sampleAccidentsJson, {
+    remId: 'zhytomyr',
+    settlementId: 'zt_city',
+    streetId: 'zt_kyivska',
+    house: '37',
+  });
+  assert.ok(matchedAccident !== null, 'matchEmergencyOutageFromAccidentsJson must match pw_accidents JSON');
+  assert.equal(matchedAccident?.startTime, '06.04.2026 19:21');
+  assert.equal(matchedAccident?.estimatedRestoreTime, '07.04.2026 20:00');
+
+  const sampleEmergencyTableHtml = `
+    <table>
+      <tr><th>РЕМ</th><th>Населений пункт</th><th>Вулиця</th><th>Будинок</th><th>Тип відключення</th><th>Час відключення</th><th>Очікуваний час ввімкнення</th></tr>
+      <tr><td>Житомирський РЕМ</td><td>м. Житомир</td><td>вул. Київська</td><td>37</td><td>Аварійне відключення</td><td>06.04.2026 19:21</td><td>07.04.2026 20:00</td></tr>
+    </table>
+  `;
+  const matchedTableEmergencyRows = parseZtoeEmergencyOutagesTableHtml(sampleEmergencyTableHtml);
+  assert.equal(matchedTableEmergencyRows.length, 1, 'parseZtoeEmergencyOutagesTableHtml must match emergency HTML table');
+  assert.equal(matchedTableEmergencyRows[0].startTime, '06.04.2026 19:21');
+  assert.equal(matchedTableEmergencyRows[0].estimatedRestoreTime, '07.04.2026 20:00');
+
+  // 5. Verify Cross-Day Emergency Overlay on Today (06.04.2026 -> 19:00-24:00) and Tomorrow (07.04.2026 -> 00:00-20:00)
+  const crossDayEmergency = {
+    id: 'pw_accident_cross_day',
+    outageType: 'Аварійне відключення',
+    startTime: '06.04.2026 19:21',
+    estimatedRestoreTime: '07.04.2026 20:00',
+  };
+  const base48PowerOn = Array.from({ length: 48 }, (_, idx) => {
+    const sh = Math.floor(idx / 2);
+    const sm = idx % 2 === 0 ? 0 : 30;
+    const eh = Math.floor((idx + 1) / 2);
+    const em = (idx + 1) % 2 === 0 ? 0 : 30;
+    const startTimeStr = `${String(sh).padStart(2, '0')}:${String(sm).padStart(2, '0')}`;
+    const endTimeStr = `${String(eh).padStart(2, '0')}:${String(em).padStart(2, '0')}`;
+    return {
+      id: `2026-04-06_${idx}`,
+      startHour: sh,
+      endHour: eh,
+      startMinute: sm,
+      endMinute: em,
+      startTimeStr,
+      endTimeStr,
+      status: 'POWER_ON' as const,
+      isEmergency: false,
+    };
+  });
+
+  const todayWithEmergency = applyEmergencyOutageToSchedule(
+    {
+      dateStr: '2026-04-06',
+      dayLabel: 'Сьогодні',
+      queue: '1.1',
+      city: 'Житомир (ZTOE)',
+      slots: base48PowerOn,
+      lastUpdated: '19:25',
+      sourceUrl: 'https://www.ztoe.com.ua/unhooking-search.php',
+    },
+    crossDayEmergency
+  );
+  assert.ok(todayWithEmergency !== null);
+  const todayEmergencyIntervals = getBlackoutIntervals(todayWithEmergency!.slots);
+  assert.equal(todayEmergencyIntervals.length, 1);
+  assert.equal(todayEmergencyIntervals[0].start, '19:00', 'Day 1 emergency outage starts at containing half-hour slot 19:00');
+  assert.equal(todayEmergencyIntervals[0].end, '24:00', 'Day 1 emergency outage extends to 24:00');
+  assert.equal(todayEmergencyIntervals[0].isEmergency, true, 'Emergency interval must have isEmergency: true');
+
+  const tomorrowWithEmergency = applyEmergencyOutageToSchedule(
+    {
+      dateStr: '2026-04-07',
+      dayLabel: 'Завтра',
+      queue: '1.1',
+      city: 'Житомир (ZTOE)',
+      slots: base48PowerOn,
+      lastUpdated: '19:25',
+      sourceUrl: 'https://www.ztoe.com.ua/unhooking-search.php',
+    },
+    crossDayEmergency
+  );
+  assert.ok(tomorrowWithEmergency !== null);
+  const tomorrowEmergencyIntervals = getBlackoutIntervals(tomorrowWithEmergency!.slots);
+  assert.equal(tomorrowEmergencyIntervals.length, 1);
+  assert.equal(tomorrowEmergencyIntervals[0].start, '00:00', 'Day 2 emergency outage starts at 00:00');
+  assert.equal(tomorrowEmergencyIntervals[0].end, '20:00', 'Day 2 emergency outage ends at 20:00');
+  assert.equal(tomorrowEmergencyIntervals[0].isEmergency, true, 'Day 2 emergency interval must have isEmergency: true');
+
+  // 6. Verify Emergency State-Transition Notifications (Detected & Restored)
+  resetAllAppDataToFirstLaunch();
+  const testNotifSettings = {
+    ...DEFAULT_SETTINGS,
+    queue: '2.2',
+    selectedAddress: 'м. Житомир, вул. Київська, буд. 37',
+    notificationsEnabled: true,
+    soundEnabled: false,
+    vibrationEnabled: false,
+  };
+  const startAlert = checkAndTriggerEmergencyOutageAlert(null, crossDayEmergency, testNotifSettings, 'uk');
+  assert.ok(startAlert !== null, 'Must fire emergency-detected notification');
+  assert.equal(startAlert?.slotId, `emerg_detected_${crossDayEmergency.id}`);
+
+  const restoreAlert = checkAndTriggerEmergencyOutageAlert(crossDayEmergency, null, testNotifSettings, 'uk');
+  assert.ok(restoreAlert !== null, 'Must fire emergency-restored notification when emergency outage clears');
+  assert.equal(restoreAlert?.slotId, `emerg_restored_${crossDayEmergency.id}`);
+
+  // 7. Verify Unselected Queue returns empty slots without network error in fetchFullSchedules
+  const unselectedRes = await fetchFullSchedules('https://www.ztoe.com.ua/unhooking-search.php', '');
+  assert.equal(unselectedRes.status, 'NO_QUEUES_FOUND');
+  assert.equal(unselectedRes.todaySchedule.slots.length, 0);
+  assert.equal(unselectedRes.todaySchedule.isUnclear, true);
+
+  // 8. Verify Android & Web Source Parity for ANDROID_UPDATE_SPEC.md
+  const mainViewTsx = fs.readFileSync(path.join(ROOT_DIR, 'src/components/MainView.tsx'), 'utf-8');
+  const settingsViewTsx = fs.readFileSync(path.join(ROOT_DIR, 'src/components/SettingsView.tsx'), 'utf-8');
+  const phoneSimTsx = fs.readFileSync(path.join(ROOT_DIR, 'src/components/PhoneSimulator.tsx'), 'utf-8');
+  const widgetSimTsx = fs.readFileSync(path.join(ROOT_DIR, 'src/components/WidgetSimulator.tsx'), 'utf-8');
+  const appTsx = fs.readFileSync(path.join(ROOT_DIR, 'src/App.tsx'), 'utf-8');
+  const mainScreenKt = fs.readFileSync(
+    path.join(ROOT_DIR, 'android/app/src/main/java/ua/blackout/prewarning/ui/screens/MainScreen.kt'),
+    'utf-8'
+  );
+  const settingsScreenKt = fs.readFileSync(
+    path.join(ROOT_DIR, 'android/app/src/main/java/ua/blackout/prewarning/ui/screens/SettingsScreen.kt'),
+    'utf-8'
+  );
+  const navScreenKt = fs.readFileSync(
+    path.join(ROOT_DIR, 'android/app/src/main/java/ua/blackout/prewarning/ui/screens/BlackoutAppNavigation.kt'),
+    'utf-8'
+  );
+  const glanceWidgetKt = fs.readFileSync(
+    path.join(ROOT_DIR, 'android/app/src/main/java/ua/blackout/prewarning/widget/BlackoutGlanceWidget.kt'),
+    'utf-8'
+  );
+  const ztoeAddressLookupKt = fs.readFileSync(
+    path.join(ROOT_DIR, 'android/app/src/main/java/ua/blackout/prewarning/data/parser/ZtoeAddressLookup.kt'),
+    'utf-8'
+  );
+
+  assert.ok(
+    mainViewTsx.includes('unselected-queue-header-btn') &&
+      mainViewTsx.includes('first-start-language-switch') &&
+      mainViewTsx.includes('formatAddressAfterCity') &&
+      mainViewTsx.includes('Години відключень на завтра:') &&
+      mainViewTsx.includes('Години відключень на сьогодні:') &&
+      mainViewTsx.includes('main-emergency-outage-banner') &&
+      mainScreenKt.includes('formatAddressAfterCity') &&
+      mainScreenKt.includes('AppStrings.blackoutHoursForTomorrowHeader(lang)') &&
+      mainScreenKt.includes('AppStrings.blackoutHoursForDayHeader(lang)') &&
+      mainScreenKt.includes('AppStrings.selectQueueAction(lang)') &&
+      mainScreenKt.includes('AppStrings.emergencyOutageTitle(lang)'),
+    'MainView.tsx and MainScreen.kt must include First-Launch Select Queue button, language switch, formatted address, Emergency Outage banner, and Today/Tomorrow blackout hours headers'
+  );
+
+  assert.ok(
+    settingsViewTsx.includes('ztoe-address-lookup-section') &&
+      settingsViewTsx.includes('border-2 border-white/25') &&
+      settingsViewTsx.includes('Пошук вручну') &&
+      settingsScreenKt.includes('DialogProperties(usePlatformDefaultWidth = false)') &&
+      settingsScreenKt.includes('border(2.dp, Color.White.copy(alpha = 0.25f)') &&
+      settingsScreenKt.includes('AppStrings.queueHelpManualSearchTitle(lang)') &&
+      ztoeAddressLookupKt.includes('checkAddressOnZtoeWebsite') &&
+      ztoeAddressLookupKt.includes('getKyivska37DemoEmergencyOutage'),
+    'SettingsView.tsx, SettingsScreen.kt, and ZtoeAddressLookup.kt must implement the full-screen "?" Address Lookup modal with 2px/2dp border and "Пошук вручну" heading'
+  );
+
+  assert.ok(
+    phoneSimTsx.includes('zt-app-first-launch-reset') &&
+      phoneSimTsx.includes('opacity-15 brightness-50 pointer-events-none select-none') &&
+      navScreenKt.includes('isQueueUnselected') &&
+      widgetSimTsx.includes('applyEmergencyOutageToSchedule') &&
+      glanceWidgetKt.includes('applyEmergencyOutageToSlots') &&
+      appTsx.includes('emulator-reset-all-app-data-first-launch') &&
+      appTsx.includes('emulator-simulate-emergency-outage-kyivska-37'),
+    'PhoneSimulator, BlackoutAppNavigation, Widgets, and App.tsx must support unselected queue dimming, emergency widget overlays, and emulator test buttons'
+  );
+
+  resetAllAppDataToFirstLaunch();
+  console.log('Unit Test E PASSED: Interactive ZTOE Address Lookup, First-Launch Unselected Queue, No-Queue Houses & Emergency Outages verified.');
 }
 
 async function main() {
   await runUnitTestA();
   runUnitTestB();
   await runUnitTestC_ZhytomyrRoulette();
+  await runUnitTestE_AddressLookupAndUnsetQueue();
 }
 
 main().catch((err) => {

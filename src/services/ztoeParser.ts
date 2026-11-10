@@ -1,9 +1,9 @@
 /**
  * ZTOE (Zhytomyroblenergo) Schedule Parser & Schedule Engine
  * Supports live scraping of https://www.ztoe.com.ua/unhooking-search.php
- * with 48 half-hour slot resolution matching Android ZtoeParser.kt 100%.
+ * with 48 half-hour slot resolution matching iOS ZtoeParser.swift 100%.
  */
-import { BlackoutSlot, DaySchedule, QueueOption, SlotStatus } from '../types';
+import { BlackoutSlot, DaySchedule, EmergencyOutageInfo, QueueOption, SlotStatus } from '../types';
 import validUrlsList from '../../valid-urls.json';
 
 export const QUEUES: QueueOption[] = [
@@ -420,6 +420,23 @@ export async function fetchFullSchedules(
   const tomorrowLabel = `Завтра (${tomorrowDate.toLocaleDateString('uk-UA', { day: 'numeric', month: 'long' })})`;
   const nowTimeStr = new Date().toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit', hour12: false });
 
+  if (!queue || queue.trim() === '') {
+    return {
+      todaySchedule: {
+        dateStr: todayParts.dateStr,
+        dayLabel: todayLabel,
+        queue: '',
+        city: 'Житомир (ZTOE)',
+        slots: [],
+        lastUpdated: nowTimeStr,
+        sourceUrl: url,
+        isUnclear: true
+      },
+      tomorrowSchedule: null,
+      status: 'NO_QUEUES_FOUND'
+    };
+  }
+
   if (typeof navigator !== 'undefined' && navigator.onLine === false) {
     return {
       todaySchedule: {
@@ -546,6 +563,7 @@ export interface BlackoutInterval {
   startMinute?: number;
   endMinute?: number;
   durationHours: number;
+  isEmergency?: boolean;
 }
 
 /**
@@ -559,12 +577,18 @@ export function getBlackoutIntervals(slots: BlackoutSlot[]): BlackoutInterval[] 
   const minutesPerSlot = Math.floor(1440 / totalSlots);
   let inBlock = false;
   let startIdx = 0;
+  let blockHasEmergency = false;
 
   for (let i = 0; i < totalSlots; i++) {
     const isOff = slots[i]?.status === 'POWER_OFF';
     if (isOff && !inBlock) {
       inBlock = true;
       startIdx = i;
+      blockHasEmergency = Boolean(slots[i]?.isEmergency);
+    } else if (isOff && inBlock) {
+      if (slots[i]?.isEmergency) {
+        blockHasEmergency = true;
+      }
     } else if (!isOff && inBlock) {
       inBlock = false;
       const startMin = startIdx * minutesPerSlot;
@@ -577,7 +601,7 @@ export function getBlackoutIntervals(slots: BlackoutSlot[]): BlackoutInterval[] 
       const endStr = endMin >= 1440 ? '24:00' : `${String(eH).padStart(2, '0')}:${String(eM).padStart(2, '0')}`;
       const durationHours = (i - startIdx) * (minutesPerSlot / 60);
 
-      intervals.push({
+      const intervalObj: BlackoutInterval = {
         start: startStr,
         end: endStr,
         startHour: sH,
@@ -585,7 +609,12 @@ export function getBlackoutIntervals(slots: BlackoutSlot[]): BlackoutInterval[] 
         startMinute: sM,
         endMinute: eM,
         durationHours
-      });
+      };
+      if (blockHasEmergency) {
+        intervalObj.isEmergency = true;
+      }
+      intervals.push(intervalObj);
+      blockHasEmergency = false;
     }
   }
 
@@ -596,7 +625,7 @@ export function getBlackoutIntervals(slots: BlackoutSlot[]): BlackoutInterval[] 
     const startStr = `${String(sH).padStart(2, '0')}:${String(sM).padStart(2, '0')}`;
     const durationHours = (totalSlots - startIdx) * (minutesPerSlot / 60);
 
-    intervals.push({
+    const intervalObj: BlackoutInterval = {
       start: startStr,
       end: '24:00',
       startHour: sH,
@@ -604,10 +633,199 @@ export function getBlackoutIntervals(slots: BlackoutSlot[]): BlackoutInterval[] 
       startMinute: sM,
       endMinute: 0,
       durationHours
-    });
+    };
+    if (blockHasEmergency) {
+      intervalObj.isEmergency = true;
+    }
+    intervals.push(intervalObj);
   }
 
   return intervals;
+}
+
+export interface ParsedEmergencyDateTime {
+  dateStr?: string; // "YYYY-MM-DD"
+  totalMinutes: number; // 0..1440
+}
+
+export function parseEmergencyDateTime(raw: string | undefined | null): ParsedEmergencyDateTime | null {
+  if (!raw || typeof raw !== 'string') return null;
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+
+  let dateStr: string | undefined;
+  const dmyMatch = trimmed.match(/(\d{2})\.(\d{2})\.(\d{4})/);
+  if (dmyMatch) {
+    const [, dd, mm, yyyy] = dmyMatch;
+    dateStr = `${yyyy}-${mm}-${dd}`;
+  } else {
+    const ymdMatch = trimmed.match(/(\d{4})-(\d{2})-(\d{2})/);
+    if (ymdMatch) {
+      const [, yyyy, mm, dd] = ymdMatch;
+      dateStr = `${yyyy}-${mm}-${dd}`;
+    }
+  }
+
+  const timeMatch = trimmed.match(/(\d{1,2}):(\d{2})(?::\d{2})?(?!\.\d)/);
+  if (!timeMatch) return null;
+  const hours = parseInt(timeMatch[1], 10);
+  const minutes = parseInt(timeMatch[2], 10);
+  if (isNaN(hours) || isNaN(minutes) || hours < 0 || hours > 24 || minutes < 0 || minutes > 59) {
+    return null;
+  }
+  const totalMinutes = Math.min(1440, Math.max(0, hours * 60 + minutes));
+  return { dateStr, totalMinutes };
+}
+
+export function getEmergencyOverlapMinutesForDay(
+  emergencyOutage: EmergencyOutageInfo | null | undefined,
+  targetDateStr: string,
+  isTomorrow: boolean = false
+): { startMin: number; endMin: number } | null {
+  if (!emergencyOutage) return null;
+  const startParsed = parseEmergencyDateTime(emergencyOutage.startTime);
+  const endParsed = parseEmergencyDateTime(emergencyOutage.estimatedRestoreTime);
+  if (!startParsed || !endParsed) return null;
+
+  let overlap: { startMin: number; endMin: number } | null = null;
+
+  if (startParsed.dateStr && endParsed.dateStr) {
+    if (startParsed.dateStr === endParsed.dateStr) {
+      if (isTomorrow) {
+        if (targetDateStr === startParsed.dateStr) {
+          overlap = { startMin: startParsed.totalMinutes, endMin: endParsed.totalMinutes };
+        }
+      } else {
+        if (targetDateStr === startParsed.dateStr || startParsed.dateStr <= targetDateStr) {
+          overlap = { startMin: startParsed.totalMinutes, endMin: endParsed.totalMinutes };
+        }
+      }
+    } else if (startParsed.dateStr < endParsed.dateStr) {
+      if (targetDateStr === startParsed.dateStr) {
+        overlap = { startMin: startParsed.totalMinutes, endMin: 1440 };
+      } else if (targetDateStr === endParsed.dateStr) {
+        overlap = { startMin: 0, endMin: endParsed.totalMinutes };
+      } else if (targetDateStr > startParsed.dateStr && targetDateStr < endParsed.dateStr) {
+        overlap = { startMin: 0, endMin: 1440 };
+      } else if (!isTomorrow && targetDateStr < endParsed.dateStr) {
+        overlap = { startMin: startParsed.totalMinutes, endMin: 1440 };
+      } else if (isTomorrow && targetDateStr > startParsed.dateStr) {
+        overlap = { startMin: 0, endMin: endParsed.totalMinutes };
+      }
+    }
+  } else {
+    if (startParsed.totalMinutes < endParsed.totalMinutes) {
+      if (!isTomorrow) {
+        overlap = { startMin: startParsed.totalMinutes, endMin: endParsed.totalMinutes };
+      }
+    } else {
+      if (!isTomorrow) {
+        overlap = { startMin: startParsed.totalMinutes, endMin: 1440 };
+      } else {
+        overlap = { startMin: 0, endMin: endParsed.totalMinutes };
+      }
+    }
+  }
+
+  if (!overlap || overlap.endMin <= overlap.startMin) {
+    return null;
+  }
+  return overlap;
+}
+
+export function createEmptyDaySlots(dateStr: string, queueId: string = 'emergency'): BlackoutSlot[] {
+  const slots: BlackoutSlot[] = [];
+  for (let index = 0; index < 48; index++) {
+    const startTotalMin = index * 30;
+    const endTotalMin = (index + 1) * 30;
+    const startH = Math.floor(startTotalMin / 60);
+    const startM = startTotalMin % 60;
+    const endH = Math.floor(endTotalMin / 60);
+    const endM = endTotalMin % 60;
+    const startStr = `${String(startH).padStart(2, '0')}:${String(startM).padStart(2, '0')}`;
+    const endStr = endH >= 24 ? '24:00' : `${String(endH).padStart(2, '0')}:${String(endM).padStart(2, '0')}`;
+    slots.push({
+      id: `${dateStr}_${startStr}_Q${queueId || 'emergency'}`,
+      startHour: startH,
+      endHour: endH,
+      startMinute: startM,
+      endMinute: endM,
+      startTimeStr: startStr,
+      endTimeStr: endStr,
+      status: 'POWER_ON',
+    });
+  }
+  return slots;
+}
+
+/**
+ * Overlays an active Emergency Outage ("Аварійне відключення") on top of a DaySchedule
+ * (Today or Tomorrow) so emergency outages take priority over and merge with ZTOE scheduled outages.
+ */
+export function applyEmergencyOutageToSchedule(
+  schedule: DaySchedule | null,
+  emergencyOutage: EmergencyOutageInfo | null | undefined,
+  isTomorrow: boolean = false
+): DaySchedule | null {
+  if (!emergencyOutage) return schedule;
+
+  if (!schedule) {
+    if (!isTomorrow) return null;
+    const tomorrowDate = new Date(Date.now() + 86400000);
+    const tomorrowParts = getKyivDateParts(tomorrowDate);
+    const overlap = getEmergencyOverlapMinutesForDay(emergencyOutage, tomorrowParts.dateStr, true);
+    if (!overlap) return null;
+    const tomorrowLabel = `Завтра (${tomorrowDate.toLocaleDateString('uk-UA', { day: 'numeric', month: 'long' })})`;
+    const nowTimeStr = new Date().toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit', hour12: false });
+    const baseSlots = createEmptyDaySlots(tomorrowParts.dateStr, 'emergency');
+    const mergedSlots = baseSlots.map((slot, index) => {
+      const slotStartMin = index * 30;
+      const slotEndMin = (index + 1) * 30;
+      const isEmergencyOff = slotStartMin < overlap.endMin && slotEndMin > overlap.startMin;
+      return isEmergencyOff ? { ...slot, status: 'POWER_OFF' as SlotStatus, isEmergency: true } : slot;
+    });
+    return {
+      dateStr: tomorrowParts.dateStr,
+      dayLabel: tomorrowLabel,
+      queue: '',
+      city: 'Житомир (ZTOE)',
+      slots: mergedSlots,
+      lastUpdated: nowTimeStr,
+      sourceUrl: DEFAULT_ZTOE_URL,
+      isUnclear: false,
+    };
+  }
+
+  const overlap = getEmergencyOverlapMinutesForDay(emergencyOutage, schedule.dateStr, isTomorrow);
+  if (!overlap) return schedule;
+
+  const baseSlots =
+    schedule.slots && schedule.slots.length > 0
+      ? schedule.slots
+      : createEmptyDaySlots(schedule.dateStr, schedule.queue || 'emergency');
+
+  const totalSlots = baseSlots.length;
+  const minutesPerSlot = Math.floor(1440 / totalSlots);
+
+  const mergedSlots = baseSlots.map((slot, index) => {
+    const slotStartMin = index * minutesPerSlot;
+    const slotEndMin = (index + 1) * minutesPerSlot;
+    const isEmergencyOff = slotStartMin < overlap.endMin && slotEndMin > overlap.startMin;
+    if (isEmergencyOff) {
+      return {
+        ...slot,
+        status: 'POWER_OFF' as SlotStatus,
+        isEmergency: true,
+      };
+    }
+    return slot;
+  });
+
+  return {
+    ...schedule,
+    slots: mergedSlots,
+    isUnclear: false,
+  };
 }
 
 export interface OutageCountdownInfo {
@@ -669,12 +887,14 @@ export function calculateOutageCountdown(
     });
 
     let endMinuteOfDay = activeInterval ? parseIntervalMinutes(activeInterval).endMin : (currentSlotIdx + 1) * minutesPerSlot;
+    let activeEndStr = activeInterval ? activeInterval.end : currentSlot.endTimeStr;
     if (endMinuteOfDay >= 1440 && tomorrowSchedule?.slots?.length) {
       const tomorrowIntervals = getBlackoutIntervals(tomorrowSchedule.slots);
       if (tomorrowIntervals.length > 0) {
         const firstTom = parseIntervalMinutes(tomorrowIntervals[0]);
         if (firstTom.startMin === 0) {
           endMinuteOfDay = 1440 + firstTom.endMin;
+          activeEndStr = tomorrowIntervals[0].end;
         }
       }
     }
@@ -691,7 +911,7 @@ export function calculateOutageCountdown(
       closestBlackoutSlot: currentSlot,
       minutesUntilNextBlackout: 0,
       formattedTimeLeft: `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`,
-      slotDescription: activeInterval ? `${activeInterval.start} – ${activeInterval.end}` : `${currentSlot.startTimeStr} – ${currentSlot.endTimeStr}`,
+      slotDescription: activeInterval ? `${activeInterval.start} – ${activeEndStr}` : `${currentSlot.startTimeStr} – ${activeEndStr}`,
       intervals
     };
   }
@@ -702,7 +922,17 @@ export function calculateOutageCountdown(
   });
 
   if (nextInterval) {
-    const { startMin } = parseIntervalMinutes(nextInterval);
+    const { startMin, endMin } = parseIntervalMinutes(nextInterval);
+    let nextEndStr = nextInterval.end;
+    if (endMin >= 1440 && tomorrowSchedule?.slots?.length) {
+      const tomorrowIntervals = getBlackoutIntervals(tomorrowSchedule.slots);
+      if (tomorrowIntervals.length > 0) {
+        const firstTom = parseIntervalMinutes(tomorrowIntervals[0]);
+        if (firstTom.startMin === 0) {
+          nextEndStr = tomorrowIntervals[0].end;
+        }
+      }
+    }
     const diffMin = startMin - currentMinuteOfDay;
     const secondsRemaining = Math.max(0, diffMin * 60 - currentSec);
     const h = Math.floor(secondsRemaining / 3600);
@@ -718,7 +948,7 @@ export function calculateOutageCountdown(
       closestBlackoutSlot: closestSlot,
       minutesUntilNextBlackout: diffMin,
       formattedTimeLeft: `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`,
-      slotDescription: `${nextInterval.start} – ${nextInterval.end}`,
+      slotDescription: `${nextInterval.start} – ${nextEndStr}`,
       intervals
     };
   }
@@ -816,7 +1046,7 @@ export async function verifyZtoeSiteAndData(
 
   try {
     const html = await fetchHtmlDecoded(trimmed, 4500);
-    const parsed = parseZtoeHtmlFull(html, queue, new Date());
+    const parsed = parseZtoeHtmlFull(html, queue || '1.1', new Date());
 
     if (parsed.hasTodayTable && parsed.todaySlots) {
       return {

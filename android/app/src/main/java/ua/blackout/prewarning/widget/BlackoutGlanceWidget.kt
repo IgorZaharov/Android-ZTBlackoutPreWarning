@@ -54,7 +54,9 @@ import ua.blackout.prewarning.data.repository.ScheduleRepository
 import ua.blackout.prewarning.data.repository.SettingsRepository
 import ua.blackout.prewarning.notification.AlarmScheduler
 import ua.blackout.prewarning.ui.AppStrings
+import java.time.LocalDate
 import java.time.LocalTime
+import java.time.format.DateTimeFormatter
 import ua.blackout.prewarning.data.KYIV_ZONE
 
 class BlackoutGlanceWidget : GlanceAppWidget() {
@@ -92,6 +94,24 @@ class BlackoutGlanceWidget : GlanceAppWidget() {
             return rawCountdown
         }
 
+        private fun buildLightNoOutageSlots(): List<BlackoutSlot> {
+            return (0 until 48).map { idx ->
+                val sh = idx / 2
+                val sm = if (idx % 2 == 0) "00" else "30"
+                val eh = (idx + 1) / 2
+                val em = if ((idx + 1) % 2 == 0) "00" else "30"
+                val startStr = "${sh.toString().padStart(2, '0')}:$sm"
+                val endStr = "${eh.toString().padStart(2, '0')}:$em"
+                BlackoutSlot(
+                    hour = sh,
+                    startStr = startStr,
+                    endStr = endStr,
+                    status = SlotStatus.POWER_ON,
+                    label = "$startStr - $endStr"
+                )
+            }
+        }
+
         @Volatile
         private var cachedChartBitmapKey: String? = null
         @Volatile
@@ -116,9 +136,49 @@ class BlackoutGlanceWidget : GlanceAppWidget() {
             val settings = SettingsRepository(appCtx).getSettings()
             val resolvedLang = AppStrings.resolveLang(settings.language)
             val scheduleRepo = ScheduleRepository(appCtx)
-            val info = scheduleRepo.getCurrentStatusAndCountdown(settings.queue)
+
+            val todayDateIso = LocalDate.now(KYIV_ZONE).format(DateTimeFormatter.ISO_LOCAL_DATE)
+            val tomorrowDateIso = LocalDate.now(KYIV_ZONE).plusDays(1).format(DateTimeFormatter.ISO_LOCAL_DATE)
+            val isNoQueueHouse = !settings.customQueueStatusText.isNullOrBlank()
+            val baseTodaySlots = when {
+                isNoQueueHouse && settings.activeEmergencyOutage == null -> buildLightNoOutageSlots()
+                settings.queue.isBlank() && isNoQueueHouse -> buildLightNoOutageSlots()
+                else -> scheduleRepo.getTodaySlots(settings.queue)
+            }
+            val effectiveTodaySlots = ScheduleRepository.applyEmergencyOutageToSlots(
+                baseTodaySlots,
+                todayDateIso,
+                settings.activeEmergencyOutage
+            )
+            val rawTomorrowSlots = scheduleRepo.getTomorrowSlots(settings.queue)
+            val effectiveTomorrowSlots = rawTomorrowSlots?.let {
+                ScheduleRepository.applyEmergencyOutageToSlots(it, tomorrowDateIso, settings.activeEmergencyOutage)
+            }
+
+            val info = when {
+                settings.queue.isBlank() && !isNoQueueHouse && settings.activeEmergencyOutage == null ->
+                    ScheduleRepository.StatusAndCountdown(false, "--:--:--", "--:-- - --:--", true)
+                isNoQueueHouse && settings.activeEmergencyOutage == null ->
+                    ScheduleRepository.StatusAndCountdown(false, "--:--:--", "Відключень немає", false)
+                else ->
+                    ScheduleRepository.calculateStatusAndCountdown(
+                        slots = effectiveTodaySlots,
+                        tomorrowSlots = effectiveTomorrowSlots,
+                        now = LocalTime.now(KYIV_ZONE)
+                    )
+            }
             val formattedCountdown = formatWidgetCountdown(info.countdownText, resolvedLang)
-            val nextBlackoutText = scheduleRepo.getNextUpcomingIntervalText(settings.queue)
+            val nextBlackoutText = if (isNoQueueHouse && settings.activeEmergencyOutage == null) {
+                "Сьогодні більше немає"
+            } else {
+                val nowMin = LocalTime.now(KYIV_ZONE).let { it.hour * 60 + it.minute }
+                val upcoming = scheduleRepo.getDetailedIntervals(effectiveTodaySlots).firstOrNull { interval ->
+                    val p = interval.startStr.split(":")
+                    val startMin = (p.getOrNull(0)?.toIntOrNull() ?: 0) * 60 + (p.getOrNull(1)?.toIntOrNull() ?: 0)
+                    startMin > nowMin
+                }
+                if (upcoming != null) "${upcoming.startStr} – ${upcoming.endStr}" else "Сьогодні більше немає"
+            }
             val nowMs = System.currentTimeMillis()
             for (gId in glanceIds) {
                 updateAppWidgetState(appCtx, PreferencesGlanceStateDefinition, gId) { prefs ->
@@ -341,7 +401,7 @@ class BlackoutGlanceWidget : GlanceAppWidget() {
         val initialSettings = settingsRepo.getSettings()
 
         // Immediately fetch live schedule on first widget placement if cache is missing for selected queue
-        if (!scheduleRepo.hasValidTodayCache(initialSettings.queue)) {
+        if (initialSettings.queue.isNotBlank() && !scheduleRepo.hasValidTodayCache(initialSettings.queue)) {
             withContext(Dispatchers.IO) {
                 try {
                     val res = ZtoeParser.fetchFullSchedule(initialSettings.cityUrl, initialSettings.queue, appContext)
@@ -363,22 +423,67 @@ class BlackoutGlanceWidget : GlanceAppWidget() {
             val resolvedLang = AppStrings.resolveLang(prefs[KEY_LANGUAGE] ?: currentSettings.language)
             val notificationsEnabled = prefs[KEY_NOTIFICATIONS_ENABLED] ?: currentSettings.notificationsEnabled
             val activeQueue = currentSettings.queue
+            val isNoQueueHouse = !currentSettings.customQueueStatusText.isNullOrBlank()
             val refreshTick = prefs[KEY_REFRESH_TICK] ?: 0L
 
-            // Always use Today's schedule for the widget
-            val slots = scheduleRepo.getTodaySlots(activeQueue)
-            val liveInfo = scheduleRepo.getCurrentStatusAndCountdown(activeQueue)
+            val todayDateIso = LocalDate.now(KYIV_ZONE).format(DateTimeFormatter.ISO_LOCAL_DATE)
+            val tomorrowDateIso = LocalDate.now(KYIV_ZONE).plusDays(1).format(DateTimeFormatter.ISO_LOCAL_DATE)
+
+            // Always use Today's schedule for the widget, with active emergency outage overlaid
+            val baseTodaySlots = when {
+                isNoQueueHouse && currentSettings.activeEmergencyOutage == null -> buildLightNoOutageSlots()
+                activeQueue.isBlank() && isNoQueueHouse -> buildLightNoOutageSlots()
+                else -> scheduleRepo.getTodaySlots(activeQueue)
+            }
+            val slots = ScheduleRepository.applyEmergencyOutageToSlots(
+                baseTodaySlots,
+                todayDateIso,
+                currentSettings.activeEmergencyOutage
+            )
+            val rawTomorrowSlots = scheduleRepo.getTomorrowSlots(activeQueue)
+            val effectiveTomorrowSlots = rawTomorrowSlots?.let {
+                ScheduleRepository.applyEmergencyOutageToSlots(it, tomorrowDateIso, currentSettings.activeEmergencyOutage)
+            }
+            val liveInfo = when {
+                activeQueue.isBlank() && !isNoQueueHouse && currentSettings.activeEmergencyOutage == null ->
+                    ScheduleRepository.StatusAndCountdown(false, "--:--:--", "--:-- - --:--", true)
+                isNoQueueHouse && currentSettings.activeEmergencyOutage == null ->
+                    ScheduleRepository.StatusAndCountdown(false, "--:--:--", "Відключень немає", false)
+                else ->
+                    ScheduleRepository.calculateStatusAndCountdown(
+                        slots = slots,
+                        tomorrowSlots = effectiveTomorrowSlots,
+                        now = LocalTime.now(KYIV_ZONE)
+                    )
+            }
+
             val isUnclear = slots.isEmpty() || (if (refreshTick > 0L) (prefs[KEY_IS_UNCLEAR] ?: liveInfo.isUnclear) else liveInfo.isUnclear)
             val isBlackoutNow = !isUnclear && (if (refreshTick > 0L) (prefs[KEY_IS_BLACKOUT_NOW] ?: liveInfo.isBlackoutNow) else liveInfo.isBlackoutNow)
             val rawCountdownText = if (isUnclear) "--:--:--" else (prefs[KEY_COUNTDOWN_TEXT]?.takeIf { it.isNotBlank() && refreshTick > 0L } ?: liveInfo.countdownText)
             val countdownText = formatWidgetCountdown(rawCountdownText, resolvedLang)
             val nextSlotTime = if (isUnclear) "--:-- - --:--" else (prefs[KEY_NEXT_SLOT_TIME]?.takeIf { it.isNotBlank() && refreshTick > 0L } ?: liveInfo.nextSlotTime)
-            val nextBlackoutText = if (isUnclear) "--:-- - --:--" else scheduleRepo.getNextUpcomingIntervalText(activeQueue).ifBlank {
-                prefs[KEY_NEXT_BLACKOUT_TEXT] ?: "Сьогодні більше немає"
+            val nextBlackoutText = if (isUnclear) {
+                "--:-- - --:--"
+            } else if (isNoQueueHouse && currentSettings.activeEmergencyOutage == null) {
+                "Сьогодні більше немає"
+            } else {
+                val nowMin = LocalTime.now(KYIV_ZONE).let { it.hour * 60 + it.minute }
+                val upcoming = scheduleRepo.getDetailedIntervals(slots).firstOrNull { interval ->
+                    val p = interval.startStr.split(":")
+                    val startMin = (p.getOrNull(0)?.toIntOrNull() ?: 0) * 60 + (p.getOrNull(1)?.toIntOrNull() ?: 0)
+                    startMin > nowMin
+                }
+                if (upcoming != null) "${upcoming.startStr} – ${upcoming.endStr}" else (prefs[KEY_NEXT_BLACKOUT_TEXT] ?: "Сьогодні більше немає")
             }
 
             val size = LocalSize.current
             val isBigWidget = size.height >= 115.dp || size.width >= 230.dp
+
+            val queueHeaderText = when {
+                isNoQueueHouse -> if (resolvedLang == "uk") "Черга відсутня" else "No queue"
+                activeQueue.isBlank() -> if (resolvedLang == "uk") "Черга —" else "Queue —"
+                else -> "Черга $activeQueue"
+            }
 
             val statusText = when {
                 isUnclear -> AppStrings.powerUnclear(resolvedLang)
@@ -419,7 +524,7 @@ class BlackoutGlanceWidget : GlanceAppWidget() {
                                         .clickable(actionStartActivity<MainActivity>())
                                 ) {
                                     Text(
-                                        text = "Черга $activeQueue",
+                                        text = queueHeaderText,
                                         style = TextStyle(
                                             fontWeight = FontWeight.Bold,
                                             fontSize = 16.sp,
@@ -574,7 +679,7 @@ class BlackoutGlanceWidget : GlanceAppWidget() {
                                 verticalAlignment = Alignment.Vertical.CenterVertically
                             ) {
                                 Text(
-                                    text = "Черга $activeQueue",
+                                    text = queueHeaderText,
                                     style = TextStyle(
                                         fontWeight = FontWeight.Bold,
                                         fontSize = 14.sp,
@@ -702,11 +807,13 @@ class RefreshWidgetActionCallback : ActionCallback {
 
         withContext(Dispatchers.IO) {
             try {
-                val res = ZtoeParser.fetchFullSchedule(current.cityUrl, current.queue, appContext, forceNetwork = true)
-                if (res.status == ua.blackout.prewarning.data.parser.FetchStatus.SUCCESS) {
-                    scheduleRepo.saveSchedule(current.queue, res.todaySlots, res.tomorrowSlots)
-                } else {
-                    scheduleRepo.clearScheduleCache()
+                if (current.queue.isNotBlank()) {
+                    val res = ZtoeParser.fetchFullSchedule(current.cityUrl, current.queue, appContext, forceNetwork = true)
+                    if (res.status == ua.blackout.prewarning.data.parser.FetchStatus.SUCCESS) {
+                        scheduleRepo.saveSchedule(current.queue, res.todaySlots, res.tomorrowSlots)
+                    } else {
+                        scheduleRepo.clearScheduleCache()
+                    }
                 }
                 AlarmScheduler.syncAlarms(appContext)
                 BlackoutGlanceWidget.syncAllWidgets(appContext)

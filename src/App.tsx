@@ -19,14 +19,17 @@ import {
   Bell
 } from 'lucide-react';
 import { DaySchedule, UserSettings, NotificationRecord, Language } from './types';
-import { fetchFullSchedules } from './services/ztoeParser';
+import { fetchFullSchedules, applyEmergencyOutageToSchedule } from './services/ztoeParser';
+import { checkAddressOnZtoeWebsite, getKyivska37DemoEmergencyOutage } from './services/ztoeAddressLookup';
 import { 
   loadUserSettings, 
   saveUserSettings, 
   createTestNotification, 
   checkAndTriggerAdvanceAlert, 
+  checkAndTriggerEmergencyOutageAlert,
   DEFAULT_SETTINGS,
   clearNotifiedHistory,
+  resetAllAppDataToFirstLaunch,
   toggleMasterNotifications
 } from './services/alertManager';
 import { resolveLanguage, translations } from './services/i18n';
@@ -77,11 +80,63 @@ export default function App() {
     }
   }, [settings.theme]);
 
-  // Load schedule from ztoe.com.ua / rotation engine
+  // Load schedule from ztoe.com.ua / rotation engine and re-check saved address & emergency outages against ZTOE website
   const loadSchedules = useCallback(async (currentSettings: UserSettings): Promise<'SUCCESS' | 'NO_INTERNET' | 'NO_QUEUES_FOUND'> => {
     setIsRefreshing(true);
     try {
-      const res = await fetchFullSchedules(currentSettings.url, currentSettings.queue);
+      let effectiveQueue = currentSettings.queue;
+
+      if (currentSettings.selectedAddressQuery) {
+        const latestAddressLookup = await checkAddressOnZtoeWebsite(
+          currentSettings.selectedAddressQuery,
+          currentSettings.url
+        );
+        if (latestAddressLookup) {
+          const prevEmergency = currentSettings.activeEmergencyOutage ?? null;
+          const nextEmergency = latestAddressLookup.emergencyOutage ?? null;
+
+          checkAndTriggerEmergencyOutageAlert(
+            prevEmergency,
+            nextEmergency,
+            currentSettings,
+            resolveLanguage(currentSettings.language),
+            (record) => {
+              setActiveNotification(record);
+            }
+          );
+
+          const emergencyChanged =
+            (prevEmergency?.id || null) !== (nextEmergency?.id || null) ||
+            (prevEmergency?.startTime || '') !== (nextEmergency?.startTime || '') ||
+            (prevEmergency?.estimatedRestoreTime || '') !== (nextEmergency?.estimatedRestoreTime || '');
+
+          const hadNoQueue = !currentSettings.queue || currentSettings.queue.trim() === '';
+          const queueAssignedForNoQueueHouse =
+            hadNoQueue &&
+            (latestAddressLookup.queue !== currentSettings.queue ||
+              latestAddressLookup.statusText !== currentSettings.customQueueStatusText);
+
+          if (queueAssignedForNoQueueHouse || emergencyChanged) {
+            const nextQueue = queueAssignedForNoQueueHouse
+              ? latestAddressLookup.queue
+              : currentSettings.queue;
+            const nextStatusText = queueAssignedForNoQueueHouse
+              ? latestAddressLookup.statusText
+              : currentSettings.customQueueStatusText;
+            effectiveQueue = nextQueue;
+            const updatedSettings: UserSettings = {
+              ...currentSettings,
+              queue: nextQueue,
+              customQueueStatusText: nextStatusText,
+              activeEmergencyOutage: nextEmergency,
+            };
+            setSettings(updatedSettings);
+            saveUserSettings(updatedSettings);
+          }
+        }
+      }
+
+      const res = await fetchFullSchedules(currentSettings.url, effectiveQueue);
       setSchedule(res.todaySchedule);
       setTomorrowSchedule(res.tomorrowSchedule);
       return res.status;
@@ -95,11 +150,20 @@ export default function App() {
 
   useEffect(() => {
     loadSchedules(settings);
-  }, [loadSchedules, settings.queue, settings.url]);
+  }, [loadSchedules, settings.queue, settings.url, settings.selectedAddress]);
+
+  // Periodic background refresh that also re-checks selectedAddressQuery against the ZTOE website
+  useEffect(() => {
+    const intervalMs = Math.max(1, settings.refreshIntervalMinutes || 30) * 60 * 1000;
+    const refreshTimerId = setInterval(() => {
+      loadSchedules(settings);
+    }, intervalMs);
+    return () => clearInterval(refreshTimerId);
+  }, [loadSchedules, settings]);
 
   useEffect(() => {
     import('./services/donationsService').then(({ getDonationsWithDailyRefresh }) => {
-      getDonationsWithDailyRefresh(Date.now(), true).catch(() => {});
+      getDonationsWithDailyRefresh(Date.now(), false).catch(() => {});
     });
   }, []);
 
@@ -108,17 +172,33 @@ export default function App() {
   const [timeOfDayOverride, setTimeOfDayOverride] = useState<'auto' | 'morning' | 'day' | 'evening' | 'night'>('auto');
 
   // Background ticker: updates countdown and checks advance alerts.
-  // Throttled to 30s when tab is backgrounded/hidden to maximize device battery life.
+  // Pauses 1s countdown updates when not on Main screen (phoneTab !== 'schedule' in 'app' mode)
+  // and throttles to 30s when browser tab is hidden to maximize device battery life.
   useEffect(() => {
     let tickerId: any;
+    const formatLocalIsoDate = (d: Date) =>
+      `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    let lastDateStr = formatLocalIsoDate(new Date());
 
     const runTick = () => {
       const currentNow = new Date();
       setNow(currentNow);
 
+      const currentDateStr = formatLocalIsoDate(currentNow);
+      if (currentDateStr !== lastDateStr) {
+        lastDateStr = currentDateStr;
+        if (tomorrowSchedule && tomorrowSchedule.dateStr === currentDateStr) {
+          setSchedule({ ...tomorrowSchedule, dayLabel: 'Сьогодні' });
+          setTomorrowSchedule(null);
+        }
+        loadSchedules(settings);
+      }
+
       if (schedule && settings.notificationsEnabled) {
+        const effectiveSchedule =
+          applyEmergencyOutageToSchedule(schedule, settings.activeEmergencyOutage, false) || schedule;
         checkAndTriggerAdvanceAlert(
-          schedule,
+          effectiveSchedule,
           settings,
           resolvedLang,
           (record) => {
@@ -128,12 +208,19 @@ export default function App() {
       }
     };
 
+    const isCountdownScreenActive =
+      (activeMode === 'app' && phoneTab === 'schedule') || activeMode === 'widget';
+
     const setupTicker = () => {
       clearInterval(tickerId);
-      const intervalMs = typeof document !== 'undefined' && document.visibilityState === 'hidden' ? 30000 : 1000;
+      const isHidden = typeof document !== 'undefined' && document.visibilityState === 'hidden';
+      const intervalMs = isHidden ? 30000 : isCountdownScreenActive ? 1000 : 15000;
       tickerId = setInterval(runTick, intervalMs);
     };
 
+    if (isCountdownScreenActive) {
+      runTick();
+    }
     setupTicker();
 
     const handleVisibility = () => {
@@ -153,7 +240,7 @@ export default function App() {
         document.removeEventListener('visibilitychange', handleVisibility);
       }
     };
-  }, [schedule, settings, resolvedLang]);
+  }, [schedule, tomorrowSchedule, settings, resolvedLang, activeMode, phoneTab, loadSchedules]);
 
   // Handle setting updates
   const handleUpdateSettings = (newSettings: UserSettings) => {
@@ -179,6 +266,25 @@ export default function App() {
     saveUserSettings(DEFAULT_SETTINGS);
   };
 
+  const handleResetAllAppDataFirstLaunch = () => {
+    const freshSettings = resetAllAppDataToFirstLaunch();
+    resetAllRouletteProgress();
+    setSettings(freshSettings);
+    setActiveNotification(null);
+    setTimeOfDayOverride('auto');
+    setActiveMode('app');
+    setPhoneTab('schedule');
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('zt-app-first-launch-reset'));
+      window.dispatchEvent(new CustomEvent('zt-roulette-progress-reset'));
+      window.dispatchEvent(
+        new CustomEvent('zt-roulette-power-points-updated', {
+          detail: { powerPoints: 0 },
+        })
+      );
+    }
+  };
+
   const effectiveNow = React.useMemo(() => {
     if (timeOfDayOverride === 'auto') return now;
     const simulated = new Date(now);
@@ -192,6 +298,16 @@ export default function App() {
   const timePalette = React.useMemo(
     () => getInterpolatedTimePalette(effectiveNow),
     [effectiveNow.getHours(), effectiveNow.getMinutes()]
+  );
+
+  const effectiveSchedule = React.useMemo(
+    () => (schedule ? applyEmergencyOutageToSchedule(schedule, settings.activeEmergencyOutage, false) || schedule : null),
+    [schedule, settings.activeEmergencyOutage]
+  );
+
+  const effectiveTomorrowSchedule = React.useMemo(
+    () => applyEmergencyOutageToSchedule(tomorrowSchedule, settings.activeEmergencyOutage, true),
+    [tomorrowSchedule, settings.activeEmergencyOutage]
   );
 
   return (
@@ -398,8 +514,8 @@ export default function App() {
               {/* Left / Main: The Physical Phone Simulator */}
               <div className="w-full max-w-[420px] shrink-0">
                 <PhoneSimulator
-                  schedule={schedule}
-                  tomorrowSchedule={tomorrowSchedule}
+                  schedule={effectiveSchedule || schedule}
+                  tomorrowSchedule={effectiveTomorrowSchedule}
                   settings={settings}
                   lang={resolvedLang}
                   activeNotification={activeNotification}
@@ -529,6 +645,66 @@ export default function App() {
                           : 'Reset All Game Progress (Coins, Upgrades, Power Points)'}
                       </span>
                     </button>
+
+                    <button
+                      type="button"
+                      data-testid="emulator-reset-all-app-data-first-launch"
+                      onClick={handleResetAllAppDataFirstLaunch}
+                      className="col-span-2 flex items-center justify-center gap-2 p-3 rounded-2xl bg-amber-950/70 hover:bg-amber-900/70 text-amber-200 font-bold text-xs transition-all border border-amber-500/45 active:scale-95 shadow-md cursor-pointer"
+                    >
+                      <RotateCcw className="w-4 h-4" />
+                      <span>
+                        {resolvedLang === 'uk'
+                          ? 'Скинути всі дані застосунку та імітувати перший запуск'
+                          : 'Reset All App Data & Imitate First Launch'}
+                      </span>
+                    </button>
+
+                    <button
+                      type="button"
+                      data-testid="emulator-simulate-emergency-outage-kyivska-37"
+                      onClick={() => {
+                        clearNotifiedHistory();
+                        const kyivska37Emergency = getKyivska37DemoEmergencyOutage();
+                        const nextSettings: UserSettings = {
+                          ...settings,
+                          queue: '2.2',
+                          customQueueStatusText: undefined,
+                          selectedAddress:
+                            resolvedLang === 'uk'
+                              ? 'Житомирський РЕМ, м. Житомир,\nвул. Київська, буд. 37'
+                              : 'Zhytomyr REM, Zhytomyr,\nKyivska St., bldg. 37',
+                          selectedAddressQuery: {
+                            remId: 'zhytomyr',
+                            settlementId: 'zt_city',
+                            streetId: 'zt_kyivska',
+                            house: '37',
+                          },
+                          activeEmergencyOutage: kyivska37Emergency,
+                        };
+                        setSettings(nextSettings);
+                        saveUserSettings(nextSettings);
+                        setPhoneTab('schedule');
+                        loadSchedules(nextSettings);
+                        checkAndTriggerEmergencyOutageAlert(
+                          null,
+                          kyivska37Emergency,
+                          nextSettings,
+                          resolvedLang,
+                          (record) => {
+                            setActiveNotification(record);
+                          }
+                        );
+                      }}
+                      className="col-span-2 flex items-center justify-center gap-2 p-3 rounded-2xl bg-[#FF5E3A]/20 hover:bg-[#FF5E3A]/30 text-[#FF5E3A] font-bold text-xs transition-all border border-[#FF5E3A]/50 active:scale-95 shadow-md cursor-pointer"
+                    >
+                      <Zap className="w-4 h-4 fill-current" />
+                      <span>
+                        {resolvedLang === 'uk'
+                          ? 'Житомир, вул. Київська, 37 (Аварійне відключення)'
+                          : 'Zhytomyr, Kyivska St., 37 (Emergency Outage)'}
+                      </span>
+                    </button>
                   </div>
 
                   {/* Fast Queue Switcher */}
@@ -538,7 +714,7 @@ export default function App() {
                         {resolvedLang === 'uk' ? 'Швидка зміна черги' : 'Quick Queue Switch'}:
                       </span>
                       <span className="font-mono text-[#FF5E3A] font-bold">
-                        {settings.queue}
+                        {settings.queue || (resolvedLang === 'uk' ? 'Виберіть чергу' : 'Queue not selected')}
                       </span>
                     </div>
 
@@ -546,7 +722,16 @@ export default function App() {
                       {['1.1', '1.2', '2.1', '2.2', '3.1', '3.2', '4.1', '4.2', '5.1', '5.2', '6.1', '6.2'].map((q) => (
                         <button
                           key={q}
-                          onClick={() => handleUpdateSettings({ ...settings, queue: q })}
+                          onClick={() =>
+                            handleUpdateSettings({
+                              ...settings,
+                              queue: q,
+                              customQueueStatusText: undefined,
+                              selectedAddress: undefined,
+                              selectedAddressQuery: undefined,
+                              activeEmergencyOutage: null,
+                            })
+                          }
                           className={`py-1.5 rounded-xl text-[11px] font-bold transition-all ${
                             settings.queue === q
                               ? 'bg-[#FF5E3A] text-white shadow-sm'
@@ -665,7 +850,9 @@ export default function App() {
           {activeMode === 'widget' && schedule && (
             <div className="flex flex-col items-center justify-center">
               <WidgetSimulator
-                schedule={schedule}
+                schedule={effectiveSchedule || schedule}
+                tomorrowSchedule={effectiveTomorrowSchedule}
+                now={effectiveNow}
                 settings={settings}
                 lang={resolvedLang}
                 onToggleNotifications={handleToggleNotifications}

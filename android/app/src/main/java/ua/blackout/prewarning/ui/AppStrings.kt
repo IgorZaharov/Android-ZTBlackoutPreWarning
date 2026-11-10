@@ -27,6 +27,12 @@ object AppStrings {
     fun today(lang: String) = if (lang == "uk") "Сьогодні" else "Today"
     fun tomorrow(lang: String) = if (lang == "uk") "Завтра" else "Tomorrow"
     fun blackoutHoursHeader(lang: String) = if (lang == "uk") "ГОДИНИ БЕЗ СВІТЛА НА ЦЕЙ ДЕНЬ:" else "BLACKOUT HOURS FOR TODAY:"
+    fun blackoutHoursForDayHeader(lang: String) = if (lang == "uk") "Години відключень на сьогодні:" else "Blackout hours for today:"
+    fun blackoutHoursForTomorrowHeader(lang: String) = if (lang == "uk") "Години відключень на завтра:" else "Blackout hours for tomorrow:"
+    fun selectQueueAction(lang: String) = if (lang == "uk") "Виберіть чергу" else "Select queue"
+    fun emergencyOutageTitle(lang: String) = if (lang == "uk") "Аварійне відключення!" else "Emergency outage!"
+    fun emergencyStartLabel(lang: String) = if (lang == "uk") "Початок:" else "Start:"
+    fun emergencyRestoreLabel(lang: String) = if (lang == "uk") "Орієнтовне відновлення:" else "Estimated restoration:"
     fun noBlackoutsScheduled(lang: String) = if (lang == "uk") "Відключень не заплановано" else "No blackouts scheduled"
     fun hourShort(lang: String) = if (lang == "uk") "год" else "h"
     fun lastUpdated(lang: String) = if (lang == "uk") "Останнє оновлення:" else "Last updated:"
@@ -59,7 +65,7 @@ object AppStrings {
     fun resetDefaultsBtn(lang: String) = if (lang == "uk") "Скинути налаштування" else "Reset to defaults"
     fun resetConfirmTitle(lang: String) = if (lang == "uk") "Скинути налаштування?" else "Reset all settings?"
     // CRITICAL CONSTANTS — Default timers are 15 min (advance) and 30 min (refresh). Never modify on your own.
-    fun resetConfirmDesc(lang: String) = if (lang == "uk") "Усі параметри повернуться до початкових значень (черга 1.1, таймери 15/30 хв)." else "All parameters will revert to defaults (queue 1.1, timers 15/30 min)."
+    fun resetConfirmDesc(lang: String) = if (lang == "uk") "Усі параметри повернуться до початкових значень (черга не обрана, таймери 15/30 хв)." else "All parameters will revert to defaults (queue unselected, timers 15/30 min)."
     fun resetYes(lang: String) = if (lang == "uk") "Скинути" else "Reset"
     fun cancel(lang: String) = if (lang == "uk") "Скасувати" else "Cancel"
 
@@ -68,16 +74,17 @@ object AppStrings {
     // Numbered instruction for Users on how to find their queue ("?" Help popup in Settings)
     // =========================================================================================
     fun queueHelpTitle(lang: String) = if (lang == "uk") "Як дізнатися свою чергу" else "How to find your queue"
+    fun queueHelpManualSearchTitle(lang: String) = if (lang == "uk") "Пошук вручну" else "Manual search"
     fun queueHelpSteps(lang: String): List<String> = if (lang == "uk") {
         listOf(
-            "1. Відкрийте сторінку пошуку черги на сайті https://www.ztoe.com.ua/unhooking-search.php.",
+            "1. Відкрийте сторінку пошуку черги на сайті https://www.ztoe.com.ua/unhooking-search.php",
             "2. Оберіть свій РЕМ, населений пункт і вулицю.",
             "3. У таблиці знайдіть свій будинок і подивіться стовпці «Черга» і «Підчерга». Наприклад, черга 5 і підчерга 2 - це 5.2.",
             "4. Виберіть це значення у полі «Черга» у вікні налаштувань (кнопка ⚙)."
         )
     } else {
         listOf(
-            "1. Open the queue lookup page on https://www.ztoe.com.ua/unhooking-search.php.",
+            "1. Open the queue lookup page on https://www.ztoe.com.ua/unhooking-search.php",
             "2. Select your distribution district (РЕМ), settlement, and street.",
             "3. In the table, find your building and check the «Queue» and «Subqueue» columns. For example, queue 5 and subqueue 2 is 5.2.",
             "4. Select this value in the «Queue» field in the Settings window (⚙ button)."
@@ -129,7 +136,7 @@ object AppStrings {
     fun rouletteGameOverTitle(lang: String) = if (lang == "uk") "БЛЕКАУТ! ГРУ ЗАКІНЧЕНО" else "GAME OVER"
     fun rouletteFinalScoreLabel(lang: String) = if (lang == "uk") "Фінальний рахунок" else "Final Score"
     fun rouletteAllTimeBestScoreLabel(lang: String) = if (lang == "uk") "Найкращий Результат" else "All time best score"
-    fun rouletteMainMenuBtn(lang: String) = if (lang == "uk") "Головне Меню" else "Main Menu"
+    fun rouletteMainMenuBtn(lang: String = "uk") = if (lang == "uk") "Головне Меню" else "Main Menu"
     fun rouletteShareBtn(lang: String = "uk") = if (lang == "uk") "Поділитися" else "Share"
     fun rouletteDownloadImageBtn(lang: String = "uk") = if (lang == "uk") "Завантажити зображення" else "Download Image"
     fun rouletteImageSavedToast(lang: String = "uk") = if (lang == "uk") "Зображення збережено" else "Image saved"
@@ -137,4 +144,3 @@ object AppStrings {
     fun rouletteMusicLabel(lang: String = "uk") = if (lang == "uk") "Музика" else "Music"
     fun rouletteLoadingText(lang: String) = if (lang == "uk") "Роздача білетів..." else "Dealing tickets..."
 }
-

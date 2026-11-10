@@ -9,10 +9,13 @@ import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import ua.blackout.prewarning.data.parser.FetchStatus
+import ua.blackout.prewarning.data.parser.ZtoeAddressLookup
 import ua.blackout.prewarning.data.parser.ZtoeParser
 import ua.blackout.prewarning.data.repository.ScheduleRepository
 import ua.blackout.prewarning.data.repository.SettingsRepository
 import ua.blackout.prewarning.notification.AlarmScheduler
+import ua.blackout.prewarning.notification.NotificationHelper
+import ua.blackout.prewarning.ui.AppStrings
 import ua.blackout.prewarning.widget.BlackoutGlanceWidget
 import java.util.concurrent.TimeUnit
 
@@ -25,14 +28,56 @@ class ScheduleSyncWorker(
         return try {
             val appContext = context.applicationContext
             val settingsRepo = SettingsRepository(appContext)
-            val settings = settingsRepo.getSettings()
+            var settings = settingsRepo.getSettings()
+            val resolvedLang = AppStrings.resolveLang(settings.language)
+
+            // Re-check saved address query & emergency outages on ZTOE website
+            val addressQuery = settings.selectedAddressQuery
+            if (addressQuery != null) {
+                val latestAddressLookup = ZtoeAddressLookup.checkAddressOnZtoeWebsite(addressQuery, settings.cityUrl)
+                if (latestAddressLookup != null) {
+                    val prevEmergency = settings.activeEmergencyOutage
+                    val nextEmergency = latestAddressLookup.emergencyOutage
+
+                    NotificationHelper.checkAndTriggerEmergencyOutageAlert(
+                        context = appContext,
+                        prevOutage = prevEmergency,
+                        nextOutage = nextEmergency,
+                        settings = settings,
+                        lang = resolvedLang
+                    )
+
+                    val emergencyChanged =
+                        (prevEmergency?.id != nextEmergency?.id) ||
+                            (prevEmergency?.startTime != nextEmergency?.startTime) ||
+                            (prevEmergency?.estimatedRestoreTime != nextEmergency?.estimatedRestoreTime)
+
+                    val hadNoQueue = settings.queue.isBlank()
+                    val queueAssignedForNoQueueHouse = hadNoQueue &&
+                        (latestAddressLookup.queue != settings.queue ||
+                            latestAddressLookup.statusText != settings.customQueueStatusText)
+
+                    if (queueAssignedForNoQueueHouse || emergencyChanged) {
+                        val nextQueue = if (queueAssignedForNoQueueHouse) latestAddressLookup.queue else settings.queue
+                        val nextStatusText = if (queueAssignedForNoQueueHouse) latestAddressLookup.statusText else settings.customQueueStatusText
+                        settings = settings.copy(
+                            queue = nextQueue,
+                            customQueueStatusText = nextStatusText,
+                            activeEmergencyOutage = nextEmergency
+                        )
+                        settingsRepo.saveSettings(settings)
+                    }
+                }
+            }
 
             val scheduleRepo = ScheduleRepository(appContext)
             val fetchRes = ZtoeParser.fetchFullSchedule(settings.cityUrl, settings.queue, appContext)
 
             // Only save schedule when live fetch succeeded; clear cached results if unreachable or no queues found
             if (fetchRes.status == FetchStatus.SUCCESS) {
-                scheduleRepo.saveSchedule(settings.queue, fetchRes.todaySlots, fetchRes.tomorrowSlots)
+                if (settings.queue.isNotBlank()) {
+                    scheduleRepo.saveSchedule(settings.queue, fetchRes.todaySlots, fetchRes.tomorrowSlots)
+                }
             } else {
                 scheduleRepo.clearScheduleCache()
             }

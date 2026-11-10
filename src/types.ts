@@ -13,6 +13,7 @@ export interface BlackoutSlot {
   startTimeStr: string; // "14:00" or "14:30"
   endTimeStr: string; // "18:00" or "15:00"
   status: SlotStatus;
+  isEmergency?: boolean;
   rawLabel?: string;
 }
 
@@ -30,10 +31,28 @@ export interface DaySchedule {
 export type ThemeMode = 'system' | 'dark' | 'light';
 export type Language = 'system' | 'uk' | 'en';
 
+export interface SelectedAddressQuery {
+  remId: string;
+  settlementId: string;
+  streetId: string;
+  house: string;
+}
+
+export interface EmergencyOutageInfo {
+  id: string;
+  startTime: string; // e.g. "09.11.2026 06:35"
+  estimatedRestoreTime: string; // e.g. "09.11.2026 17:00"
+  outageType?: string; // e.g. "Аварійне відключення"
+}
+
 export interface UserSettings {
   city: string;
   url: string;
-  queue: string; // e.g. "1.1"
+  queue: string; // e.g. "1.1" or "" when not selected yet or when house has status message instead of queue
+  customQueueStatusText?: string; // e.g. "В цей час не вимикається, за винятком випадків аварійних відключень" from ZTOE lookup table
+  selectedAddress?: string; // e.g. "Житомирський РЕМ, м. Житомир,\nвул. Київська, буд. 104"
+  selectedAddressQuery?: SelectedAddressQuery;
+  activeEmergencyOutage?: EmergencyOutageInfo | null;
   refreshIntervalMinutes: number; // default 30
   advanceNoticeMinutes: number; // default 15
   notificationsEnabled: boolean;
