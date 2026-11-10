@@ -5,6 +5,8 @@
 
 **[Завантажити останню версію APK (v1.3.4)](https://github.com/IgorZaharov/Android-ZTBlackoutPreWarning/releases/latest/download/app-release.apk)**
 
+**[Завантажити останню версію Google з Play](https://play.google.com/store/apps/details?id=com.ZTBlackoutPreWarning)**
+
 Як встановити:
 1. Натисніть на посилання вище на своєму Android-телефоні — файл `app-release.apk` завантажиться автоматично.
 2. Відкрийте завантажений файл (у сповіщеннях браузера або в папці «Завантаження» / «Downloads»).
