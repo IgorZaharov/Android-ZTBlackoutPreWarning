@@ -32,6 +32,21 @@ while ((match = entryRegex.exec(existingTs)) !== null) {
 
 const additionalFiles = [
   {
+    path: 'app/src/main/java/ua/blackout/prewarning/ui/screens/AboutScreen.kt',
+    language: 'kotlin',
+    description: 'About screen with app version, developer links, donations, and disclaimer',
+  },
+  {
+    path: 'app/src/main/java/ua/blackout/prewarning/ui/screens/BlackoutAppNavigation.kt',
+    language: 'kotlin',
+    description: 'Main navigation pager with time-of-day dynamic background and top scrim',
+  },
+  {
+    path: 'app/src/main/java/ua/blackout/prewarning/ui/screens/ZhytomyrRouletteScreen.kt',
+    language: 'kotlin',
+    description: 'Zhytomyr Roulette mini-game dialog screen',
+  },
+  {
     path: 'app/src/main/java/ua/blackout/prewarning/data/parser/ZtoeAddressLookup.kt',
     language: 'kotlin',
     description: 'ZTOE Address Queue Lookup & Emergency Outage Parser',
