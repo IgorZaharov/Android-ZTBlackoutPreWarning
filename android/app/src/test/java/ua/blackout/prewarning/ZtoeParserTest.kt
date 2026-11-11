@@ -1039,6 +1039,87 @@ class ZtoeParserTest {
         assertEquals("24:00", synthesizedIntervals[0].endStr)
         assertEquals(true, synthesizedIntervals[0].isEmergency)
 
+        // 10. Verify Житомир, вул. Велика Бердичівська, буд. 22 parity with Workbench:
+        // (a) 5-cell <td colspan="3"> no-queue ZTOE HTML row in both parseZtoeAddressLookupTableHtml and parseZtoeSettlementHousesTableHtml
+        val berdy22ColspanHtml = """
+            <table>
+                <tr>
+                    <td><b>РЕМ</b></td>
+                    <td><b>Населений пункт</b></td>
+                    <td><b>Назва вулиці, провулка, тощо</b></td>
+                    <td><b>Будинки</b></td>
+                    <td><b>Черга</b></td>
+                    <td><b>Підчерга</b></td>
+                    <td><b>Примітка</b></td>
+                </tr>
+                <tr>
+                    <td>Житомирський РЕМ</td>
+                    <td>Житомир</td>
+                    <td>вул. Велика Бердичівська</td>
+                    <td>1, 10, 12/1, 15/1, 17, 20, 22, 24, 28, 30, 32, 34, 34А, 70</td>
+                    <td colspan="3">В цей час не вимикається, за винятком випадків аварійних відключень</td>
+                </tr>
+            </table>
+        """.trimIndent()
+        val parsedBerdy22 = ua.blackout.prewarning.data.parser.ZtoeAddressLookup.parseZtoeAddressLookupTableHtml(berdy22ColspanHtml, "22")
+        assertEquals(null, parsedBerdy22?.first)
+        assertEquals("В цей час не вимикається, за винятком випадків аварійних відключень", parsedBerdy22?.second)
+        val bulkBerdyMap = ua.blackout.prewarning.data.parser.ZtoeAddressLookup.parseZtoeSettlementHousesTableHtml(
+            "zt_city",
+            ua.blackout.prewarning.data.parser.ZtoeAddressLookup.ZTOE_STREETS.filter { it.settlementId == "zt_city" },
+            berdy22ColspanHtml
+        )
+        val bulkBerdy22 = bulkBerdyMap["zt_velyka_berdychivska"]?.firstOrNull { it.house == "22" }
+        assertNotNull(bulkBerdy22)
+        assertEquals("", bulkBerdy22?.queue)
+        assertEquals("В цей час не вимикається, за винятком випадків аварійних відключень", bulkBerdy22?.statusText)
+
+        // (b) Live PowerOn JSON with nested street.city.name ("Житомир") before street.name ("вул. Велика Бердичівська")
+        val liveBerdy22PoweronJson = """
+            {"hydra:member":[{"id":401740077,"code_otg":"6","city":{"@id":"/api/pw_cities/333","@type":"PwCity","id":333,"name":"Житомир","codeOtg":""},"street":{"@id":"/api/pw_streets/4550","@type":"PwStreet","id":4550,"city":{"@id":"/api/pw_cities/333","@type":"PwCity","name":"Житомир"},"name":"вул. Велика Бердичівська"},"dateEvent":"2026-11-10T23:28:00+00:00","datePlanIn":"2026-11-11T17:00:00+00:00","koment":"АВАРІЯ","switchSubReason":0,"otg":{"@id":"/api/pw_otgs/6","@type":"PwOtg","id":6,"code":"6","name":"Житомирський РЕМ"},"buildingNames":"10, 11, 12, 12А, 13, 14, 15, 15/1, 17, 18, 20, 22, 24, 28, 28/1, 30, 32, 34, 34-А, 6, 8, 9","typeOff":1}]}
+        """.trimIndent()
+        val matchedBerdy22ByName = ua.blackout.prewarning.data.parser.ZtoeAddressLookup.matchEmergencyOutageFromAccidentsJson(
+            htmlOrJson = liveBerdy22PoweronJson,
+            remName = "Житомирський РЕМ",
+            settlementName = "м. Житомир",
+            streetName = "вул. Велика Бердичівська",
+            house = "22",
+            poweronStreetId = null,
+            poweronCityId = null
+        )
+        assertNotNull(matchedBerdy22ByName)
+        assertEquals("pw_accident_401740077", matchedBerdy22ByName?.id)
+        assertEquals("вул. Велика Бердичівська", matchedBerdy22ByName?.streetName)
+        assertEquals("10.11.2026 23:28", matchedBerdy22ByName?.startTime)
+        assertEquals("11.11.2026 17:00", matchedBerdy22ByName?.estimatedRestoreTime)
+        assertEquals("Аварійне відключення", matchedBerdy22ByName?.outageType)
+
+        val matchedBerdy22ByQuery = ua.blackout.prewarning.data.parser.ZtoeAddressLookup.matchEmergencyOutageFromAccidentsJson(
+            liveBerdy22PoweronJson,
+            ua.blackout.prewarning.data.model.SelectedAddressQuery(
+                remId = "zhytomyr",
+                settlementId = "zt_city",
+                streetId = "zt_velyka_berdychivska",
+                house = "22"
+            )
+        )
+        assertNotNull(matchedBerdy22ByQuery)
+        assertEquals("10.11.2026 23:28", matchedBerdy22ByQuery?.startTime)
+        assertEquals("11.11.2026 17:00", matchedBerdy22ByQuery?.estimatedRestoreTime)
+
+        // Verify hyphenated building number normalization ("34А" <-> "34-А")
+        val matchedBerdy34A = ua.blackout.prewarning.data.parser.ZtoeAddressLookup.matchEmergencyOutageFromAccidentsJson(
+            liveBerdy22PoweronJson,
+            ua.blackout.prewarning.data.model.SelectedAddressQuery(
+                remId = "zhytomyr",
+                settlementId = "zt_city",
+                streetId = "zt_velyka_berdychivska",
+                house = "34А"
+            )
+        )
+        assertNotNull(matchedBerdy34A)
+        assertEquals("11.11.2026 17:00", matchedBerdy34A?.estimatedRestoreTime)
+
         ua.blackout.prewarning.data.parser.ZtoeAddressLookup.clearCacheForTesting()
     }
 }

@@ -709,7 +709,15 @@ export function getEmergencyOverlapMinutesForDay(
       } else if (!isTomorrow && targetDateStr < endParsed.dateStr) {
         overlap = { startMin: startParsed.totalMinutes, endMin: 1440 };
       } else if (isTomorrow && targetDateStr > startParsed.dateStr) {
-        overlap = { startMin: 0, endMin: endParsed.totalMinutes };
+        const endNextDayStr = (() => {
+          const d = new Date(`${endParsed.dateStr}T12:00:00Z`);
+          if (isNaN(d.getTime())) return '';
+          d.setUTCDate(d.getUTCDate() + 1);
+          return d.toISOString().slice(0, 10);
+        })();
+        if (targetDateStr !== endNextDayStr) {
+          overlap = { startMin: 0, endMin: endParsed.totalMinutes };
+        }
       }
     }
   } else {

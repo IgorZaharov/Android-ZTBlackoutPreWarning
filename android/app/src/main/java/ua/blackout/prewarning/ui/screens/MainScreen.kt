@@ -66,6 +66,7 @@ fun MainScreen(
     selectedAddress: String? = null,
     emergencyOutageStartTime: String? = null,
     emergencyOutageRestoreTime: String? = null,
+    emergencyOutageType: String? = null,
     isBlackoutNow: Boolean = false,
     countdownText: String = "01:35:12",
     slotTimeText: String = "14:00 – 18:00",
@@ -247,7 +248,11 @@ fun MainScreen(
                 ) {
                     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         Text(
-                            text = AppStrings.emergencyOutageTitle(lang),
+                            text = if (lang == "uk" && !emergencyOutageType.isNullOrBlank()) {
+                                emergencyOutageType
+                            } else {
+                                AppStrings.emergencyOutageTitle(lang)
+                            },
                             fontSize = 14.sp,
                             fontWeight = FontWeight.Bold,
                             color = Color(0xFFFF5E3A),

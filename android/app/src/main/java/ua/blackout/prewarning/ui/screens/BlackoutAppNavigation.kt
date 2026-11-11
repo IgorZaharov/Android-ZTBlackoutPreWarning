@@ -236,6 +236,7 @@ fun BlackoutAppNavigation(
                 val addrQuery = selectedAddressQuery
                 if (addrQuery != null) {
                     val latestAddressLookup = withContext(Dispatchers.IO) {
+                        ZtoeAddressLookup.initDiskCache(appContext)
                         ZtoeAddressLookup.checkAddressOnZtoeWebsite(addrQuery, siteUrl)
                     }
                     if (latestAddressLookup != null) {
@@ -410,6 +411,7 @@ fun BlackoutAppNavigation(
         val addrQuery = selectedAddressQuery
         if (addrQuery != null) {
             val latestAddressLookup = withContext(Dispatchers.IO) {
+                ZtoeAddressLookup.initDiskCache(appContext)
                 ZtoeAddressLookup.checkAddressOnZtoeWebsite(addrQuery, siteUrl)
             }
             if (latestAddressLookup != null) {
@@ -501,11 +503,13 @@ fun BlackoutAppNavigation(
             val addrQuery = selectedAddressQuery
             if (addrQuery != null && addrQuery.streetId.isNotBlank() && addrQuery.house.isNotBlank()) {
                 val addrRes = withContext(Dispatchers.IO) {
+                    ZtoeAddressLookup.initDiskCache(appContext)
                     ZtoeAddressLookup.checkAddressOnZtoeWebsite(
                         remId = addrQuery.remId,
                         settlementId = addrQuery.settlementId,
                         streetId = addrQuery.streetId,
-                        house = addrQuery.house
+                        house = addrQuery.house,
+                        siteUrl = siteUrl
                     )
                 }
                 if (addrRes != null) {
@@ -708,6 +712,7 @@ fun BlackoutAppNavigation(
                         selectedAddress = selectedAddress,
                         emergencyOutageStartTime = activeEmergencyOutage?.startTime,
                         emergencyOutageRestoreTime = activeEmergencyOutage?.estimatedRestoreTime,
+                        emergencyOutageType = activeEmergencyOutage?.outageType,
                         isBlackoutNow = statusInfo.isBlackoutNow,
                         countdownText = statusInfo.countdownText,
                         slotTimeText = statusInfo.nextSlotTime,
@@ -838,6 +843,22 @@ fun BlackoutAppNavigation(
                                 pagerState.animateScrollToPage(0)
                             }
                             coroutineScope.launch(Dispatchers.IO) {
+                                try {
+                                    ZtoeAddressLookup.initDiskCache(appContext)
+                                    val verified = ZtoeAddressLookup.checkAddressOnZtoeWebsite(query, siteUrl)
+                                    if (verified != null && verified.emergencyOutage != null && emergencyOutage == null) {
+                                        val latestSettings = settingsRepo.getSettings().copy(
+                                            activeEmergencyOutage = verified.emergencyOutage
+                                        )
+                                        settingsRepo.saveSettings(latestSettings)
+                                        NotificationHelper.checkAndTriggerEmergencyOutageAlert(
+                                            context = appContext,
+                                            settings = latestSettings,
+                                            previousEmergency = null,
+                                            currentEmergency = verified.emergencyOutage
+                                        )
+                                    }
+                                } catch (_: Exception) {}
                                 try {
                                     AlarmScheduler.syncAlarms(appContext)
                                     BlackoutGlanceWidget.syncAllWidgets(appContext)

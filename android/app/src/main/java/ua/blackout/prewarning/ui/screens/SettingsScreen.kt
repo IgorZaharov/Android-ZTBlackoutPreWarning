@@ -887,8 +887,8 @@ fun SettingsScreen(
 
         // Automatically query ZTOE when a valid street and house are selected (do NOT close or apply until user clicks button)
         LaunchedEffect(selectedRemId, selectedSettlementId, selectedStreetId, selectedHouse) {
+            addressLookupResult = null
             if (selectedStreetId.isBlank() || selectedHouse.isBlank()) {
-                addressLookupResult = null
                 isCheckingAddressOnSite = false
                 return@LaunchedEffect
             }
@@ -914,7 +914,7 @@ fun SettingsScreen(
                             h.copy(
                                 queue = res.queue.ifEmpty { h.queue },
                                 statusText = res.statusText ?: h.statusText,
-                                emergencyOutage = res.emergencyOutage,
+                                emergencyOutage = res.emergencyOutage ?: h.emergencyOutage,
                                 addressLabel = res.addressLabel.ifEmpty { h.addressLabel }
                             )
                         } else h
@@ -1092,6 +1092,7 @@ fun SettingsScreen(
                                                     selectedStreetId = ""
                                                     housesList = emptyList()
                                                     selectedHouse = ""
+                                                    addressLookupResult = null
                                                     remDropdownExpanded = false
                                                 }
                                             )
@@ -1155,6 +1156,7 @@ fun SettingsScreen(
                                                     selectedStreetId = ""
                                                     housesList = emptyList()
                                                     selectedHouse = ""
+                                                    addressLookupResult = null
                                                     settlementDropdownExpanded = false
                                                 }
                                             )
@@ -1216,6 +1218,7 @@ fun SettingsScreen(
                                                     selectedStreetId = street.id
                                                     housesList = ZtoeAddressLookup.getHousesForStreet(street.id)
                                                     selectedHouse = ""
+                                                    addressLookupResult = null
                                                     streetDropdownExpanded = false
                                                 }
                                             )
@@ -1282,6 +1285,7 @@ fun SettingsScreen(
                                                 },
                                                 onClick = {
                                                     selectedHouse = h.house
+                                                    addressLookupResult = null
                                                     houseDropdownExpanded = false
                                                 }
                                             )
@@ -1291,15 +1295,24 @@ fun SettingsScreen(
                             }
 
                             // Result Card matching Workbench (shown when a house is selected)
-                            val matchedRecord = addressLookupResult
-                                ?: currentHouseRecord
-                                ?: if (selectedHouse.isNotBlank()) {
-                                    AddressLookupResult(
-                                        house = selectedHouse,
-                                        queue = "",
-                                        addressLabel = selectedAddressStr
-                                    )
-                                } else null
+                            val validLookupResult = addressLookupResult?.takeIf {
+                                it.house.equals(selectedHouse, ignoreCase = true)
+                            }
+                            val matchedRecord = when {
+                                validLookupResult != null && currentHouseRecord != null -> validLookupResult.copy(
+                                    queue = validLookupResult.queue.ifEmpty { currentHouseRecord.queue },
+                                    statusText = validLookupResult.statusText ?: currentHouseRecord.statusText,
+                                    emergencyOutage = validLookupResult.emergencyOutage ?: currentHouseRecord.emergencyOutage
+                                )
+                                validLookupResult != null -> validLookupResult
+                                currentHouseRecord != null -> currentHouseRecord
+                                selectedHouse.isNotBlank() -> AddressLookupResult(
+                                    house = selectedHouse,
+                                    queue = "",
+                                    addressLabel = selectedAddressStr
+                                )
+                                else -> null
+                            }
                             if (selectedHouse.isNotBlank() && matchedRecord != null) {
                                 Box(
                                     modifier = Modifier

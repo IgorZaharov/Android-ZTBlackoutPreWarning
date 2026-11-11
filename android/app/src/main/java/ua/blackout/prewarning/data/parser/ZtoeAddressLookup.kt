@@ -146,6 +146,9 @@ object ZtoeAddressLookup {
                 append("{")
                 append("\"id\":\"${escapeJsonStr(r.id)}\",")
                 append("\"ztoeRemId\":${r.ztoeRemId},")
+                if (r.ztoeOtgId != null) {
+                    append("\"ztoeOtgId\":${r.ztoeOtgId},")
+                }
                 append("\"nameUk\":\"${escapeJsonStr(r.nameUk)}\",")
                 append("\"nameEn\":\"${escapeJsonStr(r.nameEn)}\"")
                 append("}")
@@ -162,6 +165,9 @@ object ZtoeAddressLookup {
                     append("\"id\":\"${escapeJsonStr(s.id)}\",")
                     append("\"remId\":\"${escapeJsonStr(s.remId)}\",")
                     append("\"ztoeNaspunktId\":${s.ztoeNaspunktId},")
+                    if (s.poweronCityId != null) {
+                        append("\"poweronCityId\":${s.poweronCityId},")
+                    }
                     append("\"nameUk\":\"${escapeJsonStr(s.nameUk)}\",")
                     append("\"nameEn\":\"${escapeJsonStr(s.nameEn)}\"")
                     append("}")
@@ -179,6 +185,9 @@ object ZtoeAddressLookup {
                     append("\"id\":\"${escapeJsonStr(st.id)}\",")
                     append("\"settlementId\":\"${escapeJsonStr(st.settlementId)}\",")
                     append("\"ztoeVulicaId\":${st.ztoeVulicaId},")
+                    if (st.poweronStreetId != null) {
+                        append("\"poweronStreetId\":${st.poweronStreetId},")
+                    }
                     append("\"nameUk\":\"${escapeJsonStr(st.nameUk)}\",")
                     append("\"nameEn\":\"${escapeJsonStr(st.nameEn)}\"")
                     append("}")
@@ -222,7 +231,9 @@ object ZtoeAddressLookup {
                     val ztoeRemId = extractJsonIntField(objStr, "ztoeRemId") ?: continue
                     val nameUk = stripHtmlFast(extractJsonStringField(objStr, "nameUk") ?: continue)
                     val nameEn = stripHtmlFast(extractJsonStringField(objStr, "nameEn") ?: nameUk)
-                    parsedRems.add(ZtoeRemOption(id, ztoeRemId, nameUk, nameEn))
+                    val staticRem = ZTOE_REM_OPTIONS.firstOrNull { it.id == id || it.ztoeRemId == ztoeRemId }
+                    val ztoeOtgId = extractJsonIntField(objStr, "ztoeOtgId") ?: staticRem?.ztoeOtgId
+                    parsedRems.add(ZtoeRemOption(id, ztoeRemId, nameUk, nameEn, ztoeOtgId))
                 }
                 if (parsedRems.isNotEmpty()) {
                     cachedRems = parsedRems
@@ -238,8 +249,10 @@ object ZtoeAddressLookup {
                     val npId = extractJsonIntField(objStr, "ztoeNaspunktId") ?: continue
                     val nameUk = stripHtmlFast(extractJsonStringField(objStr, "nameUk") ?: continue)
                     val nameEn = stripHtmlFast(extractJsonStringField(objStr, "nameEn") ?: nameUk)
+                    val staticSettlement = ZTOE_SETTLEMENTS.firstOrNull { it.id == id || it.ztoeNaspunktId == npId }
+                    val poweronCityId = extractJsonIntField(objStr, "poweronCityId") ?: staticSettlement?.poweronCityId
                     grouped.getOrPut(remId) { mutableListOf() }.add(
-                        ZtoeSettlementOption(id, remId, npId, nameUk, nameEn)
+                        ZtoeSettlementOption(id, remId, npId, nameUk, nameEn, poweronCityId)
                     )
                 }
                 for ((remId, list) in grouped) {
@@ -258,8 +271,10 @@ object ZtoeAddressLookup {
                     val vulId = extractJsonIntField(objStr, "ztoeVulicaId") ?: continue
                     val nameUk = stripHtmlFast(extractJsonStringField(objStr, "nameUk") ?: continue)
                     val nameEn = stripHtmlFast(extractJsonStringField(objStr, "nameEn") ?: nameUk)
+                    val staticStreet = ZTOE_STREETS.firstOrNull { it.id == id || it.ztoeVulicaId == vulId }
+                    val poweronStreetId = extractJsonIntField(objStr, "poweronStreetId") ?: staticStreet?.poweronStreetId
                     grouped.getOrPut(settlementId) { mutableListOf() }.add(
-                        ZtoeStreetOption(id, settlementId, vulId, nameUk, nameEn)
+                        ZtoeStreetOption(id, settlementId, vulId, nameUk, nameEn, poweronStreetId)
                     )
                 }
                 for ((settlementId, list) in grouped) {
@@ -392,10 +407,10 @@ object ZtoeAddressLookup {
     )
 
     val ZTOE_STREETS: List<ZtoeStreetOption> = listOf(
-        ZtoeStreetOption("zt_kyivska", "zt_city", 173934, "вул. Київська", "Kyivska St.", 4755),
-        ZtoeStreetOption("zt_velyka_berdychivska", "zt_city", 174574, "вул. Велика Бердичівська", "Velyka Berdychivska St.", 4642),
-        ZtoeStreetOption("zt_peremohy", "zt_city", 173948, "вул. Перемоги", "Peremohy St.", 4754),
-        ZtoeStreetOption("zt_pokrovska", "zt_city", 173949, "вул. Покровська", "Pokrovska St.", 4633),
+        ZtoeStreetOption("zt_kyivska", "zt_city", 173934, "вул. Київська", "Kyivska St.", 4757),
+        ZtoeStreetOption("zt_velyka_berdychivska", "zt_city", 174574, "вул. Велика Бердичівська", "Velyka Berdychivska St.", 4550),
+        ZtoeStreetOption("zt_peremohy", "zt_city", 173948, "вул. Перемоги", "Peremohy St.", 4552),
+        ZtoeStreetOption("zt_pokrovska", "zt_city", 173949, "вул. Покровська", "Pokrovska St.", 4789),
         ZtoeStreetOption("zt_chudnivska", "zt_city", 174543, "вул. Чуднівська", "Chudnivska St.", 4645),
         ZtoeStreetOption("zt_mykhailivska", "zt_city", 174152, "вул. Михайлівська", "Mykhailivska St.", 33622),
         ZtoeStreetOption("zt_vitruka", "zt_city", 174457, "вул. Вітрука", "Vitruka St.", 4620),
@@ -492,14 +507,21 @@ object ZtoeAddressLookup {
                 ZtoeHouseLookupResult("104", "", statusText = "В цей час не вимикається, за винятком випадків аварійних відключень"),
                 ZtoeHouseLookupResult("106", "", statusText = "В цей час не вимикається, за винятком випадків аварійних відключень")
             )
-            "zt_velyka_berdychivska" -> listOf(
+            "zt_velyka_berdychivska", "zt_berdy" -> listOf(
                 ZtoeHouseLookupResult("2", "1.1"),
-                ZtoeHouseLookupResult("6", "1.2"),
+                ZtoeHouseLookupResult("6", "2.1"),
+                ZtoeHouseLookupResult("8", "2.1"),
+                ZtoeHouseLookupResult("10", "2.1"),
+                ZtoeHouseLookupResult("12", "2.1"),
                 ZtoeHouseLookupResult("14", "2.1"),
+                ZtoeHouseLookupResult("15", "2.2"),
+                ZtoeHouseLookupResult("22", "", statusText = "В цей час не вимикається, за винятком випадків аварійних відключень"),
                 ZtoeHouseLookupResult("28", "3.1"),
+                ZtoeHouseLookupResult("32", "4.1"),
                 ZtoeHouseLookupResult("35", "4.2"),
                 ZtoeHouseLookupResult("52", "5.1"),
-                ZtoeHouseLookupResult("67", "6.1"),
+                ZtoeHouseLookupResult("67", "5.1"),
+                ZtoeHouseLookupResult("70", "", statusText = "В цей час не вимикається, за винятком випадків аварійних відключень"),
                 ZtoeHouseLookupResult("71", "", statusText = "В цей час не вимикається, за винятком випадків аварійних відключень")
             )
             "zt_peremohy" -> listOf(
@@ -565,12 +587,22 @@ object ZtoeAddressLookup {
     }
 
     fun getHousesForStreet(streetId: String): List<ZtoeHouseLookupResult> {
-        return cachedHousesByStreet[streetId] ?: getDefaultHousesForStreet(streetId)
+        cachedHousesByStreet[streetId]?.let { return it }
+        if (streetId == "zt_berdy") {
+            cachedHousesByStreet["zt_velyka_berdychivska"]?.let { return it }
+        } else if (streetId == "zt_velyka_berdychivska") {
+            cachedHousesByStreet["zt_berdy"]?.let { return it }
+        }
+        return getDefaultHousesForStreet(streetId)
     }
 
     fun findSettlementById(settlementId: String): ZtoeSettlementOption? {
         for (list in cachedSettlementsByRem.values) {
-            list.firstOrNull { it.id == settlementId }?.let { return it }
+            list.firstOrNull { it.id == settlementId }?.let { found ->
+                if (found.poweronCityId != null) return found
+                val staticMatch = ZTOE_SETTLEMENTS.firstOrNull { it.id == found.id || it.ztoeNaspunktId == found.ztoeNaspunktId }
+                return if (staticMatch?.poweronCityId != null) found.copy(poweronCityId = staticMatch.poweronCityId) else found
+            }
         }
         ZTOE_SETTLEMENTS.firstOrNull { it.id == settlementId }?.let { return it }
         val npId = settlementId.removePrefix("np_").toIntOrNull()
@@ -579,23 +611,28 @@ object ZtoeAddressLookup {
                 list.firstOrNull { it.ztoeNaspunktId == npId }?.let { return it }
             }
             ZTOE_SETTLEMENTS.firstOrNull { it.ztoeNaspunktId == npId }?.let { return it }
-            return ZtoeSettlementOption(settlementId, "", npId, settlementId, settlementId)
+            return ZtoeSettlementOption(settlementId, "", npId, "", "")
         }
         return null
     }
 
     fun findStreetById(streetId: String): ZtoeStreetOption? {
+        val canonicalId = if (streetId == "zt_berdy") "zt_velyka_berdychivska" else streetId
         for (list in cachedStreetsBySettlement.values) {
-            list.firstOrNull { it.id == streetId }?.let { return it }
+            list.firstOrNull { it.id == streetId || it.id == canonicalId }?.let { found ->
+                if (found.poweronStreetId != null) return found
+                val staticMatch = ZTOE_STREETS.firstOrNull { it.id == found.id || it.ztoeVulicaId == found.ztoeVulicaId }
+                return if (staticMatch?.poweronStreetId != null) found.copy(poweronStreetId = staticMatch.poweronStreetId) else found
+            }
         }
-        ZTOE_STREETS.firstOrNull { it.id == streetId }?.let { return it }
+        ZTOE_STREETS.firstOrNull { it.id == streetId || it.id == canonicalId }?.let { return it }
         val vulId = streetId.removePrefix("st_").toIntOrNull()
         if (vulId != null) {
             for (list in cachedStreetsBySettlement.values) {
                 list.firstOrNull { it.ztoeVulicaId == vulId }?.let { return it }
             }
             ZTOE_STREETS.firstOrNull { it.ztoeVulicaId == vulId }?.let { return it }
-            return ZtoeStreetOption(streetId, "", vulId, streetId, streetId)
+            return ZtoeStreetOption(streetId, "", vulId, "", "")
         }
         return null
     }
@@ -833,7 +870,7 @@ object ZtoeAddressLookup {
             for (cellMatch in TD_TH_TAG_REGEX.findAll(rowHtml)) {
                 cells.add(stripHtmlFast(cellMatch.groupValues[1]))
             }
-            if (cells.size < 6) continue
+            if (cells.size < 5) continue
 
             val firstLower = cells[0].lowercase()
             if (firstLower == "рем" || cells[2].lowercase().contains("назва вулиці")) {
@@ -849,7 +886,7 @@ object ZtoeAddressLookup {
                 ?: continue
 
             val col4 = cells[4].trim()
-            val col5 = cells[5].trim()
+            val col5 = if (cells.size >= 6) cells[5].trim() else ""
             val qNum = col4.replace(Regex("[^0-9]"), "")
             val subNum = col5.replace(Regex("[^0-9]"), "")
             val candidateQueue = "$qNum.$subNum"
@@ -1046,6 +1083,7 @@ object ZtoeAddressLookup {
             if (!html.isNullOrBlank()) {
                 val parsedRows = parseZtoeAddressLookupTableHtml(html)
                 if (parsedRows.isNotEmpty()) {
+                    val prevHouses = cachedHousesByStreet[streetId]
                     val mergedMap = LinkedHashMap<String, ZtoeHouseLookupResult>()
                     for (row in parsedRows) {
                         val key = normalizeHouseNumber(row.house)
@@ -1053,6 +1091,18 @@ object ZtoeAddressLookup {
                         val existing = mergedMap[key]
                         if (existing == null || (existing.queue.isEmpty() && row.queue.isNotEmpty())) {
                             mergedMap[key] = row
+                        }
+                    }
+                    if (prevHouses != null) {
+                        for (prevH in prevHouses) {
+                            val prevEmerg = prevH.emergencyOutage
+                            if (prevEmerg != null && isValidEmergencyOutage(prevEmerg)) {
+                                val k = normalizeHouseNumber(prevH.house)
+                                val cur = mergedMap[k]
+                                if (cur != null && cur.emergencyOutage == null) {
+                                    mergedMap[k] = cur.copy(emergencyOutage = prevEmerg)
+                                }
+                            }
                         }
                     }
                     applyCanonicalStreetOverrides(streetId, mergedMap)
@@ -1213,12 +1263,12 @@ object ZtoeAddressLookup {
                 continue
             }
 
-            // Format A: Real ZTOE 6+ column address lookup table:
-            // [0] РЕМ, [1] Населений пункт, [2] Назва вулиці, [3] Будинки, [4] Черга (or status message), [5] Підчерга (or status message)
-            if (cells.size >= 6) {
+            // Format A: Real ZTOE 5+ column address lookup table:
+            // [0] РЕМ, [1] Населений пункт, [2] Назва вулиці, [3] Будинки, [4] Черга (or colspan="3" status message), [5] Підчерга
+            if (cells.size >= 5) {
                 val houseField = cells[3]
-                val col4 = cells[4]
-                val col5 = cells[5]
+                val col4 = cells[4].trim()
+                val col5 = if (cells.size >= 6) cells[5].trim() else ""
                 val houses = houseField.split(Regex("[,;]"))
                     .map { it.trim() }
                     .filter { it.isNotEmpty() && !it.equals("будинки", ignoreCase = true) }
@@ -1372,9 +1422,12 @@ object ZtoeAddressLookup {
 
     private fun normalizeUkText(value: String): String {
         return value.lowercase()
+            .replace(Regex("""\([^)]*\)"""), "")
             .replace(CITY_PREFIX_REGEX, "")
             .replace(STREET_PREFIX_REGEX, "")
-            .replace(Regex("""['"«»`]"""), "")
+            .replace(Regex("""^(?:вулиця|вул\.?|провулок|пров\.?|пр-к\.?|пр\.?|проспект|просп\.?|пр-т\.?|майдан|м-н\.?|площа|пл\.?|бульвар|бул\.?|б-р\.?|шосе|ш\.?|проїзд|пр-д\.?|тупик|наб\.?)\s+"""), "")
+            .replace(Regex("""[.,'"«»’ʼ`]"""), " ")
+            .replace("бердичив", "бердичів")
             .replace(Regex("""\s+"""), " ")
             .trim()
     }
@@ -1392,8 +1445,9 @@ object ZtoeAddressLookup {
             'i' to 'і'
         )
         val cleaned = value.lowercase()
-            .replace(Regex("""^(буд\.|будинок|б\.|д\.)\s*""", RegexOption.IGNORE_CASE), "")
-            .replace(Regex("""['"«»`\s]+"""), "")
+            .replace(Regex("""^(буд\.?|будинок|б\.?|д\.?)\s*""", RegexOption.IGNORE_CASE), "")
+            .replace(Regex("""\.+$"""), "")
+            .replace(Regex("""['"«»’ʼ`\s-]+"""), "")
             .trim()
         val sb = StringBuilder(cleaned.length)
         for (ch in cleaned) {
@@ -1508,7 +1562,106 @@ object ZtoeAddressLookup {
         return null
     }
 
+    /**
+     * Finds the value start index for a top-level property `fieldName` inside `objStr`,
+     * ignoring any nested `{...}` or `[...]` objects so nested fields (like `street.city.name`)
+     * never shadow the parent object's own fields (like `street.name`).
+     */
+    private fun findTopLevelJsonFieldValueStart(objStr: String, fieldName: String): Int {
+        val firstNonWs = objStr.indexOfFirst { !it.isWhitespace() }
+        if (firstNonWs < 0) return -1
+        val targetDepth = if (objStr[firstNonWs] == '{') 1 else 0
+        var depth = 0
+        var i = firstNonWs
+        val len = objStr.length
+
+        while (i < len) {
+            val ch = objStr[i]
+            if (ch == '"') {
+                val strStart = i + 1
+                var k = strStart
+                var escaped = false
+                while (k < len) {
+                    val sc = objStr[k]
+                    if (escaped) {
+                        escaped = false
+                    } else if (sc == '\\') {
+                        escaped = true
+                    } else if (sc == '"') {
+                        break
+                    }
+                    k++
+                }
+                if (k >= len) return -1
+                val keyCandidate = objStr.substring(strStart, k)
+                i = k + 1
+                if (depth == targetDepth) {
+                    while (i < len && objStr[i].isWhitespace()) i++
+                    if (i < len && objStr[i] == ':') {
+                        i++
+                        while (i < len && objStr[i].isWhitespace()) i++
+                        if (keyCandidate.trim() == fieldName) {
+                            return if (i < len) i else -1
+                        }
+                    }
+                }
+                continue
+            }
+            when (ch) {
+                '{', '[' -> depth++
+                '}', ']' -> depth--
+            }
+            i++
+        }
+        return -1
+    }
+
+    private fun unescapeJsonString(raw: String): String {
+        if (!raw.contains('\\')) return raw
+        val sb = StringBuilder(raw.length)
+        var i = 0
+        while (i < raw.length) {
+            val ch = raw[i]
+            if (ch == '\\' && i + 1 < raw.length) {
+                val next = raw[i + 1]
+                when (next) {
+                    '"' -> { sb.append('"'); i += 2 }
+                    '\\' -> { sb.append('\\'); i += 2 }
+                    '/' -> { sb.append('/'); i += 2 }
+                    'n' -> { sb.append('\n'); i += 2 }
+                    'r' -> { sb.append('\r'); i += 2 }
+                    't' -> { sb.append('\t'); i += 2 }
+                    'u' -> {
+                        if (i + 5 < raw.length) {
+                            val hex = raw.substring(i + 2, i + 6)
+                            val code = hex.toIntOrNull(16)
+                            if (code != null) {
+                                sb.append(code.toChar())
+                                i += 6
+                                continue
+                            }
+                        }
+                        sb.append(ch)
+                        i++
+                    }
+                    else -> {
+                        sb.append(next)
+                        i += 2
+                    }
+                }
+            } else {
+                sb.append(ch)
+                i++
+            }
+        }
+        return sb.toString()
+    }
+
     private fun extractJsonArrayField(objStr: String, fieldName: String): String? {
+        val valIdx = findTopLevelJsonFieldValueStart(objStr, fieldName)
+        if (valIdx >= 0 && objStr[valIdx] == '[') {
+            return extractBalancedBracketBlock(objStr, valIdx, '[', ']')
+        }
         val keyRegex = Regex(""""\s*${Regex.escape(fieldName)}\s*"\s*:\s*\[""")
         val m = keyRegex.find(objStr) ?: return null
         val bracketIdx = objStr.indexOf('[', m.range.first)
@@ -1516,22 +1669,42 @@ object ZtoeAddressLookup {
     }
 
     private fun extractJsonObjectField(objStr: String, fieldName: String): String? {
-        val keyRegex = Regex(""""\s*${Regex.escape(fieldName)}\s*"\s*:\s*\{""")
-        val m = keyRegex.find(objStr) ?: return null
-        val braceIdx = objStr.indexOf('{', m.range.first)
-        return extractBalancedBracketBlock(objStr, braceIdx, '{', '}')
+        val valIdx = findTopLevelJsonFieldValueStart(objStr, fieldName)
+        if (valIdx >= 0 && objStr[valIdx] == '{') {
+            return extractBalancedBracketBlock(objStr, valIdx, '{', '}')
+        }
+        return null
     }
 
     private fun extractJsonStringField(objStr: String, fieldName: String): String? {
-        val keyRegex = Regex(""""\s*${Regex.escape(fieldName)}\s*"\s*:\s*"((?:\\"|[^"])*)"""")
-        val m = keyRegex.find(objStr) ?: return null
-        return m.groupValues[1].replace("\\\"", "\"")
+        val valIdx = findTopLevelJsonFieldValueStart(objStr, fieldName)
+        if (valIdx < 0 || objStr[valIdx] != '"') return null
+        var k = valIdx + 1
+        var escaped = false
+        while (k < objStr.length) {
+            val ch = objStr[k]
+            if (escaped) {
+                escaped = false
+            } else if (ch == '\\') {
+                escaped = true
+            } else if (ch == '"') {
+                return unescapeJsonString(objStr.substring(valIdx + 1, k))
+            }
+            k++
+        }
+        return null
     }
 
     private fun extractJsonIntField(objStr: String, fieldName: String): Int? {
-        val keyRegex = Regex(""""\s*${Regex.escape(fieldName)}\s*"\s*:\s*(-?\d+)""")
-        val m = keyRegex.find(objStr) ?: return null
-        return m.groupValues[1].toIntOrNull()
+        val valIdx = findTopLevelJsonFieldValueStart(objStr, fieldName)
+        if (valIdx < 0) return null
+        var start = valIdx
+        if (objStr[start] == '"') start++
+        var end = start
+        if (end < objStr.length && objStr[end] == '-') end++
+        while (end < objStr.length && objStr[end].isDigit()) end++
+        if (end <= start || (end == start + 1 && objStr[start] == '-')) return null
+        return objStr.substring(start, end).toIntOrNull()
     }
 
     private fun applyAccidentsToSettlementHouses(settlementId: String, rawJson: String) {
@@ -1616,9 +1789,8 @@ object ZtoeAddressLookup {
 
                 val outageType = getAccidentOutageTypeLabel(switchSubReason, koment)
                 val otgName = extractJsonObjectField(itemStr, "otg")?.let { extractJsonStringField(it, "name") }
-                val idVal = extractJsonIntField(itemStr, "id")?.toString()
+                val explicitId = extractJsonIntField(itemStr, "id")?.toString()
                     ?: extractJsonStringField(itemStr, "id")
-                    ?: startTime
 
                 val houseTokens = buildingNames.split(Regex("[,;]")).map { it.trim() }.filter { it.isNotEmpty() }
                 for (streetId in matchedStreetIds) {
@@ -1628,11 +1800,16 @@ object ZtoeAddressLookup {
                         if (normH.isEmpty()) continue
                         val existing = streetEmergMap[normH]
                         if (existing == null || score > existing.score || (score == existing.score && rawPlanIn > existing.rawPlanIn)) {
+                            val outageId = if (!explicitId.isNullOrBlank()) {
+                                "pw_accident_$explicitId"
+                            } else {
+                                "pw_accident_${streetId}_${normH}_$startTime"
+                            }
                             streetEmergMap[normH] = ScoredOutage(
                                 score = score,
                                 rawPlanIn = rawPlanIn,
                                 info = EmergencyOutageInfo(
-                                    id = "pw_accident_${idVal}_$normH",
+                                    id = outageId,
                                     remName = otgName,
                                     settlementName = cityName.ifBlank { settlementObj?.nameUk },
                                     streetName = streetNameRaw,
@@ -2001,17 +2178,8 @@ object ZtoeAddressLookup {
 
         val rem = getRems().firstOrNull { it.id == query.remId }
             ?: ZTOE_REM_OPTIONS.firstOrNull { it.id == query.remId }
-        val settlement = findSettlementById(query.settlementId)
-        val street = findStreetById(query.streetId)
-        val formattedAddressLabel = buildString {
-            append(rem?.nameUk ?: "Житомирський РЕМ")
-            append(", ")
-            append(settlement?.nameUk ?: "м. Житомир")
-            append(",\n")
-            append(street?.nameUk ?: "вул. Київська")
-            append(", буд. ")
-            append(query.house.trim())
-        }
+        var settlement = findSettlementById(query.settlementId)
+        var street = findStreetById(query.streetId)
 
         var fetchedHtml: String? = null
         if (rem != null && settlement != null && street != null && ZtoeParser.isValidUrl(siteUrl)) {
@@ -2038,6 +2206,20 @@ object ZtoeAddressLookup {
                         html = String(bytes, Charsets.UTF_8)
                     }
                     fetchedHtml = html
+                    if (settlement.nameUk.isBlank() && query.remId.isNotBlank()) {
+                        val parsedSettlements = parseZtoeSettlementOptionsHtml(query.remId, html)
+                        if (parsedSettlements.isNotEmpty()) {
+                            cachedSettlementsByRem[query.remId] = parsedSettlements
+                            settlement = findSettlementById(query.settlementId) ?: settlement
+                        }
+                    }
+                    if (street.nameUk.isBlank() && query.settlementId.isNotBlank()) {
+                        val parsedStreets = parseZtoeStreetOptionsHtml(query.settlementId, html)
+                        if (parsedStreets.isNotEmpty()) {
+                            cachedStreetsBySettlement[query.settlementId] = parsedStreets
+                            street = findStreetById(query.streetId) ?: street
+                        }
+                    }
                     val parsedRows = parseZtoeAddressLookupTableHtml(html)
                     val matchingRows = parsedRows.filter {
                         normalizeHouseNumber(it.house) == targetHouseNorm
@@ -2057,6 +2239,16 @@ object ZtoeAddressLookup {
             } finally {
                 conn?.disconnect()
             }
+        }
+
+        val formattedAddressLabel = buildString {
+            append(rem?.nameUk?.ifBlank { "Житомирський РЕМ" } ?: "Житомирський РЕМ")
+            append(", ")
+            append(settlement?.nameUk?.ifBlank { "м. Житомир" } ?: "м. Житомир")
+            append(",\n")
+            append(street?.nameUk?.ifBlank { "вул. Київська" } ?: "вул. Київська")
+            append(", буд. ")
+            append(query.house.trim())
         }
 
         val emergencyOutage = checkEmergencyOutageOnZtoe(query, fetchedHtml)

@@ -34,6 +34,7 @@ class ScheduleSyncWorker(
             // Re-check saved address query & emergency outages on ZTOE website
             val addressQuery = settings.selectedAddressQuery
             if (addressQuery != null) {
+                ZtoeAddressLookup.initDiskCache(appContext)
                 val latestAddressLookup = ZtoeAddressLookup.checkAddressOnZtoeWebsite(addressQuery, settings.cityUrl)
                 if (latestAddressLookup != null) {
                     val prevEmergency = settings.activeEmergencyOutage

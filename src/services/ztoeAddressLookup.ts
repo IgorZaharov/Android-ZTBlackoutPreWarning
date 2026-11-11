@@ -199,6 +199,13 @@ export const ZTOE_STREET_HOUSES: Record<string, ZtoeHouseLookupResult[]> = {
     { house: '10', queue: '2.1', rawQueueCell: '2', rawSubqueueCell: '1' },
     { house: '12', queue: '2.1', rawQueueCell: '2', rawSubqueueCell: '1' },
     { house: '15', queue: '2.2', rawQueueCell: '2', rawSubqueueCell: '2' },
+    {
+      house: '22',
+      queue: '',
+      rawQueueCell: ZTOE_FULL_NO_OUTAGE_MESSAGE,
+      rawSubqueueCell: ZTOE_FULL_NO_OUTAGE_MESSAGE,
+      statusText: ZTOE_FULL_NO_OUTAGE_MESSAGE,
+    },
     { house: '32', queue: '4.1', rawQueueCell: '4', rawSubqueueCell: '1' },
     { house: '67', queue: '5.1', rawQueueCell: '5', rawSubqueueCell: '1' },
     {
@@ -1640,11 +1647,12 @@ export function findSettlementById(settlementId: string): ZtoeSettlementOption |
 
 export function findStreetById(streetId: string): ZtoeStreetOption | undefined {
   ensureHydrated();
+  const canonicalId = streetId === 'zt_velyka_berdychivska' ? 'zt_berdy' : streetId;
   for (const list of Object.values(dynamicStreetsBySettlementId)) {
-    const found = list.find((st) => st.id === streetId);
+    const found = list.find((st) => st.id === streetId || st.id === canonicalId);
     if (found) return found;
   }
-  const staticMatch = ZTOE_STREET_OPTIONS.find((st) => st.id === streetId);
+  const staticMatch = ZTOE_STREET_OPTIONS.find((st) => st.id === streetId || st.id === canonicalId);
   if (staticMatch) return staticMatch;
   const vulId = streetId.replace(/^(?:st|vul_[a-z_]+)_/, '');
   if (/^\d+$/.test(vulId)) {
@@ -1674,9 +1682,10 @@ export function getStreetsForSettlement(settlementId: string): ZtoeStreetOption[
 
 export function getHousesForStreet(streetId: string): ZtoeHouseLookupResult[] {
   ensureHydrated();
-  const dynamicList = dynamicHousesByStreetId[streetId];
+  const canonicalId = streetId === 'zt_velyka_berdychivska' ? 'zt_berdy' : streetId;
+  const dynamicList = dynamicHousesByStreetId[streetId] || dynamicHousesByStreetId[canonicalId];
   if (dynamicList && dynamicList.length > 0) return dynamicList;
-  return ZTOE_STREET_HOUSES[streetId] || [];
+  return ZTOE_STREET_HOUSES[streetId] || ZTOE_STREET_HOUSES[canonicalId] || [];
 }
 
 export function parseZtoeRemOptionsHtml(html: string): ZtoeRemOption[] {

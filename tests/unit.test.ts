@@ -3145,6 +3145,79 @@ async function runUnitTestE_AddressLookupAndUnsetQueue() {
     'Synthesized schedule from null must mark emergency overlap slots as POWER_OFF with isEmergency = true'
   );
 
+  // Verify Житомир, вул. Велика Бердичівська, буд. 22 parity between Workbench and Android
+  const berdy22LivePoweronRecord = [
+    {
+      id: 401740077,
+      code_otg: '6',
+      city: {
+        '@id': '/api/pw_cities/333',
+        '@type': 'PwCity',
+        id: 333,
+        name: 'Житомир',
+        codeOtg: '',
+      },
+      street: {
+        '@id': '/api/pw_streets/4550',
+        '@type': 'PwStreet',
+        id: 4550,
+        city: {
+          '@id': '/api/pw_cities/333',
+          '@type': 'PwCity',
+          name: 'Житомир',
+        },
+        name: 'вул. Велика Бердичівська',
+      },
+      dateEvent: '2026-11-10T23:28:00+00:00',
+      datePlanIn: '2026-11-11T17:00:00+00:00',
+      koment: 'АВАРІЯ',
+      switchSubReason: 0,
+      otg: {
+        '@id': '/api/pw_otgs/6',
+        '@type': 'PwOtg',
+        id: 6,
+        code: '6',
+        name: 'Житомирський РЕМ',
+      },
+      buildingNames:
+        '10, 11, 12, 12А, 13, 14, 15, 15/1, 17, 18, 20, 22, 24, 28, 28/1, 30, 32, 34, 34-А, 6, 8, 9',
+      typeOff: 1,
+    },
+  ];
+  const matchedBerdy22 = matchEmergencyOutageFromAccidentsJson(berdy22LivePoweronRecord, {
+    remId: 'zhytomyr',
+    settlementId: 'zt_city',
+    streetId: 'zt_berdy',
+    house: '22',
+  });
+  assert.ok(
+    matchedBerdy22 !== null &&
+      matchedBerdy22.id === 'pw_accident_401740077' &&
+      matchedBerdy22.startTime === '10.11.2026 23:28' &&
+      matchedBerdy22.estimatedRestoreTime === '11.11.2026 17:00' &&
+      matchedBerdy22.outageType === 'Аварійне відключення',
+    'matchEmergencyOutageFromAccidentsJson must match Житомир, вул. Велика Бердичівська, буд. 22 emergency outage'
+  );
+  const matchedBerdy22AndroidAlias = matchEmergencyOutageFromAccidentsJson(berdy22LivePoweronRecord, {
+    remId: 'zhytomyr',
+    settlementId: 'zt_city',
+    streetId: 'zt_velyka_berdychivska',
+    house: '22',
+  });
+  assert.ok(
+    matchedBerdy22AndroidAlias !== null &&
+      matchedBerdy22AndroidAlias.startTime === '10.11.2026 23:28' &&
+      matchedBerdy22AndroidAlias.estimatedRestoreTime === '11.11.2026 17:00',
+    'matchEmergencyOutageFromAccidentsJson must also match Android streetId alias zt_velyka_berdychivska'
+  );
+  assert.ok(
+    ztoeAddressLookupKt.includes('findTopLevelJsonFieldValueStart') &&
+      ztoeAddressLookupKt.includes('ZtoeStreetOption("zt_velyka_berdychivska", "zt_city", 174574, "вул. Велика Бердичівська", "Velyka Berdychivska St.", 4550)') &&
+      ztoeAddressLookupKt.includes('if (cells.size < 5) continue') &&
+      ztoeAddressLookupKt.includes('if (cells.size >= 5)'),
+    'ZtoeAddressLookup.kt must use depth-1 JSON field extraction (ignoring nested street.city.name), poweronStreetId 4550 for Велика Бердичівська, and support 5-cell colspan="3" no-queue HTML rows'
+  );
+
   // Verify MainView.tsx and MainScreen.kt render the Emergency Outage banner before customQueueStatusText and counter card
   assert.ok(
     mainViewTsx.indexOf('data-testid="main-emergency-outage-banner"') <

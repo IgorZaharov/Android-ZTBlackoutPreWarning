@@ -160,7 +160,7 @@ class ScheduleRepository(context: Context) {
                         targetDate == endDate -> overlap = 0 to endMin
                         targetDate > startDate && targetDate < endDate -> overlap = 0 to 1440
                         !isTomorrow && targetDate < endDate -> overlap = startMin to 1440
-                        isTomorrow && targetDate > startDate -> overlap = 0 to endMin
+                        isTomorrow && targetDate > startDate && targetDate != endDate.plusDays(1) -> overlap = 0 to endMin
                     }
                 }
             } else {
