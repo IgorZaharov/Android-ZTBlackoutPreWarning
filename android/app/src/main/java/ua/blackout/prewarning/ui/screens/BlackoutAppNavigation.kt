@@ -53,6 +53,7 @@ import ua.blackout.prewarning.data.repository.SettingsRepository
 import ua.blackout.prewarning.notification.AlarmScheduler
 import ua.blackout.prewarning.notification.NotificationHelper
 import ua.blackout.prewarning.ui.AppStrings
+import ua.blackout.prewarning.ui.components.floatingShadow
 import ua.blackout.prewarning.ui.theme.TimeOfDayPalette
 import ua.blackout.prewarning.widget.BlackoutGlanceWidget
 import java.time.LocalDate
@@ -1057,6 +1058,7 @@ fun BlackoutAppNavigation(
             ) {
                 Box(
                     modifier = Modifier
+                        .floatingShadow(color = Color(0xB3000000), borderRadius = 32.dp, blurRadius = 24.dp, offsetY = 8.dp)
                         .clip(CircleShape)
                         .background(Color(0xCC141A29))
                         .padding(6.dp)

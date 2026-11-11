@@ -688,6 +688,7 @@ fun MainScreen(
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .floatingShadow(color = Color(0xB3000000), borderRadius = 20.dp, blurRadius = 22.dp, offsetY = 8.dp)
                     .clip(RoundedCornerShape(20.dp))
                     .background(Color(0xBF141A29))
                     .padding(14.dp)
@@ -733,6 +734,7 @@ fun MainScreen(
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .floatingShadow(color = Color(0xB3000000), borderRadius = 24.dp, blurRadius = 22.dp, offsetY = 8.dp)
                     .clip(RoundedCornerShape(24.dp))
                     .background(Color(0xBF141A29))
                     .padding(14.dp)
@@ -803,6 +805,7 @@ fun MainScreen(
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .floatingShadow(color = Color(0xB3000000), borderRadius = 24.dp, blurRadius = 22.dp, offsetY = 8.dp)
                     .clip(RoundedCornerShape(24.dp))
                     .background(Color(0xBF141A29))
                     .padding(14.dp)

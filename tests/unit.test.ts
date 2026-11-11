@@ -3301,6 +3301,13 @@ function runUnitTestF_FloatingShadows() {
 
   const floatingShadowKtPath = path.join(ROOT_DIR, 'android/app/src/main/java/ua/blackout/prewarning/ui/components/FloatingShadow.kt');
   assert.ok(fs.existsSync(floatingShadowKtPath), 'FloatingShadow.kt must exist');
+  const floatingShadowKt = fs.readFileSync(floatingShadowKtPath, 'utf-8');
+  assert.ok(
+    floatingShadowKt.includes('drawRoundRect') &&
+      floatingShadowKt.includes('drawBehind') &&
+      !floatingShadowKt.includes('BlurMaskFilter'),
+    'FloatingShadow.kt must use hardware-accelerated drawRoundRect without unsupported BlurMaskFilter'
+  );
 
   console.log('Unit Test F PASSED: Floating shadows verified on Web and Android across Main, Settings, and About screens.');
 }
