@@ -3237,11 +3237,74 @@ async function runUnitTestE_AddressLookupAndUnsetQueue() {
   console.log('Unit Test E PASSED: Interactive ZTOE Address Lookup, First-Launch Unselected Queue, No-Queue Houses, Emergency Outages, Background Address Prefetch & Bulk House Indexing verified.');
 }
 
+function runUnitTestF_FloatingShadows() {
+  console.log('Running Unit Test F: Floating shadows around segments on Main screen, Settings, About...');
+
+  const mainViewPath = path.join(ROOT_DIR, 'src/components/MainView.tsx');
+  const settingsViewPath = path.join(ROOT_DIR, 'src/components/SettingsView.tsx');
+  const aboutViewPath = path.join(ROOT_DIR, 'src/components/AboutView.tsx');
+  const mainScreenPath = path.join(ROOT_DIR, 'android/app/src/main/java/ua/blackout/prewarning/ui/screens/MainScreen.kt');
+  const settingsScreenPath = path.join(ROOT_DIR, 'android/app/src/main/java/ua/blackout/prewarning/ui/screens/SettingsScreen.kt');
+  const aboutScreenPath = path.join(ROOT_DIR, 'android/app/src/main/java/ua/blackout/prewarning/ui/screens/AboutScreen.kt');
+
+  const mainView = fs.readFileSync(mainViewPath, 'utf-8');
+  const settingsView = fs.readFileSync(settingsViewPath, 'utf-8');
+  const aboutView = fs.readFileSync(aboutViewPath, 'utf-8');
+  const mainScreen = fs.readFileSync(mainScreenPath, 'utf-8');
+  const settingsScreen = fs.readFileSync(settingsScreenPath, 'utf-8');
+  const aboutScreen = fs.readFileSync(aboutScreenPath, 'utf-8');
+
+  // Verify Web MainView floating shadows
+  assert.ok(
+    mainView.includes('shadow-[0_16px_40px_rgba(0,0,0,0.55)]') &&
+      mainView.includes('shadow-[0_16px_44px_rgba(0,0,0,0.55)]') &&
+      mainView.includes('shadow-[0_12px_36px_rgba(0,0,0,0.45)]'),
+    'MainView.tsx must include floating shadows on segments'
+  );
+
+  // Verify Web SettingsView floating shadows
+  assert.ok(
+    (settingsView.match(/shadow-\[0_16px_44px_rgba\(0,0,0,0\.55\)\]/g) || []).length >= 6,
+    'SettingsView.tsx must include floating shadows on all segment cards'
+  );
+
+  // Verify Web AboutView floating shadows
+  assert.ok(
+    (aboutView.match(/shadow-\[0_16px_44px_rgba\(0,0,0,0\.55\)\]/g) || []).length >= 6,
+    'AboutView.tsx must include floating shadows on all segment cards'
+  );
+
+  // Verify Android MainScreen.kt shadows
+  assert.ok(
+    mainScreen.includes('import androidx.compose.ui.draw.shadow') &&
+      mainScreen.includes('.shadow(10.dp, RoundedCornerShape(24.dp)') &&
+      mainScreen.includes('.shadow(8.dp, RoundedCornerShape(16.dp)'),
+    'MainScreen.kt must include .shadow() modifiers on segments'
+  );
+
+  // Verify Android SettingsScreen.kt shadows
+  assert.ok(
+    settingsScreen.includes('import androidx.compose.ui.draw.shadow') &&
+      (settingsScreen.match(/\.shadow\(10\.dp, RoundedCornerShape\(24\.dp\)/g) || []).length >= 7,
+    'SettingsScreen.kt must include .shadow() modifiers on cards'
+  );
+
+  // Verify Android AboutScreen.kt shadows
+  assert.ok(
+    aboutScreen.includes('import androidx.compose.ui.draw.shadow') &&
+      (aboutScreen.match(/\.shadow\(10\.dp, RoundedCornerShape\(24\.dp\)/g) || []).length >= 5,
+    'AboutScreen.kt must include .shadow() modifiers on cards'
+  );
+
+  console.log('Unit Test F PASSED: Floating shadows verified on Web and Android across Main, Settings, and About screens.');
+}
+
 async function main() {
   await runUnitTestA();
   runUnitTestB();
   await runUnitTestC_ZhytomyrRoulette();
   await runUnitTestE_AddressLookupAndUnsetQueue();
+  runUnitTestF_FloatingShadows();
 }
 
 main().catch((err) => {

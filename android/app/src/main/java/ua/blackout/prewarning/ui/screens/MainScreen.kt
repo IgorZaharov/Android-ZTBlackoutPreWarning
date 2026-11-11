@@ -26,6 +26,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
@@ -241,6 +242,7 @@ fun MainScreen(
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
+                        .shadow(10.dp, RoundedCornerShape(24.dp), ambientColor = Color(0x66000000), spotColor = Color(0x80000000))
                         .clip(RoundedCornerShape(24.dp))
                         .background(Color(0xBF141A29))
                         .border(1.dp, Color(0x26FFFFFF), RoundedCornerShape(24.dp))
@@ -309,6 +311,7 @@ fun MainScreen(
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
+                        .shadow(10.dp, RoundedCornerShape(24.dp), ambientColor = Color(0x66000000), spotColor = Color(0x80000000))
                         .clip(RoundedCornerShape(24.dp))
                         .background(Color(0xBF141A29))
                         .border(1.dp, Color(0x26FFFFFF), RoundedCornerShape(24.dp))
@@ -339,6 +342,7 @@ fun MainScreen(
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .shadow(10.dp, RoundedCornerShape(24.dp), ambientColor = Color(0x66000000), spotColor = Color(0x80000000))
                     .clip(RoundedCornerShape(24.dp))
                     .background(Color(0xBF141A29))
                     .border(1.dp, Color(0x26FFFFFF), RoundedCornerShape(24.dp))
@@ -482,6 +486,7 @@ fun MainScreen(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
+                        .shadow(8.dp, RoundedCornerShape(16.dp), ambientColor = Color(0x55000000), spotColor = Color(0x66000000))
                         .clip(RoundedCornerShape(16.dp))
                         .background(Color(0x80141A29))
                         .padding(4.dp)
@@ -528,6 +533,7 @@ fun MainScreen(
                 ) {
                     Box(
                         modifier = Modifier
+                            .shadow(8.dp, RoundedCornerShape(16.dp), ambientColor = Color(0x55000000), spotColor = Color(0x66000000))
                             .clip(RoundedCornerShape(16.dp))
                             .background(Color(0x80141A29))
                             .padding(horizontal = 24.dp, vertical = 10.dp)
@@ -546,6 +552,7 @@ fun MainScreen(
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .shadow(10.dp, RoundedCornerShape(24.dp), ambientColor = Color(0x66000000), spotColor = Color(0x80000000))
                     .clip(RoundedCornerShape(24.dp))
                     .background(Color(0xBF141A29))
                     .padding(18.dp)

@@ -291,7 +291,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       </div>
 
       {/* 1. Queue Selection (Only Drop-down List + ? Help Glyph) */}
-      <div className="bg-[#141A29]/75 backdrop-blur-2xl rounded-3xl p-5 border border-white/15 shadow-[0_12px_40px_rgba(0,0,0,0.45)] flex flex-col gap-3">
+      <div className="bg-[#141A29]/75 backdrop-blur-2xl rounded-3xl p-5 border border-white/15 shadow-[0_16px_44px_rgba(0,0,0,0.55)] flex flex-col gap-3">
         <div className="flex items-center justify-between gap-3">
           <div>
             <div className="flex items-center gap-2">
@@ -343,7 +343,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       </div>
 
       {/* 2. Site Address with Reachability and Data Verification Glyph */}
-      <div className="bg-[#141A29]/75 backdrop-blur-2xl rounded-3xl p-5 border border-white/15 shadow-[0_12px_40px_rgba(0,0,0,0.45)] flex flex-col gap-2">
+      <div className="bg-[#141A29]/75 backdrop-blur-2xl rounded-3xl p-5 border border-white/15 shadow-[0_16px_44px_rgba(0,0,0,0.55)] flex flex-col gap-2">
         <div className="flex items-center justify-between">
           <label className="text-xs font-bold text-white flex items-center gap-1.5 uppercase tracking-wider">
             <Globe className="w-3.5 h-3.5 text-[#FF5E3A]" />
@@ -417,7 +417,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       </div>
 
       {/* 3. Timers: Clean Edit Boxes restricted strictly to 1..240 */}
-      <div className="bg-[#141A29]/75 backdrop-blur-2xl rounded-3xl p-5 border border-white/15 shadow-[0_12px_40px_rgba(0,0,0,0.45)] flex flex-col gap-4">
+      <div className="bg-[#141A29]/75 backdrop-blur-2xl rounded-3xl p-5 border border-white/15 shadow-[0_16px_44px_rgba(0,0,0,0.55)] flex flex-col gap-4">
         
         {/* Advance Alert Notice - Default 15 min (CRITICAL CONSTANT) */}
         <div>
@@ -480,7 +480,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       </div>
 
       {/* 4. Notification Toggles (Turning OFF notifications turns off & disables sound and vibration; turning ON restores previous states) */}
-      <div className="bg-[#141A29]/75 backdrop-blur-2xl rounded-3xl p-5 border border-white/15 shadow-[0_12px_40px_rgba(0,0,0,0.45)] flex flex-col gap-3">
+      <div className="bg-[#141A29]/75 backdrop-blur-2xl rounded-3xl p-5 border border-white/15 shadow-[0_16px_44px_rgba(0,0,0,0.55)] flex flex-col gap-3">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <Bell className="w-4 h-4 text-white" />
@@ -584,7 +584,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       {/* 4b. Emergency Power Outages Switch (Separate block below Notifications block; always visible even when no outages detected; ON by default) */}
       <div
         data-testid="emergency-outage-switch-block"
-        className="bg-[#141A29]/75 backdrop-blur-2xl rounded-3xl p-5 border border-white/15 shadow-[0_12px_40px_rgba(0,0,0,0.45)] flex flex-col gap-3"
+        className="bg-[#141A29]/75 backdrop-blur-2xl rounded-3xl p-5 border border-white/15 shadow-[0_16px_44px_rgba(0,0,0,0.55)] flex flex-col gap-3"
       >
         <div
           data-testid="emergency-outage-switch-row"
@@ -618,7 +618,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       </div>
 
       {/* 5. Language (iOS Segmented Control) */}
-      <div className="bg-[#141A29]/75 backdrop-blur-2xl rounded-3xl p-5 border border-white/15 shadow-[0_12px_40px_rgba(0,0,0,0.45)] flex flex-col gap-3">
+      <div className="bg-[#141A29]/75 backdrop-blur-2xl rounded-3xl p-5 border border-white/15 shadow-[0_16px_44px_rgba(0,0,0,0.55)] flex flex-col gap-3">
         <label className="text-xs font-bold text-white flex items-center gap-1.5 uppercase tracking-wider">
           <Globe className="w-3.5 h-3.5 text-[#FF5E3A]" />
           <span>{t.settingsLanguage}</span>
@@ -652,7 +652,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       </div>
 
       {/* 6. Diagnostics & Actions (With Confirmation on Reset) */}
-      <div className="bg-[#141A29]/75 backdrop-blur-2xl rounded-3xl p-5 border border-white/15 shadow-[0_12px_40px_rgba(0,0,0,0.45)] flex flex-col gap-2.5">
+      <div className="bg-[#141A29]/75 backdrop-blur-2xl rounded-3xl p-5 border border-white/15 shadow-[0_16px_44px_rgba(0,0,0,0.55)] flex flex-col gap-2.5">
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
           <button
             onClick={() => {
