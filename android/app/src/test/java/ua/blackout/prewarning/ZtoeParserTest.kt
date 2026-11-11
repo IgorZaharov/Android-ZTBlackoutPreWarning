@@ -1012,7 +1012,32 @@ class ZtoeParserTest {
         assertEquals(false, ua.blackout.prewarning.data.parser.ZtoeAddressLookup.isValidOutageTimestamp("побутові споживачі"))
         assertEquals(true, ua.blackout.prewarning.data.parser.ZtoeAddressLookup.isValidOutageTimestamp("06.04 19:21"))
         assertEquals(true, ua.blackout.prewarning.data.parser.ZtoeAddressLookup.isValidOutageTimestamp("10.11.2026 22:00"))
-        assertEquals(true, ua.blackout.prewarning.data.parser.ZtoeAddressLookup.isValidEmergencyOutage(demoEmergency))
+        // 9. Verify priority scoring (switchSubReason 0 Аварійне відключення > switchSubReason 2 ГПВ), Latin/Cyrillic house letter normalization, and empty-slot emergency synthesis
+        val multiAccidentsJson = """
+            {"hydra:member":[{"id":1001,"city":{"id":1,"name":"м. Житомир"},"street":{"id":162,"name":"вул. Степана Бандери"},"buildingNames":"16, 16А","dateEvent":"2026-11-11T08:00:00+02:00","datePlanIn":"2026-11-11T12:00:00+02:00","koment":"ГПВ 4.1","typeOff":1,"switchSubReason":2},{"id":1002,"city":{"id":1,"name":"м. Житомир"},"street":{"id":162,"name":"вул. Степана Бандери"},"buildingNames":"16, 16A","dateEvent":"2026-11-11T09:15:00+02:00","datePlanIn":"2026-11-11T17:30:00+02:00","koment":"Аварійне відключення","typeOff":1,"switchSubReason":0}]}
+        """.trimIndent()
+        val matchedBandery = ua.blackout.prewarning.data.parser.ZtoeAddressLookup.matchEmergencyOutageFromAccidentsJson(
+            multiAccidentsJson,
+            "Житомирський РЕМ",
+            "м. Житомир",
+            "вул. Степана Бандери",
+            "16А"
+        )
+        assertEquals("11.11.2026 09:15", matchedBandery?.startTime)
+        assertEquals("11.11.2026 17:30", matchedBandery?.estimatedRestoreTime)
+
+        val synthesizedFromEmpty = ua.blackout.prewarning.data.repository.ScheduleRepository.applyEmergencyOutageToSlots(
+            emptyList(),
+            "2026-04-06",
+            demoEmergency,
+            isTodaySchedule = true
+        )
+        assertEquals(48, synthesizedFromEmpty.size)
+        val synthesizedIntervals = ua.blackout.prewarning.data.repository.ScheduleRepository.computeDetailedIntervals(synthesizedFromEmpty)
+        assertEquals(1, synthesizedIntervals.size)
+        assertEquals("19:00", synthesizedIntervals[0].startStr)
+        assertEquals("24:00", synthesizedIntervals[0].endStr)
+        assertEquals(true, synthesizedIntervals[0].isEmergency)
 
         ua.blackout.prewarning.data.parser.ZtoeAddressLookup.clearCacheForTesting()
     }

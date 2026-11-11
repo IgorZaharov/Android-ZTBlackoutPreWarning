@@ -411,23 +411,23 @@ function runUnitTestB() {
     'MainScreen.kt and ScheduleRepository.kt must recompose blackout hours on Today/Tomorrow tab switch and compute tomorrow 1st blackout'
   );
 
-  // 11. Verify Build Version 1.3.4, GitHub v1.3.2 KYIV_ZONE Fix & Developer Handover Documentation across project files
+  // 11. Verify Build Version 1.3.5, GitHub v1.3.2 KYIV_ZONE Fix & Developer Handover Documentation across project files
   const packageJson = JSON.parse(fs.readFileSync(path.join(ROOT_DIR, 'package.json'), 'utf-8'));
-  assert.equal(packageJson.version, '1.3.4', 'package.json version must be 1.3.4');
+  assert.equal(packageJson.version, '1.3.5', 'package.json version must be 1.3.5');
   const buildGradle = fs.readFileSync(path.join(ROOT_DIR, 'android/app/build.gradle.kts'), 'utf-8');
-  assert.ok(buildGradle.includes('"1.3.4"'), 'android/app/build.gradle.kts default versionName must be 1.3.4');
+  assert.ok(buildGradle.includes('"1.3.5"'), 'android/app/build.gradle.kts default versionName must be 1.3.5');
   const aboutScreenKt = fs.readFileSync(
     path.join(ROOT_DIR, 'android/app/src/main/java/ua/blackout/prewarning/ui/screens/AboutScreen.kt'),
     'utf-8'
   );
-  assert.ok(aboutScreenKt.includes('"1.3.4"'), 'AboutScreen.kt fallback version must be 1.3.4');
+  assert.ok(aboutScreenKt.includes('"1.3.5"'), 'AboutScreen.kt fallback version must be 1.3.5');
   const aboutViewTsx = fs.readFileSync(path.join(ROOT_DIR, 'src/components/AboutView.tsx'), 'utf-8');
-  assert.ok(aboutViewTsx.includes("'1.3.4'"), 'AboutView.tsx fallback version must be 1.3.4');
+  assert.ok(aboutViewTsx.includes("'1.3.5'"), 'AboutView.tsx fallback version must be 1.3.5');
   const readmeMd = fs.readFileSync(path.join(ROOT_DIR, 'README.md'), 'utf-8');
-  assert.ok(readmeMd.includes('(v1.3.4)'), 'README.md must reference v1.3.4');
+  assert.ok(readmeMd.includes('(v1.3.5)'), 'README.md must reference v1.3.5');
   assert.ok(
-    changelog.includes('## [1.3.4]') && changelog.includes('## [1.3.3]') && changelog.includes('## [1.3.2]'),
-    'CHANGELOG.md must document v1.3.4, v1.3.3, and v1.3.2'
+    changelog.includes('## [1.3.5]') && changelog.includes('## [1.3.4]') && changelog.includes('## [1.3.3]'),
+    'CHANGELOG.md must document v1.3.5, v1.3.4, and v1.3.3'
   );
 
   // Verify GitHub v1.3.2 fix (KyivZone.kt KYIV_ZONE fallback) is included across Android codebase
@@ -3000,10 +3000,11 @@ async function runUnitTestE_AddressLookupAndUnsetQueue() {
     { remId: 'zhytomyr', settlementId: 'zt_city', streetId: 'zt_kyivska', house: '74' },
     kyivska74Html
   );
-  assert.equal(
-    checkedKyivska74Emergency,
-    null,
-    'checkEmergencyOutageOnZtoe must return null for вул. Київська house 74 when no emergency outage exists'
+  assert.ok(
+    checkedKyivska74Emergency === null ||
+      (isValidEmergencyOutage(checkedKyivska74Emergency) &&
+        checkedKyivska74Emergency.id.startsWith('pw_accident_')),
+    'checkEmergencyOutageOnZtoe must never return a bogus outage from the 7-column regular HTML table (only null or a valid live pw_accident_*)'
   );
   assert.equal(
     isValidOutageTimestamp('В цей час не вимикається, за винятком випадків аварійних відключень'),
@@ -3046,14 +3047,112 @@ async function runUnitTestE_AddressLookupAndUnsetQueue() {
     path.join(ROOT_DIR, 'android/app/src/main/java/ua/blackout/prewarning/data/repository/SettingsRepository.kt'),
     'utf-8'
   );
+  const workflowYml = fs.readFileSync(
+    path.join(ROOT_DIR, '.github/workflows/build-apk.yml'),
+    'utf-8'
+  );
   assert.ok(
     buildGradleKts.includes('applicationId = appPkgEnv ?: "com.ZTBlackoutPreWarning"') &&
       !buildGradleKts.includes('isDebuggable = true') &&
+      !buildGradleKts.includes('isBundleBuild') &&
+      buildGradleKts.includes('val hasUploadKeystore = uploadKeystoreFile.exists() && uploadStorePassword.isNotEmpty()') &&
+      workflowYml.indexOf('Prepare Release Keystore') < workflowYml.indexOf('Build Release APK') &&
       settingsRepoKt.includes('ZtoeAddressLookup.isValidEmergencyOutage(rawEmergencyCandidate)') &&
       ztoeAddressLookupKt.includes('fun isValidOutageTimestamp(') &&
       ztoeAddressLookupKt.includes('fun isValidEmergencyOutage(') &&
       ztoeAddressLookupKt.includes('fun parseZtoeEmergencyOutagesTableHtml(html: String, targetHouse: String)'),
-    'build.gradle.kts must keep unified applicationId and isDebuggable = false across debug and release APKs for v1.3.3 upgrades, and ZtoeAddressLookup.kt must provide 2-arg parseZtoeEmergencyOutagesTableHtml'
+    'build.gradle.kts and build-apk.yml must sign both Release APK and Release AAB with upload-keystore.jks when configured, keep unified applicationId and isDebuggable = false for v1.3.3 upgrades, and ZtoeAddressLookup.kt must provide 2-arg parseZtoeEmergencyOutagesTableHtml'
+  );
+
+  // (9) Verify live PowerOn pw_accidents emergency outage detection, priority scoring (Аварійні > Планові > ГПВ), Latin-to-Cyrillic house letter normalization, Степана Бандери 16, null-schedule emergency synthesis, and top-priority Emergency Outage banner
+  const multiAccidentsList = [
+    {
+      id: 1001,
+      city: { id: 1, name: 'м. Житомир' },
+      street: { id: 162, name: 'вул. Степана Бандери' },
+      buildingNames: '16, 16А',
+      dateEvent: '2026-11-11T08:00:00+02:00',
+      datePlanIn: '2026-11-11T12:00:00+02:00',
+      koment: 'ГПВ 4.1',
+      typeOff: 1,
+      switchSubReason: 2,
+    },
+    {
+      id: 1002,
+      city: { id: 1, name: 'м. Житомир' },
+      street: { id: 162, name: 'вул. Степана Бандери' },
+      buildingNames: '16, 16A',
+      dateEvent: '2026-11-11T09:15:00+02:00',
+      datePlanIn: '2026-11-11T17:30:00+02:00',
+      koment: 'Аварійне відключення',
+      typeOff: 1,
+      switchSubReason: 0,
+    },
+  ];
+  const matchedBandery16 = matchEmergencyOutageFromAccidentsJson(multiAccidentsList, {
+    remId: 'zhytomyr',
+    settlementId: 'zt_city',
+    streetId: 'st_173952',
+    house: '16',
+  });
+  assert.ok(matchedBandery16 !== null, 'matchEmergencyOutageFromAccidentsJson must match вул. Степана Бандери, буд. 16');
+  assert.equal(
+    matchedBandery16!.startTime,
+    '11.11.2026 09:15',
+    'matchEmergencyOutageFromAccidentsJson must prioritize Аварійне відключення (switchSubReason 0) over ГПВ (switchSubReason 2) when multiple rows match a building'
+  );
+  assert.equal(matchedBandery16!.estimatedRestoreTime, '11.11.2026 17:30');
+
+  // Verify Latin "16A" vs Cyrillic "16А" normalization
+  const matchedBandery16Cyrillic = matchEmergencyOutageFromAccidentsJson(multiAccidentsList, {
+    remId: 'zhytomyr',
+    settlementId: 'zt_city',
+    streetId: 'st_173952',
+    house: '16А',
+  });
+  assert.ok(
+    matchedBandery16Cyrillic !== null && matchedBandery16Cyrillic.startTime === '11.11.2026 09:15',
+    'matchEmergencyOutageFromAccidentsJson must normalize Latin/Cyrillic building letters (16A <-> 16А)'
+  );
+
+  resetAddressIndexCache(true);
+  const checkedBerdy10 = await checkAddressOnZtoeWebsite({
+    remId: 'zhytomyr',
+    settlementId: 'zt_city',
+    streetId: 'zt_berdy',
+    house: '10',
+  });
+  assert.ok(
+    checkedBerdy10 && checkedBerdy10.house === '10' && checkedBerdy10.queue === '2.1',
+    'checkAddressOnZtoeWebsite must resolve Житомирський РЕМ, м. Житомир, вул. Велика Бердичівська, буд. 10 with queue 2.1'
+  );
+
+  // Verify applyEmergencyOutageToSchedule synthesizes a 48-slot schedule when base schedule is null (e.g. site schedule unclear or no-queue building)
+  const synthesizedFromNull = applyEmergencyOutageToSchedule(
+    null,
+    demoEmergency,
+    false
+  );
+  assert.ok(
+    synthesizedFromNull !== null && synthesizedFromNull.slots.length === 48,
+    'applyEmergencyOutageToSchedule must synthesize a 48-slot schedule when base schedule is null and an active emergency outage exists'
+  );
+  assert.ok(
+    synthesizedFromNull!.slots.slice(44, 48).every((s) => s.status === 'POWER_OFF' && s.isEmergency),
+    'Synthesized schedule from null must mark emergency overlap slots as POWER_OFF with isEmergency = true'
+  );
+
+  // Verify MainView.tsx and MainScreen.kt render the Emergency Outage banner before customQueueStatusText and counter card
+  assert.ok(
+    mainViewTsx.indexOf('data-testid="main-emergency-outage-banner"') <
+      mainViewTsx.indexOf('data-testid="main-custom-queue-status-text"') &&
+      mainViewTsx.indexOf('data-testid="main-emergency-outage-banner"') <
+        mainViewTsx.indexOf('data-testid="main-counter-card"') &&
+      mainScreenKt.indexOf('1c. Active Emergency Outage') <
+        mainScreenKt.indexOf('1b. Custom ZTOE Queue/House Status Message Bar') &&
+      mainScreenKt.indexOf('1c. Active Emergency Outage') <
+        mainScreenKt.indexOf('2. Hero Outage Status Card'),
+    'MainView.tsx and MainScreen.kt must render the Emergency Outage banner at the top of the main content area with highest visual priority'
   );
 
   resetAddressIndexCache(true);

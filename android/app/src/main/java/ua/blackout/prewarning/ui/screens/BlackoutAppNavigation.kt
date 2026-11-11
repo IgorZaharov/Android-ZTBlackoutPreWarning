@@ -129,7 +129,7 @@ fun BlackoutAppNavigation(
     var autoOpenQueueHelp by remember { mutableStateOf(false) }
     var currentTime by remember { mutableStateOf(LocalTime.now(KYIV_ZONE)) }
 
-    val isQueueUnselected = queue.isBlank() && customQueueStatusText.isNullOrBlank()
+    val isQueueUnselected = queue.isBlank() && customQueueStatusText.isNullOrBlank() && activeEmergencyOutage == null
 
     // Pager for swipe left/right between windows with beyondViewportPageCount = 2 to eliminate swipe jittering
     val pagerState = rememberPagerState(initialPage = 0, pageCount = { 3 })
@@ -188,20 +188,26 @@ fun BlackoutAppNavigation(
         } else {
             baseSlots
         }
-        ScheduleRepository.applyEmergencyOutageToSlots(raw, todayDateIso, activeEmergencyOutage)
+        ScheduleRepository.applyEmergencyOutageToSlots(raw, todayDateIso, activeEmergencyOutage, queue = queue, isTomorrow = false)
     }
     val effectiveTomorrowSlots = remember(baseTomorrowSlots, activeEmergencyOutage, tomorrowDateIso) {
-        baseTomorrowSlots?.let {
-            ScheduleRepository.applyEmergencyOutageToSlots(it, tomorrowDateIso, activeEmergencyOutage)
-        }
+        val overlaid = ScheduleRepository.applyEmergencyOutageToSlots(
+            slots = baseTomorrowSlots ?: emptyList(),
+            targetDateIso = tomorrowDateIso,
+            emergencyOutage = activeEmergencyOutage,
+            queue = queue,
+            isTomorrow = true
+        )
+        if (overlaid.isNotEmpty()) overlaid else baseTomorrowSlots
     }
+    val effectiveHasTomorrowSchedule = hasTomorrowSchedule || (effectiveTomorrowSlots != null && effectiveTomorrowSlots.isNotEmpty())
 
     // Dynamic real-time countdown info updated every second ONLY while Lifecycle is RESUMED and MainScreen is visible
     var statusInfo by remember {
         mutableStateOf(
             ScheduleRepository.calculateStatusAndCountdown(
                 slots = effectiveSlots,
-                tomorrowSlots = if (hasTomorrowSchedule) effectiveTomorrowSlots else null,
+                tomorrowSlots = if (effectiveHasTomorrowSchedule) effectiveTomorrowSlots else null,
                 now = LocalTime.now(KYIV_ZONE)
             )
         )
@@ -223,24 +229,53 @@ fun BlackoutAppNavigation(
             }
             statusInfo = ScheduleRepository.calculateStatusAndCountdown(
                 slots = effectiveSlots,
-                tomorrowSlots = if (hasTomorrowSchedule) effectiveTomorrowSlots else null,
+                tomorrowSlots = if (effectiveHasTomorrowSchedule) effectiveTomorrowSlots else null,
                 now = now
             )
-            if (queue.isNotBlank() && hasCompletedInitialScheduleFetch) {
-                val res = withContext(Dispatchers.IO) {
-                    ZtoeParser.fetchFullSchedule(siteUrl, queue, appContext)
-                }
-                if (res.status == FetchStatus.SUCCESS) {
-                    baseSlots = res.todaySlots
-                    baseTomorrowSlots = res.tomorrowSlots
-                    hasTomorrowSchedule = res.hasTomorrowSchedule && res.tomorrowSlots != null
-                    withContext(Dispatchers.IO) {
-                        scheduleRepo.saveSchedule(queue, res.todaySlots, res.tomorrowSlots)
+            if (hasCompletedInitialScheduleFetch) {
+                val addrQuery = selectedAddressQuery
+                if (addrQuery != null) {
+                    val latestAddressLookup = withContext(Dispatchers.IO) {
+                        ZtoeAddressLookup.checkAddressOnZtoeWebsite(addrQuery, siteUrl)
                     }
-                    val refreshedNow = LocalTime.now(KYIV_ZONE)
-                    currentTime = refreshedNow
-                    lastUpdated = refreshedNow.format(DateTimeFormatter.ofPattern("HH:mm"))
-                    nextUpdated = refreshedNow.plusMinutes(refreshMinutes.toLong()).format(DateTimeFormatter.ofPattern("HH:mm"))
+                    if (latestAddressLookup != null) {
+                        val currentSettings = settingsRepo.getSettings()
+                        val prevEmergency = activeEmergencyOutage
+                        val nextEmergency = latestAddressLookup.emergencyOutage
+                        val emergencyChanged = (prevEmergency?.id != nextEmergency?.id) ||
+                            (prevEmergency?.startTime != nextEmergency?.startTime) ||
+                            (prevEmergency?.estimatedRestoreTime != nextEmergency?.estimatedRestoreTime)
+                        if (emergencyChanged) {
+                            activeEmergencyOutage = nextEmergency
+                            val updatedSettings = currentSettings.copy(activeEmergencyOutage = nextEmergency)
+                            withContext(Dispatchers.IO) {
+                                settingsRepo.saveSettings(updatedSettings)
+                                NotificationHelper.checkAndTriggerEmergencyOutageAlert(
+                                    context = appContext,
+                                    settings = updatedSettings,
+                                    previousEmergency = prevEmergency,
+                                    currentEmergency = nextEmergency
+                                )
+                            }
+                        }
+                    }
+                }
+                if (queue.isNotBlank()) {
+                    val res = withContext(Dispatchers.IO) {
+                        ZtoeParser.fetchFullSchedule(siteUrl, queue, appContext)
+                    }
+                    if (res.status == FetchStatus.SUCCESS) {
+                        baseSlots = res.todaySlots
+                        baseTomorrowSlots = res.tomorrowSlots
+                        hasTomorrowSchedule = res.hasTomorrowSchedule && res.tomorrowSlots != null
+                        withContext(Dispatchers.IO) {
+                            scheduleRepo.saveSchedule(queue, res.todaySlots, res.tomorrowSlots)
+                        }
+                        val refreshedNow = LocalTime.now(KYIV_ZONE)
+                        currentTime = refreshedNow
+                        lastUpdated = refreshedNow.format(DateTimeFormatter.ofPattern("HH:mm"))
+                        nextUpdated = refreshedNow.plusMinutes(refreshMinutes.toLong()).format(DateTimeFormatter.ofPattern("HH:mm"))
+                    }
                 }
             }
         }
@@ -250,7 +285,7 @@ fun BlackoutAppNavigation(
         lifecycleOwner,
         effectiveSlots,
         effectiveTomorrowSlots,
-        hasTomorrowSchedule,
+        effectiveHasTomorrowSchedule,
         queue,
         customQueueStatusText,
         isCountdownScreenActive
@@ -260,7 +295,7 @@ fun BlackoutAppNavigation(
             currentTime = now
             statusInfo = ScheduleRepository.calculateStatusAndCountdown(
                 slots = effectiveSlots,
-                tomorrowSlots = if (hasTomorrowSchedule) effectiveTomorrowSlots else null,
+                tomorrowSlots = if (effectiveHasTomorrowSchedule) effectiveTomorrowSlots else null,
                 now = now
             )
             return@LaunchedEffect
@@ -276,7 +311,7 @@ fun BlackoutAppNavigation(
                 currentTime = now
                 val updatedStatus = ScheduleRepository.calculateStatusAndCountdown(
                     slots = effectiveSlots,
-                    tomorrowSlots = if (hasTomorrowSchedule) effectiveTomorrowSlots else null,
+                    tomorrowSlots = if (effectiveHasTomorrowSchedule) effectiveTomorrowSlots else null,
                     now = now
                 )
                 statusInfo = updatedStatus
@@ -369,9 +404,51 @@ fun BlackoutAppNavigation(
         }
     }
 
-    // Fetch schedule when queue or siteUrl changes; update all Compose states on the Main UI thread
-    LaunchedEffect(queue, customQueueStatusText, siteUrl) {
-        val activeQ = queue
+    // Fetch schedule and re-check saved address & emergency outages when queue, siteUrl, or selectedAddressQuery changes
+    LaunchedEffect(queue, customQueueStatusText, siteUrl, selectedAddressQuery) {
+        var activeQ = queue
+        val addrQuery = selectedAddressQuery
+        if (addrQuery != null) {
+            val latestAddressLookup = withContext(Dispatchers.IO) {
+                ZtoeAddressLookup.checkAddressOnZtoeWebsite(addrQuery, siteUrl)
+            }
+            if (latestAddressLookup != null) {
+                val currentSettings = settingsRepo.getSettings()
+                val prevEmergency = activeEmergencyOutage
+                val nextEmergency = latestAddressLookup.emergencyOutage
+
+                val emergencyChanged = (prevEmergency?.id != nextEmergency?.id) ||
+                    (prevEmergency?.startTime != nextEmergency?.startTime) ||
+                    (prevEmergency?.estimatedRestoreTime != nextEmergency?.estimatedRestoreTime)
+                val hadNoQueue = activeQ.isBlank()
+                val queueAssignedForNoQueueHouse = hadNoQueue &&
+                    (latestAddressLookup.queue != activeQ || latestAddressLookup.statusText != customQueueStatusText)
+
+                if (queueAssignedForNoQueueHouse || emergencyChanged) {
+                    val nextQ = if (queueAssignedForNoQueueHouse) latestAddressLookup.queue else activeQ
+                    val nextStatus = if (queueAssignedForNoQueueHouse) latestAddressLookup.statusText else customQueueStatusText
+                    activeQ = nextQ
+                    queue = nextQ
+                    customQueueStatusText = nextStatus
+                    activeEmergencyOutage = nextEmergency
+                    val updatedSettings = currentSettings.copy(
+                        queue = nextQ,
+                        customQueueStatusText = nextStatus,
+                        activeEmergencyOutage = nextEmergency
+                    )
+                    withContext(Dispatchers.IO) {
+                        settingsRepo.saveSettings(updatedSettings)
+                        NotificationHelper.checkAndTriggerEmergencyOutageAlert(
+                            context = appContext,
+                            settings = updatedSettings,
+                            previousEmergency = prevEmergency,
+                            currentEmergency = nextEmergency
+                        )
+                    }
+                }
+            }
+        }
+
         if (activeQ.isBlank()) {
             baseSlots = emptyList()
             baseTomorrowSlots = null
@@ -636,7 +713,7 @@ fun BlackoutAppNavigation(
                         slotTimeText = statusInfo.nextSlotTime,
                         slots = effectiveSlots,
                         tomorrowSlots = effectiveTomorrowSlots,
-                        hasTomorrowSchedule = hasTomorrowSchedule,
+                        hasTomorrowSchedule = effectiveHasTomorrowSchedule,
                         notificationsEnabled = notificationsEnabled,
                         lastUpdated = lastUpdated,
                         nextUpdated = nextUpdated,

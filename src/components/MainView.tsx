@@ -283,31 +283,11 @@ export const MainView: React.FC<MainViewProps> = ({
           isQueueUnselected ? 'opacity-15 brightness-50 pointer-events-none select-none' : ''
         }`}
       >
-      {/* Custom ZTOE Queue/House Status Message Bar — exact same style/color as other Main screen bars */}
-      {!isQueueUnselected && settings.customQueueStatusText && (
-        <div
-          data-testid="main-custom-queue-status-text"
-          className="bg-[#141A29]/75 backdrop-blur-2xl rounded-3xl p-4 border border-white/15 shadow-[0_12px_40px_rgba(0,0,0,0.45)] flex flex-col gap-1"
-        >
-          {settings.selectedAddress && (
-            <div
-              data-testid="main-selected-address-text"
-              className="text-xs text-sky-200/70 font-medium whitespace-pre-line leading-snug"
-            >
-              {formatAddressAfterCity(settings.selectedAddress)}
-            </div>
-          )}
-          <div className="text-sm font-bold text-white leading-snug whitespace-normal break-words">
-            {settings.customQueueStatusText}
-          </div>
-        </div>
-      )}
-
       {/* Active Emergency Outage ("Аварійне відключення") Banner with Start & Estimated Restore Times */}
-      {!isQueueUnselected && settings.activeEmergencyOutage && (
+      {!isQueueUnselected && hasActiveEmergencyOutage && settings.activeEmergencyOutage && (
         <div
           data-testid="main-emergency-outage-banner"
-          className="bg-[#141A29]/75 backdrop-blur-2xl rounded-3xl p-4 border border-white/15 shadow-[0_12px_40px_rgba(0,0,0,0.45)] flex flex-col gap-1.5"
+          className="bg-[#141A29]/75 backdrop-blur-2xl rounded-3xl p-4 border border-white/15 shadow-[0_8px_28px_rgba(0,0,0,0.4)] flex flex-col gap-1.5"
         >
           <div
             data-testid="main-emergency-outage-title"
@@ -339,10 +319,30 @@ export const MainView: React.FC<MainViewProps> = ({
         </div>
       )}
 
+      {/* Custom ZTOE Queue/House Status Message Bar — exact same style/color as other Main screen bars */}
+      {!isQueueUnselected && settings.customQueueStatusText && (
+        <div
+          data-testid="main-custom-queue-status-text"
+          className="bg-[#141A29]/75 backdrop-blur-2xl rounded-3xl p-4 border border-white/15 shadow-[0_8px_28px_rgba(0,0,0,0.4)] flex flex-col gap-1"
+        >
+          {settings.selectedAddress && (
+            <div
+              data-testid="main-selected-address-text"
+              className="text-xs text-sky-200/70 font-medium whitespace-pre-line leading-snug"
+            >
+              {formatAddressAfterCity(settings.selectedAddress)}
+            </div>
+          )}
+          <div className="text-sm font-bold text-white leading-snug whitespace-normal break-words">
+            {settings.customQueueStatusText}
+          </div>
+        </div>
+      )}
+
       {/* Hero Outage Status Card (Frosted Glass with Subtle Blue Glow) */}
       <div
         data-testid="main-counter-card"
-        className="rounded-3xl p-5 bg-[#141A29]/75 backdrop-blur-2xl border border-white/15 shadow-[0_12px_40px_rgba(0,0,0,0.45)] transition-all"
+        className="rounded-3xl p-5 bg-[#141A29]/75 backdrop-blur-2xl border border-white/15 shadow-[0_8px_28px_rgba(0,0,0,0.4)] transition-all"
       >
         {hasNoQueueMessage ? (
           <div data-testid="main-counter-empty" className="my-4 text-center">

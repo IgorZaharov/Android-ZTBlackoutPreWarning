@@ -66,25 +66,55 @@ class ScheduleRepository(context: Context) {
         private val decodedSlotsCache = java.util.concurrent.ConcurrentHashMap<String, List<BlackoutSlot>>()
         private val detailedIntervalsCache = java.util.concurrent.ConcurrentHashMap<String, List<OutageInterval>>()
 
-        private val ZTOE_DATE_TIME_REGEX = Regex("""^(\d{2})\.(\d{2})(?:\.(\d{4}))?\s+(\d{2}):(\d{2})""")
+        private val ZTOE_DATE_TIME_REGEX = Regex("""(\d{1,2})\.(\d{1,2})(?:\.(\d{2,4}))?\s+(\d{1,2}):(\d{2})""")
+        private val ISO_DATE_TIME_REGEX = Regex("""(\d{4})-(\d{2})-(\d{2})[\sT]+(\d{1,2}):(\d{2})""")
+        private val TIME_ONLY_REGEX = Regex("""(\d{1,2}):(\d{2})""")
 
-        private fun parseZtoeDateTimeMinutes(str: String?, defaultYear: Int = LocalDate.now(KYIV_ZONE).year): Pair<LocalDate, Int>? {
+        private fun parseZtoeDateTimeMinutes(str: String?, defaultYear: Int = LocalDate.now(KYIV_ZONE).year): Pair<LocalDate?, Int>? {
             if (str.isNullOrBlank()) return null
-            val m = ZTOE_DATE_TIME_REGEX.find(str.trim()) ?: return null
-            val day = m.groupValues[1].toIntOrNull() ?: return null
-            val month = m.groupValues[2].toIntOrNull() ?: return null
-            val year = m.groupValues[3].takeIf { it.isNotEmpty() }?.toIntOrNull() ?: defaultYear
-            val hour = m.groupValues[4].toIntOrNull() ?: return null
-            val minute = m.groupValues[5].toIntOrNull() ?: return null
-            val date = runCatching { LocalDate.of(year, month, day) }.getOrNull() ?: return null
-            return date to (hour * 60 + minute).coerceIn(0, 1440)
+            val trimmed = str.trim()
+            val dmyMatch = ZTOE_DATE_TIME_REGEX.find(trimmed)
+            if (dmyMatch != null) {
+                val day = dmyMatch.groupValues[1].toIntOrNull() ?: return null
+                val month = dmyMatch.groupValues[2].toIntOrNull() ?: return null
+                val rawYear = dmyMatch.groupValues[3].takeIf { it.isNotEmpty() }?.toIntOrNull()
+                val year = when {
+                    rawYear == null -> defaultYear
+                    rawYear < 100 -> 2000 + rawYear
+                    else -> rawYear
+                }
+                val hour = dmyMatch.groupValues[4].toIntOrNull() ?: return null
+                val minute = dmyMatch.groupValues[5].toIntOrNull() ?: return null
+                val date = runCatching { LocalDate.of(year, month, day) }.getOrNull()
+                return date to (hour * 60 + minute).coerceIn(0, 1440)
+            }
+            val isoMatch = ISO_DATE_TIME_REGEX.find(trimmed)
+            if (isoMatch != null) {
+                val year = isoMatch.groupValues[1].toIntOrNull() ?: defaultYear
+                val month = isoMatch.groupValues[2].toIntOrNull() ?: return null
+                val day = isoMatch.groupValues[3].toIntOrNull() ?: return null
+                val hour = isoMatch.groupValues[4].toIntOrNull() ?: return null
+                val minute = isoMatch.groupValues[5].toIntOrNull() ?: return null
+                val date = runCatching { LocalDate.of(year, month, day) }.getOrNull()
+                return date to (hour * 60 + minute).coerceIn(0, 1440)
+            }
+            val timeMatch = TIME_ONLY_REGEX.find(trimmed)
+            if (timeMatch != null) {
+                val hour = timeMatch.groupValues[1].toIntOrNull() ?: return null
+                val minute = timeMatch.groupValues[2].toIntOrNull() ?: return null
+                if (hour in 0..24 && minute in 0..59) {
+                    return null to (hour * 60 + minute).coerceIn(0, 1440)
+                }
+            }
+            return null
         }
 
         fun applyEmergencyOutageToSlots(
             slots: List<BlackoutSlot>,
             targetDateIso: String,
             emergencyOutage: EmergencyOutageInfo?,
-            queue: String = ""
+            queue: String = "",
+            isTomorrow: Boolean = false
         ): List<BlackoutSlot> {
             val parsedDate = runCatching { LocalDate.parse(targetDateIso, DateTimeFormatter.ISO_LOCAL_DATE) }
                 .getOrNull() ?: LocalDate.now(KYIV_ZONE)
@@ -92,7 +122,7 @@ class ScheduleRepository(context: Context) {
                 slots = slots,
                 emergencyOutage = emergencyOutage,
                 targetDate = parsedDate,
-                isTomorrow = false,
+                isTomorrow = isTomorrow,
                 queue = queue
             )
         }
@@ -108,24 +138,53 @@ class ScheduleRepository(context: Context) {
             val startParsed = parseZtoeDateTimeMinutes(emergencyOutage.startTime, targetDate.year) ?: return slots
             val endParsed = parseZtoeDateTimeMinutes(emergencyOutage.estimatedRestoreTime, targetDate.year) ?: return slots
 
-            val effectiveDate = if (isTomorrow && slots.isEmpty()) targetDate else targetDate
-            val startEpochDay = startParsed.first.toEpochDay()
-            val endEpochDay = endParsed.first.toEpochDay()
-            val targetEpochDay = effectiveDate.toEpochDay()
+            val startDate = startParsed.first
+            val endDate = endParsed.first
+            val startMin = startParsed.second
+            val endMin = endParsed.second
 
-            val dayStartTotalMin = targetEpochDay * 1440L
-            val dayEndTotalMin = dayStartTotalMin + 1440L
-            val outageStartTotalMin = startEpochDay * 1440L + startParsed.second
-            val outageEndTotalMin = endEpochDay * 1440L + endParsed.second
+            var overlap: Pair<Int, Int>? = null
+            if (startDate != null && endDate != null) {
+                if (startDate == endDate) {
+                    if (isTomorrow) {
+                        if (targetDate == startDate) {
+                            overlap = startMin to endMin
+                        }
+                    } else {
+                        // Active emergency outage on Today's schedule always applies to Today's timeline
+                        overlap = startMin to endMin
+                    }
+                } else if (startDate < endDate) {
+                    when {
+                        targetDate == startDate -> overlap = startMin to 1440
+                        targetDate == endDate -> overlap = 0 to endMin
+                        targetDate > startDate && targetDate < endDate -> overlap = 0 to 1440
+                        !isTomorrow && targetDate < endDate -> overlap = startMin to 1440
+                        isTomorrow && targetDate > startDate -> overlap = 0 to endMin
+                    }
+                }
+            } else {
+                if (startMin < endMin) {
+                    if (!isTomorrow) {
+                        overlap = startMin to endMin
+                    }
+                } else {
+                    overlap = if (!isTomorrow) {
+                        startMin to 1440
+                    } else {
+                        0 to endMin
+                    }
+                }
+            }
 
-            val overlapStartMin = maxOf(0L, outageStartTotalMin - dayStartTotalMin).toInt()
-            val overlapEndMin = minOf(1440L, outageEndTotalMin - dayStartTotalMin).toInt()
-
-            if (overlapEndMin <= overlapStartMin || outageEndTotalMin <= dayStartTotalMin || outageStartTotalMin >= dayEndTotalMin) {
+            val resolvedOverlap = overlap ?: return slots
+            val overlapStartMin = resolvedOverlap.first.coerceIn(0, 1440)
+            val overlapEndMin = resolvedOverlap.second.coerceIn(0, 1440)
+            if (overlapEndMin <= overlapStartMin) {
                 return slots
             }
 
-            val dateStr = effectiveDate.format(DateTimeFormatter.ISO_LOCAL_DATE)
+            val dateStr = targetDate.format(DateTimeFormatter.ISO_LOCAL_DATE)
             val baseSlots = if (slots.isNotEmpty()) {
                 slots
             } else {
@@ -139,7 +198,7 @@ class ScheduleRepository(context: Context) {
                     val startStr = String.format("%02d:%02d", startH, startM)
                     val endStr = if (endH >= 24) "24:00" else String.format("%02d:%02d", endH, endM)
                     BlackoutSlot(
-                        id = "${dateStr}_${startStr}_Q$queue",
+                        id = "${dateStr}_${startStr}_Q${queue.ifEmpty { "emergency" }}",
                         startHour = startH,
                         endHour = endH,
                         startMinute = startM,

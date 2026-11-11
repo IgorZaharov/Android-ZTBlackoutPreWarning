@@ -14,7 +14,7 @@ function readAndroidBuildVersion(): string {
   } catch {
     // Fallback
   }
-  return '1.3.4';
+  return '1.3.5';
 }
 
 export default defineConfig(() => {
@@ -40,6 +40,12 @@ export default defineConfig(() => {
       // Disable file watching when DISABLE_HMR is true to save CPU during agent edits.
       watch: process.env.DISABLE_HMR === 'true' ? null : {},
       proxy: {
+        '/proxy-ztoe-poweron': {
+          target: 'https://api-ztoe-poweron.inneti.net',
+          changeOrigin: true,
+          secure: false,
+          rewrite: (path) => path.replace(/^\/proxy-ztoe-poweron/, '')
+        },
         '/proxy-ztoe': {
           target: 'https://www.ztoe.com.ua',
           changeOrigin: true,

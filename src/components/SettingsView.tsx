@@ -24,7 +24,8 @@ import {
   fetchRemsFromZtoe,
   fetchSettlementsForRem,
   fetchStreetsForSettlement,
-  fetchHousesForStreet
+  fetchHousesForStreet,
+  checkAddressOnZtoeWebsite
 } from '../services/ztoeAddressLookup';
 import { toggleMasterNotifications, toggleEmergencyNotifications } from '../services/alertManager';
 import { translations } from '../services/i18n';
@@ -185,6 +186,35 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       cancelled = true;
     };
   }, [showQueueHelp, selectedRemId, selectedSettlementId, selectedStreetId, settings.url]);
+
+  // 4. When User selects a House, check ZTOE (including live pw_accidents emergency outages) and enrich the house record
+  React.useEffect(() => {
+    if (!showQueueHelp || !selectedStreetId || !selectedHouseNumber) return;
+
+    let cancelled = false;
+    (async () => {
+      const checked = await checkAddressOnZtoeWebsite(
+        {
+          remId: selectedRemId,
+          settlementId: selectedSettlementId,
+          streetId: selectedStreetId,
+          house: selectedHouseNumber,
+        },
+        settings.url
+      );
+      if (!cancelled && checked) {
+        setHouses((prev) => {
+          const exists = prev.some((h) => h.house === checked.house);
+          if (!exists) return [...prev, checked];
+          return prev.map((h) => (h.house === checked.house ? { ...h, ...checked } : h));
+        });
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [showQueueHelp, selectedRemId, selectedSettlementId, selectedStreetId, selectedHouseNumber, settings.url]);
 
   const matchedHouseRecord = houses.find((h) => h.house === selectedHouseNumber) || null;
   const selectedRemObj = rems.find((r) => r.id === selectedRemId);

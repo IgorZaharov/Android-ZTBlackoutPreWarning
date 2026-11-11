@@ -16,7 +16,8 @@ data class ZtoeRemOption(
     val id: String,
     val ztoeRemId: Int,
     val nameUk: String,
-    val nameEn: String
+    val nameEn: String,
+    val ztoeOtgId: Int? = null
 ) {
     val settlements: List<ZtoeSettlementOption>
         get() = ZtoeAddressLookup.getSettlementsForRem(id)
@@ -27,7 +28,8 @@ data class ZtoeSettlementOption(
     val remId: String,
     val ztoeNaspunktId: Int,
     val nameUk: String,
-    val nameEn: String
+    val nameEn: String,
+    val poweronCityId: Int? = null
 ) {
     val streets: List<ZtoeStreetOption>
         get() = ZtoeAddressLookup.getStreetsForSettlement(id)
@@ -38,7 +40,8 @@ data class ZtoeStreetOption(
     val settlementId: String,
     val ztoeVulicaId: Int,
     val nameUk: String,
-    val nameEn: String
+    val nameEn: String,
+    val poweronStreetId: Int? = null
 ) {
     val houses: List<ZtoeHouseLookupResult>
         get() = ZtoeAddressLookup.getHousesForStreet(id)
@@ -90,6 +93,8 @@ object ZtoeAddressLookup {
     private val houseCacheUpdatedAtByStreet = java.util.concurrent.ConcurrentHashMap<String, Long>()
     private val settlementFetchLocks = java.util.concurrent.ConcurrentHashMap<String, Any>()
     private val recentHouseStreetOrder = java.util.concurrent.CopyOnWriteArrayList<String>()
+    private const val ACCIDENTS_CACHE_TTL_MS = 60_000L
+    private val accidentsCacheByScope = java.util.concurrent.ConcurrentHashMap<String, Pair<Long, String>>()
     private val diskPersistExecutor = java.util.concurrent.Executors.newSingleThreadExecutor { r ->
         Thread(r, "ZtoeDiskCachePersist").apply {
             isDaemon = true
@@ -329,28 +334,29 @@ object ZtoeAddressLookup {
         houseCacheUpdatedAtByStreet.clear()
         settlementFetchLocks.clear()
         recentHouseStreetOrder.clear()
+        accidentsCacheByScope.clear()
     }
 
     val ZTOE_REM_OPTIONS: List<ZtoeRemOption> = listOf(
-        ZtoeRemOption("zhytomyr", 7, "Житомирський РЕМ", "Zhytomyr REM"),
-        ZtoeRemOption("berdychiv", 3, "Бердичівський РЕМ", "Berdychiv REM"),
-        ZtoeRemOption("korosten", 9, "Коростенський РЕМ", "Korosten REM"),
-        ZtoeRemOption("zviahel", 16, "Звягельський РЕМ", "Zviahel REM"),
-        ZtoeRemOption("malyn", 14, "Малинський РЕМ", "Malyn REM"),
-        ZtoeRemOption("radomyshl", 20, "Радомишльський РЕМ", "Radomyshl REM"),
-        ZtoeRemOption("andrushivka", 1, "Андрушівський РЕМ", "Andrushivka REM"),
-        ZtoeRemOption("baranivka", 2, "Баранівський РЕМ", "Baranivka REM"),
-        ZtoeRemOption("brusyliv", 4, "Брусилівський РЕМ", "Brusyliv REM"),
-        ZtoeRemOption("korostyshiv", 11, "Коростишівський РЕМ", "Korostyshiv REM"),
-        ZtoeRemOption("liubar", 13, "Любарський РЕМ", "Liubar REM"),
-        ZtoeRemOption("ovruch", 17, "Овруцький РЕМ", "Ovruch REM"),
-        ZtoeRemOption("olevsk", 18, "Олевський РЕМ", "Olevsk REM"),
-        ZtoeRemOption("popilnia", 19, "Попільнянський РЕМ", "Popilnia REM"),
-        ZtoeRemOption("pulyny", 23, "Пулинський РЕМ", "Pulyny REM"),
-        ZtoeRemOption("romaniv", 21, "Романівський РЕМ", "Romaniv REM"),
-        ZtoeRemOption("khoroshiv", 5, "Хорошівський РЕМ", "Khoroshiv REM"),
-        ZtoeRemOption("cherniakhiv", 24, "Черняхівський РЕМ", "Cherniakhiv REM"),
-        ZtoeRemOption("chudniv", 25, "Чуднівський РЕМ", "Chudniv REM")
+        ZtoeRemOption("zhytomyr", 7, "Житомирський РЕМ", "Zhytomyr REM", 6),
+        ZtoeRemOption("berdychiv", 3, "Бердичівський РЕМ", "Berdychiv REM", 3),
+        ZtoeRemOption("korosten", 9, "Коростенський РЕМ", "Korosten REM", 7),
+        ZtoeRemOption("zviahel", 16, "Звягельський РЕМ", "Zviahel REM", 11),
+        ZtoeRemOption("malyn", 14, "Малинський РЕМ", "Malyn REM", 10),
+        ZtoeRemOption("radomyshl", 20, "Радомишльський РЕМ", "Radomyshl REM", 15),
+        ZtoeRemOption("andrushivka", 1, "Андрушівський РЕМ", "Andrushivka REM", 1),
+        ZtoeRemOption("baranivka", 2, "Баранівський РЕМ", "Baranivka REM", 2),
+        ZtoeRemOption("brusyliv", 4, "Брусилівський РЕМ", "Brusyliv REM", 4),
+        ZtoeRemOption("korostyshiv", 11, "Коростишівський РЕМ", "Korostyshiv REM", 8),
+        ZtoeRemOption("liubar", 13, "Любарський РЕМ", "Liubar REM", 9),
+        ZtoeRemOption("ovruch", 17, "Овруцький РЕМ", "Ovruch REM", 12),
+        ZtoeRemOption("olevsk", 18, "Олевський РЕМ", "Olevsk REM", 13),
+        ZtoeRemOption("popilnia", 19, "Попільнянський РЕМ", "Popilnia REM", 14),
+        ZtoeRemOption("pulyny", 23, "Пулинський РЕМ", "Pulyny REM", 17),
+        ZtoeRemOption("romaniv", 21, "Романівський РЕМ", "Romaniv REM", 16),
+        ZtoeRemOption("khoroshiv", 5, "Хорошівський РЕМ", "Khoroshiv REM", 5),
+        ZtoeRemOption("cherniakhiv", 24, "Черняхівський РЕМ", "Cherniakhiv REM", 18),
+        ZtoeRemOption("chudniv", 25, "Чуднівський РЕМ", "Chudniv REM", 19)
     )
 
     fun getRems(): List<ZtoeRemOption> = cachedRems ?: ZTOE_REM_OPTIONS
@@ -359,7 +365,7 @@ object ZtoeAddressLookup {
         get() = getRems()
 
     val ZTOE_SETTLEMENTS: List<ZtoeSettlementOption> = listOf(
-        ZtoeSettlementOption("zt_city", "zhytomyr", 16657, "м. Житомир", "Zhytomyr"),
+        ZtoeSettlementOption("zt_city", "zhytomyr", 16657, "м. Житомир", "Zhytomyr", 333),
         ZtoeSettlementOption("zt_zarichany", "zhytomyr", 16670, "с. Зарічани", "Zarichany"),
         ZtoeSettlementOption("zt_oliivka", "zhytomyr", 16700, "с. Оліївка", "Oliivka"),
         ZtoeSettlementOption("zt_глибочиця", "zhytomyr", 16667, "с. Глибочиця", "Hlybochytsia"),
@@ -386,17 +392,18 @@ object ZtoeAddressLookup {
     )
 
     val ZTOE_STREETS: List<ZtoeStreetOption> = listOf(
-        ZtoeStreetOption("zt_kyivska", "zt_city", 173934, "вул. Київська", "Kyivska St."),
-        ZtoeStreetOption("zt_velyka_berdychivska", "zt_city", 174574, "вул. Велика Бердичівська", "Velyka Berdychivska St."),
-        ZtoeStreetOption("zt_peremohy", "zt_city", 173948, "вул. Перемоги", "Peremohy St."),
-        ZtoeStreetOption("zt_pokrovska", "zt_city", 173949, "вул. Покровська", "Pokrovska St."),
-        ZtoeStreetOption("zt_chudnivska", "zt_city", 174543, "вул. Чуднівська", "Chudnivska St."),
-        ZtoeStreetOption("zt_mykhailivska", "zt_city", 174152, "вул. Михайлівська", "Mykhailivska St."),
-        ZtoeStreetOption("zt_vitruka", "zt_city", 174457, "вул. Вітрука", "Vitruka St."),
-        ZtoeStreetOption("zt_bandery", "zt_city", 173952, "вул. Степана Бандери", "Stepana Bandery St."),
-        ZtoeStreetOption("zt_shevchenka", "zt_city", 174478, "вул. Шевченка", "Shevchenka St."),
-        ZtoeStreetOption("zt_dovzhenka", "zt_city", 174495, "вул. Довженка", "Dovzhenka St."),
-        ZtoeStreetOption("zt_lesi", "zt_city", 173937, "вул. Лесі Українки", "Lesi Ukrainky St."),
+        ZtoeStreetOption("zt_kyivska", "zt_city", 173934, "вул. Київська", "Kyivska St.", 4755),
+        ZtoeStreetOption("zt_velyka_berdychivska", "zt_city", 174574, "вул. Велика Бердичівська", "Velyka Berdychivska St.", 4642),
+        ZtoeStreetOption("zt_peremohy", "zt_city", 173948, "вул. Перемоги", "Peremohy St.", 4754),
+        ZtoeStreetOption("zt_pokrovska", "zt_city", 173949, "вул. Покровська", "Pokrovska St.", 4633),
+        ZtoeStreetOption("zt_chudnivska", "zt_city", 174543, "вул. Чуднівська", "Chudnivska St.", 4645),
+        ZtoeStreetOption("zt_mykhailivska", "zt_city", 174152, "вул. Михайлівська", "Mykhailivska St.", 33622),
+        ZtoeStreetOption("zt_vitruka", "zt_city", 174457, "вул. Вітрука", "Vitruka St.", 4620),
+        ZtoeStreetOption("zt_bandery", "zt_city", 173952, "вул. Степана Бандери", "Stepana Bandery St.", 33488),
+        ZtoeStreetOption("st_173952", "zt_city", 173952, "вул. Степана Бандери", "Stepana Bandery St.", 33488),
+        ZtoeStreetOption("zt_shevchenka", "zt_city", 174478, "вул. Шевченка", "Shevchenka St.", 4625),
+        ZtoeStreetOption("zt_dovzhenka", "zt_city", 174495, "вул. Довженка", "Dovzhenka St.", 4631),
+        ZtoeStreetOption("zt_lesi", "zt_city", 173937, "вул. Лесі Українки", "Lesi Ukrainky St.", 4788),
         ZtoeStreetOption("zt_zhytomyrska_zar", "zt_zarichany", 41001, "вул. Житомирська", "Zhytomyrska St."),
         ZtoeStreetOption("zt_lisova_zar", "zt_zarichany", 41002, "вул. Лісова", "Lisova St."),
         ZtoeStreetOption("zt_centralna_ol", "zt_oliivka", 42001, "вул. Центральна", "Tsentralna St."),
@@ -520,6 +527,29 @@ object ZtoeAddressLookup {
                 ZtoeHouseLookupResult("92", "5.2"),
                 ZtoeHouseLookupResult("104", "6.2"),
                 ZtoeHouseLookupResult("112", "", statusText = "В цей час не вимикається, за винятком випадків аварійних відключень")
+            )
+            "zt_bandery", "st_173952" -> listOf(
+                ZtoeHouseLookupResult("2", "1.2"),
+                ZtoeHouseLookupResult("3", "1.2"),
+                ZtoeHouseLookupResult("4", "1.2"),
+                ZtoeHouseLookupResult("4А", "1.2"),
+                ZtoeHouseLookupResult("5", "4.1"),
+                ZtoeHouseLookupResult("6", "1.2"),
+                ZtoeHouseLookupResult("7", "4.1"),
+                ZtoeHouseLookupResult("8", "4.1"),
+                ZtoeHouseLookupResult("9", "4.1"),
+                ZtoeHouseLookupResult("10", "1.2"),
+                ZtoeHouseLookupResult("10А", "4.1"),
+                ZtoeHouseLookupResult("11", "4.1"),
+                ZtoeHouseLookupResult("12", "4.1"),
+                ZtoeHouseLookupResult("13", "4.1"),
+                ZtoeHouseLookupResult("14", "4.1"),
+                ZtoeHouseLookupResult("15", "4.1"),
+                ZtoeHouseLookupResult("16", "4.1"),
+                ZtoeHouseLookupResult("16/63", "4.1"),
+                ZtoeHouseLookupResult("16а", "4.1"),
+                ZtoeHouseLookupResult("18", "1.2"),
+                ZtoeHouseLookupResult("32", "1.2")
             )
             else -> listOf(
                 ZtoeHouseLookupResult("1", "1.1"),
@@ -773,13 +803,21 @@ object ZtoeAddressLookup {
     ): Map<String, List<ZtoeHouseLookupResult>> {
         if (html.isBlank() || streets.isEmpty()) return emptyMap()
 
-        val streetIdByNormName = HashMap<String, String>(streets.size * 2)
+        val streetIdsByNormName = HashMap<String, MutableList<String>>(streets.size * 2)
+        fun addStreetMapping(normKey: String, streetId: String) {
+            if (normKey.isEmpty()) return
+            val list = streetIdsByNormName.getOrPut(normKey) { mutableListOf() }
+            if (!list.contains(streetId)) {
+                list.add(streetId)
+            }
+        }
         for (st in streets) {
-            streetIdByNormName[st.nameUk.trim().lowercase()] = st.id
-            streetIdByNormName[normalizeUkText(st.nameUk)] = st.id
+            addStreetMapping(st.nameUk.trim().lowercase(), st.id)
+            addStreetMapping(normalizeUkText(st.nameUk), st.id)
         }
         for (st in ZTOE_STREETS.filter { it.settlementId == settlementId }) {
-            streetIdByNormName.putIfAbsent(normalizeUkText(st.nameUk), st.id)
+            addStreetMapping(st.nameUk.trim().lowercase(), st.id)
+            addStreetMapping(normalizeUkText(st.nameUk), st.id)
         }
 
         val scheduleIdx = html.indexOf("Графіки погодинних відключень")
@@ -806,8 +844,8 @@ object ZtoeAddressLookup {
             val houseField = cells[3].trim()
             if (streetNameRaw.isEmpty() || houseField.isEmpty()) continue
 
-            val streetId = streetIdByNormName[streetNameRaw.lowercase()]
-                ?: streetIdByNormName[normalizeUkText(streetNameRaw)]
+            val matchedStreetIds = streetIdsByNormName[streetNameRaw.lowercase()]
+                ?: streetIdsByNormName[normalizeUkText(streetNameRaw)]
                 ?: continue
 
             val col4 = cells[4].trim()
@@ -828,20 +866,22 @@ object ZtoeAddressLookup {
                 continue
             }
 
-            val streetMap = mergedMapsByStreet.getOrPut(streetId) { LinkedHashMap() }
             val houseTokens = houseField.split(Regex("[,;]"))
-            for (rawToken in houseTokens) {
-                val h = rawToken.trim()
-                if (h.isEmpty() || h.equals("будинки", ignoreCase = true)) continue
-                val key = normalizeHouseNumber(h)
-                if (key.isEmpty()) continue
-                val existing = streetMap[key]
-                if (existing == null || (existing.queue.isEmpty() && resolvedQueue.isNotEmpty())) {
-                    streetMap[key] = ZtoeHouseLookupResult(
-                        house = h,
-                        queue = resolvedQueue,
-                        statusText = resolvedStatusText
-                    )
+            for (streetId in matchedStreetIds) {
+                val streetMap = mergedMapsByStreet.getOrPut(streetId) { LinkedHashMap() }
+                for (rawToken in houseTokens) {
+                    val h = rawToken.trim()
+                    if (h.isEmpty() || h.equals("будинки", ignoreCase = true)) continue
+                    val key = normalizeHouseNumber(h)
+                    if (key.isEmpty()) continue
+                    val existing = streetMap[key]
+                    if (existing == null || (existing.queue.isEmpty() && resolvedQueue.isNotEmpty())) {
+                        streetMap[key] = ZtoeHouseLookupResult(
+                            house = h,
+                            queue = resolvedQueue,
+                            statusText = resolvedStatusText
+                        )
+                    }
                 }
             }
         }
@@ -849,6 +889,18 @@ object ZtoeAddressLookup {
         val now = System.currentTimeMillis()
         val result = HashMap<String, List<ZtoeHouseLookupResult>>(mergedMapsByStreet.size)
         for ((streetId, mergedMap) in mergedMapsByStreet) {
+            val prevHouses = cachedHousesByStreet[streetId]
+            if (prevHouses != null) {
+                for (prevH in prevHouses) {
+                    if (prevH.emergencyOutage != null && isValidEmergencyOutage(prevH.emergencyOutage)) {
+                        val k = normalizeHouseNumber(prevH.house)
+                        val cur = mergedMap[k]
+                        if (cur != null && cur.emergencyOutage == null) {
+                            mergedMap[k] = cur.copy(emergencyOutage = prevH.emergencyOutage)
+                        }
+                    }
+                }
+            }
             applyCanonicalStreetOverrides(streetId, mergedMap)
             val sortedList = mergedMap.values.sortedWith(
                 compareBy<ZtoeHouseLookupResult> { houseSortKey(it.house).first }
@@ -872,6 +924,7 @@ object ZtoeAddressLookup {
         if (!forceRefresh && cached != null && cached.size > 5) return cached
 
         val rem = getRems().firstOrNull { it.id == remId }
+            ?: ZTOE_REM_OPTIONS.firstOrNull { it.id == remId }
             ?: return getSettlementsForRem(remId)
         val html = postZtoeForm("rem_id=${rem.ztoeRemId}", siteUrl)
         if (!html.isNullOrBlank()) {
@@ -900,7 +953,10 @@ object ZtoeAddressLookup {
             cached.size > 15 &&
             cached.any { it.id != "zt_kyivska" && (cachedHousesByStreet[it.id]?.isNotEmpty() == true) }
 
-        if (!forceRefresh && hasBulkIndexedHouses && cached != null) return cached
+        if (!forceRefresh && hasBulkIndexedHouses && cached != null) {
+            fetchPwAccidentsForScope(remId, settlementId)
+            return cached
+        }
 
         val lock = settlementFetchLocks.getOrPut("$remId::$settlementId") { Any() }
         synchronized(lock) {
@@ -908,9 +964,13 @@ object ZtoeAddressLookup {
             val recheckedBulk = rechecked != null &&
                 rechecked.size > 15 &&
                 rechecked.any { it.id != "zt_kyivska" && (cachedHousesByStreet[it.id]?.isNotEmpty() == true) }
-            if (!forceRefresh && recheckedBulk && rechecked != null) return rechecked
+            if (!forceRefresh && recheckedBulk && rechecked != null) {
+                fetchPwAccidentsForScope(remId, settlementId)
+                return rechecked
+            }
 
             val rem = getRems().firstOrNull { it.id == remId }
+                ?: ZTOE_REM_OPTIONS.firstOrNull { it.id == remId }
                 ?: return getStreetsForSettlement(settlementId)
             val settlement = findSettlementById(settlementId)
                 ?: return getStreetsForSettlement(settlementId)
@@ -932,10 +992,12 @@ object ZtoeAddressLookup {
                 if (liveList.isNotEmpty()) {
                     cachedStreetsBySettlement[settlementId] = liveList
                     parseZtoeSettlementHousesTableHtml(settlementId, liveList, html)
+                    fetchPwAccidentsForScope(remId, settlementId)
                     persistToDiskCache()
                     return liveList
                 }
             }
+            fetchPwAccidentsForScope(remId, settlementId)
             return getStreetsForSettlement(settlementId)
         }
     }
@@ -953,7 +1015,8 @@ object ZtoeAddressLookup {
         val updatedAt = houseCacheUpdatedAtByStreet[streetId] ?: 0L
         if (cached != null && cached.isNotEmpty() && (!forceRefresh || System.currentTimeMillis() - updatedAt < FRESH_HOUSE_CACHE_TTL_MS)) {
             recordRecentHouseStreet(streetId)
-            return cached
+            fetchPwAccidentsForScope(remId, settlementId)
+            return cachedHousesByStreet[streetId] ?: cached
         }
 
         val lock = settlementFetchLocks["$remId::$settlementId"]
@@ -962,18 +1025,22 @@ object ZtoeAddressLookup {
                 val afterSettlementSync = cachedHousesByStreet[streetId]
                 if (afterSettlementSync != null && afterSettlementSync.isNotEmpty()) {
                     recordRecentHouseStreet(streetId)
-                    return afterSettlementSync
+                    fetchPwAccidentsForScope(remId, settlementId)
+                    return cachedHousesByStreet[streetId] ?: afterSettlementSync
                 }
             }
         }
 
         val rem = getRems().firstOrNull { it.id == remId }
+            ?: ZTOE_REM_OPTIONS.firstOrNull { it.id == remId }
         val settlement = findSettlementById(settlementId)
         val street = findStreetById(streetId)
 
         if (rem != null && settlement != null && street != null) {
+            // Note: Do NOT pass all=1 when vulica_id is specified, because all=1 causes ZTOE
+            // to ignore vulica_id and return all streets in the settlement instead of the selected street.
             val html = postZtoeForm(
-                "rem_id=${rem.ztoeRemId}&naspunkt_id=${settlement.ztoeNaspunktId}&vulica_id=${street.ztoeVulicaId}&all=1",
+                "rem_id=${rem.ztoeRemId}&naspunkt_id=${settlement.ztoeNaspunktId}&vulica_id=${street.ztoeVulicaId}",
                 siteUrl
             )
             if (!html.isNullOrBlank()) {
@@ -996,12 +1063,14 @@ object ZtoeAddressLookup {
                     cachedHousesByStreet[streetId] = sortedList
                     houseCacheUpdatedAtByStreet[streetId] = System.currentTimeMillis()
                     recordRecentHouseStreet(streetId)
+                    fetchPwAccidentsForScope(remId, settlementId)
                     persistToDiskCache()
-                    return sortedList
+                    return cachedHousesByStreet[streetId] ?: sortedList
                 }
             }
         }
-        return getDefaultHousesForStreet(streetId)
+        fetchPwAccidentsForScope(remId, settlementId)
+        return cachedHousesByStreet[streetId] ?: getDefaultHousesForStreet(streetId)
     }
 
     /**
@@ -1109,7 +1178,10 @@ object ZtoeAddressLookup {
     fun isValidEmergencyOutage(info: EmergencyOutageInfo?): Boolean {
         if (info == null) return false
         val typeLower = info.outageType.lowercase()
-        val validType = (typeLower.contains("аварійн") || typeLower.contains("emergency")) &&
+        val validType = (typeLower.contains("аварійн") ||
+            typeLower.contains("emergency") ||
+            typeLower.contains("гав") ||
+            typeLower.contains("сгав")) &&
             !typeLower.contains("не вимикається") &&
             !typeLower.contains("за винятком")
         return validType &&
@@ -1308,10 +1380,63 @@ object ZtoeAddressLookup {
     }
 
     private fun normalizeHouseNumber(value: String): String {
-        return value.lowercase()
-            .replace(HOUSE_PREFIX_REGEX, "")
-            .replace(Regex("""\s+"""), "")
+        val latinToCyrillic = mapOf(
+            'a' to 'а',
+            'b' to 'б',
+            'v' to 'в',
+            'g' to 'г',
+            'd' to 'д',
+            'e' to 'е',
+            'k' to 'к',
+            'm' to 'м',
+            'i' to 'і'
+        )
+        val cleaned = value.lowercase()
+            .replace(Regex("""^(буд\.|будинок|б\.|д\.)\s*""", RegexOption.IGNORE_CASE), "")
+            .replace(Regex("""['"«»`\s]+"""), "")
             .trim()
+        val sb = StringBuilder(cleaned.length)
+        for (ch in cleaned) {
+            sb.append(latinToCyrillic[ch] ?: ch)
+        }
+        return sb.toString()
+    }
+
+    private fun getAccidentPriorityScore(
+        switchSubReason: Int?,
+        typeOff: Int?,
+        koment: String?
+    ): Int {
+        // 1. Genuine unscheduled emergency accident ("Аварійне відключення"): switchSubReason == 0 (or omitted) & typeOff == 1
+        if ((switchSubReason == null || switchSubReason == -1 || switchSubReason == 0) && (typeOff == null || typeOff == 1)) {
+            return 4
+        }
+        // 2. Emergency blackout schedules (ГАВ = 1, СГАВ = 3)
+        if (switchSubReason == 1 || switchSubReason == 3) {
+            return 3
+        }
+        // 3. Explicit emergency keywords in koment (excluding generic "ГПВ")
+        if (!koment.isNullOrBlank() && Regex("""аварі|гав|сгав|(^|\s)мо(?=\s|$)""", RegexOption.IGNORE_CASE).containsMatchIn(koment)) {
+            return 3
+        }
+        // 4. Other typeOff == 1 (e.g. switchSubReason == 2 GPV rows)
+        if (typeOff == 1) {
+            return if (switchSubReason == 2) 1 else 2
+        }
+        return 0
+    }
+
+    private fun getAccidentOutageTypeLabel(
+        switchSubReason: Int?,
+        koment: String?
+    ): String {
+        if (switchSubReason == 1) return "Графік аварійних відключень"
+        if (switchSubReason == 3) return "Спеціальний графік аварійних відключень"
+        if (!koment.isNullOrBlank()) {
+            if (koment.contains("сгав", ignoreCase = true)) return "Спеціальний графік аварійних відключень"
+            if (koment.contains("гав", ignoreCase = true)) return "Графік аварійних відключень"
+        }
+        return "Аварійне відключення"
     }
 
     private fun extractTopLevelJsonObjects(jsonStr: String): List<String> {
@@ -1409,6 +1534,219 @@ object ZtoeAddressLookup {
         return m.groupValues[1].toIntOrNull()
     }
 
+    private fun applyAccidentsToSettlementHouses(settlementId: String, rawJson: String) {
+        if (settlementId.isBlank() || rawJson.isBlank()) return
+        try {
+            val hydraArr = extractJsonArrayField(rawJson, "hydra:member")
+            val items = extractTopLevelJsonObjects(hydraArr ?: rawJson)
+            if (items.isEmpty()) return
+
+            val settlementObj = findSettlementById(settlementId)
+            val targetCityNorm = settlementObj?.let { normalizeUkText(it.nameUk) } ?: ""
+
+            val streets = getStreetsForSettlement(settlementId)
+            if (streets.isEmpty()) return
+
+            val streetIdsByNormName = HashMap<String, MutableList<String>>(streets.size * 2)
+            val streetIdsByPoweronId = HashMap<Int, MutableList<String>>()
+            fun addNorm(k: String, id: String) {
+                if (k.isEmpty()) return
+                val l = streetIdsByNormName.getOrPut(k) { mutableListOf() }
+                if (!l.contains(id)) l.add(id)
+            }
+            for (st in streets) {
+                addNorm(st.nameUk.trim().lowercase(), st.id)
+                addNorm(normalizeUkText(st.nameUk), st.id)
+                if (st.poweronStreetId != null) {
+                    val l = streetIdsByPoweronId.getOrPut(st.poweronStreetId) { mutableListOf() }
+                    if (!l.contains(st.id)) l.add(st.id)
+                }
+            }
+            for (st in ZTOE_STREETS.filter { it.settlementId == settlementId }) {
+                addNorm(st.nameUk.trim().lowercase(), st.id)
+                addNorm(normalizeUkText(st.nameUk), st.id)
+                if (st.poweronStreetId != null) {
+                    val l = streetIdsByPoweronId.getOrPut(st.poweronStreetId) { mutableListOf() }
+                    if (!l.contains(st.id)) l.add(st.id)
+                }
+            }
+
+            data class ScoredOutage(val score: Int, val rawPlanIn: String, val info: EmergencyOutageInfo)
+            val emergencyByStreetAndHouse = HashMap<String, HashMap<String, ScoredOutage>>()
+
+            for (itemStr in items) {
+                val switchSubReason = extractJsonIntField(itemStr, "switchSubReason")
+                val typeOff = extractJsonIntField(itemStr, "typeOff")
+                val koment = extractJsonStringField(itemStr, "koment")
+                val score = getAccidentPriorityScore(switchSubReason, typeOff, koment)
+                if (score < 3) continue
+
+                val cityObjStr = extractJsonObjectField(itemStr, "city")
+                val cityName = cityObjStr?.let { extractJsonStringField(it, "name") } ?: ""
+                if (targetCityNorm.isNotEmpty() && cityName.isNotBlank()) {
+                    val itemCityNorm = normalizeUkText(cityName)
+                    if (itemCityNorm != targetCityNorm &&
+                        !itemCityNorm.contains(targetCityNorm) &&
+                        !targetCityNorm.contains(itemCityNorm)
+                    ) {
+                        continue
+                    }
+                }
+
+                val streetObjStr = extractJsonObjectField(itemStr, "street")
+                val streetIdNum = streetObjStr?.let { extractJsonIntField(it, "id") }
+                val streetNameRaw = streetObjStr?.let { extractJsonStringField(it, "name") } ?: ""
+                val matchedStreetIds = mutableListOf<String>()
+                if (streetIdNum != null) {
+                    streetIdsByPoweronId[streetIdNum]?.forEach { if (!matchedStreetIds.contains(it)) matchedStreetIds.add(it) }
+                }
+                if (streetNameRaw.isNotBlank()) {
+                    streetIdsByNormName[streetNameRaw.trim().lowercase()]?.forEach { if (!matchedStreetIds.contains(it)) matchedStreetIds.add(it) }
+                    streetIdsByNormName[normalizeUkText(streetNameRaw)]?.forEach { if (!matchedStreetIds.contains(it)) matchedStreetIds.add(it) }
+                }
+                if (matchedStreetIds.isEmpty()) continue
+
+                val buildingNames = extractJsonStringField(itemStr, "buildingNames") ?: ""
+                if (buildingNames.isBlank()) continue
+
+                val startTime = formatZtoeOutageTimestamp(extractJsonStringField(itemStr, "dateEvent") ?: "")
+                val rawPlanIn = extractJsonStringField(itemStr, "datePlanIn") ?: ""
+                val estimatedRestoreTime = formatZtoeOutageTimestamp(rawPlanIn)
+                if (!isValidOutageTimestamp(startTime) || !isValidOutageTimestamp(estimatedRestoreTime)) continue
+
+                val outageType = getAccidentOutageTypeLabel(switchSubReason, koment)
+                val otgName = extractJsonObjectField(itemStr, "otg")?.let { extractJsonStringField(it, "name") }
+                val idVal = extractJsonIntField(itemStr, "id")?.toString()
+                    ?: extractJsonStringField(itemStr, "id")
+                    ?: startTime
+
+                val houseTokens = buildingNames.split(Regex("[,;]")).map { it.trim() }.filter { it.isNotEmpty() }
+                for (streetId in matchedStreetIds) {
+                    val streetEmergMap = emergencyByStreetAndHouse.getOrPut(streetId) { HashMap() }
+                    for (hToken in houseTokens) {
+                        val normH = normalizeHouseNumber(hToken)
+                        if (normH.isEmpty()) continue
+                        val existing = streetEmergMap[normH]
+                        if (existing == null || score > existing.score || (score == existing.score && rawPlanIn > existing.rawPlanIn)) {
+                            streetEmergMap[normH] = ScoredOutage(
+                                score = score,
+                                rawPlanIn = rawPlanIn,
+                                info = EmergencyOutageInfo(
+                                    id = "pw_accident_${idVal}_$normH",
+                                    remName = otgName,
+                                    settlementName = cityName.ifBlank { settlementObj?.nameUk },
+                                    streetName = streetNameRaw,
+                                    house = hToken,
+                                    outageType = outageType,
+                                    startTime = startTime,
+                                    estimatedRestoreTime = estimatedRestoreTime
+                                )
+                            )
+                        }
+                    }
+                }
+            }
+
+            for ((streetId, streetEmergMap) in emergencyByStreetAndHouse) {
+                val baseHouses = cachedHousesByStreet[streetId] ?: getDefaultHousesForStreet(streetId)
+                val updatedHouses = baseHouses.map { h ->
+                    val matched = streetEmergMap[normalizeHouseNumber(h.house)]
+                    if (matched != null) h.copy(emergencyOutage = matched.info) else h
+                }.toMutableList()
+                val existingHouseNorms = updatedHouses.map { normalizeHouseNumber(it.house) }.toHashSet()
+                for ((normH, entry) in streetEmergMap) {
+                    if (!existingHouseNorms.contains(normH) && ! entry.info.house.isNullOrBlank()) {
+                        updatedHouses.add(
+                            ZtoeHouseLookupResult(
+                                house = entry.info.house,
+                                queue = "",
+                                emergencyOutage = entry.info
+                            )
+                        )
+                        existingHouseNorms.add(normH)
+                    }
+                }
+                if (updatedHouses.isNotEmpty()) {
+                    cachedHousesByStreet[streetId] = updatedHouses.sortedWith(
+                        compareBy<ZtoeHouseLookupResult> { houseSortKey(it.house).first }
+                            .thenBy { houseSortKey(it.house).second }
+                    )
+                }
+            }
+        } catch (_: Exception) {
+        }
+    }
+
+    private fun applyAccidentsToRemHouses(remId: String, rawJson: String, fallbackSettlementId: String? = null) {
+        if (rawJson.isBlank()) return
+        val settlements = getSettlementsForRem(remId)
+        val visited = HashSet<String>()
+        for (s in settlements) {
+            if (visited.add(s.id)) {
+                applyAccidentsToSettlementHouses(s.id, rawJson)
+            }
+        }
+        if (!fallbackSettlementId.isNullOrBlank() && visited.add(fallbackSettlementId)) {
+            applyAccidentsToSettlementHouses(fallbackSettlementId, rawJson)
+        }
+    }
+
+    fun fetchPwAccidentsForScope(
+        remId: String,
+        settlementId: String? = null
+    ): String? {
+        val remObj = getRems().firstOrNull { it.id == remId }
+            ?: ZTOE_REM_OPTIONS.firstOrNull { it.id == remId }
+        val canonicalRemObj = ZTOE_REM_OPTIONS.firstOrNull { it.id == remId }
+        val settlementObj = settlementId?.let { findSettlementById(it) }
+        val otgId = remObj?.ztoeOtgId ?: canonicalRemObj?.ztoeOtgId
+        val cityId = settlementObj?.poweronCityId
+
+        val scopeParam = when {
+            otgId != null -> "otg.id=$otgId"
+            cityId != null -> "city.id=$cityId"
+            else -> ""
+        }
+        val cacheKey = scopeParam.ifEmpty { "$remId::${settlementId ?: ""}" }
+        val cached = accidentsCacheByScope[cacheKey]
+        if (cached != null && System.currentTimeMillis() - cached.first < ACCIDENTS_CACHE_TTL_MS) {
+            applyAccidentsToRemHouses(remId, cached.second, settlementId)
+            return cached.second
+        }
+
+        val queryParams = buildString {
+            append("switchSubReason[]=0&switchSubReason[]=1&switchSubReason[]=3")
+            if (scopeParam.isNotEmpty()) {
+                append("&").append(scopeParam)
+            }
+            append("&pagination=false")
+        }
+        val targetEndpoint = "https://api-ztoe-poweron.inneti.net/api/pw_accidents?$queryParams"
+        var conn: HttpURLConnection? = null
+        return try {
+            conn = (URL(targetEndpoint).openConnection() as HttpURLConnection).apply {
+                requestMethod = "GET"
+                connectTimeout = 5000
+                readTimeout = 5000
+                setRequestProperty("Accept", "application/ld+json, application/json")
+                setRequestProperty("User-Agent", "Mozilla/5.0 (Android; ZTBlackoutPreWarning)")
+            }
+            if (conn.responseCode in 200..299) {
+                val text = conn.inputStream.use { String(it.readBytes(), Charsets.UTF_8) }
+                if (text.contains("hydra:member") || text.trim().startsWith("[")) {
+                    accidentsCacheByScope[cacheKey] = System.currentTimeMillis() to text
+                    applyAccidentsToRemHouses(remId, text, settlementId)
+                    return text
+                }
+            }
+            null
+        } catch (_: Exception) {
+            null
+        } finally {
+            conn?.disconnect()
+        }
+    }
+
     fun matchEmergencyOutageFromAccidentsJson(
         accidentsJsonStr: String,
         query: SelectedAddressQuery
@@ -1421,7 +1759,9 @@ object ZtoeAddressLookup {
             remName = remObj?.nameUk ?: "",
             settlementName = settlementObj?.nameUk ?: "",
             streetName = streetObj?.nameUk ?: "",
-            house = query.house
+            house = query.house,
+            poweronStreetId = streetObj?.poweronStreetId,
+            poweronCityId = settlementObj?.poweronCityId
         )
     }
 
@@ -1430,7 +1770,9 @@ object ZtoeAddressLookup {
         remName: String,
         settlementName: String,
         streetName: String,
-        house: String
+        house: String,
+        poweronStreetId: Int? = null,
+        poweronCityId: Int? = null
     ): EmergencyOutageInfo? {
         val targetCityNorm = normalizeUkText(settlementName)
         val targetStreetNorm = normalizeUkText(streetName)
@@ -1448,7 +1790,12 @@ object ZtoeAddressLookup {
         }
 
         return try {
-            val items = extractTopLevelJsonObjects(extractedJson)
+            val hydraArr = extractJsonArrayField(extractedJson, "hydra:member")
+            val items = extractTopLevelJsonObjects(hydraArr ?: extractedJson)
+            var bestMatch: EmergencyOutageInfo? = null
+            var bestScore = -1
+            var bestRawPlanIn = ""
+
             for (itemStr in items) {
                 // Support Nested Schema: {"rem_name": ..., " date_begin": ..., "date_plan": ..., "naspunkt": [{"name": ..., "streets": [{"name": "вул. Київська, 37"}]}]}
                 val naspunktArrStr = extractJsonArrayField(itemStr, "naspunkt")
@@ -1476,7 +1823,7 @@ object ZtoeAddressLookup {
                         for (stObjStr in stObjects) {
                             val stRaw = extractJsonStringField(stObjStr, "name") ?: ""
                             val stNorm = normalizeUkText(stRaw)
-                            if (targetStreetNorm.isNotEmpty() && !stNorm.contains(targetStreetNorm)) {
+                            if (targetStreetNorm.isNotEmpty() && !stNorm.contains(targetStreetNorm) && !targetStreetNorm.contains(stNorm)) {
                                 continue
                             }
                             val tokens = stRaw.split(Regex("[,;]")).map { normalizeHouseNumber(it) }
@@ -1497,30 +1844,46 @@ object ZtoeAddressLookup {
                     continue
                 }
 
-                // Support Flat Schema: {"id": 391476673, "city": {"name": "Житомир"}, "street": {"name": "вул. Київська"}, "buildingNames": "18, 37", "dateEvent": "...", "datePlanIn": "..."}
-                val switchSubReason = extractJsonIntField(itemStr, "switchSubReason") ?: -1
-                val typeOff = extractJsonIntField(itemStr, "typeOff") ?: 1
-                val isEmergency = (switchSubReason == 0 || switchSubReason == 2) && typeOff == 1
-                if (!isEmergency) continue
+                // Support Flat / Hydra Schema: {"id": 391476673, "city": {"name": "Житомир"}, "street": {"name": "вул. Київська"}, "buildingNames": "18, 37", "dateEvent": "...", "datePlanIn": "..."}
+                val switchSubReason = extractJsonIntField(itemStr, "switchSubReason")
+                val typeOff = extractJsonIntField(itemStr, "typeOff")
+                val koment = extractJsonStringField(itemStr, "koment")
+                val score = getAccidentPriorityScore(switchSubReason, typeOff, koment)
+                if (score < 3) continue
 
-                val cityName = extractJsonObjectField(itemStr, "city")?.let { extractJsonStringField(it, "name") } ?: ""
-                val itemStreetName = extractJsonObjectField(itemStr, "street")?.let { extractJsonStringField(it, "name") } ?: ""
+                val cityObjStr = extractJsonObjectField(itemStr, "city")
+                val cityIdNum = cityObjStr?.let { extractJsonIntField(it, "id") }
+                val cityName = cityObjStr?.let { extractJsonStringField(it, "name") } ?: ""
+
+                val cityMatches = when {
+                    poweronCityId != null && cityIdNum != null && poweronCityId == cityIdNum -> true
+                    targetCityNorm.isEmpty() || cityName.isBlank() -> true
+                    else -> {
+                        val itemCityNorm = normalizeUkText(cityName)
+                        itemCityNorm == targetCityNorm ||
+                            itemCityNorm.contains(targetCityNorm) ||
+                            targetCityNorm.contains(itemCityNorm)
+                    }
+                }
+                if (!cityMatches) continue
+
+                val streetObjStr = extractJsonObjectField(itemStr, "street")
+                val streetIdNum = streetObjStr?.let { extractJsonIntField(it, "id") }
+                val itemStreetName = streetObjStr?.let { extractJsonStringField(it, "name") } ?: ""
+
+                val streetMatches = when {
+                    poweronStreetId != null && streetIdNum != null && poweronStreetId == streetIdNum -> true
+                    targetStreetNorm.isEmpty() || itemStreetName.isBlank() -> true
+                    else -> {
+                        val itemStreetNorm = normalizeUkText(itemStreetName)
+                        itemStreetNorm == targetStreetNorm ||
+                            itemStreetNorm.contains(targetStreetNorm) ||
+                            targetStreetNorm.contains(itemStreetNorm)
+                    }
+                }
+                if (!streetMatches) continue
+
                 val buildingNames = extractJsonStringField(itemStr, "buildingNames") ?: ""
-
-                if (targetCityNorm.isNotEmpty() && cityName.isNotBlank()) {
-                    val itemCityNorm = normalizeUkText(cityName)
-                    if (!itemCityNorm.contains(targetCityNorm) && !targetCityNorm.contains(itemCityNorm)) {
-                        continue
-                    }
-                }
-
-                if (targetStreetNorm.isNotEmpty() && itemStreetName.isNotBlank()) {
-                    val itemStreetNorm = normalizeUkText(itemStreetName)
-                    if (!itemStreetNorm.contains(targetStreetNorm) && !targetStreetNorm.contains(itemStreetNorm)) {
-                        continue
-                    }
-                }
-
                 val houses = buildingNames.split(Regex("[,;]"))
                     .map { normalizeHouseNumber(it) }
                     .filter { it.isNotEmpty() }
@@ -1531,19 +1894,27 @@ object ZtoeAddressLookup {
                         ?: "${targetStreetNorm}_$targetHouseNorm"
                     val dateEvent = extractJsonStringField(itemStr, "dateEvent") ?: ""
                     val datePlanIn = extractJsonStringField(itemStr, "datePlanIn") ?: ""
-                    return EmergencyOutageInfo(
+                    val otgName = extractJsonObjectField(itemStr, "otg")?.let { extractJsonStringField(it, "name") }
+                    val candidate = EmergencyOutageInfo(
                         id = "pw_accident_$idVal",
-                        remName = remName.ifBlank { null },
+                        remName = otgName ?: remName.ifBlank { null },
                         settlementName = cityName.ifBlank { settlementName },
                         streetName = itemStreetName.ifBlank { streetName },
                         house = house,
-                        outageType = "Аварійне відключення",
+                        outageType = getAccidentOutageTypeLabel(switchSubReason, koment),
                         startTime = formatZtoeOutageTimestamp(dateEvent),
                         estimatedRestoreTime = formatZtoeOutageTimestamp(datePlanIn)
                     )
+                    if (isValidEmergencyOutage(candidate)) {
+                        if (score > bestScore || (score == bestScore && datePlanIn > bestRawPlanIn)) {
+                            bestScore = score
+                            bestRawPlanIn = datePlanIn
+                            bestMatch = candidate
+                        }
+                    }
                 }
             }
-            null
+            bestMatch
         } catch (_: Exception) {
             null
         }
@@ -1576,6 +1947,14 @@ object ZtoeAddressLookup {
             if (matchedRow != null && isValidEmergencyOutage(matchedRow)) return matchedRow
 
             matchEmergencyOutageFromAccidentsJson(pageHtml, query)?.takeIf { isValidEmergencyOutage(it) }?.let { return it }
+        }
+
+        // Query live ZTOE PowerOn API (https://api-ztoe-poweron.inneti.net/api/pw_accidents)
+        val liveAccidentsJson = fetchPwAccidentsForScope(query.remId, query.settlementId)
+        if (!liveAccidentsJson.isNullOrBlank()) {
+            matchEmergencyOutageFromAccidentsJson(liveAccidentsJson, query)
+                ?.takeIf { isValidEmergencyOutage(it) }
+                ?.let { return it }
         }
 
         val localMatch = getHousesForStreet(query.streetId)
@@ -1611,12 +1990,14 @@ object ZtoeAddressLookup {
         siteUrl: String = "https://www.ztoe.com.ua/unhooking-search.php"
     ): ZtoeHouseLookupResult? {
         val localHouses = getHousesForStreet(query.streetId)
+        val targetHouseNorm = normalizeHouseNumber(query.house)
         val localMatch = localHouses.firstOrNull {
-            it.house.trim().equals(query.house.trim(), ignoreCase = true)
+            normalizeHouseNumber(it.house) == targetHouseNorm
         }
         var resolvedResult: ZtoeHouseLookupResult? = localMatch?.copy()
 
-        val rem = ZTOE_REM_OPTIONS.firstOrNull { it.id == query.remId }
+        val rem = getRems().firstOrNull { it.id == query.remId }
+            ?: ZTOE_REM_OPTIONS.firstOrNull { it.id == query.remId }
         val settlement = findSettlementById(query.settlementId)
         val street = findStreetById(query.streetId)
         val formattedAddressLabel = buildString {
@@ -1633,7 +2014,8 @@ object ZtoeAddressLookup {
         if (rem != null && settlement != null && street != null && ZtoeParser.isValidUrl(siteUrl)) {
             var conn: HttpURLConnection? = null
             try {
-                val formBody = "rem_id=${rem.ztoeRemId}&naspunkt_id=${settlement.ztoeNaspunktId}&vulica_id=${street.ztoeVulicaId}&all=1"
+                // Note: Do NOT pass all=1 when vulica_id is specified
+                val formBody = "rem_id=${rem.ztoeRemId}&naspunkt_id=${settlement.ztoeNaspunktId}&vulica_id=${street.ztoeVulicaId}"
                 conn = (URL(siteUrl).openConnection() as HttpURLConnection).apply {
                     requestMethod = "POST"
                     doOutput = true
@@ -1655,7 +2037,7 @@ object ZtoeAddressLookup {
                     fetchedHtml = html
                     val parsedRows = parseZtoeAddressLookupTableHtml(html)
                     val matchingRows = parsedRows.filter {
-                        it.house.trim().equals(query.house.trim(), ignoreCase = true)
+                        normalizeHouseNumber(it.house) == targetHouseNorm
                     }
                     // CRITICAL SAFEGUARD: Only allow live HTML table rows to assign/update queue when the house had NO queue locally
                     if (matchingRows.isNotEmpty() && (localMatch == null || localMatch.queue.isEmpty())) {
@@ -1680,7 +2062,38 @@ object ZtoeAddressLookup {
                 emergencyOutage = emergencyOutage,
                 addressLabel = formattedAddressLabel
             )
+        } else if (emergencyOutage != null) {
+            resolvedResult = ZtoeHouseLookupResult(
+                house = query.house.trim(),
+                queue = "",
+                emergencyOutage = emergencyOutage,
+                addressLabel = formattedAddressLabel
+            )
         }
+
+        if (resolvedResult != null && query.streetId.isNotBlank()) {
+            val currentList = cachedHousesByStreet[query.streetId] ?: getDefaultHousesForStreet(query.streetId)
+            val exists = currentList.any { normalizeHouseNumber(it.house) == targetHouseNorm }
+            val updatedList = if (exists) {
+                currentList.map { h ->
+                    if (normalizeHouseNumber(h.house) == targetHouseNorm) {
+                        h.copy(
+                            queue = resolvedResult.queue.ifEmpty { h.queue },
+                            statusText = resolvedResult.statusText ?: h.statusText,
+                            emergencyOutage = resolvedResult.emergencyOutage,
+                            addressLabel = resolvedResult.addressLabel.ifEmpty { h.addressLabel }
+                        )
+                    } else h
+                }
+            } else {
+                (currentList + resolvedResult).sortedWith(
+                    compareBy<ZtoeHouseLookupResult> { houseSortKey(it.house).first }
+                        .thenBy { houseSortKey(it.house).second }
+                )
+            }
+            cachedHousesByStreet[query.streetId] = updatedList
+        }
+
         return resolvedResult
     }
 }

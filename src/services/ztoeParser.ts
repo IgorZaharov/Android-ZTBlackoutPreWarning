@@ -696,9 +696,8 @@ export function getEmergencyOverlapMinutesForDay(
           overlap = { startMin: startParsed.totalMinutes, endMin: endParsed.totalMinutes };
         }
       } else {
-        if (targetDateStr === startParsed.dateStr || startParsed.dateStr <= targetDateStr) {
-          overlap = { startMin: startParsed.totalMinutes, endMin: endParsed.totalMinutes };
-        }
+        // Active emergency outage on Today's schedule always applies to Today's timeline
+        overlap = { startMin: startParsed.totalMinutes, endMin: endParsed.totalMinutes };
       }
     } else if (startParsed.dateStr < endParsed.dateStr) {
       if (targetDateStr === startParsed.dateStr) {
@@ -770,14 +769,14 @@ export function applyEmergencyOutageToSchedule(
   if (!emergencyOutage) return schedule;
 
   if (!schedule) {
-    if (!isTomorrow) return null;
-    const tomorrowDate = new Date(Date.now() + 86400000);
-    const tomorrowParts = getKyivDateParts(tomorrowDate);
-    const overlap = getEmergencyOverlapMinutesForDay(emergencyOutage, tomorrowParts.dateStr, true);
+    const targetDate = isTomorrow ? new Date(Date.now() + 86400000) : new Date();
+    const targetParts = getKyivDateParts(targetDate);
+    const overlap = getEmergencyOverlapMinutesForDay(emergencyOutage, targetParts.dateStr, isTomorrow);
     if (!overlap) return null;
-    const tomorrowLabel = `Завтра (${tomorrowDate.toLocaleDateString('uk-UA', { day: 'numeric', month: 'long' })})`;
+    const dayPrefix = isTomorrow ? 'Завтра' : 'Сьогодні';
+    const dayLabel = `${dayPrefix} (${targetDate.toLocaleDateString('uk-UA', { day: 'numeric', month: 'long' })})`;
     const nowTimeStr = new Date().toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit', hour12: false });
-    const baseSlots = createEmptyDaySlots(tomorrowParts.dateStr, 'emergency');
+    const baseSlots = createEmptyDaySlots(targetParts.dateStr, 'emergency');
     const mergedSlots = baseSlots.map((slot, index) => {
       const slotStartMin = index * 30;
       const slotEndMin = (index + 1) * 30;
@@ -785,8 +784,8 @@ export function applyEmergencyOutageToSchedule(
       return isEmergencyOff ? { ...slot, status: 'POWER_OFF' as SlotStatus, isEmergency: true } : slot;
     });
     return {
-      dateStr: tomorrowParts.dateStr,
-      dayLabel: tomorrowLabel,
+      dateStr: targetParts.dateStr,
+      dayLabel,
       queue: '',
       city: 'Житомир (ZTOE)',
       slots: mergedSlots,

@@ -20,7 +20,7 @@ import {
 import { ZhytomyrRouletteModal } from './ZhytomyrRouletteModal';
 
 declare const __APP_VERSION__: string | undefined;
-const CURRENT_BUILD_VERSION = `v${typeof __APP_VERSION__ !== 'undefined' && /^[0-9]+\.[0-9]+/.test(__APP_VERSION__) ? __APP_VERSION__ : '1.3.4'}`;
+const CURRENT_BUILD_VERSION = `v${typeof __APP_VERSION__ !== 'undefined' && /^[0-9]+\.[0-9]+/.test(__APP_VERSION__) ? __APP_VERSION__ : '1.3.5'}`;
 
 const DonationFavicon: React.FC<{ url: string; title: string }> = ({ url, title }) => {
   const candidates = getFaviconCandidateUrls(url);

@@ -150,7 +150,16 @@ export default function App() {
 
   useEffect(() => {
     loadSchedules(settings);
-  }, [loadSchedules, settings.queue, settings.url, settings.selectedAddress]);
+  }, [
+    loadSchedules,
+    settings.queue,
+    settings.url,
+    settings.selectedAddress,
+    settings.selectedAddressQuery?.remId,
+    settings.selectedAddressQuery?.settlementId,
+    settings.selectedAddressQuery?.streetId,
+    settings.selectedAddressQuery?.house,
+  ]);
 
   // Automatically refresh timer and drum bar when User enters main screen
   useEffect(() => {

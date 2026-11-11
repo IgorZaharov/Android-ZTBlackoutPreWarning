@@ -64,6 +64,8 @@ export interface ZtoeHouseLookupResult {
   emergencyOutage?: EmergencyOutageInfo | null;
 }
 
+export type ZtoeHouseQueueRecord = ZtoeHouseLookupResult;
+
 export const ZTOE_REM_OPTIONS: ZtoeRemOption[] = [
   { id: 'zhytomyr', ztoeRemId: '7', ztoeOtgId: '6', nameUk: 'Житомирський РЕМ', nameEn: 'Zhytomyr REM' },
   { id: 'berdychiv', ztoeRemId: '3', ztoeOtgId: '3', nameUk: 'Бердичівський РЕМ', nameEn: 'Berdychiv REM' },
@@ -79,8 +81,8 @@ export const ZTOE_REM_OPTIONS: ZtoeRemOption[] = [
   { id: 'ovruch', ztoeRemId: '17', ztoeOtgId: '12', nameUk: 'Овруцький РЕМ', nameEn: 'Ovruch REM' },
   { id: 'olevsk', ztoeRemId: '18', ztoeOtgId: '13', nameUk: 'Олевський РЕМ', nameEn: 'Olevsk REM' },
   { id: 'popilnia', ztoeRemId: '19', ztoeOtgId: '14', nameUk: 'Попільнянський РЕМ', nameEn: 'Popilnia REM' },
-  { id: 'pulyny', ztoeRemId: '23', ztoeOtgId: '16', nameUk: 'Пулинський РЕМ', nameEn: 'Pulyny REM' },
-  { id: 'romaniv', ztoeRemId: '21', ztoeOtgId: '17', nameUk: 'Романівський РЕМ', nameEn: 'Romaniv REM' },
+  { id: 'pulyny', ztoeRemId: '23', ztoeOtgId: '17', nameUk: 'Пулинський РЕМ', nameEn: 'Pulyny REM' },
+  { id: 'romaniv', ztoeRemId: '21', ztoeOtgId: '16', nameUk: 'Романівський РЕМ', nameEn: 'Romaniv REM' },
   { id: 'khoroshiv', ztoeRemId: '5', ztoeOtgId: '5', nameUk: 'Хорошівський РЕМ', nameEn: 'Khoroshiv REM' },
   { id: 'cherniakhiv', ztoeRemId: '24', ztoeOtgId: '18', nameUk: 'Черняхівський РЕМ', nameEn: 'Cherniakhiv REM' },
   { id: 'chudniv', ztoeRemId: '25', ztoeOtgId: '19', nameUk: 'Чуднівський РЕМ', nameEn: 'Chudniv REM' },
@@ -120,6 +122,7 @@ export const ZTOE_STREET_OPTIONS: ZtoeStreetOption[] = [
   { id: 'zt_lesi', settlementId: 'zt_city', ztoeVulicaId: '173937', poweronStreetId: '4788', nameUk: 'вул. Лесі Українки', nameEn: 'Lesi Ukrainky St.' },
   { id: 'zt_chudnivska', settlementId: 'zt_city', ztoeVulicaId: '174543', poweronStreetId: '4645', nameUk: 'вул. Чуднівська', nameEn: 'Chudnivska St.' },
   { id: 'zt_mykhailivska', settlementId: 'zt_city', ztoeVulicaId: '174152', poweronStreetId: '33622', nameUk: 'вул. Михайлівська', nameEn: 'Mykhailivska St.' },
+  { id: 'st_173952', settlementId: 'zt_city', ztoeVulicaId: '173952', poweronStreetId: '33488', nameUk: 'вул. Степана Бандери', nameEn: 'Stepana Bandery St.' },
   // с. Зарічани
   { id: 'zr_lisova', settlementId: 'zt_zarichany', ztoeVulicaId: '175050', nameUk: 'вул. Лісова', nameEn: 'Lisova St.' },
   { id: 'zr_berdy', settlementId: 'zt_zarichany', ztoeVulicaId: '175051', nameUk: 'вул. Бердичівське шосе', nameEn: 'Berdychivske Hwy' },
@@ -192,6 +195,9 @@ export const ZTOE_STREET_HOUSES: Record<string, ZtoeHouseLookupResult[]> = {
   ],
   zt_berdy: [
     { house: '6', queue: '2.1', rawQueueCell: '2', rawSubqueueCell: '1' },
+    { house: '8', queue: '2.1', rawQueueCell: '2', rawSubqueueCell: '1' },
+    { house: '10', queue: '2.1', rawQueueCell: '2', rawSubqueueCell: '1' },
+    { house: '12', queue: '2.1', rawQueueCell: '2', rawSubqueueCell: '1' },
     { house: '15', queue: '2.2', rawQueueCell: '2', rawSubqueueCell: '2' },
     { house: '32', queue: '4.1', rawQueueCell: '4', rawSubqueueCell: '1' },
     { house: '67', queue: '5.1', rawQueueCell: '5', rawSubqueueCell: '1' },
@@ -218,7 +224,6 @@ export const ZTOE_STREET_HOUSES: Record<string, ZtoeHouseLookupResult[]> = {
   ],
   zt_pokrovska: [
     { house: '4', queue: '2.2', rawQueueCell: '2', rawSubqueueCell: '2' },
-    { house: '28', queue: '4.2', rawQueueCell: '4', rawSubqueueCell: '2' },
     { house: '115', queue: '6.2', rawQueueCell: '6', rawSubqueueCell: '2' },
     {
       house: '120',
@@ -262,6 +267,29 @@ export const ZTOE_STREET_HOUSES: Record<string, ZtoeHouseLookupResult[]> = {
       rawSubqueueCell: ZTOE_FULL_NO_OUTAGE_MESSAGE,
       statusText: ZTOE_FULL_NO_OUTAGE_MESSAGE,
     },
+  ],
+  st_173952: [
+    { house: '2', queue: '1.2', rawQueueCell: '1', rawSubqueueCell: '2' },
+    { house: '3', queue: '1.2', rawQueueCell: '1', rawSubqueueCell: '2' },
+    { house: '4', queue: '1.2', rawQueueCell: '1', rawSubqueueCell: '2' },
+    { house: '4А', queue: '1.2', rawQueueCell: '1', rawSubqueueCell: '2' },
+    { house: '5', queue: '4.1', rawQueueCell: '4', rawSubqueueCell: '1' },
+    { house: '6', queue: '1.2', rawQueueCell: '1', rawSubqueueCell: '2' },
+    { house: '7', queue: '4.1', rawQueueCell: '4', rawSubqueueCell: '1' },
+    { house: '8', queue: '4.1', rawQueueCell: '4', rawSubqueueCell: '1' },
+    { house: '9', queue: '4.1', rawQueueCell: '4', rawSubqueueCell: '1' },
+    { house: '10', queue: '1.2', rawQueueCell: '1', rawSubqueueCell: '2' },
+    { house: '10А', queue: '4.1', rawQueueCell: '4', rawSubqueueCell: '1' },
+    { house: '11', queue: '4.1', rawQueueCell: '4', rawSubqueueCell: '1' },
+    { house: '12', queue: '4.1', rawQueueCell: '4', rawSubqueueCell: '1' },
+    { house: '13', queue: '4.1', rawQueueCell: '4', rawSubqueueCell: '1' },
+    { house: '14', queue: '4.1', rawQueueCell: '4', rawSubqueueCell: '1' },
+    { house: '15', queue: '4.1', rawQueueCell: '4', rawSubqueueCell: '1' },
+    { house: '16', queue: '4.1', rawQueueCell: '4', rawSubqueueCell: '1' },
+    { house: '16/63', queue: '4.1', rawQueueCell: '4', rawSubqueueCell: '1' },
+    { house: '16а', queue: '4.1', rawQueueCell: '4', rawSubqueueCell: '1' },
+    { house: '18', queue: '1.2', rawQueueCell: '1', rawSubqueueCell: '2' },
+    { house: '32', queue: '1.2', rawQueueCell: '1', rawSubqueueCell: '2' },
   ],
   zr_lisova: [
     { house: '3', queue: '3.1', rawQueueCell: '3', rawSubqueueCell: '1' },
@@ -427,13 +455,23 @@ export const ZTOE_STREET_HOUSES: Record<string, ZtoeHouseLookupResult[]> = {
   ],
 };
 
-function decodeHtmlEntities(raw: string): string {
+/**
+ * Decodes HTML entities and apostrophe character references (`&amp;#039;`, `&#039;`, `&#39;`,
+ * `&#x27;`, `&apos;`, `&rsquo;`, `&lsquo;`, `&#8217;`, `&#146;`) into standard characters (`'`).
+ * Unescapes `&amp;` first so double-escaped entities like `&amp;#039;` are properly resolved.
+ */
+export function decodeHtmlEntities(raw: string): string {
+  if (!raw) return '';
   return raw
     .replace(/&amp;/gi, '&')
-    .replace(/&#0*39;|&#x0*27;|&apos;|&#8217;|&#0*146;/gi, "'")
+    .replace(/&#0*39;|&#x0*27;|&apos;|&#8217;|&#0*146;|&rsquo;|&lsquo;/gi, "'")
     .replace(/&quot;|&#0*34;/gi, '"')
-    .replace(/&nbsp;|&#0*160;/gi, ' ');
+    .replace(/&nbsp;|&#0*160;/gi, ' ')
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>');
 }
+
+export const decodeZtoeHtmlEntities = decodeHtmlEntities;
 
 function stripHtmlTags(raw: string): string {
   return decodeHtmlEntities(raw.replace(/<[^>]*>/g, ' '))
@@ -441,14 +479,38 @@ function stripHtmlTags(raw: string): string {
     .trim();
 }
 
+const VALID_TIMESTAMP_REGEX = /^(\d{2}\.\d{2}(?:\.\d{2,4})?\s+)?\d{1,2}:\d{2}$/;
+
+export function isValidOutageTimestamp(value: string | undefined | null): boolean {
+  if (!value || typeof value !== 'string') return false;
+  return VALID_TIMESTAMP_REGEX.test(value.trim());
+}
+
+export function isValidEmergencyOutage(
+  info: EmergencyOutageInfo | null | undefined
+): info is EmergencyOutageInfo {
+  if (!info || typeof info !== 'object') return false;
+  if (!isValidOutageTimestamp(info.startTime) || !isValidOutageTimestamp(info.estimatedRestoreTime)) {
+    return false;
+  }
+  const combined = `${info.outageType || ''} ${info.startTime} ${info.estimatedRestoreTime}`.toLowerCase();
+  if (combined.includes('не вимикається') || combined.includes('за винятком')) {
+    return false;
+  }
+  return true;
+}
+
 /**
  * Parses an HTML address lookup table from https://www.ztoe.com.ua/unhooking-search.php
- * Supports both 3-column (Будинок | Черга | Підчерга) and 7-column
+ * Supports both 3-column (Будинок | Черга | Підчерга or Черга | Підчерга | Будинки) and 7-column
  * (РЕМ | Населений пункт | Назва вулиці, провулка, тощо | Будинки | Черга | Підчерга | Примітка) ZTOE tables.
  * If the ZTOE table has a message instead of queue/subqueue, queue is set to "" (no queue)
  * and the full unshortened message is returned in statusText.
  */
-export function parseZtoeAddressLookupTableHtml(html: string): ZtoeHouseLookupResult[] {
+export function parseZtoeAddressLookupTableHtml(
+  html: string,
+  targetStreetName?: string
+): ZtoeHouseLookupResult[] {
   const results: ZtoeHouseLookupResult[] = [];
   if (!html) return results;
 
@@ -459,11 +521,13 @@ export function parseZtoeAddressLookupTableHtml(html: string): ZtoeHouseLookupRe
   const trRegex = /<tr\b[^>]*>([\s\S]*?)<\/tr>/gi;
   let trMatch: RegExpExecArray | null;
 
+  let streetColIdx = -1;
   let houseColIdx = 0;
   let queueColIdx = 1;
   let subqueueColIdx = 2;
   let noteColIdx = -1;
   const metadataCols = new Set<number>();
+  const targetStreetNorm = targetStreetName ? normalizeStreetName(targetStreetName) : '';
 
   while ((trMatch = trRegex.exec(addressSectionHtml)) !== null) {
     const rowHtml = trMatch[1];
@@ -478,7 +542,6 @@ export function parseZtoeAddressLookupTableHtml(html: string): ZtoeHouseLookupRe
 
     if (cells.length < 2) continue;
 
-    // Detect header row (uses <th> or first cell is column title like "Будинок" / "Адреса" / "РЕМ")
     const firstCellLower = (cells[0] || '').toLowerCase();
     const isHeaderRow =
       /<th\b/i.test(rowHtml) ||
@@ -486,13 +549,19 @@ export function parseZtoeAddressLookupTableHtml(html: string): ZtoeHouseLookupRe
       firstCellLower === 'будинки' ||
       firstCellLower === 'адреса' ||
       firstCellLower === 'рем' ||
+      firstCellLower === 'черга' ||
       firstCellLower.includes('вулиц');
+
     if (isHeaderRow) {
       metadataCols.clear();
+      streetColIdx = -1;
       noteColIdx = -1;
       cells.forEach((c, idx) => {
         const cl = c.toLowerCase();
-        if (cl.includes('буд') || cl.includes('дом') || cl.includes('адрес')) {
+        if (cl.includes('вулиц')) {
+          streetColIdx = idx;
+          metadataCols.add(idx);
+        } else if (cl.includes('буд') || cl.includes('дом') || cl.includes('адрес')) {
           houseColIdx = idx;
         } else if (cl.includes('підчерг')) {
           subqueueColIdx = idx;
@@ -501,11 +570,17 @@ export function parseZtoeAddressLookupTableHtml(html: string): ZtoeHouseLookupRe
         } else if (cl.includes('примітк')) {
           noteColIdx = idx;
           metadataCols.add(idx);
-        } else if (cl === 'рем' || cl.includes('населений') || cl.includes('вулиц')) {
+        } else if (cl === 'рем' || cl.includes('населений')) {
           metadataCols.add(idx);
         }
       });
       continue;
+    }
+
+    if (targetStreetNorm && streetColIdx >= 0 && cells[streetColIdx]) {
+      if (normalizeStreetName(cells[streetColIdx]) !== targetStreetNorm) {
+        continue;
+      }
     }
 
     const houseVal = cells[houseColIdx] || cells[0] || '';
@@ -514,7 +589,6 @@ export function parseZtoeAddressLookupTableHtml(html: string): ZtoeHouseLookupRe
 
     if (!houseVal) continue;
 
-    // Check if queueRaw + subqueueRaw forms a valid numeric queue "X.Y" (e.g. "5.2")
     const combinedMatch = `${queueRaw}.${subqueueRaw}`.match(/^([1-6])\.([1-2])$/);
     const directMatch = queueRaw.match(/^([1-6])\.([1-2])$/);
 
@@ -527,7 +601,6 @@ export function parseZtoeAddressLookupTableHtml(html: string): ZtoeHouseLookupRe
       normalizedQueue = `${combinedMatch[1]}.${combinedMatch[2]}`;
     }
 
-    // Extract full unshortened non-numeric status text from queue/subqueue/remark cells, deduplicating identical cells
     const uniqueNonNumericParts: string[] = [];
     cells.forEach((cellVal, idx) => {
       if (idx === houseColIdx || metadataCols.has(idx) || idx === noteColIdx) return;
@@ -561,43 +634,9 @@ export function parseZtoeAddressLookupTableHtml(html: string): ZtoeHouseLookupRe
   return results;
 }
 
-const VALID_OUTAGE_TIMESTAMP_REGEX =
-  /(?:(?:\b\d{2}\.\d{2}(?:\.\d{4})?|\b\d{4}-\d{2}-\d{2})[T\s]+)?\b([01]\d|2[0-3]):[0-5]\d\b/;
-
 /**
- * Validates that an outage timestamp string contains a real date/time (e.g. "06.04 19:21", "10.11.2026 22:00", or "19:21")
- * and is NOT a static ZTOE remark or message such as "В цей час не вимикається..." or "побутові споживачі".
- */
-export function isValidOutageTimestamp(value?: string | null): boolean {
-  if (!value) return false;
-  const trimmed = value.trim();
-  if (!trimmed) return false;
-  const lower = trimmed.toLowerCase();
-  if (
-    lower.includes('не вимикається') ||
-    lower.includes('за винятком') ||
-    lower.includes('побутові споживачі')
-  ) {
-    return false;
-  }
-  return VALID_OUTAGE_TIMESTAMP_REGEX.test(trimmed);
-}
-
-/**
- * Validates that an EmergencyOutageInfo object represents a genuine emergency outage with valid start and restore timestamps.
- */
-export function isValidEmergencyOutage(info?: EmergencyOutageInfo | null): boolean {
-  if (!info) return false;
-  const typeLower = (info.outageType || '').toLowerCase();
-  if (typeLower.includes('не вимикається') || typeLower.includes('за винятком')) {
-    return false;
-  }
-  return isValidOutageTimestamp(info.startTime) && isValidOutageTimestamp(info.estimatedRestoreTime);
-}
-
-/**
- * Formats an ISO timestamp from ZTOE (e.g. "2026-11-09T06:35:59+00:00") into "DD.MM.YYYY HH:mm"
- * using the UTC date/time fields (matching ZTOE's official frontend behavior).
+ * Formats an ISO-8601 or ZTOE timestamp (e.g. "2026-11-09T06:35:59+00:00" or "09.11.2026 06:35")
+ * into "DD.MM.YYYY HH:mm".
  */
 export function formatZtoeOutageTimestamp(raw: string): string {
   if (!raw) return '';
@@ -617,16 +656,12 @@ export interface ParsedEmergencyOutageRow extends EmergencyOutageInfo {
 }
 
 /**
- * Parses ZTOE 7-column emergency outage HTML tables
- * (РЕМ | Населений пункт | Вулиця | Будинок | Тип відключення | Час відключення | Очікуваний час ввімкнення)
- * and extracts rows where the outage type indicates an emergency outage ("Аварійне відключення").
+ * Parses an HTML emergency outage table from ZTOE (https://www.ztoe.com.ua/unhooking-search.php or poweron table)
+ * extracting rows where the outage type is "Аварійне відключення" along with Start and Estimated Restoration times.
  */
 export function parseZtoeEmergencyOutagesTableHtml(html: string): ParsedEmergencyOutageRow[] {
   const results: ParsedEmergencyOutageRow[] = [];
   if (!html) return results;
-
-  const scheduleSectionIdx = html.indexOf('Графіки погодинних відключень');
-  const relevantHtml = scheduleSectionIdx >= 0 ? html.slice(0, scheduleSectionIdx) : html;
 
   const trRegex = /<tr\b[^>]*>([\s\S]*?)<\/tr>/gi;
   let trMatch: RegExpExecArray | null;
@@ -639,7 +674,7 @@ export function parseZtoeEmergencyOutagesTableHtml(html: string): ParsedEmergenc
   let startColIdx = 5;
   let restoreColIdx = 6;
 
-  while ((trMatch = trRegex.exec(relevantHtml)) !== null) {
+  while ((trMatch = trRegex.exec(html)) !== null) {
     const rowHtml = trMatch[1];
     if (/<input\b/i.test(rowHtml) || /<select\b/i.test(rowHtml)) continue;
 
@@ -653,22 +688,23 @@ export function parseZtoeEmergencyOutagesTableHtml(html: string): ParsedEmergenc
     if (cells.length < 4) continue;
 
     const firstCellLower = (cells[0] || '').toLowerCase();
+    const rowJoinedLower = cells.join(' ').toLowerCase();
     const isHeaderRow =
       /<th\b/i.test(rowHtml) ||
       firstCellLower === 'рем' ||
-      firstCellLower === 'будинок' ||
-      firstCellLower === 'будинки' ||
-      cells.some((c) => c.toLowerCase().includes('тип відключення') || c.toLowerCase().includes('час відключення'));
+      firstCellLower === 'підрозділ' ||
+      (rowJoinedLower.includes('вулиц') &&
+        (rowJoinedLower.includes('відключен') || rowJoinedLower.includes('ввімкнен') || rowJoinedLower.includes('відновлен')));
 
     if (isHeaderRow) {
       cells.forEach((c, idx) => {
         const cl = c.toLowerCase();
-        if (cl === 'рем') remColIdx = idx;
-        else if (cl.includes('населений')) cityColIdx = idx;
+        if (cl === 'рем' || cl.includes('підрозділ')) remColIdx = idx;
+        else if (cl.includes('населений') || cl.includes('місто') || cl.includes('пункт')) cityColIdx = idx;
         else if (cl.includes('вулиц')) streetColIdx = idx;
-        else if (cl.includes('буд')) houseColIdx = idx;
-        else if (cl.includes('тип відключ') || cl.includes('причин')) typeColIdx = idx;
-        else if (cl.includes('час відключ') || cl.includes('початок')) startColIdx = idx;
+        else if (cl.includes('буд') || cl.includes('дом')) houseColIdx = idx;
+        else if (cl.includes('причин') || cl.includes('тип') || cl.includes('вид')) typeColIdx = idx;
+        else if (cl.includes('почат') || cl.includes('час відключ') || cl.includes('дата відключ')) startColIdx = idx;
         else if (cl.includes('ввімкн') || cl.includes('відновл')) restoreColIdx = idx;
       });
       continue;
@@ -679,7 +715,6 @@ export function parseZtoeEmergencyOutagesTableHtml(html: string): ParsedEmergenc
     const startVal = cells[startColIdx] || '';
     const restoreVal = cells[restoreColIdx] || '';
 
-    // Must be an emergency outage ("Аварійне відключення") and NOT the static "В цей час не вимикається, за винятком випадків аварійних відключень" note
     const typeLower = typeVal.toLowerCase();
     const isEmergency =
       typeLower.includes('аварійн') &&
@@ -716,36 +751,115 @@ export function parseZtoeEmergencyOutagesTableHtml(html: string): ParsedEmergenc
 }
 
 function normalizePlaceName(name: string): string {
-  return name
+  return decodeHtmlEntities(name || '')
     .toLowerCase()
-    .replace(/^(м\.|місто|с\.|село|смт|селище)\s+/i, '')
+    .replace(/^(м\.|місто|с\.|село|смт\.?|селище|с-ще\.?)\s+/i, '')
+    .replace(/\([^)]*\)/g, '')
     .replace(/['’ʼ`]/g, "'")
+    .replace(/\s+/g, ' ')
     .trim();
 }
 
 function normalizeStreetName(name: string): string {
-  return name
+  let s = decodeHtmlEntities(name || '')
     .toLowerCase()
-    .replace(/\s+/g, ' ')
     .replace(/['’ʼ`]/g, "'")
+    .replace(/[.,]/g, ' ')
+    .replace(/(^|\s)вулиця(?=\s|$)/g, '$1вул')
+    .replace(/(^|\s)(?:провулок|пр-к|пр)(?=\s|$)/g, '$1пров')
+    .replace(/(^|\s)(?:проспект|пр-т)(?=\s|$)/g, '$1просп')
+    .replace(/(^|\s)м-н(?=\s|$)/g, '$1майдан')
+    .replace(/(^|\s)площа(?=\s|$)/g, '$1пл')
+    .replace(/(^|\s)ш(?=\s|$)/g, '$1шосе')
+    .replace(/(^|\s)(?:бульвар|б-р)(?=\s|$)/g, '$1бул')
+    .replace(/(^|\s)пр-д(?=\s|$)/g, '$1проїзд')
+    .replace(/(\d+)\s*-\s*(?:й|а|га|тя|ї|е)(?=\s|$)/g, '$1')
+    .replace(/бердичив/g, 'бердичів')
+    .replace(/\s+/g, ' ')
     .trim();
+  s = s.replace(/^(\d+)\s+(пров|проїзд|вул|тупик)(?=\s|$)/, '$2 $1');
+  return s;
+}
+
+function stripStreetTypePrefix(normStreet: string): string {
+  return normStreet
+    .replace(/^(?:вул|пров|просп|майдан|пл|шосе|бул|проїзд|тупик|наб)\s+/i, '')
+    .trim();
+}
+
+function normalizeHouseToken(raw: string): string {
+  return decodeHtmlEntities(raw || '')
+    .trim()
+    .replace(/^(?:буд\.?|б\.?|д\.?)\s*/i, '')
+    .replace(/\.+$/, '')
+    .toLowerCase()
+    .replace(/a/g, 'а')
+    .replace(/b/g, 'б')
+    .replace(/v/g, 'в')
+    .replace(/g/g, 'г')
+    .replace(/d/g, 'д')
+    .replace(/e/g, 'е')
+    .replace(/k/g, 'к')
+    .replace(/m/g, 'м')
+    .replace(/i/g, 'і')
+    .replace(/[\s-]+/g, '');
 }
 
 export interface ZtoePwAccidentRecord {
   id?: number | string;
-  city?: { name?: string };
-  street?: { name?: string };
+  city?: { id?: number | string; name?: string };
+  street?: { id?: number | string; name?: string };
   otg?: { id?: number | string; code?: string; name?: string };
   buildingNames?: string;
   dateEvent?: string;
   datePlanIn?: string;
+  koment?: string;
   typeOff?: number;
   switchSubReason?: number;
 }
 
 /**
+ * Computes priority score matching ZTOE PowerOn's official outage type classification:
+ * - (!switchSubReason || switchSubReason === 0) && typeOff === 1 -> "Аварійне відключення" (score 4, highest priority)
+ * - switchSubReason === 1 -> "Графік аварійних відключень" (score 3)
+ * - switchSubReason === 3 -> "Спеціальний графік аварійних відключень" (score 3)
+ * - switchSubReason === 2 && typeOff === 1 -> "Графік погодинних відключень" (score 1 or 2)
+ */
+function getAccidentPriorityScore(item: ZtoePwAccidentRecord): number {
+  if (!item.switchSubReason || item.switchSubReason === 0) {
+    if (item.typeOff === 1 || item.typeOff === undefined) {
+      return 4;
+    }
+    return 0;
+  }
+  if (item.switchSubReason === 1 || item.switchSubReason === 3) {
+    return 3;
+  }
+  const komentTrimmed = (item.koment || '').trim();
+  if (/аварі|гав|сгав|(^|\s)мо(?=\s|$)/i.test(komentTrimmed)) {
+    return 3;
+  }
+  if (item.typeOff === 1) {
+    const isGpvQueueComment = /^(?:гпв[-\s]*)?[1-6][.,][1-2](?!\d)/i.test(komentTrimmed);
+    return isGpvQueueComment ? 1 : 2;
+  }
+  return 0;
+}
+
+function getAccidentOutageTypeLabel(item: ZtoePwAccidentRecord): string {
+  if (item.switchSubReason === 1) {
+    return 'Графік аварійних відключень';
+  }
+  if (item.switchSubReason === 3) {
+    return 'Спеціальний графік аварійних відключень';
+  }
+  return 'Аварійне відключення';
+}
+
+/**
  * Matches a user's SelectedAddressQuery against records from ZTOE's live
  * https://api-ztoe-poweron.inneti.net/api/pw_accidents endpoint.
+ * Emergency outages ("Аварійне відключення", switchSubReason 0, 1, 3) always take priority over scheduled GPV rows (switchSubReason 2).
  */
 export function matchEmergencyOutageFromAccidentsJson(
   accidents: ZtoePwAccidentRecord[],
@@ -759,18 +873,17 @@ export function matchEmergencyOutageFromAccidentsJson(
 
   const targetCityNorm = settlementObj ? normalizePlaceName(settlementObj.nameUk) : '';
   const targetStreetNorm = normalizeStreetName(streetObj.nameUk);
-  const targetHouseNorm = query.house.trim().toLowerCase();
+  const targetStreetBare = stripStreetTypePrefix(targetStreetNorm);
+  const targetHouseRawLower = query.house.trim().toLowerCase();
+  const targetHouseNorm = normalizeHouseToken(query.house);
+
+  let bestItem: ZtoePwAccidentRecord | null = null;
+  let bestScore = 0;
+  let bestPlanIn = '';
 
   for (const item of accidents) {
-    // Only match emergency outages from ZTOE pw_accidents:
-    // - typeOff === 1 (emergency / active outage on ZTOE pw_accidents, including switchSubReason 0 or 2) -> "Аварійне відключення"
-    // - switchSubReason === 1 -> "Графік аварійних відключень"
-    // - switchSubReason === 3 -> "Спеціальний графік аварійних відключень"
-    const isEmergencyRecord =
-      item.typeOff === 1 ||
-      item.switchSubReason === 1 ||
-      item.switchSubReason === 3;
-    if (!isEmergencyRecord) continue;
+    const score = getAccidentPriorityScore(item);
+    if (score <= 0) continue;
 
     if (targetCityNorm && item.city?.name) {
       const itemCityNorm = normalizePlaceName(item.city.name);
@@ -779,43 +892,332 @@ export function matchEmergencyOutageFromAccidentsJson(
 
     if (item.street?.name) {
       const itemStreetNorm = normalizeStreetName(item.street.name);
-      if (itemStreetNorm !== targetStreetNorm) continue;
+      if (itemStreetNorm !== targetStreetNorm) {
+        const itemStreetBare = stripStreetTypePrefix(itemStreetNorm);
+        const oneHasNoPrefix = itemStreetNorm === itemStreetBare || targetStreetNorm === targetStreetBare;
+        if (!oneHasNoPrefix || !itemStreetBare || itemStreetBare !== targetStreetBare) {
+          continue;
+        }
+      }
     } else {
       continue;
     }
 
-    const housesList = (item.buildingNames || '')
+    const rawTokens = (item.buildingNames || '')
       .split(',')
-      .map((h) => h.trim().toLowerCase())
+      .map((h) => h.trim())
       .filter(Boolean);
 
-    if (!housesList.includes(targetHouseNorm)) continue;
+    const matchesHouse = rawTokens.some(
+      (h) =>
+        h.toLowerCase() === targetHouseRawLower ||
+        normalizeHouseToken(h) === targetHouseNorm
+    );
+    if (!matchesHouse) continue;
+
+    const planInStr = item.datePlanIn || '';
+    if (
+      !bestItem ||
+      score > bestScore ||
+      (score === bestScore && planInStr > bestPlanIn)
+    ) {
+      bestItem = item;
+      bestScore = score;
+      bestPlanIn = planInStr;
+    }
+  }
+
+  if (!bestItem) return null;
+
+  const startTime = formatZtoeOutageTimestamp(bestItem.dateEvent || '');
+  const estimatedRestoreTime = formatZtoeOutageTimestamp(bestItem.datePlanIn || '');
+  if (!isValidOutageTimestamp(startTime) || !isValidOutageTimestamp(estimatedRestoreTime)) {
+    return null;
+  }
+
+  const outageType = getAccidentOutageTypeLabel(bestItem);
+
+  return {
+    id: bestItem.id
+      ? `pw_accident_${bestItem.id}`
+      : `pw_accident_${query.streetId}_${targetHouseRawLower}_${startTime}`,
+    startTime,
+    estimatedRestoreTime,
+    outageType,
+  };
+}
+
+const accidentsCacheByScope = new Map<string, { updatedAt: number; records: ZtoePwAccidentRecord[] }>();
+const inFlightAccidentsByScope = new Map<string, Promise<ZtoePwAccidentRecord[]>>();
+const ACCIDENTS_CACHE_TTL_MS = 60_000;
+
+function resolveOtgIdForRem(remId: string): string | undefined {
+  if (!remId) return undefined;
+  const remObj =
+    getRems().find((r) => r.id === remId || r.ztoeRemId === remId) ||
+    ZTOE_REM_OPTIONS.find((r) => r.id === remId || r.ztoeRemId === remId);
+  if (remObj?.ztoeOtgId) return remObj.ztoeOtgId;
+  if (remObj) {
+    const byStatic = ZTOE_REM_OPTIONS.find(
+      (s) =>
+        s.id === remObj.id ||
+        (remObj.ztoeRemId && s.ztoeRemId === remObj.ztoeRemId) ||
+        s.nameUk.toLowerCase() === remObj.nameUk.toLowerCase()
+    );
+    if (byStatic?.ztoeOtgId) return byStatic.ztoeOtgId;
+  }
+  const stripped = remId.replace(/^rem_/, '');
+  const byRemNum = ZTOE_REM_OPTIONS.find((s) => s.ztoeRemId === stripped);
+  return byRemNum?.ztoeOtgId;
+}
+
+function applyAccidentsToRemHouses(
+  remId: string,
+  accidents: ZtoePwAccidentRecord[],
+  specificSettlementId?: string
+): void {
+  if (!Array.isArray(accidents) || accidents.length === 0) return;
+  const settlementIds = new Set<string>();
+  if (specificSettlementId) {
+    settlementIds.add(specificSettlementId);
+  }
+  for (const s of getSettlementsForRem(remId)) {
+    if (s.id) settlementIds.add(s.id);
+  }
+  for (const s of ZTOE_SETTLEMENT_OPTIONS.filter((st) => st.remId === remId)) {
+    if (s.id) settlementIds.add(s.id);
+  }
+  for (const sid of settlementIds) {
+    applyAccidentsToSettlementHouses(sid, accidents);
+  }
+}
+
+/**
+ * Fetches active emergency outages (switchSubReason 0, 1, 3) from ZTOE's PowerOn API
+ * for a given REM (otg.id), caching results for 60s and enriching indexed houses across all settlements in the REM.
+ */
+export async function fetchPwAccidentsForScope(
+  remId: string,
+  settlementId?: string
+): Promise<ZtoePwAccidentRecord[]> {
+  if (typeof fetch === 'undefined') return [];
+
+  const otgId = resolveOtgIdForRem(remId);
+  const settlementObj = settlementId ? findSettlementById(settlementId) : undefined;
+  const cityId = settlementObj?.poweronCityId;
+  if (!otgId && !cityId) return [];
+
+  // Prefer REM-wide otgId scope so every city, town, and village in the REM is covered in a single fast request
+  const scopeKey = otgId ? `otg_${otgId}` : `city_${cityId}`;
+  const cached = accidentsCacheByScope.get(scopeKey);
+  if (cached && Date.now() - cached.updatedAt < ACCIDENTS_CACHE_TTL_MS) {
+    applyAccidentsToRemHouses(remId, cached.records, settlementId);
+    return cached.records;
+  }
+
+  const existingPromise = inFlightAccidentsByScope.get(scopeKey);
+  if (existingPromise) {
+    const records = await existingPromise;
+    applyAccidentsToRemHouses(remId, records, settlementId);
+    return records;
+  }
+
+  const promise = (async (): Promise<ZtoePwAccidentRecord[]> => {
+    try {
+      const isBrowser = typeof window !== 'undefined' && typeof window.document !== 'undefined';
+      const filterParam = otgId
+        ? `otg.id=${encodeURIComponent(otgId)}`
+        : `city.id=${encodeURIComponent(cityId!)}`;
+      const queryString = `switchSubReason[]=0&switchSubReason[]=1&switchSubReason[]=3&${filterParam}&pagination=false`;
+      const endpoints = isBrowser
+        ? [
+            `/proxy-ztoe-poweron/api/pw_accidents?${queryString}`,
+            `https://api-ztoe-poweron.inneti.net/api/pw_accidents?${queryString}`,
+          ]
+        : [`https://api-ztoe-poweron.inneti.net/api/pw_accidents?${queryString}`];
+
+      for (const url of endpoints) {
+        try {
+          const controller = new AbortController();
+          const timer = setTimeout(() => controller.abort(), 4500);
+          const res = await fetch(url, {
+            method: 'GET',
+            headers: { Accept: 'application/json' },
+            signal: controller.signal,
+          });
+          clearTimeout(timer);
+          if (!res.ok || typeof res.json !== 'function') continue;
+          const contentType = res.headers?.get?.('content-type') || '';
+          if (contentType && contentType.includes('text/html')) continue;
+          const data = await res.json();
+          const records: ZtoePwAccidentRecord[] = Array.isArray(data)
+            ? data
+            : Array.isArray(data?.['hydra:member'])
+            ? data['hydra:member']
+            : [];
+          accidentsCacheByScope.set(scopeKey, { updatedAt: Date.now(), records });
+          if (records.length > 0) {
+            applyAccidentsToRemHouses(remId, records, settlementId);
+          }
+          return records;
+        } catch {
+          // Try next endpoint if proxy or network failed
+        }
+      }
+      return [];
+    } finally {
+      inFlightAccidentsByScope.delete(scopeKey);
+    }
+  })();
+
+  inFlightAccidentsByScope.set(scopeKey, promise);
+  return promise;
+}
+
+function applyAccidentsToSettlementHouses(
+  settlementId: string,
+  accidents: ZtoePwAccidentRecord[]
+): void {
+  if (!settlementId || !Array.isArray(accidents) || accidents.length === 0) return;
+  const settlementObj = findSettlementById(settlementId);
+  const targetCityNorm = settlementObj ? normalizePlaceName(settlementObj.nameUk) : '';
+
+  const dynamicStreets = getStreetsForSettlement(settlementId);
+  const staticStreets = ZTOE_STREET_OPTIONS.filter((st) => st.settlementId === settlementId);
+  const allStreetsMap = new Map<string, ZtoeStreetOption>();
+  for (const st of [...dynamicStreets, ...staticStreets]) {
+    if (st && st.id && !allStreetsMap.has(st.id)) {
+      allStreetsMap.set(st.id, st);
+    }
+  }
+  const streets = Array.from(allStreetsMap.values());
+  if (streets.length === 0) return;
+
+  const streetsByNormName = new Map<string, ZtoeStreetOption[]>();
+  const streetsByBareName = new Map<string, ZtoeStreetOption[]>();
+  for (const st of streets) {
+    const norm = normalizeStreetName(st.nameUk);
+    if (!norm) continue;
+    const list = streetsByNormName.get(norm) || [];
+    if (!list.some((existing) => existing.id === st.id)) {
+      list.push(st);
+      streetsByNormName.set(norm, list);
+    }
+    const bare = stripStreetTypePrefix(norm);
+    if (bare) {
+      const bareList = streetsByBareName.get(bare) || [];
+      if (!bareList.some((existing) => existing.id === st.id)) {
+        bareList.push(st);
+        streetsByBareName.set(bare, bareList);
+      }
+    }
+  }
+
+  // Sort accidents by priority ascending so higher-priority accidents (score 4 = "Аварійне відключення")
+  // and later restoration times win when multiple rows affect the same house.
+  const sortedAccidents = [...accidents].sort((a, b) => {
+    const scoreDiff = getAccidentPriorityScore(a) - getAccidentPriorityScore(b);
+    if (scoreDiff !== 0) return scoreDiff;
+    return (a.datePlanIn || '').localeCompare(b.datePlanIn || '');
+  });
+
+  for (const item of sortedAccidents) {
+    const score = getAccidentPriorityScore(item);
+    if (score < 3) continue; // Only attach true emergency outages (switchSubReason 0, 1, 3)
+
+    if (targetCityNorm && item.city?.name) {
+      if (normalizePlaceName(item.city.name) !== targetCityNorm) continue;
+    }
+    if (!item.street?.name) continue;
+    const itemStreetNorm = normalizeStreetName(item.street.name);
+    let matchedStreets = streetsByNormName.get(itemStreetNorm);
+    if (!matchedStreets || matchedStreets.length === 0) {
+      const itemBare = stripStreetTypePrefix(itemStreetNorm);
+      if (itemBare === itemStreetNorm) {
+        matchedStreets = streetsByBareName.get(itemBare);
+      }
+    }
+    if (!matchedStreets || matchedStreets.length === 0) continue;
 
     const startTime = formatZtoeOutageTimestamp(item.dateEvent || '');
     const estimatedRestoreTime = formatZtoeOutageTimestamp(item.datePlanIn || '');
-    const outageType =
-      item.switchSubReason === 1
-        ? 'Графік аварійних відключень'
-        : item.switchSubReason === 3
-        ? 'Спеціальний графік аварійних відключень'
-        : 'Аварійне відключення';
+    if (!isValidOutageTimestamp(startTime) || !isValidOutageTimestamp(estimatedRestoreTime)) {
+      continue;
+    }
 
-    return {
-      id: item.id
-        ? `pw_accident_${item.id}`
-        : `pw_accident_${query.streetId}_${targetHouseNorm}_${startTime}`,
-      startTime,
-      estimatedRestoreTime,
-      outageType,
-    };
+    const outageType = getAccidentOutageTypeLabel(item);
+
+    const rawBuildingTokens = (item.buildingNames || '')
+      .split(',')
+      .map((h) => h.trim())
+      .filter(Boolean);
+    const buildingNormToRaw = new Map<string, string>();
+    for (const rawTok of rawBuildingTokens) {
+      const normTok = normalizeHouseToken(rawTok);
+      if (normTok && !buildingNormToRaw.has(normTok)) {
+        buildingNormToRaw.set(normTok, rawTok);
+      }
+    }
+    if (buildingNormToRaw.size === 0) continue;
+
+    for (const matchedStreet of matchedStreets) {
+      const houseList =
+        dynamicHousesByStreetId[matchedStreet.id] ||
+        ZTOE_STREET_HOUSES[matchedStreet.id] ||
+        [];
+      if (houseList.length === 0) continue;
+
+      let updated = false;
+      const matchedNorms = new Set<string>();
+      const nextList = houseList.map((h) => {
+        const hNorm = normalizeHouseToken(h.house);
+        if (buildingNormToRaw.has(hNorm)) {
+          matchedNorms.add(hNorm);
+          updated = true;
+          return {
+            ...h,
+            emergencyOutage: {
+              id: item.id
+                ? `pw_accident_${item.id}`
+                : `pw_accident_${matchedStreet.id}_${hNorm}_${startTime}`,
+              startTime,
+              estimatedRestoreTime,
+              outageType,
+            },
+          };
+        }
+        return h;
+      });
+
+      // If any house in buildingNames is not yet present in houseList, add it so it is selectable in the dropdown
+      for (const [normTok, rawTok] of buildingNormToRaw.entries()) {
+        if (!matchedNorms.has(normTok)) {
+          updated = true;
+          nextList.push({
+            house: rawTok,
+            queue: '',
+            emergencyOutage: {
+              id: item.id
+                ? `pw_accident_${item.id}`
+                : `pw_accident_${matchedStreet.id}_${normTok}_${startTime}`,
+              startTime,
+              estimatedRestoreTime,
+              outageType,
+            },
+          });
+        }
+      }
+
+      if (updated) {
+        dynamicHousesByStreetId[matchedStreet.id] = sortHouseLookupResults(nextList);
+      }
+    }
   }
-
-  return null;
 }
 
 /**
  * Queries ZTOE for active emergency outages ("Аварійне відключення") affecting the user's house,
- * checking both any HTML table passed in and ZTOE's live pw_accidents service.
+ * checking HTML emergency tables, ZTOE's live pw_accidents API, and the canonical house directory.
  */
 export async function checkEmergencyOutageOnZtoe(
   query: SelectedAddressQuery,
@@ -824,18 +1226,18 @@ export async function checkEmergencyOutageOnZtoe(
   if (!query || !query.streetId || !query.house) return null;
 
   const streetObj = findStreetById(query.streetId);
-  const targetHouseNorm = query.house.trim().toLowerCase();
+  const targetHouseNorm = normalizeHouseToken(query.house);
 
-  // 1. Check HTML table if available
   if (decodedHtml) {
     const htmlEmergencyRows = parseZtoeEmergencyOutagesTableHtml(decodedHtml);
     const matchedHtmlRow = htmlEmergencyRows.find((r) => {
-      if (r.house.toLowerCase() !== targetHouseNorm) return false;
+      if (normalizeHouseToken(r.house) !== targetHouseNorm) return false;
       if (r.street && streetObj) {
         return normalizeStreetName(r.street) === normalizeStreetName(streetObj.nameUk);
       }
       return true;
     });
+
     if (matchedHtmlRow && isValidEmergencyOutage(matchedHtmlRow)) {
       return {
         id: matchedHtmlRow.id,
@@ -846,9 +1248,17 @@ export async function checkEmergencyOutageOnZtoe(
     }
   }
 
-  // 2. Check canonical local house directory (e.g. demo emergency outage on вул. Київська, буд. 37)
+  // Query live ZTOE pw_accidents API for active emergency outages in this city/REM
+  const liveAccidents = await fetchPwAccidentsForScope(query.remId, query.settlementId);
+  if (liveAccidents.length > 0) {
+    const liveMatch = matchEmergencyOutageFromAccidentsJson(liveAccidents, query);
+    if (liveMatch && isValidEmergencyOutage(liveMatch)) {
+      return liveMatch;
+    }
+  }
+
   const localHouses = getHousesForStreet(query.streetId);
-  const localMatch = localHouses.find((h) => h.house.toLowerCase() === targetHouseNorm);
+  const localMatch = localHouses.find((h) => normalizeHouseToken(h.house) === targetHouseNorm);
   if (localMatch?.emergencyOutage && isValidEmergencyOutage(localMatch.emergencyOutage)) {
     return localMatch.emergencyOutage;
   }
@@ -868,11 +1278,14 @@ export async function checkAddressOnZtoeWebsite(
 ): Promise<ZtoeHouseLookupResult | null> {
   if (!query || !query.streetId || !query.house) return null;
 
+  const targetHouseNorm = normalizeHouseToken(query.house);
   const localHouses = getHousesForStreet(query.streetId);
   const localMatch =
-    localHouses.find((h) => h.house.toLowerCase() === query.house.trim().toLowerCase()) || null;
+    localHouses.find((h) => normalizeHouseToken(h.house) === targetHouseNorm) || null;
 
-  const remObj = getRems().find((r) => r.id === query.remId);
+  const remObj =
+    getRems().find((r) => r.id === query.remId) ||
+    ZTOE_REM_OPTIONS.find((r) => r.id === query.remId);
   const settlementObj = findSettlementById(query.settlementId);
   const streetObj = findStreetById(query.streetId);
 
@@ -886,16 +1299,22 @@ export async function checkAddressOnZtoeWebsite(
     streetObj?.ztoeVulicaId
   ) {
     try {
+      const isBrowser = typeof window !== 'undefined' && typeof window.document !== 'undefined';
       const targetEndpoint =
         !siteUrl || siteUrl.includes('ztoe.com.ua')
-          ? '/proxy-ztoe/unhooking-search.php'
+          ? isBrowser
+            ? '/proxy-ztoe/unhooking-search.php'
+            : 'https://www.ztoe.com.ua/unhooking-search.php'
           : siteUrl;
+
+      // Note: Do NOT pass `all: '1'` when `vulica_id` is specified, because `all=1` causes ZTOE
+      // to ignore `vulica_id` and return all streets in the settlement instead of the selected street.
       const bodyParams = new URLSearchParams({
         rem_id: remObj.ztoeRemId,
         naspunkt_id: settlementObj.ztoeNaspunktId,
         vulica_id: streetObj.ztoeVulicaId,
-        all: '1',
       });
+
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), 5000);
       const res = await fetch(targetEndpoint, {
@@ -905,21 +1324,20 @@ export async function checkAddressOnZtoeWebsite(
         signal: controller.signal,
       });
       clearTimeout(timer);
+
       if (res.ok) {
         const buffer = await res.arrayBuffer();
         const win1251Text = new TextDecoder('windows-1251').decode(buffer);
         decodedHtml =
-          win1251Text.includes('Черга') || win1251Text.includes('Будинки')
+          win1251Text.includes('Черга') || win1251Text.includes('Будинки') || win1251Text.includes('Оберіть')
             ? win1251Text
             : new TextDecoder('utf-8').decode(buffer);
-        const parsedRows = parseZtoeAddressLookupTableHtml(decodedHtml);
+
+        const parsedRows = parseZtoeAddressLookupTableHtml(decodedHtml, streetObj.nameUk);
         const matchingRows = parsedRows.filter(
-          (r) => r.house.toLowerCase() === query.house.trim().toLowerCase()
+          (r) => normalizeHouseToken(r.house) === targetHouseNorm
         );
         if (matchingRows.length > 0 && (!localMatch || localMatch.queue === '')) {
-          // If the user selected a no-queue address (or the house had no queue locally),
-          // keep the no-queue status as long as the ZTOE table still lists the no-outage message for this house.
-          // Only assign a queue if the ZTOE table no longer has a no-queue status row for it.
           const noQueueRow = matchingRows.find((r) => !r.queue && r.statusText);
           if (noQueueRow) {
             resolvedResult = { ...noQueueRow };
@@ -935,19 +1353,37 @@ export async function checkAddressOnZtoeWebsite(
   }
 
   const emergencyOutage = await checkEmergencyOutageOnZtoe(query, decodedHtml);
-  if (resolvedResult) {
+
+  if (!resolvedResult && emergencyOutage) {
+    resolvedResult = {
+      house: query.house,
+      queue: '',
+      emergencyOutage,
+    };
+  } else if (resolvedResult) {
     resolvedResult.emergencyOutage = emergencyOutage;
+  }
+
+  // Keep in-memory house list synchronized with the resolved record
+  if (resolvedResult && query.streetId) {
+    const existingList = dynamicHousesByStreetId[query.streetId];
+    if (Array.isArray(existingList) && existingList.length > 0) {
+      dynamicHousesByStreetId[query.streetId] = existingList.map((h) =>
+        normalizeHouseToken(h.house) === targetHouseNorm ? { ...h, ...resolvedResult! } : h
+      );
+    }
   }
 
   return resolvedResult;
 }
 
 export const ADDRESS_INDEX_STORAGE_KEY = 'zt_address_index_cache_v1';
+const CACHE_SCHEMA_VERSION = 4;
 const MAX_PERSISTED_HOUSE_STREETS = 50;
 const FRESH_HOUSE_CACHE_TTL_MS = 120_000;
 
 export interface PersistedAddressIndexCache {
-  version: 1;
+  version: number;
   updatedAt: number;
   rems?: ZtoeRemOption[];
   settlementsByRemId?: Record<string, ZtoeSettlementOption[]>;
@@ -1013,12 +1449,25 @@ export function hydrateAddressIndexFromStorage(): boolean {
     const parsed = JSON.parse(raw) as Partial<PersistedAddressIndexCache>;
     if (!parsed || typeof parsed !== 'object') return false;
 
+    // Validate schema version and ensure Zhytomyr REM has ztoeRemId === '7'
+    const cachedZtRem = Array.isArray(parsed.rems)
+      ? parsed.rems.find((r) => r.id === 'zhytomyr')
+      : undefined;
+    if (parsed.version !== CACHE_SCHEMA_VERSION || (cachedZtRem && cachedZtRem.ztoeRemId !== '7')) {
+      localStorage.removeItem(ADDRESS_INDEX_STORAGE_KEY);
+      return false;
+    }
+
     if (Array.isArray(parsed.rems) && parsed.rems.length > 0) {
-      dynamicRems = parsed.rems.map((r) => ({
+      const cleaned = parsed.rems.map((r) => ({
         ...r,
         nameUk: stripHtmlTags(r.nameUk || ''),
         nameEn: stripHtmlTags(r.nameEn || r.nameUk || ''),
       }));
+      // Ensure Житомирський РЕМ ('zhytomyr') is always at index 0
+      const zt = cleaned.find((r) => r.id === 'zhytomyr');
+      const rest = cleaned.filter((r) => r.id !== 'zhytomyr');
+      dynamicRems = zt ? [zt, ...rest] : cleaned;
     }
     if (parsed.settlementsByRemId && typeof parsed.settlementsByRemId === 'object') {
       for (const [remId, list] of Object.entries(parsed.settlementsByRemId)) {
@@ -1045,7 +1494,12 @@ export function hydrateAddressIndexFromStorage(): boolean {
     if (parsed.housesByStreetId && typeof parsed.housesByStreetId === 'object') {
       for (const [streetId, list] of Object.entries(parsed.housesByStreetId)) {
         if (Array.isArray(list) && list.length > 0) {
-          dynamicHousesByStreetId[streetId] = list;
+          dynamicHousesByStreetId[streetId] = list.map((h) => ({
+            ...h,
+            house: decodeHtmlEntities(h.house),
+            statusText: h.statusText ? decodeHtmlEntities(h.statusText) : undefined,
+            emergencyOutage: isValidEmergencyOutage(h.emergencyOutage) ? h.emergencyOutage : undefined,
+          }));
         }
       }
     }
@@ -1077,13 +1531,15 @@ export function persistAddressIndexToStorage(): void {
             queue: h.queue,
           };
           if (h.statusText) compact.statusText = h.statusText;
-          if (h.emergencyOutage) compact.emergencyOutage = h.emergencyOutage;
+          if (h.emergencyOutage && isValidEmergencyOutage(h.emergencyOutage)) {
+            compact.emergencyOutage = h.emergencyOutage;
+          }
           return compact;
         });
       }
     }
     const payload: PersistedAddressIndexCache = {
-      version: 1,
+      version: CACHE_SCHEMA_VERSION,
       updatedAt: Date.now(),
       rems: dynamicRems || undefined,
       settlementsByRemId: { ...dynamicSettlementsByRemId },
@@ -1112,6 +1568,8 @@ export function resetAddressIndexCache(clearDisk = false): void {
     delete houseCacheUpdatedAtByStreetId[key];
   }
   inFlightSettlementPromises.clear();
+  accidentsCacheByScope.clear();
+  inFlightAccidentsByScope.clear();
   recentHouseStreetOrder = [];
   hasHydratedFromStorage = false;
   if (clearDisk && typeof localStorage !== 'undefined') {
@@ -1125,16 +1583,25 @@ export function resetAddressIndexCache(clearDisk = false): void {
 
 export function getAddressIndexStats(): {
   remCount: number;
+  settlementGroupCount: number;
+  streetGroupCount: number;
+  houseGroupCount: number;
   indexedRemSettlementsCount: number;
   indexedSettlementStreetsCount: number;
   indexedStreetHousesCount: number;
 } {
   ensureHydrated();
+  const sCount = Object.keys(dynamicSettlementsByRemId).length;
+  const stCount = Object.keys(dynamicStreetsBySettlementId).length;
+  const hCount = Object.keys(dynamicHousesByStreetId).length;
   return {
     remCount: (dynamicRems || ZTOE_REM_OPTIONS).length,
-    indexedRemSettlementsCount: Object.keys(dynamicSettlementsByRemId).length,
-    indexedSettlementStreetsCount: Object.keys(dynamicStreetsBySettlementId).length,
-    indexedStreetHousesCount: Object.keys(dynamicHousesByStreetId).length,
+    settlementGroupCount: sCount,
+    streetGroupCount: stCount,
+    houseGroupCount: hCount,
+    indexedRemSettlementsCount: sCount,
+    indexedSettlementStreetsCount: stCount,
+    indexedStreetHousesCount: hCount,
   };
 }
 
@@ -1159,7 +1626,7 @@ export function findSettlementById(settlementId: string): ZtoeSettlementOption |
   }
   const staticMatch = ZTOE_SETTLEMENT_OPTIONS.find((s) => s.id === settlementId);
   if (staticMatch) return staticMatch;
-  const npId = settlementId.replace(/^np_/, '');
+  const npId = settlementId.replace(/^(?:np|nasp_[a-z]+)_/, '');
   if (/^\d+$/.test(npId)) {
     for (const list of Object.values(dynamicSettlementsByRemId)) {
       const byDynamicNp = list.find((s) => s.ztoeNaspunktId === npId);
@@ -1179,7 +1646,7 @@ export function findStreetById(streetId: string): ZtoeStreetOption | undefined {
   }
   const staticMatch = ZTOE_STREET_OPTIONS.find((st) => st.id === streetId);
   if (staticMatch) return staticMatch;
-  const vulId = streetId.replace(/^st_/, '');
+  const vulId = streetId.replace(/^(?:st|vul_[a-z_]+)_/, '');
   if (/^\d+$/.test(vulId)) {
     for (const list of Object.values(dynamicStreetsBySettlementId)) {
       const byDynamicVul = list.find((st) => st.ztoeVulicaId === vulId);
@@ -1213,9 +1680,11 @@ export function getHousesForStreet(streetId: string): ZtoeHouseLookupResult[] {
 }
 
 export function parseZtoeRemOptionsHtml(html: string): ZtoeRemOption[] {
-  const selectMatch = html.match(/<select[^>]*name=["']?rem_id["']?[^>]*>([\s\S]*?)<\/select>/i);
-  if (!selectMatch) return [];
-  const selectInner = selectMatch[1];
+  if (!html || typeof html !== 'string') return [];
+  const selectMatch = html.match(
+    /<select[^>]*?(?:name=["']?rem_id["']?|id=["']?rem_id["']?)[^>]*>([\s\S]*?)<\/select>/i
+  );
+  const selectInner = selectMatch ? selectMatch[1] : html;
   const results: ZtoeRemOption[] = [];
   const seenIds = new Set<string>();
   const optRegex = /<option\s+value=["']?(\d+)["']?[^>]*>([\s\S]*?)<\/option>/gi;
@@ -1224,10 +1693,16 @@ export function parseZtoeRemOptionsHtml(html: string): ZtoeRemOption[] {
     const remNum = m[1].trim();
     if (!remNum || remNum === '0') continue;
     const rawLabel = stripHtmlTags(m[2]).trim();
-    if (!rawLabel || rawLabel.toLowerCase().includes('оберіть')) continue;
+    if (!rawLabel || /оберіть|виберіть/i.test(rawLabel)) continue;
+
+    const normalizedRawName = rawLabel.replace(/\s*РЕМ$/i, '').trim().toLowerCase();
     const staticMatch =
-      ZTOE_REM_OPTIONS.find((r) => r.ztoeRemId === remNum) ||
-      ZTOE_REM_OPTIONS.find((r) => r.nameUk.toLowerCase() === rawLabel.toLowerCase());
+      ZTOE_REM_OPTIONS.find(
+        (r) =>
+          r.nameUk.toLowerCase() === rawLabel.toLowerCase() ||
+          r.nameUk.replace(/\s*РЕМ$/i, '').trim().toLowerCase() === normalizedRawName
+      ) || ZTOE_REM_OPTIONS.find((r) => r.ztoeRemId === remNum);
+
     const opt: ZtoeRemOption = {
       id: staticMatch?.id || `rem_${remNum}`,
       ztoeRemId: remNum,
@@ -1240,19 +1715,31 @@ export function parseZtoeRemOptionsHtml(html: string): ZtoeRemOption[] {
       results.push(opt);
     }
   }
-  for (const staticRem of ZTOE_REM_OPTIONS) {
-    if (!seenIds.has(staticRem.id)) {
-      seenIds.add(staticRem.id);
-      results.push(staticRem);
+  if (results.length > 0) {
+    for (const def of ZTOE_REM_OPTIONS) {
+      if (!seenIds.has(def.id)) {
+        seenIds.add(def.id);
+        results.push(def);
+      }
     }
+  }
+  // Ensure Житомирський РЕМ ('zhytomyr') is always placed first if present
+  const ztIdx = results.findIndex((r) => r.id === 'zhytomyr');
+  if (ztIdx > 0) {
+    const [ztItem] = results.splice(ztIdx, 1);
+    results.unshift(ztItem);
   }
   return results;
 }
 
 export function parseZtoeSettlementOptionsHtml(remId: string, html: string): ZtoeSettlementOption[] {
-  const selectMatch = html.match(/<select[^>]*name=["']?naspunkt_id["']?[^>]*>([\s\S]*?)<\/select>/i);
-  if (!selectMatch) return [];
-  const selectInner = selectMatch[1];
+  if (!html || typeof html !== 'string') return [];
+  const selectMatch = html.match(
+    /<select[^>]*?(?:name=["']?naspunkt_id["']?|id=["']?naspunkt_id["']?)[^>]*>([\s\S]*?)<\/select>/i
+  );
+  const selectInner = selectMatch ? selectMatch[1] : !/<select\b/i.test(html) ? html : '';
+  if (!selectInner) return [];
+
   const staticForRem = ZTOE_SETTLEMENT_OPTIONS.filter((s) => s.remId === remId);
   const results: ZtoeSettlementOption[] = [];
   const seenIds = new Set<string>();
@@ -1262,7 +1749,7 @@ export function parseZtoeSettlementOptionsHtml(remId: string, html: string): Zto
     const npId = m[1].trim();
     if (!npId || npId === '0') continue;
     const rawLabel = stripHtmlTags(m[2]).trim();
-    if (!rawLabel || rawLabel.toLowerCase().includes('оберіть')) continue;
+    if (!rawLabel || /оберіть|виберіть/i.test(rawLabel)) continue;
     const formattedUk = rawLabel
       .replace(/^місто\s+/i, 'м. ')
       .replace(/^село\s+/i, 'с. ')
@@ -1288,9 +1775,13 @@ export function parseZtoeSettlementOptionsHtml(remId: string, html: string): Zto
 }
 
 export function parseZtoeStreetOptionsHtml(settlementId: string, html: string): ZtoeStreetOption[] {
-  const selectMatch = html.match(/<select[^>]*name=["']?vulica_id["']?[^>]*>([\s\S]*?)<\/select>/i);
-  if (!selectMatch) return [];
-  const selectInner = selectMatch[1];
+  if (!html || typeof html !== 'string') return [];
+  const selectMatch = html.match(
+    /<select[^>]*?(?:name=["']?vulica_id["']?|id=["']?vulica_id["']?)[^>]*>([\s\S]*?)<\/select>/i
+  );
+  const selectInner = selectMatch ? selectMatch[1] : !/<select\b/i.test(html) ? html : '';
+  if (!selectInner) return [];
+
   const staticForSettlement = ZTOE_STREET_OPTIONS.filter((st) => st.settlementId === settlementId);
   const results: ZtoeStreetOption[] = [];
   const seenIds = new Set<string>();
@@ -1300,7 +1791,7 @@ export function parseZtoeStreetOptionsHtml(settlementId: string, html: string): 
     const vulId = m[1].trim();
     if (!vulId || vulId === '0') continue;
     const rawLabel = stripHtmlTags(m[2]).trim();
-    if (!rawLabel || rawLabel.toLowerCase().includes('оберіть')) continue;
+    if (!rawLabel || /оберіть|виберіть/i.test(rawLabel)) continue;
     const candidateStatic =
       staticForSettlement.find((st) => normalizeStreetName(st.nameUk) === normalizeStreetName(rawLabel)) ||
       staticForSettlement.find((st) => st.ztoeVulicaId === vulId);
@@ -1325,30 +1816,166 @@ export function parseZtoeStreetOptionsHtml(settlementId: string, html: string): 
  * Parses a settlement-wide ZTOE response (`rem_id=X&naspunkt_id=Y&all=1`) and indexes
  * ALL houses for EVERY street in that settlement in a single pass so selecting any street
  * in the dropdown opens its complete house list in 0ms without additional network requests.
+ *
+ * Also supports a 1-argument `parseZtoeSettlementHousesTableHtml(html)` call returning
+ * a `Map<string, ZtoeHouseLookupResult[]>` keyed by lowercased street name.
  */
+export function parseZtoeSettlementHousesTableHtml(
+  html: string
+): Map<string, ZtoeHouseLookupResult[]>;
 export function parseZtoeSettlementHousesTableHtml(
   settlementId: string,
   streets: ZtoeStreetOption[],
   html: string
-): Record<string, ZtoeHouseLookupResult[]> {
+): Record<string, ZtoeHouseLookupResult[]>;
+export function parseZtoeSettlementHousesTableHtml(
+  settlementIdOrHtml: string,
+  streets?: ZtoeStreetOption[],
+  maybeHtml?: string
+): Map<string, ZtoeHouseLookupResult[]> | Record<string, ZtoeHouseLookupResult[]> {
+  // Single-argument overload: returns Map<streetNameLower, ZtoeHouseLookupResult[]>
+  if (streets === undefined && maybeHtml === undefined) {
+    const html = settlementIdOrHtml;
+    const streetMap = new Map<string, ZtoeHouseLookupResult[]>();
+    if (!html || typeof html !== 'string') return streetMap;
+
+    const scheduleSectionIdx = html.indexOf('Графіки погодинних відключень');
+    const addressSectionHtml = scheduleSectionIdx >= 0 ? html.slice(0, scheduleSectionIdx) : html;
+    const trRegex = /<tr\b[^>]*>([\s\S]*?)<\/tr>/gi;
+    let trMatch: RegExpExecArray | null;
+
+    let streetColIdx = 2;
+    let houseColIdx = 3;
+    let queueColIdx = 4;
+    let subqueueColIdx = 5;
+    let noteColIdx = 6;
+    const metadataCols = new Set<number>([0, 1, 2, 6]);
+
+    while ((trMatch = trRegex.exec(addressSectionHtml)) !== null) {
+      const rowHtml = trMatch[1];
+      if (/<input\b/i.test(rowHtml) || /<select\b/i.test(rowHtml)) continue;
+      const cellRegex = /<(?:td|th)\b[^>]*>([\s\S]*?)<\/(?:td|th)>/gi;
+      const cells: string[] = [];
+      let cellMatch: RegExpExecArray | null;
+      while ((cellMatch = cellRegex.exec(rowHtml)) !== null) {
+        cells.push(stripHtmlTags(cellMatch[1]));
+      }
+      if (cells.length < 5) continue;
+
+      const firstCellLower = (cells[0] || '').toLowerCase();
+      const isHeaderRow =
+        /<th\b/i.test(rowHtml) ||
+        firstCellLower === 'рем' ||
+        firstCellLower === 'будинок' ||
+        firstCellLower === 'будинки' ||
+        firstCellLower.includes('вулиц');
+
+      if (isHeaderRow) {
+        metadataCols.clear();
+        noteColIdx = -1;
+        cells.forEach((c, idx) => {
+          const cl = c.toLowerCase();
+          if (cl.includes('вулиц')) {
+            streetColIdx = idx;
+            metadataCols.add(idx);
+          } else if (cl.includes('буд') || cl.includes('дом')) {
+            houseColIdx = idx;
+          } else if (cl.includes('підчерг')) {
+            subqueueColIdx = idx;
+          } else if (cl.includes('черг')) {
+            queueColIdx = idx;
+          } else if (cl.includes('примітк')) {
+            noteColIdx = idx;
+            metadataCols.add(idx);
+          } else if (cl === 'рем' || cl.includes('населений')) {
+            metadataCols.add(idx);
+          }
+        });
+        continue;
+      }
+
+      const streetRaw = decodeHtmlEntities(cells[streetColIdx] || '').trim();
+      const houseVal = decodeHtmlEntities(cells[houseColIdx] || '').trim();
+      if (!streetRaw || !houseVal) continue;
+
+      const queueRaw = cells[queueColIdx] ?? '';
+      const subqueueRaw = cells[subqueueColIdx] ?? '';
+      const combinedMatch = `${queueRaw}.${subqueueRaw}`.match(/^([1-6])\.([1-2])$/);
+      const directMatch = queueRaw.match(/^([1-6])\.([1-2])$/);
+      let normalizedQueue = '';
+      let statusText: string | undefined;
+
+      if (directMatch) {
+        normalizedQueue = `${directMatch[1]}.${directMatch[2]}`;
+      } else if (combinedMatch) {
+        normalizedQueue = `${combinedMatch[1]}.${combinedMatch[2]}`;
+      }
+
+      const uniqueNonNumericParts: string[] = [];
+      cells.forEach((cellVal, idx) => {
+        if (idx === houseColIdx || metadataCols.has(idx) || idx === noteColIdx) return;
+        const trimmed = cellVal.trim();
+        if (trimmed.length > 0 && !/^[1-6](\.[1-2])?$/.test(trimmed) && trimmed !== '-') {
+          if (!uniqueNonNumericParts.includes(trimmed)) {
+            uniqueNonNumericParts.push(trimmed);
+          }
+        }
+      });
+
+      if (uniqueNonNumericParts.length > 0) {
+        statusText = uniqueNonNumericParts.join(' ').trim();
+      }
+
+      const key = streetRaw.toLowerCase();
+      const list = streetMap.get(key) || [];
+      const houseTokens = houseVal.includes(',')
+        ? houseVal.split(',').map((h) => h.trim()).filter(Boolean)
+        : [houseVal.trim()];
+
+      for (const hToken of houseTokens) {
+        if (!list.some((item) => item.house === hToken)) {
+          list.push({
+            house: hToken,
+            queue: normalizedQueue,
+            rawQueueCell: queueRaw,
+            rawSubqueueCell: subqueueRaw,
+            ...(statusText ? { statusText } : {}),
+          });
+        }
+      }
+      streetMap.set(key, list);
+    }
+
+    return streetMap;
+  }
+
+  // 3-argument overload: indexes into dynamicHousesByStreetId by streetId
+  const settlementId = settlementIdOrHtml;
+  const html = maybeHtml || '';
   const indexedByStreetId: Record<string, ZtoeHouseLookupResult[]> = {};
   if (!html || !streets || streets.length === 0) return indexedByStreetId;
 
-  const streetIdByNormName = new Map<string, string>();
+  const streetIdsByNormName = new Map<string, string[]>();
+  const addStreetMapping = (key: string, id: string) => {
+    if (!key || !id) return;
+    const arr = streetIdsByNormName.get(key) || [];
+    if (!arr.includes(id)) {
+      arr.push(id);
+      streetIdsByNormName.set(key, arr);
+    }
+  };
   for (const st of streets) {
-    streetIdByNormName.set(st.nameUk.trim().toLowerCase(), st.id);
-    streetIdByNormName.set(normalizeStreetName(st.nameUk), st.id);
+    addStreetMapping(st.nameUk.trim().toLowerCase(), st.id);
+    addStreetMapping(normalizeStreetName(st.nameUk), st.id);
   }
   for (const st of ZTOE_STREET_OPTIONS.filter((s) => s.settlementId === settlementId)) {
-    if (!streetIdByNormName.has(normalizeStreetName(st.nameUk))) {
-      streetIdByNormName.set(normalizeStreetName(st.nameUk), st.id);
-    }
+    addStreetMapping(st.nameUk.trim().toLowerCase(), st.id);
+    addStreetMapping(normalizeStreetName(st.nameUk), st.id);
   }
 
   const scheduleSectionIdx = html.indexOf('Графіки погодинних відключень');
   const addressSectionHtml = scheduleSectionIdx >= 0 ? html.slice(0, scheduleSectionIdx) : html;
 
-  const mergedMapsByStreet = new Map<string, Map<string, ZtoeHouseLookupResult>>();
   const trRegex = /<tr\b[^>]*>([\s\S]*?)<\/tr>/gi;
   let trMatch: RegExpExecArray | null;
 
@@ -1358,6 +1985,8 @@ export function parseZtoeSettlementHousesTableHtml(
   let subqueueColIdx = 5;
   let noteColIdx = 6;
   const metadataCols = new Set<number>([0, 1, 2, 6]);
+
+  const mergedMapsByStreet = new Map<string, Map<string, ZtoeHouseLookupResult>>();
 
   while ((trMatch = trRegex.exec(addressSectionHtml)) !== null) {
     const rowHtml = trMatch[1];
@@ -1370,7 +1999,7 @@ export function parseZtoeSettlementHousesTableHtml(
       cells.push(stripHtmlTags(cellMatch[1]));
     }
 
-    if (cells.length < 4) continue;
+    if (cells.length < 5) continue;
 
     const firstCellLower = (cells[0] || '').toLowerCase();
     const isHeaderRow =
@@ -1382,6 +2011,7 @@ export function parseZtoeSettlementHousesTableHtml(
 
     if (isHeaderRow) {
       metadataCols.clear();
+      noteColIdx = -1;
       cells.forEach((c, idx) => {
         const cl = c.toLowerCase();
         if (cl.includes('вулиц')) {
@@ -1407,13 +2037,14 @@ export function parseZtoeSettlementHousesTableHtml(
     const houseVal = (cells[houseColIdx] || '').trim();
     if (!streetRaw || !houseVal) continue;
 
-    const streetId =
-      streetIdByNormName.get(streetRaw.toLowerCase()) ||
-      streetIdByNormName.get(normalizeStreetName(streetRaw));
-    if (!streetId) continue;
+    const matchedStreetIds =
+      streetIdsByNormName.get(normalizeStreetName(streetRaw)) ||
+      streetIdsByNormName.get(streetRaw.toLowerCase());
+    if (!matchedStreetIds || matchedStreetIds.length === 0) continue;
 
     const queueRaw = cells[queueColIdx] ?? '';
     const subqueueRaw = cells[subqueueColIdx] ?? '';
+
     const combinedMatch = `${queueRaw}.${subqueueRaw}`.match(/^([1-6])\.([1-2])$/);
     const directMatch = queueRaw.match(/^([1-6])\.([1-2])$/);
 
@@ -1441,34 +2072,48 @@ export function parseZtoeSettlementHousesTableHtml(
       statusText = uniqueNonNumericParts.join(' ').trim();
     }
 
-    let streetHouseMap = mergedMapsByStreet.get(streetId);
-    if (!streetHouseMap) {
-      streetHouseMap = new Map<string, ZtoeHouseLookupResult>();
-      mergedMapsByStreet.set(streetId, streetHouseMap);
-    }
-
     const houseTokens = houseVal.includes(',')
       ? houseVal.split(',').map((h) => h.trim()).filter(Boolean)
       : [houseVal.trim()];
 
-    for (const hToken of houseTokens) {
-      const key = hToken.toLowerCase();
-      if (!key) continue;
-      const existing = streetHouseMap.get(key);
-      if (!existing || (!existing.queue && normalizedQueue)) {
-        streetHouseMap.set(key, {
-          house: hToken,
-          queue: normalizedQueue,
-          rawQueueCell: queueRaw,
-          rawSubqueueCell: subqueueRaw,
-          statusText,
-        });
+    for (const streetId of matchedStreetIds) {
+      let streetHouseMap = mergedMapsByStreet.get(streetId);
+      if (!streetHouseMap) {
+        streetHouseMap = new Map<string, ZtoeHouseLookupResult>();
+        mergedMapsByStreet.set(streetId, streetHouseMap);
+      }
+
+      for (const hToken of houseTokens) {
+        const key = hToken.toLowerCase();
+        if (!key) continue;
+        const existing = streetHouseMap.get(key);
+        if (!existing || (!existing.queue && normalizedQueue)) {
+          streetHouseMap.set(key, {
+            house: hToken,
+            queue: normalizedQueue,
+            rawQueueCell: queueRaw,
+            rawSubqueueCell: subqueueRaw,
+            statusText,
+          });
+        }
       }
     }
   }
 
   const now = Date.now();
   for (const [streetId, mergedMap] of mergedMapsByStreet.entries()) {
+    const prevHouses = dynamicHousesByStreetId[streetId];
+    if (Array.isArray(prevHouses)) {
+      for (const prevH of prevHouses) {
+        if (prevH.emergencyOutage && isValidEmergencyOutage(prevH.emergencyOutage)) {
+          const k = prevH.house.trim().toLowerCase();
+          const cur = mergedMap.get(k);
+          if (cur && !cur.emergencyOutage) {
+            mergedMap.set(k, { ...cur, emergencyOutage: prevH.emergencyOutage });
+          }
+        }
+      }
+    }
     applyCanonicalStreetOverrides(streetId, mergedMap);
     const sorted = sortHouseLookupResults(mergedMap.values());
     if (sorted.length > 0) {
@@ -1484,13 +2129,16 @@ export function parseZtoeSettlementHousesTableHtml(
 async function postZtoeLookupForm(bodyParams: Record<string, string>, siteUrl?: string): Promise<string | null> {
   if (typeof fetch === 'undefined') return null;
   try {
+    const isBrowser = typeof window !== 'undefined' && typeof window.document !== 'undefined';
     const targetEndpoint =
       !siteUrl || siteUrl.includes('ztoe.com.ua')
-        ? '/proxy-ztoe/unhooking-search.php'
+        ? isBrowser
+          ? '/proxy-ztoe/unhooking-search.php'
+          : 'https://www.ztoe.com.ua/unhooking-search.php'
         : siteUrl;
     const params = new URLSearchParams(bodyParams);
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 5000);
+    const timer = setTimeout(() => controller.abort(), 6000);
     const res = await fetch(targetEndpoint, {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -1571,6 +2219,7 @@ export async function fetchStreetsForSettlement(
     cachedStreets.some((st) => st.id !== 'zt_kyivska' && (dynamicHousesByStreetId[st.id]?.length || 0) > 0);
 
   if (!forceRefresh && hasBulkIndexedHouses) {
+    await fetchPwAccidentsForScope(remId, settlementId);
     return cachedStreets;
   }
 
@@ -1582,10 +2231,11 @@ export async function fetchStreetsForSettlement(
 
   const promise = (async () => {
     try {
-      const remObj = getRems().find((r) => r.id === remId);
+      const remObj =
+        getRems().find((r) => r.id === remId) ||
+        ZTOE_REM_OPTIONS.find((r) => r.id === remId);
       const settlementObj = findSettlementById(settlementId);
       if (remObj?.ztoeRemId && settlementObj?.ztoeNaspunktId) {
-        // Request all=1 so a single response returns <select name="vulica_id"> AND the full table of houses for all streets in this settlement
         const html = await postZtoeLookupForm(
           {
             rem_id: remObj.ztoeRemId,
@@ -1607,11 +2257,13 @@ export async function fetchStreetsForSettlement(
           if (parsedStreets.length > 0) {
             dynamicStreetsBySettlementId[settlementId] = parsedStreets;
             parseZtoeSettlementHousesTableHtml(settlementId, parsedStreets, html);
+            await fetchPwAccidentsForScope(remId, settlementId);
             persistAddressIndexToStorage();
             return parsedStreets;
           }
         }
       }
+      await fetchPwAccidentsForScope(remId, settlementId);
       return getStreetsForSettlement(settlementId);
     } finally {
       inFlightSettlementPromises.delete(inflightKey);
@@ -1632,8 +2284,6 @@ export async function fetchHousesForStreet(
   ensureHydrated();
   if (!streetId) return [];
 
-  // If an in-flight settlement-wide request (with all=1) is already running for this settlement,
-  // check cache first and await the in-flight request if this street isn't cached yet
   const existingHouses = dynamicHousesByStreetId[streetId];
   const updatedAt = houseCacheUpdatedAtByStreetId[streetId] || 0;
   if (
@@ -1642,13 +2292,15 @@ export async function fetchHousesForStreet(
     (!forceRefresh || Date.now() - updatedAt < FRESH_HOUSE_CACHE_TTL_MS)
   ) {
     recordRecentHouseStreet(streetId);
-    return existingHouses;
+    await fetchPwAccidentsForScope(remId, settlementId);
+    return dynamicHousesByStreetId[streetId] || existingHouses;
   }
 
   const inflightKey = `${remId}::${settlementId}`;
   const inflightSettlement = inFlightSettlementPromises.get(inflightKey);
   if (inflightSettlement) {
     await inflightSettlement;
+    await fetchPwAccidentsForScope(remId, settlementId);
     const afterInflight = dynamicHousesByStreetId[streetId];
     if (afterInflight && afterInflight.length > 0) {
       recordRecentHouseStreet(streetId);
@@ -1656,21 +2308,24 @@ export async function fetchHousesForStreet(
     }
   }
 
-  const remObj = getRems().find((r) => r.id === remId);
+  const remObj =
+    getRems().find((r) => r.id === remId) ||
+    ZTOE_REM_OPTIONS.find((r) => r.id === remId);
   const settlementObj = findSettlementById(settlementId);
   const streetObj = findStreetById(streetId);
   if (remObj?.ztoeRemId && settlementObj?.ztoeNaspunktId && streetObj?.ztoeVulicaId) {
+    // Note: Do NOT pass `all: '1'` when `vulica_id` is specified, because `all=1` causes ZTOE
+    // to ignore `vulica_id` and return all streets in the settlement instead of the selected street.
     const html = await postZtoeLookupForm(
       {
         rem_id: remObj.ztoeRemId,
         naspunkt_id: settlementObj.ztoeNaspunktId,
         vulica_id: streetObj.ztoeVulicaId,
-        all: '1',
       },
       siteUrl
     );
     if (html) {
-      const parsedRows = parseZtoeAddressLookupTableHtml(html);
+      const parsedRows = parseZtoeAddressLookupTableHtml(html, streetObj.nameUk);
       if (parsedRows.length > 0) {
         const mergedMap = new Map<string, ZtoeHouseLookupResult>();
         for (const row of parsedRows) {
@@ -1686,11 +2341,13 @@ export async function fetchHousesForStreet(
         dynamicHousesByStreetId[streetId] = sortedList;
         houseCacheUpdatedAtByStreetId[streetId] = Date.now();
         recordRecentHouseStreet(streetId);
+        await fetchPwAccidentsForScope(remId, settlementId);
         persistAddressIndexToStorage();
-        return sortedList;
+        return dynamicHousesByStreetId[streetId] || sortedList;
       }
     }
   }
+  await fetchPwAccidentsForScope(remId, settlementId);
   return getHousesForStreet(streetId);
 }
 
@@ -1705,7 +2362,6 @@ export async function prefetchAddressIndexInBackground(
   forceRefresh = false
 ): Promise<void> {
   ensureHydrated();
-
   const activeRemId = savedQuery?.remId || 'zhytomyr';
   const activeSettlementId = savedQuery?.settlementId || 'zt_city';
 
@@ -1719,9 +2375,11 @@ export async function prefetchAddressIndexInBackground(
   if (activeRemId !== 'zhytomyr') {
     await fetchSettlementsForRem(activeRemId, siteUrl, forceRefresh);
   }
+
   if (activeSettlementId && (activeRemId !== 'zhytomyr' || activeSettlementId !== 'zt_city')) {
     await fetchStreetsForSettlement(activeRemId, activeSettlementId, siteUrl, forceRefresh);
   }
+
   if (savedQuery?.streetId) {
     await fetchHousesForStreet(activeRemId, activeSettlementId, savedQuery.streetId, siteUrl, false);
   }
@@ -1752,8 +2410,6 @@ export async function prefetchAddressIndexInBackground(
     () => runWorker()
   );
   await Promise.all(workers);
+
   persistAddressIndexToStorage();
 }
-
-
-

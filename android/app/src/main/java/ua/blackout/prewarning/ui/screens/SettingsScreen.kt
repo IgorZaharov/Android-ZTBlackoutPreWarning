@@ -904,6 +904,23 @@ fun SettingsScreen(
             }
             isCheckingAddressOnSite = false
             addressLookupResult = res
+            if (res != null) {
+                val exists = housesList.any { it.house.equals(res.house, ignoreCase = true) }
+                housesList = if (!exists) {
+                    housesList + res
+                } else {
+                    housesList.map { h ->
+                        if (h.house.equals(res.house, ignoreCase = true)) {
+                            h.copy(
+                                queue = res.queue.ifEmpty { h.queue },
+                                statusText = res.statusText ?: h.statusText,
+                                emergencyOutage = res.emergencyOutage,
+                                addressLabel = res.addressLabel.ifEmpty { h.addressLabel }
+                            )
+                        } else h
+                    }
+                }
+            }
         }
 
         val selectedAddressStr = if (currentStreet != null && selectedHouse.isNotBlank()) {

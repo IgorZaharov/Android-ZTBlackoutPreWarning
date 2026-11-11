@@ -87,10 +87,10 @@ fun MainScreen(
     val scheduleRepo = remember { ScheduleRepository(context.applicationContext) }
     var selectedDayTab by remember { mutableStateOf("today") }
 
-    val hasCustomNoQueueStatus = !customQueueStatusText.isNullOrBlank()
-    val isQueueUnselected = queue.isBlank() && !hasCustomNoQueueStatus
     val hasEmergencyOutage = ZtoeAddressLookup.isValidOutageTimestamp(emergencyOutageStartTime) &&
         ZtoeAddressLookup.isValidOutageTimestamp(emergencyOutageRestoreTime)
+    val hasCustomNoQueueStatus = !customQueueStatusText.isNullOrBlank() && !hasEmergencyOutage
+    val isQueueUnselected = queue.isBlank() && !hasCustomNoQueueStatus && !hasEmergencyOutage
     val formattedSelectedAddress = remember(selectedAddress) { formatAddressAfterCity(selectedAddress) }
 
     // 48 light POWER_ON half-hour slots for buildings that are never disconnected by hourly schedules
@@ -235,37 +235,6 @@ fun MainScreen(
                 }
             }
 
-            // 1b. Custom ZTOE Queue/House Status Message Bar — exact same style/color/placement as Workbench MainView.tsx
-            if (!isQueueUnselected && hasCustomNoQueueStatus) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(24.dp))
-                        .background(Color(0xBF141A29))
-                        .border(1.dp, Color(0x26FFFFFF), RoundedCornerShape(24.dp))
-                        .padding(16.dp)
-                ) {
-                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        if (!formattedSelectedAddress.isNullOrBlank()) {
-                            Text(
-                                text = formattedSelectedAddress,
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Medium,
-                                color = Color(0xB3BAE6FD),
-                                lineHeight = 16.sp
-                            )
-                        }
-                        Text(
-                            text = customQueueStatusText ?: "",
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Color.White,
-                            lineHeight = 19.sp
-                        )
-                    }
-                }
-            }
-
             // 1c. Active Emergency Outage ("Аварійне відключення") Banner with Start & Estimated Restore Times — matching Workbench MainView.tsx
             if (!isQueueUnselected && hasEmergencyOutage) {
                 Box(
@@ -326,6 +295,37 @@ fun MainScreen(
                                 )
                             }
                         }
+                    }
+                }
+            }
+
+            // 1b. Custom ZTOE Queue/House Status Message Bar — exact same style/color/placement as Workbench MainView.tsx
+            if (!isQueueUnselected && !customQueueStatusText.isNullOrBlank()) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(24.dp))
+                        .background(Color(0xBF141A29))
+                        .border(1.dp, Color(0x26FFFFFF), RoundedCornerShape(24.dp))
+                        .padding(16.dp)
+                ) {
+                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                        if (!formattedSelectedAddress.isNullOrBlank()) {
+                            Text(
+                                text = formattedSelectedAddress,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = Color(0xB3BAE6FD),
+                                lineHeight = 16.sp
+                            )
+                        }
+                        Text(
+                            text = customQueueStatusText ?: "",
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White,
+                            lineHeight = 19.sp
+                        )
                     }
                 }
             }
