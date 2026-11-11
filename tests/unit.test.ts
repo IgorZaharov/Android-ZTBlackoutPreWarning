@@ -2938,8 +2938,11 @@ async function runUnitTestE_AddressLookupAndUnsetQueue() {
     ztoeParserTestKt.includes('assertEquals(16657, parsedSettlements[0].ztoeNaspunktId)') &&
       ztoeParserTestKt.includes('assertEquals(173934, parsedStreets[0].ztoeVulicaId)') &&
       ztoeParserTestKt.includes('assertEquals(4, parsedRems.first { it.id == "zhytomyr" }.ztoeRemId)') &&
+      ztoeParserTestKt.includes('isTomorrow = false') &&
+      !ztoeParserTestKt.includes('isTodaySchedule') &&
+      ztoeAddressLookupKt.includes('val finalResolved = resolvedResult') &&
       ztoeAddressLookupKt.includes('fun formatSettlementLabelUk('),
-    'ZtoeParserTest.kt must compare Int IDs against Int literals and ZtoeAddressLookup.kt must format settlement labels (село -> с., місто -> м.)'
+    'ZtoeParserTest.kt must compare Int IDs against Int literals, use isTomorrow parameter, and ZtoeAddressLookup.kt must format settlement labels and avoid mutable var smart-casts'
   );
   assert.ok(
     appTsx.includes('prefetchAddressIndexInBackground(settings.url, settings.selectedAddressQuery)') &&

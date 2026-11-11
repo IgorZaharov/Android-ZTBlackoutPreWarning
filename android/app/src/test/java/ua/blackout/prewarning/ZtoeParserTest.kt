@@ -1030,7 +1030,7 @@ class ZtoeParserTest {
             emptyList(),
             "2026-04-06",
             demoEmergency,
-            isTodaySchedule = true
+            isTomorrow = false
         )
         assertEquals(48, synthesizedFromEmpty.size)
         val synthesizedIntervals = ua.blackout.prewarning.data.repository.ScheduleRepository.computeDetailedIntervals(synthesizedFromEmpty)

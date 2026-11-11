@@ -6850,10 +6850,11 @@ object ZtoeAddressLookup {
                 }.toMutableList()
                 val existingHouseNorms = updatedHouses.map { normalizeHouseNumber(it.house) }.toHashSet()
                 for ((normH, entry) in streetEmergMap) {
-                    if (!existingHouseNorms.contains(normH) && ! entry.info.house.isNullOrBlank()) {
+                    val hVal = entry.info.house
+                    if (!existingHouseNorms.contains(normH) && !hVal.isNullOrBlank()) {
                         updatedHouses.add(
                             ZtoeHouseLookupResult(
-                                house = entry.info.house,
+                                house = hVal,
                                 queue = "",
                                 emergencyOutage = entry.info
                             )
@@ -7129,14 +7130,16 @@ object ZtoeAddressLookup {
             val parsedRows = parseZtoeEmergencyOutagesTableHtml(pageHtml)
             val matchedRow = parsedRows.firstOrNull { r ->
                 val houseMatches = normalizeHouseNumber(r.house ?: "") == targetHouseNorm
+                val rowStreetNorm = normalizeUkText(r.streetName.orEmpty())
                 val streetMatches = targetStreetNorm.isEmpty() ||
-                    r.streetName.isNullOrBlank() ||
-                    normalizeUkText(r.streetName).contains(targetStreetNorm) ||
-                    targetStreetNorm.contains(normalizeUkText(r.streetName))
+                    rowStreetNorm.isEmpty() ||
+                    rowStreetNorm.contains(targetStreetNorm) ||
+                    targetStreetNorm.contains(rowStreetNorm)
+                val rowCityNorm = normalizeUkText(r.settlementName.orEmpty())
                 val cityMatches = targetCityNorm.isEmpty() ||
-                    r.settlementName.isNullOrBlank() ||
-                    normalizeUkText(r.settlementName).contains(targetCityNorm) ||
-                    targetCityNorm.contains(normalizeUkText(r.settlementName))
+                    rowCityNorm.isEmpty() ||
+                    rowCityNorm.contains(targetCityNorm) ||
+                    targetCityNorm.contains(rowCityNorm)
                 houseMatches && streetMatches && cityMatches
             }
             if (matchedRow != null && isValidEmergencyOutage(matchedRow)) return matchedRow
@@ -7266,22 +7269,23 @@ object ZtoeAddressLookup {
             )
         }
 
-        if (resolvedResult != null && query.streetId.isNotBlank()) {
+        val finalResolved = resolvedResult
+        if (finalResolved != null && query.streetId.isNotBlank()) {
             val currentList = cachedHousesByStreet[query.streetId] ?: getDefaultHousesForStreet(query.streetId)
             val exists = currentList.any { normalizeHouseNumber(it.house) == targetHouseNorm }
             val updatedList = if (exists) {
                 currentList.map { h ->
                     if (normalizeHouseNumber(h.house) == targetHouseNorm) {
                         h.copy(
-                            queue = resolvedResult.queue.ifEmpty { h.queue },
-                            statusText = resolvedResult.statusText ?: h.statusText,
-                            emergencyOutage = resolvedResult.emergencyOutage,
-                            addressLabel = resolvedResult.addressLabel.ifEmpty { h.addressLabel }
+                            queue = finalResolved.queue.ifEmpty { h.queue },
+                            statusText = finalResolved.statusText ?: h.statusText,
+                            emergencyOutage = finalResolved.emergencyOutage,
+                            addressLabel = finalResolved.addressLabel.ifEmpty { h.addressLabel }
                         )
                     } else h
                 }
             } else {
-                (currentList + resolvedResult).sortedWith(
+                (currentList + finalResolved).sortedWith(
                     compareBy<ZtoeHouseLookupResult> { houseSortKey(it.house).first }
                         .thenBy { houseSortKey(it.house).second }
                 )
@@ -7289,7 +7293,7 @@ object ZtoeAddressLookup {
             cachedHousesByStreet[query.streetId] = updatedList
         }
 
-        return resolvedResult
+        return finalResolved
     }
 }
 `
