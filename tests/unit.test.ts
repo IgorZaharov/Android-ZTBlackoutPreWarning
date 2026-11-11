@@ -3277,24 +3277,30 @@ function runUnitTestF_FloatingShadows() {
   // Verify Android MainScreen.kt shadows
   assert.ok(
     mainScreen.includes('import androidx.compose.ui.draw.shadow') &&
+      mainScreen.includes('floatingShadow') &&
       mainScreen.includes('.shadow(10.dp, RoundedCornerShape(24.dp)') &&
       mainScreen.includes('.shadow(8.dp, RoundedCornerShape(16.dp)'),
-    'MainScreen.kt must include .shadow() modifiers on segments'
+    'MainScreen.kt must include floatingShadow and .shadow() modifiers on segments'
   );
 
   // Verify Android SettingsScreen.kt shadows
   assert.ok(
     settingsScreen.includes('import androidx.compose.ui.draw.shadow') &&
+      settingsScreen.includes('floatingShadow') &&
       (settingsScreen.match(/\.shadow\(10\.dp, RoundedCornerShape\(24\.dp\)/g) || []).length >= 7,
-    'SettingsScreen.kt must include .shadow() modifiers on cards'
+    'SettingsScreen.kt must include floatingShadow and .shadow() modifiers on cards'
   );
 
   // Verify Android AboutScreen.kt shadows
   assert.ok(
     aboutScreen.includes('import androidx.compose.ui.draw.shadow') &&
+      aboutScreen.includes('floatingShadow') &&
       (aboutScreen.match(/\.shadow\(10\.dp, RoundedCornerShape\(24\.dp\)/g) || []).length >= 5,
-    'AboutScreen.kt must include .shadow() modifiers on cards'
+    'AboutScreen.kt must include floatingShadow and .shadow() modifiers on cards'
   );
+
+  const floatingShadowKtPath = path.join(ROOT_DIR, 'android/app/src/main/java/ua/blackout/prewarning/ui/components/FloatingShadow.kt');
+  assert.ok(fs.existsSync(floatingShadowKtPath), 'FloatingShadow.kt must exist');
 
   console.log('Unit Test F PASSED: Floating shadows verified on Web and Android across Main, Settings, and About screens.');
 }

@@ -47,6 +47,11 @@ const additionalFiles = [
     description: 'Zhytomyr Roulette mini-game dialog screen',
   },
   {
+    path: 'app/src/main/java/ua/blackout/prewarning/ui/components/FloatingShadow.kt',
+    language: 'kotlin',
+    description: 'Custom drop-shadow extension modifier with Gaussian BlurMaskFilter',
+  },
+  {
     path: 'app/src/main/java/ua/blackout/prewarning/data/parser/ZtoeAddressLookup.kt',
     language: 'kotlin',
     description: 'ZTOE Address Queue Lookup & Emergency Outage Parser',

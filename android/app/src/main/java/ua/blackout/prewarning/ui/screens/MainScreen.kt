@@ -42,6 +42,7 @@ import ua.blackout.prewarning.data.parser.ZtoeAddressLookup
 import ua.blackout.prewarning.data.repository.ScheduleRepository
 import ua.blackout.prewarning.ui.AppStrings
 import ua.blackout.prewarning.ui.components.TimelineBar
+import ua.blackout.prewarning.ui.components.floatingShadow
 import java.time.LocalTime
 import java.time.format.DateTimeFormatter
 import ua.blackout.prewarning.data.KYIV_ZONE
@@ -242,6 +243,7 @@ fun MainScreen(
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
+                        .floatingShadow(color = Color(0xB3000000), borderRadius = 24.dp, blurRadius = 22.dp, offsetY = 8.dp)
                         .shadow(10.dp, RoundedCornerShape(24.dp), ambientColor = Color(0x66000000), spotColor = Color(0x80000000))
                         .clip(RoundedCornerShape(24.dp))
                         .background(Color(0xBF141A29))
@@ -311,6 +313,7 @@ fun MainScreen(
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
+                        .floatingShadow(color = Color(0xB3000000), borderRadius = 24.dp, blurRadius = 22.dp, offsetY = 8.dp)
                         .shadow(10.dp, RoundedCornerShape(24.dp), ambientColor = Color(0x66000000), spotColor = Color(0x80000000))
                         .clip(RoundedCornerShape(24.dp))
                         .background(Color(0xBF141A29))
@@ -342,6 +345,7 @@ fun MainScreen(
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .floatingShadow(color = Color(0xB3000000), borderRadius = 24.dp, blurRadius = 22.dp, offsetY = 8.dp)
                     .shadow(10.dp, RoundedCornerShape(24.dp), ambientColor = Color(0x66000000), spotColor = Color(0x80000000))
                     .clip(RoundedCornerShape(24.dp))
                     .background(Color(0xBF141A29))
@@ -486,6 +490,7 @@ fun MainScreen(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
+                        .floatingShadow(color = Color(0x8C000000), borderRadius = 16.dp, blurRadius = 16.dp, offsetY = 6.dp)
                         .shadow(8.dp, RoundedCornerShape(16.dp), ambientColor = Color(0x55000000), spotColor = Color(0x66000000))
                         .clip(RoundedCornerShape(16.dp))
                         .background(Color(0x80141A29))
@@ -533,6 +538,7 @@ fun MainScreen(
                 ) {
                     Box(
                         modifier = Modifier
+                            .floatingShadow(color = Color(0x8C000000), borderRadius = 16.dp, blurRadius = 16.dp, offsetY = 6.dp)
                             .shadow(8.dp, RoundedCornerShape(16.dp), ambientColor = Color(0x55000000), spotColor = Color(0x66000000))
                             .clip(RoundedCornerShape(16.dp))
                             .background(Color(0x80141A29))
@@ -552,6 +558,7 @@ fun MainScreen(
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .floatingShadow(color = Color(0xB3000000), borderRadius = 24.dp, blurRadius = 24.dp, offsetY = 10.dp)
                     .shadow(10.dp, RoundedCornerShape(24.dp), ambientColor = Color(0x66000000), spotColor = Color(0x80000000))
                     .clip(RoundedCornerShape(24.dp))
                     .background(Color(0xBF141A29))

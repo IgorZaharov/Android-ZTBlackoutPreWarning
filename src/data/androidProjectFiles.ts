@@ -2692,6 +2692,7 @@ import ua.blackout.prewarning.data.parser.ZtoeAddressLookup
 import ua.blackout.prewarning.data.repository.ScheduleRepository
 import ua.blackout.prewarning.ui.AppStrings
 import ua.blackout.prewarning.ui.components.TimelineBar
+import ua.blackout.prewarning.ui.components.floatingShadow
 import java.time.LocalTime
 import java.time.format.DateTimeFormatter
 import ua.blackout.prewarning.data.KYIV_ZONE
@@ -2892,6 +2893,7 @@ fun MainScreen(
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
+                        .floatingShadow(color = Color(0xB3000000), borderRadius = 24.dp, blurRadius = 22.dp, offsetY = 8.dp)
                         .shadow(10.dp, RoundedCornerShape(24.dp), ambientColor = Color(0x66000000), spotColor = Color(0x80000000))
                         .clip(RoundedCornerShape(24.dp))
                         .background(Color(0xBF141A29))
@@ -2961,6 +2963,7 @@ fun MainScreen(
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
+                        .floatingShadow(color = Color(0xB3000000), borderRadius = 24.dp, blurRadius = 22.dp, offsetY = 8.dp)
                         .shadow(10.dp, RoundedCornerShape(24.dp), ambientColor = Color(0x66000000), spotColor = Color(0x80000000))
                         .clip(RoundedCornerShape(24.dp))
                         .background(Color(0xBF141A29))
@@ -2992,6 +2995,7 @@ fun MainScreen(
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .floatingShadow(color = Color(0xB3000000), borderRadius = 24.dp, blurRadius = 22.dp, offsetY = 8.dp)
                     .shadow(10.dp, RoundedCornerShape(24.dp), ambientColor = Color(0x66000000), spotColor = Color(0x80000000))
                     .clip(RoundedCornerShape(24.dp))
                     .background(Color(0xBF141A29))
@@ -3136,6 +3140,7 @@ fun MainScreen(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
+                        .floatingShadow(color = Color(0x8C000000), borderRadius = 16.dp, blurRadius = 16.dp, offsetY = 6.dp)
                         .shadow(8.dp, RoundedCornerShape(16.dp), ambientColor = Color(0x55000000), spotColor = Color(0x66000000))
                         .clip(RoundedCornerShape(16.dp))
                         .background(Color(0x80141A29))
@@ -3183,6 +3188,7 @@ fun MainScreen(
                 ) {
                     Box(
                         modifier = Modifier
+                            .floatingShadow(color = Color(0x8C000000), borderRadius = 16.dp, blurRadius = 16.dp, offsetY = 6.dp)
                             .shadow(8.dp, RoundedCornerShape(16.dp), ambientColor = Color(0x55000000), spotColor = Color(0x66000000))
                             .clip(RoundedCornerShape(16.dp))
                             .background(Color(0x80141A29))
@@ -3202,6 +3208,7 @@ fun MainScreen(
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .floatingShadow(color = Color(0xB3000000), borderRadius = 24.dp, blurRadius = 24.dp, offsetY = 10.dp)
                     .shadow(10.dp, RoundedCornerShape(24.dp), ambientColor = Color(0x66000000), spotColor = Color(0x80000000))
                     .clip(RoundedCornerShape(24.dp))
                     .background(Color(0xBF141A29))
@@ -3647,6 +3654,7 @@ import ua.blackout.prewarning.data.parser.FetchStatus
 import ua.blackout.prewarning.data.parser.ZtoeAddressLookup
 import ua.blackout.prewarning.data.parser.ZtoeParser
 import ua.blackout.prewarning.ui.AppStrings
+import ua.blackout.prewarning.ui.components.floatingShadow
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -3790,6 +3798,7 @@ fun SettingsScreen(
         Box(
             modifier = Modifier
                 .fillMaxWidth()
+                .floatingShadow(color = Color(0xB3000000), borderRadius = 24.dp, blurRadius = 24.dp, offsetY = 10.dp)
                 .shadow(10.dp, RoundedCornerShape(24.dp), ambientColor = Color(0x66000000), spotColor = Color(0x80000000))
                 .clip(RoundedCornerShape(24.dp))
                 .background(Color(0xBF141A29))
@@ -3882,6 +3891,7 @@ fun SettingsScreen(
         Box(
             modifier = Modifier
                 .fillMaxWidth()
+                .floatingShadow(color = Color(0xB3000000), borderRadius = 24.dp, blurRadius = 24.dp, offsetY = 10.dp)
                 .shadow(10.dp, RoundedCornerShape(24.dp), ambientColor = Color(0x66000000), spotColor = Color(0x80000000))
                 .clip(RoundedCornerShape(24.dp))
                 .background(Color(0xBF141A29))
@@ -3962,6 +3972,7 @@ fun SettingsScreen(
         Box(
             modifier = Modifier
                 .fillMaxWidth()
+                .floatingShadow(color = Color(0xB3000000), borderRadius = 24.dp, blurRadius = 24.dp, offsetY = 10.dp)
                 .shadow(10.dp, RoundedCornerShape(24.dp), ambientColor = Color(0x66000000), spotColor = Color(0x80000000))
                 .clip(RoundedCornerShape(24.dp))
                 .background(Color(0xBF141A29))
@@ -4093,6 +4104,7 @@ fun SettingsScreen(
         Box(
             modifier = Modifier
                 .fillMaxWidth()
+                .floatingShadow(color = Color(0xB3000000), borderRadius = 24.dp, blurRadius = 24.dp, offsetY = 10.dp)
                 .shadow(10.dp, RoundedCornerShape(24.dp), ambientColor = Color(0x66000000), spotColor = Color(0x80000000))
                 .clip(RoundedCornerShape(24.dp))
                 .background(Color(0xBF141A29))
@@ -4213,6 +4225,7 @@ fun SettingsScreen(
         Box(
             modifier = Modifier
                 .fillMaxWidth()
+                .floatingShadow(color = Color(0xB3000000), borderRadius = 24.dp, blurRadius = 24.dp, offsetY = 10.dp)
                 .shadow(10.dp, RoundedCornerShape(24.dp), ambientColor = Color(0x66000000), spotColor = Color(0x80000000))
                 .clip(RoundedCornerShape(24.dp))
                 .background(Color(0xBF141A29))
@@ -4263,6 +4276,7 @@ fun SettingsScreen(
         Box(
             modifier = Modifier
                 .fillMaxWidth()
+                .floatingShadow(color = Color(0xB3000000), borderRadius = 24.dp, blurRadius = 24.dp, offsetY = 10.dp)
                 .shadow(10.dp, RoundedCornerShape(24.dp), ambientColor = Color(0x66000000), spotColor = Color(0x80000000))
                 .clip(RoundedCornerShape(24.dp))
                 .background(Color(0xBF141A29))
@@ -4324,6 +4338,7 @@ fun SettingsScreen(
         Box(
             modifier = Modifier
                 .fillMaxWidth()
+                .floatingShadow(color = Color(0xB3000000), borderRadius = 24.dp, blurRadius = 24.dp, offsetY = 10.dp)
                 .shadow(10.dp, RoundedCornerShape(24.dp), ambientColor = Color(0x66000000), spotColor = Color(0x80000000))
                 .clip(RoundedCornerShape(24.dp))
                 .background(Color(0xBF141A29))
@@ -7751,6 +7766,7 @@ import kotlinx.coroutines.withContext
 import ua.blackout.prewarning.BuildConfig
 import ua.blackout.prewarning.data.repository.DonationsRepository
 import ua.blackout.prewarning.ui.AppStrings
+import ua.blackout.prewarning.ui.components.floatingShadow
 
 @Composable
 fun AboutScreen(
@@ -7815,6 +7831,7 @@ fun AboutScreen(
         Box(
             modifier = Modifier
                 .fillMaxWidth()
+                .floatingShadow(color = Color(0xB3000000), borderRadius = 24.dp, blurRadius = 24.dp, offsetY = 10.dp)
                 .shadow(10.dp, RoundedCornerShape(24.dp), ambientColor = Color(0x66000000), spotColor = Color(0x80000000))
                 .clip(RoundedCornerShape(24.dp))
                 .background(Color(0xBF141A29))
@@ -7884,6 +7901,7 @@ fun AboutScreen(
         Box(
             modifier = Modifier
                 .fillMaxWidth()
+                .floatingShadow(color = Color(0xB3000000), borderRadius = 24.dp, blurRadius = 24.dp, offsetY = 10.dp)
                 .shadow(10.dp, RoundedCornerShape(24.dp), ambientColor = Color(0x66000000), spotColor = Color(0x80000000))
                 .clip(RoundedCornerShape(24.dp))
                 .background(Color(0xBF141A29))
@@ -7924,6 +7942,7 @@ fun AboutScreen(
         Box(
             modifier = Modifier
                 .fillMaxWidth()
+                .floatingShadow(color = Color(0xB3000000), borderRadius = 24.dp, blurRadius = 24.dp, offsetY = 10.dp)
                 .shadow(10.dp, RoundedCornerShape(24.dp), ambientColor = Color(0x66000000), spotColor = Color(0x80000000))
                 .clip(RoundedCornerShape(24.dp))
                 .background(Color(0xBF141A29))
@@ -8048,6 +8067,7 @@ fun AboutScreen(
         Box(
             modifier = Modifier
                 .fillMaxWidth()
+                .floatingShadow(color = Color(0xB3000000), borderRadius = 24.dp, blurRadius = 24.dp, offsetY = 10.dp)
                 .shadow(10.dp, RoundedCornerShape(24.dp), ambientColor = Color(0x66000000), spotColor = Color(0x80000000))
                 .clip(RoundedCornerShape(24.dp))
                 .background(Color(0xBF141A29))
@@ -8128,6 +8148,7 @@ fun AboutScreen(
         Box(
             modifier = Modifier
                 .fillMaxWidth()
+                .floatingShadow(color = Color(0xB3000000), borderRadius = 24.dp, blurRadius = 24.dp, offsetY = 10.dp)
                 .shadow(10.dp, RoundedCornerShape(24.dp), ambientColor = Color(0x66000000), spotColor = Color(0x80000000))
                 .clip(RoundedCornerShape(24.dp))
                 .background(Color(0xBF141A29))
@@ -8160,6 +8181,7 @@ fun AboutScreen(
         Box(
             modifier = Modifier
                 .fillMaxWidth()
+                .floatingShadow(color = Color(0xB3000000), borderRadius = 24.dp, blurRadius = 24.dp, offsetY = 10.dp)
                 .shadow(10.dp, RoundedCornerShape(24.dp), ambientColor = Color(0x66000000), spotColor = Color(0x80000000))
                 .clip(RoundedCornerShape(24.dp))
                 .background(Color(0xBF141A29))
@@ -14130,6 +14152,64 @@ fun ZhytomyrRouletteDialog(
                     .background(Color.Black.copy(alpha = animatedFlickerAlpha.coerceIn(0f, 0.85f)))
             )
         }
+    }
+}
+`
+  },
+  {
+    path: 'app/src/main/java/ua/blackout/prewarning/ui/components/FloatingShadow.kt',
+    language: 'kotlin',
+    description: 'Custom drop-shadow extension modifier with Gaussian BlurMaskFilter',
+    content: `package ua.blackout.prewarning.ui.components
+
+import android.graphics.BlurMaskFilter
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Paint
+import androidx.compose.ui.graphics.drawscope.drawIntoCanvas
+import androidx.compose.ui.graphics.toArgb
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.dp
+
+/**
+ * Custom floating shadow modifier that draws a genuine blurred Gaussian drop-shadow
+ * behind the composable, matching the Web workbench shadow-[0_16px_44px_rgba(0,0,0,0.55)].
+ * Unlike standard Modifier.shadow(), this works reliably on dark/translucent backgrounds,
+ * avoids RenderNode elevation clipping inside scrollable containers, and creates visible depth.
+ */
+fun Modifier.floatingShadow(
+    color: Color = Color(0x8C000000),
+    borderRadius: Dp = 24.dp,
+    blurRadius: Dp = 20.dp,
+    offsetY: Dp = 8.dp,
+    spread: Dp = 2.dp
+): Modifier = this.drawBehind {
+    drawIntoCanvas { canvas ->
+        val paint = Paint().asFrameworkPaint().apply {
+            isAntiAlias = true
+            this.color = color.toArgb()
+            if (blurRadius > 0.dp) {
+                maskFilter = BlurMaskFilter(blurRadius.toPx(), BlurMaskFilter.Blur.NORMAL)
+            }
+        }
+
+        val spreadPx = spread.toPx()
+        val left = -spreadPx
+        val top = offsetY.toPx() - spreadPx
+        val right = size.width + spreadPx
+        val bottom = size.height + offsetY.toPx() + spreadPx
+        val radiusPx = (borderRadius + spread).toPx()
+
+        canvas.drawRoundRect(
+            left,
+            top,
+            right,
+            bottom,
+            radiusPx,
+            radiusPx,
+            paint
+        )
     }
 }
 `
