@@ -1,0 +1,56 @@
+{
+  "_doc": "Design tokens shared by Compose (ui/theme/ZtTokens.kt), the web simulator and iOS (Theme.swift). Values are the ones the Android screens already used, so the original look is kept. Type roles map to iOS Dynamic Type styles and to CSS clamp() on the web.",
+  "specVersion": 1,
+  "color": {
+    "accent": "#FF5E3A",
+    "card": "#A3141A29",
+    "cardSolid": "#141A29",
+    "glass": { "sheenTop": "#1AFFFFFF", "sheenBottom": "#05FFFFFF", "rimTop": "#40FFFFFF", "rimBottom": "#14FFFFFF", "shadow": "#40000000", "shadowBlur": 14, "shadowOffsetY": 4, "webBackdropBlur": 40, "_doc": "Liquid-glass card: translucent card fill, vertical matte sheen, rim lit at the top, soft short shadow. Android has no backdrop blur, so only the web frosts what is behind the card." },
+    "cardBorder": "#26FFFFFF",
+    "innerRow": "#14FFFFFF",
+    "inputBorder": "#33FFFFFF",
+    "divider": "#1AFFFFFF",
+    "textPrimary": "#FFFFFF",
+    "textSecondary": "#B3BAE6FD",
+    "textTertiary": "#99BAE6FD",
+    "chip": {
+      "green": { "fill": "#3310B981", "text": "#34D399" },
+      "amber": { "fill": "#33F59E0B", "text": "#FBBF24" },
+      "red": { "fill": "#33EF4444", "text": "#F87171" },
+      "grey": { "fill": "#339CA3AF", "text": "#9CA3AF" }
+    },
+    "drum": {
+      "off": "#D62E26",
+      "emergencyGradient": ["#FFB020", "#F28A1B", "#C96A0B"],
+      "emergencyStripeDark": "#8C1A1208",
+      "emergencyStripeLight": "#D9FFB020",
+      "stripeWidthDp": 3,
+      "stripeAngleDeg": 45
+    }
+  },
+  "radius": { "card": 24, "control": 16, "row": 14, "chip": 12, "badge": 10 },
+  "minTouchDp": 48,
+  "type": {
+    "display": { "size": 44, "line": 48, "weight": 900, "mono": true, "dynamicType": "largeTitle" },
+    "title": { "size": 24, "line": 30, "weight": 700, "dynamicType": "title" },
+    "heading": { "size": 20, "line": 28, "weight": 800, "dynamicType": "title2" },
+    "subhead": { "size": 16, "line": 23, "weight": 700, "dynamicType": "headline" },
+    "body": { "size": 16, "line": 24, "weight": 500, "dynamicType": "body" },
+    "label": { "size": 14, "line": 20, "weight": 600, "dynamicType": "subheadline" },
+    "caption": { "size": 13, "line": 19, "weight": 500, "dynamicType": "footnote" },
+    "overline": { "size": 12, "line": 17, "weight": 700, "tracking": 0.05, "uppercase": true, "dynamicType": "caption" },
+    "timeMono": { "size": 16, "line": 22, "weight": 700, "mono": true, "dynamicType": "body" },
+    "captionMono": { "size": 13, "line": 19, "weight": 700, "mono": true, "dynamicType": "footnote" }
+  },
+  "typeRules": {
+    "minSize": 12,
+    "wrappingLineHeightMin": 1.4,
+    "nbspBetweenNumberAndUnit": true,
+    "numericsTabular": true
+  },
+  "motion": {
+    "pressScale": 0.96,
+    "pressDurationMs": 150,
+    "respectReducedMotion": true
+  }
+}

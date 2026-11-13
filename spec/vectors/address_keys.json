@@ -1,0 +1,46 @@
+{
+  "_doc": "Golden vectors for street and house keys (spec/ADDRESS_KEY.md). Names in 'streetEqual' groups are REAL duplicate pairs observed on ztoe.com.ua and PowerOn on 2026-11-12 (plus variants of the same kind) and must produce one key per group. 'streetDistinct' pairs must NOT collide. Same for houses. 'listContains' checks PowerOn buildingNames matching.",
+  "streetEqual": [
+    ["вул. В'ячеслава Липинського", "вул. В’ячеслава Липинського", "вул. В&#039;ячеслава Липинського", "вулиця В'ячеслава Липинського", "вул.  В'ячеслава   Липинського "],
+    ["вул. Закам'янська", "вул. Закам’янська", "вул. Закам&amp;#039;янська"],
+    ["майдан С.П. Корольова", "майдан С.П.Корольова"],
+    ["вул. Житній Базар", "вул. Житній базар"],
+    ["пров. Єлизавети Епштейн", "пров. Єлизавети Епштейн "],
+    ["1 пров. Мар&#039;янівський", "1 пров. Мар'янівський", "1 провулок Мар’янівський"],
+    ["вул. Київська", "вулиця Київська", "ВУЛ. КИЇВСЬКА"],
+    ["вул. Cидоренка", "вул. Сидоренка"]
+  ],
+  "streetDistinct": [
+    ["вул. Шевченка", "вул. Тараса Шевченка"],
+    ["вул. Київська", "пров. Київська"],
+    ["вул. Київська", "вул. Київська 2"],
+    ["1 пров. Мар'янівський", "2 пров. Мар'янівський"],
+    ["вул. Покровська", "вул. Покровська Слобода"]
+  ],
+  "houseEqual": [
+    ["34А", "34-А", "34 А", "34A", "34а", "34a"],
+    ["16A", "16А", "16а"],
+    ["14/а", "14/А", "14/a"],
+    ["буд. 5", "5", "№5", "будинок 5", "Будинок 5"],
+    ["1/1", " 1/1 "],
+    ["43Б", "43-Б"]
+  ],
+  "houseDistinct": [
+    ["1", "1/1"],
+    ["12", "1-2"],
+    ["34", "34А"],
+    ["34А", "34Б"],
+    ["5", "15"]
+  ],
+  "listContains": [
+    { "buildingNames": "23, 25, 29, 31, 73", "house": "29", "expect": true },
+    { "buildingNames": "0, 1, 43А, 43Б, 51а", "house": "43A", "expect": true },
+    { "buildingNames": "0, 1, 43А, 43Б, 51а", "house": "51А", "expect": true },
+    { "buildingNames": "1, 10, 11", "house": "1", "expect": true },
+    { "buildingNames": "1, 10, 11", "house": "2", "expect": false },
+    { "buildingNames": "12, 14", "house": "1", "expect": false },
+    { "buildingNames": "14/а, 15", "house": "14/А", "expect": true },
+    { "buildingNames": "1, 2; 3", "house": "3", "expect": true },
+    { "buildingNames": "1, 2", "house": "", "expect": false }
+  ]
+}

@@ -53,8 +53,12 @@ The Application requires internet access exclusively to fetch publicly accessibl
 1. **JSC "Zhytomyroblenergo" Official Schedule Server:**
    - **Target Endpoint:** `https://www.ztoe.com.ua/unhooking-search.php`
    - **Purpose:** Retrieving publicly published hourly power outage schedule HTML tables for the 12 consumer sub-queues.
-   - **Data Transmitted:** Standard HTTP/HTTPS GET requests. No user credentials, cookies, device identifiers, or personal parameters are sent with these requests.
-2. **Static Configuration File (GitHub Raw):**
+   - **Data Transmitted:** Standard HTTPS requests. When the user looks up an address in Settings, the identifiers of the chosen district, settlement and street (public option ids from the site's own address form) are sent as form fields to find the matching queue. No user credentials, cookies, device identifiers, or personal parameters are sent with these requests.
+2. **JSC "Zhytomyroblenergo" Emergency Outage Service (PowerOn):**
+   - **Target Endpoint:** `https://api-ztoe-poweron.inneti.net/api/` (the public data service behind `https://ztoe-poweron.inneti.net/`)
+   - **Purpose:** Retrieving publicly published emergency outages and planned repair works for the street the user selected, so the Application can show them next to the schedule and notify the user.
+   - **Data Transmitted:** Standard HTTPS GET requests carrying the public identifiers of the selected settlement and street as query filters. The house number is matched on the device and is never sent. No user credentials, cookies, device identifiers, or other personal parameters are sent.
+3. **Static Configuration File (GitHub Raw):**
    - **Target Endpoint:** `https://raw.githubusercontent.com/IgorZaharov/Android-ZTBlackoutPreWarning/main/donations.json`
    - **Purpose:** Periodically retrieving optional community donation URLs and official information links using standard conditional HTTP headers (`ETag` / `If-Modified-Since`).
    - **Data Transmitted:** Anonymous static file GET request. No telemetry or user information is transmitted.
@@ -67,10 +71,10 @@ In full compliance with Google Play Developer Program Policies regarding sensiti
 
 | Permission | Technical Requirement & Justification |
 | :--- | :--- |
-| `android.permission.INTERNET` | Required to communicate via HTTPS with the public servers of JSC "Zhytomyroblenergo" and retrieve blackout schedules. |
-| `android.permission.ACCESS_NETWORK_STATE` | Required to verify whether an active Wi-Fi or cellular network connection is available prior to initiating network queries, preventing unnecessary battery and data consumption. |
+| `android.permission.INTERNET` | Required to communicate via HTTPS with the public servers of JSC "Zhytomyroblenergo" (schedule site and emergency outage service) and retrieve blackout schedules and emergency outages. |
+| `android.permission.ACCESS_NETWORK_STATE` | Required to verify whether an active Wi-Fi or cellular network connection is available prior to initiating network queries, and to tell the user whether a problem is "no internet" or "the power company's site is not responding". The check uses only the status the operating system already reports; no third-party host is contacted. |
 | `android.permission.POST_NOTIFICATIONS` | Required on Android 13 (API level 33) and higher to present local notifications warning the user of imminent electrical outages according to their configured preference. |
-| `android.permission.SCHEDULE_EXACT_ALARM`<br/>`android.permission.USE_EXACT_ALARM` | Required to schedule exact, time-critical local alarms using Android `AlarmManager`. This ensures that pre-warning notifications trigger at the precise minute chosen by the user (e.g., exactly 15 minutes before an outage) even when the device is in low-power Doze mode. The Application qualifies under Google Play policies for time-critical alert and calendar/reminder utilities. |
+| `android.permission.SCHEDULE_EXACT_ALARM` | Required to schedule exact, time-critical local alarms using Android `AlarmManager`. This ensures that pre-warning notifications trigger at the precise minute chosen by the user (e.g., exactly 15 minutes before an outage) even when the device is in low-power Doze mode. On Android 12 and newer the user grants this in the system setting "Alarms & reminders"; the Application explains this in Settings and opens the system screen on request. Without the permission, warnings are still delivered but may be a few minutes late. |
 | `android.permission.RECEIVE_BOOT_COMPLETED` | Required to automatically restore and reschedule the user's configured local outage warning alarms following a device reboot or system time/timezone adjustment. |
 | `android.permission.VIBRATE` | Required to deliver haptic vibration feedback alongside notifications if enabled in the user's notification channel settings. |
 | `android.permission.WAKE_LOCK` | Required momentarily during exact alarm broadcasts to guarantee that the notification dispatch routine completes successfully before the device returns to sleep. |
@@ -83,7 +87,7 @@ The Application does **not** request access to contacts, cameras, microphones, l
 
 The Application contains hyperlinks to external third-party platforms for the convenience of the user:
 
-- **JSC "Zhytomyroblenergo" (АТ «Житомиробленерго»):** [https://www.ztoe.com.ua](https://www.ztoe.com.ua)
+- **JSC "Zhytomyroblenergo" (АТ «Житомиробленерго»):** [https://www.ztoe.com.ua](https://www.ztoe.com.ua) and its emergency outage service [https://ztoe-poweron.inneti.net](https://ztoe-poweron.inneti.net)
 - **Official Zhytomyroblenergo Facebook Page:** For official emergency announcements.
 - **Voluntary Community Donations (Monobank / Charity Jar):** Direct links that open in the user's external web browser or banking application. The Application does not process payments, store banking credentials, or receive transaction records.
 - **Project GitHub Repository:** [https://github.com/IgorZaharov/Android-ZTBlackoutPreWarning](https://github.com/IgorZaharov/Android-ZTBlackoutPreWarning)
@@ -159,13 +163,14 @@ If you have questions, feedback, or legal inquiries concerning this Privacy Poli
 ### 4. Мережеві запити
 Додаток звертається через захищене з'єднання виключно до:
 1. Офіційного сайту АТ «Житомиробленерго» (`https://www.ztoe.com.ua/unhooking-search.php`) для завантаження відкритих графіків відключень.
-2. Статичного файлу конфігурації у відкритому репозиторії GitHub для оновлення офіційних посилань.
+2. Публічного сервісу аварійних відключень АТ «Житомиробленерго» (`https://api-ztoe-poweron.inneti.net/api/`, сайт `https://ztoe-poweron.inneti.net/`) для отримання аварійних відключень і планових ремонтних робіт на вибраній вулиці. Надсилаються лише публічні коди вибраного населеного пункту та вулиці; номер будинку порівнюється на пристрої й нікуди не надсилається.
+3. Статичного файлу конфігурації у відкритому репозиторії GitHub для оновлення офіційних посилань.
 Жодні ідентифікатори пристрою чи користувача під час цих запитів не надсилаються.
 
 ### 5. Дозволи Android
 - `INTERNET` та `ACCESS_NETWORK_STATE`: для отримання публічного графіка та перевірки наявності з'єднання.
 - `POST_NOTIFICATIONS`: для показу локальних сповіщень про початок або завершення відключення.
-- `SCHEDULE_EXACT_ALARM` та `USE_EXACT_ALARM`: для гарантованого спрацьовування таймера попередження у точний час.
+- `SCHEDULE_EXACT_ALARM`: для спрацьовування таймера попередження у точний час. На Android 12 і новіше дозвіл «Будильники й нагадування» користувач вмикає в системних налаштуваннях; додаток підказує це в налаштуваннях і відкриває потрібний екран. Без дозволу попередження все одно приходять, але можуть запізнюватися на кілька хвилин.
 - `RECEIVE_BOOT_COMPLETED`: для автоматичного відновлення запланованих таймерів після перезавантаження телефону.
 - `VIBRATE` та `WAKE_LOCK`: для коректного доставлення сигналу сповіщення.
 

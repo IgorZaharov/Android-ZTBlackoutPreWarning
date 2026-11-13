@@ -33,7 +33,7 @@ import kotlinx.coroutines.withContext
 import ua.blackout.prewarning.BuildConfig
 import ua.blackout.prewarning.data.repository.DonationsRepository
 import ua.blackout.prewarning.ui.AppStrings
-import ua.blackout.prewarning.ui.components.floatingShadow
+import ua.blackout.prewarning.ui.components.glassSurface
 
 @Composable
 fun AboutScreen(
@@ -64,7 +64,7 @@ fun AboutScreen(
         val resolved = when {
             !rawVersion.isNullOrBlank() && rawVersion.matches(semverRegex) -> rawVersion
             buildCfgVersion.matches(semverRegex) -> buildCfgVersion
-            else -> "1.3.5"
+            else -> "1.4.0"
         }
         "v$resolved"
     }
@@ -98,10 +98,7 @@ fun AboutScreen(
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .floatingShadow(color = Color(0xB3000000), borderRadius = 24.dp, blurRadius = 24.dp, offsetY = 10.dp)
-                .shadow(10.dp, RoundedCornerShape(24.dp), ambientColor = Color(0x66000000), spotColor = Color(0x80000000))
-                .clip(RoundedCornerShape(24.dp))
-                .background(Color(0xBF141A29))
+                .glassSurface(RoundedCornerShape(24.dp), 24.dp)
                 .padding(20.dp)
         ) {
             Column(
@@ -168,10 +165,7 @@ fun AboutScreen(
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .floatingShadow(color = Color(0xB3000000), borderRadius = 24.dp, blurRadius = 24.dp, offsetY = 10.dp)
-                .shadow(10.dp, RoundedCornerShape(24.dp), ambientColor = Color(0x66000000), spotColor = Color(0x80000000))
-                .clip(RoundedCornerShape(24.dp))
-                .background(Color(0xBF141A29))
+                .glassSurface(RoundedCornerShape(24.dp), 24.dp)
                 .padding(18.dp)
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -209,10 +203,7 @@ fun AboutScreen(
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .floatingShadow(color = Color(0xB3000000), borderRadius = 24.dp, blurRadius = 24.dp, offsetY = 10.dp)
-                .shadow(10.dp, RoundedCornerShape(24.dp), ambientColor = Color(0x66000000), spotColor = Color(0x80000000))
-                .clip(RoundedCornerShape(24.dp))
-                .background(Color(0xBF141A29))
+                .glassSurface(RoundedCornerShape(24.dp), 24.dp)
                 .padding(18.dp)
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -334,10 +325,7 @@ fun AboutScreen(
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .floatingShadow(color = Color(0xB3000000), borderRadius = 24.dp, blurRadius = 24.dp, offsetY = 10.dp)
-                .shadow(10.dp, RoundedCornerShape(24.dp), ambientColor = Color(0x66000000), spotColor = Color(0x80000000))
-                .clip(RoundedCornerShape(24.dp))
-                .background(Color(0xBF141A29))
+                .glassSurface(RoundedCornerShape(24.dp), 24.dp)
                 .padding(18.dp)
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -415,10 +403,7 @@ fun AboutScreen(
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .floatingShadow(color = Color(0xB3000000), borderRadius = 24.dp, blurRadius = 24.dp, offsetY = 10.dp)
-                .shadow(10.dp, RoundedCornerShape(24.dp), ambientColor = Color(0x66000000), spotColor = Color(0x80000000))
-                .clip(RoundedCornerShape(24.dp))
-                .background(Color(0xBF141A29))
+                .glassSurface(RoundedCornerShape(24.dp), 24.dp)
                 .clickable {
                     if (onOpenRoulette != null) {
                         onOpenRoulette()
@@ -448,10 +433,7 @@ fun AboutScreen(
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .floatingShadow(color = Color(0xB3000000), borderRadius = 24.dp, blurRadius = 24.dp, offsetY = 10.dp)
-                .shadow(10.dp, RoundedCornerShape(24.dp), ambientColor = Color(0x66000000), spotColor = Color(0x80000000))
-                .clip(RoundedCornerShape(24.dp))
-                .background(Color(0xBF141A29))
+                .glassSurface(RoundedCornerShape(24.dp), 24.dp)
                 .padding(18.dp)
         ) {
             Row(

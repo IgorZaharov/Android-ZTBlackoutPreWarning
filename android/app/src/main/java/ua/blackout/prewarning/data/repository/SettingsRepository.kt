@@ -2,6 +2,7 @@ package ua.blackout.prewarning.data.repository
 
 import android.content.Context
 import android.content.SharedPreferences
+import ua.blackout.prewarning.core.LegacyMirror
 import ua.blackout.prewarning.data.model.EmergencyOutageInfo
 import ua.blackout.prewarning.data.model.SelectedAddressQuery
 import ua.blackout.prewarning.data.model.UserSettings
@@ -17,6 +18,10 @@ class SettingsRepository(context: Context) {
     }
 
     companion object {
+        /** Emergency follow-up alerts, one choice for all addresses (spec/PERSISTENCE.md 1, NOTIFICATIONS.md 2.4). */
+        const val KEY_EMERGENCY_ETA_ALERTS = "emergency_eta_alerts"
+        const val KEY_EMERGENCY_END_ALERTS = "emergency_end_alerts"
+
         fun readSafeInt(map: Map<String, *>, key: String, defaultVal: Int): Int {
             val raw = map[key] ?: return defaultVal
             return when (raw) {
@@ -186,7 +191,7 @@ class SettingsRepository(context: Context) {
             null
         }
 
-        val anyAlertsEnabled = notificationsEnabled || emergencyNotificationsEnabled
+        val anyAlertsEnabled = soundGate(notificationsEnabled, emergencyNotificationsEnabled)
 
         return UserSettings(
             cityUrl = readSafeString(allMap, "city_url", "https://www.ztoe.com.ua/unhooking-search.php").ifBlank { "https://www.ztoe.com.ua/unhooking-search.php" },
@@ -203,13 +208,26 @@ class SettingsRepository(context: Context) {
             vibrationEnabled = if (anyAlertsEnabled) rawVibration else false,
             prevSoundEnabled = prevSound,
             prevVibrationEnabled = prevVibration,
+            emergencyEtaAlerts = prefs.getBoolean(KEY_EMERGENCY_ETA_ALERTS, true),
+            emergencyEndAlerts = prefs.getBoolean(KEY_EMERGENCY_END_ALERTS, true),
             themeMode = readSafeString(allMap, "theme_mode", "SYSTEM").ifBlank { "SYSTEM" },
             language = readSafeString(allMap, "language", "SYSTEM").ifBlank { "SYSTEM" }
         )
     }
 
+    /**
+     * Whether sound and vibration may be on: the master switch once it is stored, else the 1.4.0 rule
+     * (spec/SUBSCRIPTIONS.md section 7), so a primary with both switches off never mutes the other addresses.
+     */
+    private fun soundGate(notificationsEnabled: Boolean, emergencyNotificationsEnabled: Boolean): Boolean =
+        if (prefs.contains(SubscriptionRepository.KEY_MASTER)) {
+            prefs.getBoolean(SubscriptionRepository.KEY_MASTER, true)
+        } else {
+            notificationsEnabled || emergencyNotificationsEnabled
+        }
+
     fun saveSettings(settings: UserSettings) {
-        val anyAlertsEnabled = settings.notificationsEnabled || settings.emergencyNotificationsEnabled
+        val anyAlertsEnabled = soundGate(settings.notificationsEnabled, settings.emergencyNotificationsEnabled)
         val editor = prefs.edit()
             .putString("city_url", settings.cityUrl)
             .putString("queue", settings.queue)
@@ -229,6 +247,8 @@ class SettingsRepository(context: Context) {
             .putBoolean("emergency_notifications_enabled", settings.emergencyNotificationsEnabled)
             .putBoolean("sound_enabled", if (anyAlertsEnabled) settings.soundEnabled else false)
             .putBoolean("vibration_enabled", if (anyAlertsEnabled) settings.vibrationEnabled else false)
+            .putBoolean(KEY_EMERGENCY_ETA_ALERTS, settings.emergencyEtaAlerts)
+            .putBoolean(KEY_EMERGENCY_END_ALERTS, settings.emergencyEndAlerts)
             .putString("theme_mode", settings.themeMode)
             .putString("language", settings.language)
 
@@ -320,6 +340,58 @@ class SettingsRepository(context: Context) {
                 .apply()
         }
         return getSettings()
+    }
+
+    /**
+     * Sound and vibration follow the alerts master switch (`spec/SUBSCRIPTIONS.md` section 7): off
+     * remembers and mutes them, on restores them. Called only when the master really changes.
+     */
+    fun applyMasterSound(masterOn: Boolean) {
+        if (masterOn) {
+            prefs.edit()
+                .putBoolean("sound_enabled", prefs.getBoolean("prev_sound_enabled", true))
+                .putBoolean("vibration_enabled", prefs.getBoolean("prev_vibration_enabled", true))
+                .apply()
+        } else {
+            // Raw keys, not getSettings(): the master is already stored as off, so getSettings() would
+            // mask both to false and the restore would bring back "off"
+            prefs.edit()
+                .putBoolean("prev_sound_enabled", prefs.getBoolean("sound_enabled", true))
+                .putBoolean("prev_vibration_enabled", prefs.getBoolean("vibration_enabled", true))
+                .putBoolean("sound_enabled", false)
+                .putBoolean("vibration_enabled", false)
+                .apply()
+        }
+    }
+
+    /**
+     * Writes the primary subscription into the single-address keys (`spec/SUBSCRIPTIONS.md`
+     * section 7). Targeted: sound, vibration, timers, site and language are untouched (sound and
+     * vibration follow the master switch, [applyMasterSound]).
+     */
+    fun applyPrimaryMirror(m: LegacyMirror) {
+        prefs.edit()
+            .putString("queue", m.queue)
+            .putString("custom_queue_status_text", m.customQueueStatusText ?: "")
+            .putString("selected_address", m.selectedAddress ?: "")
+            .putString("selected_rem", m.remSlug)
+            .putString("selected_settlement", m.settlementId)
+            .putString("selected_street", m.streetId)
+            .putString("selected_house", m.house)
+            .putBoolean("notifications_enabled", m.notificationsEnabled)
+            .putBoolean("emergency_notifications_enabled", m.emergencyNotificationsEnabled)
+            .apply()
+    }
+
+    /**
+     * Writes only the queue assignment of a house that had none. Targeted on purpose: a background
+     * check that took seconds must not overwrite settings the user changed in the meantime.
+     */
+    fun updateQueueAssignment(queue: String, statusText: String?) {
+        prefs.edit()
+            .putString("queue", queue)
+            .putString("custom_queue_status_text", statusText ?: "")
+            .apply()
     }
 
     fun getSharedPreferences(): SharedPreferences = prefs

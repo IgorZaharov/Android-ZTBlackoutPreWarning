@@ -3,51 +3,164 @@ package ua.blackout.prewarning.ui.screens
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.defaultMinSize
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.*
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Bolt
+import androidx.compose.material.icons.filled.Schedule
+import androidx.compose.material.icons.filled.AlarmOff
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.ErrorOutline
+import androidx.compose.material.icons.filled.HelpOutline
+import androidx.compose.material.icons.filled.Language
+import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Send
+import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material.icons.filled.Vibration
+import androidx.compose.material.icons.filled.VolumeUp
+import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExposedDropdownMenuBox
+import androidx.compose.material3.ExposedDropdownMenuDefaults
+import androidx.compose.material3.Icon
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.zIndex
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.material.icons.filled.DragIndicator
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.CustomAccessibilityAction
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.customActions
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextLinkStyles
 import androidx.compose.ui.text.buildAnnotatedString
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.text.withLink
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import ua.blackout.prewarning.data.model.EmergencyOutageInfo
+import ua.blackout.prewarning.core.Subscription
+import ua.blackout.prewarning.core.SubscriptionStore
+import ua.blackout.prewarning.core.Subscriptions
 import ua.blackout.prewarning.data.model.SelectedAddressQuery
 import ua.blackout.prewarning.data.parser.AddressLookupResult
 import ua.blackout.prewarning.data.parser.FetchStatus
 import ua.blackout.prewarning.data.parser.ZtoeAddressLookup
 import ua.blackout.prewarning.data.parser.ZtoeParser
+import ua.blackout.prewarning.data.parser.ZtoeHouseLookupResult
+import ua.blackout.prewarning.data.parser.ZtoeRemOption
+import ua.blackout.prewarning.data.parser.ZtoeSettlementOption
+import ua.blackout.prewarning.data.parser.ZtoeStreetOption
 import ua.blackout.prewarning.ui.AppStrings
-import ua.blackout.prewarning.ui.components.floatingShadow
+import ua.blackout.prewarning.ui.components.spinWhile
+import ua.blackout.prewarning.ui.components.GlassCard
+import ua.blackout.prewarning.ui.components.PickerItem
+import ua.blackout.prewarning.ui.components.PickerSearch
+import ua.blackout.prewarning.ui.components.SearchablePickerField
+import ua.blackout.prewarning.ui.components.glassFieldColors
+import ua.blackout.prewarning.ui.theme.ZtColors
+import ua.blackout.prewarning.ui.theme.ZtMinTouch
+import ua.blackout.prewarning.ui.theme.ZtShapes
+import ua.blackout.prewarning.ui.theme.ZtType
 
+/** Presets for "warn me N minutes before". 5 and 10 work: alarms are exact, only the site refresh is bounded by WorkManager. */
+private val ADVANCE_PRESETS = listOf(5, 10, 15, 20, 30, 45, 60, 90, 120, 180, 240)
+
+/** Presets for the site check. WorkManager never runs periodic work more often than every 15 minutes. */
+private val REFRESH_PRESETS = listOf(15, 30, 60, 120, 180, 240)
+
+private val QUEUES = listOf(
+    "1.1", "1.2", "2.1", "2.2", "3.1", "3.2",
+    "4.1", "4.2", "5.1", "5.2", "6.1", "6.2"
+)
+
+private const val ZTOE_SEARCH_URL = "https://www.ztoe.com.ua/unhooking-search.php"
+
+/**
+ * Settings page.
+ *
+ * @param exactAlarmMissing show the card that explains the "Alarms & reminders" permission
+ * @param onOpenExactAlarmSettings opens that system screen
+ * @param isVisible false while the pager keeps this page composed off screen; the site check waits
+ *   until the page is shown so launch does not run a second full schedule fetch
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(
     currentQueue: String = "",
-    customQueueStatusText: String? = null,
+    subscriptions: SubscriptionStore = SubscriptionStore.EMPTY,
+    alertsMaster: Boolean = true,
     selectedAddressQuery: SelectedAddressQuery? = null,
-    activeEmergencyOutage: EmergencyOutageInfo? = null,
-    siteUrl: String = "https://www.ztoe.com.ua/unhooking-search.php",
+    siteUrl: String = ZTOE_SEARCH_URL,
     // CRITICAL CONSTANTS — Default values: advanceMinutes = 15, refreshMinutes = 30. Never modify on your own.
     advanceMinutes: Int = 15,
     refreshMinutes: Int = 30,
@@ -59,54 +172,46 @@ fun SettingsScreen(
     lang: String = "uk",
     autoOpenQueueHelp: Boolean = false,
     onAutoOpenQueueHelpHandled: () -> Unit = {},
-    onQueueSelected: (String) -> Unit = {},
-    onAddressQueueResolved: (
+    onAddAddress: (
         queue: String,
         statusText: String?,
         addressLabel: String,
-        emergencyOutage: EmergencyOutageInfo?,
         query: SelectedAddressQuery
-    ) -> Unit = { _, _, _, _, _ -> },
+    ) -> Unit = { _, _, _, _ -> },
+    onAddQueueOnly: (String) -> Unit = {},
+    onRemoveSubscription: (String) -> Unit = {},
+    onMakePrimary: (String) -> Unit = {},
+    onSetPlanned: (id: String, on: Boolean) -> Unit = { _, _ -> },
+    onSetEmergency: (id: String, on: Boolean) -> Unit = { _, _ -> },
+    onRenameSubscription: (id: String, label: String) -> Unit = { _, _ -> },
+    /** Moves an address to a new list position (spec/SUBSCRIPTIONS.md section 4, `move`). */
+    onMoveSubscription: (id: String, toIndex: Int) -> Unit = { _, _ -> },
+    onToggleMaster: (Boolean) -> Unit = {},
     onSiteUrlChanged: (String) -> Unit = {},
     onAdvanceMinutesChanged: (Int) -> Unit = {},
     onRefreshMinutesChanged: (Int) -> Unit = {},
-    onToggleNotifications: (Boolean) -> Unit = {},
-    onToggleEmergencyNotifications: (Boolean) -> Unit = {},
     onToggleSound: (Boolean) -> Unit = {},
     onToggleVibration: (Boolean) -> Unit = {},
+    emergencyEtaAlerts: Boolean = true,
+    emergencyEndAlerts: Boolean = true,
+    onToggleEmergencyEtaAlerts: (Boolean) -> Unit = {},
+    onToggleEmergencyEndAlerts: (Boolean) -> Unit = {},
     onLanguageSelected: (String) -> Unit = {},
     onSendTestAlert: () -> Unit = {},
     onForceRefresh: () -> Unit = {},
+    /** A refresh is running: the refresh button's icon rotates and taps are ignored. */
+    isRefreshing: Boolean = false,
     onResetDefaults: () -> Unit = {},
-    onShowAppBanner: (String) -> Unit = {}
+    onShowAppBanner: (String) -> Unit = {},
+    exactAlarmMissing: Boolean = false,
+    onOpenExactAlarmSettings: () -> Unit = {},
+    isVisible: Boolean = true
 ) {
     val context = LocalContext.current
-    val coroutineScope = rememberCoroutineScope()
     var showQueueHelpDialog by remember { mutableStateOf(false) }
     var showResetConfirmDialog by remember { mutableStateOf(false) }
-    var queueDropdownExpanded by remember { mutableStateOf(false) }
-    var advanceDropdownExpanded by remember { mutableStateOf(false) }
-    var refreshDropdownExpanded by remember { mutableStateOf(false) }
-
-    // Interactive Address Lookup state inside "?" modal
-    var selectedRemId by remember(selectedAddressQuery) {
-        mutableStateOf(selectedAddressQuery?.remId?.ifBlank { "zhytomyr" } ?: "zhytomyr")
-    }
-    var selectedSettlementId by remember(selectedAddressQuery) {
-        mutableStateOf(selectedAddressQuery?.settlementId?.ifBlank { "zt_city" } ?: "zt_city")
-    }
-    var selectedStreetId by remember(selectedAddressQuery) {
-        mutableStateOf(selectedAddressQuery?.streetId ?: "")
-    }
-    var selectedHouse by remember(selectedAddressQuery) {
-        mutableStateOf(selectedAddressQuery?.house ?: "")
-    }
-    var remDropdownExpanded by remember { mutableStateOf(false) }
-    var settlementDropdownExpanded by remember { mutableStateOf(false) }
-    var streetDropdownExpanded by remember { mutableStateOf(false) }
-    var houseDropdownExpanded by remember { mutableStateOf(false) }
-    var isCheckingAddressOnSite by remember { mutableStateOf(false) }
-    var addressLookupResult by remember { mutableStateOf<AddressLookupResult?>(null) }
+    var removeCandidate by remember { mutableStateOf<Subscription?>(null) }
+    var renameCandidate by remember { mutableStateOf<Subscription?>(null) }
 
     LaunchedEffect(autoOpenQueueHelp) {
         if (autoOpenQueueHelp) {
@@ -115,20 +220,17 @@ fun SettingsScreen(
         }
     }
 
-    val queues = listOf(
-        "1.1", "1.2", "2.1", "2.2", "3.1", "3.2",
-        "4.1", "4.2", "5.1", "5.2", "6.1", "6.2"
-    )
-    val timerOptions = listOf(5, 10, 15, 20, 30, 45, 60, 90, 120, 180, 240)
-
     val isUrlInValidList = remember(siteUrl) { ZtoeParser.isValidUrl(siteUrl, context) }
     var urlFetchStatus by remember { mutableStateOf(FetchStatus.SUCCESS) }
     var isVerifyingUrl by remember { mutableStateOf(false) }
+    var urlChecked by remember { mutableStateOf(false) }
 
-    // Live URL verification against valid-urls.json + actual table with current date & queues on site
-    LaunchedEffect(siteUrl, currentQueue) {
+    // Live URL verification against valid-urls.json + the real table; waits until the page is on screen
+    LaunchedEffect(siteUrl, currentQueue, isVisible) {
+        if (!isVisible) return@LaunchedEffect
         if (!ZtoeParser.isValidUrl(siteUrl, context)) {
             urlFetchStatus = FetchStatus.NO_QUEUES_FOUND
+            urlChecked = true
             return@LaunchedEffect
         }
         isVerifyingUrl = true
@@ -138,17 +240,13 @@ fun SettingsScreen(
         }
         urlFetchStatus = res.status
         isVerifyingUrl = false
+        urlChecked = true
     }
 
+    val isChecking = isVerifyingUrl || !urlChecked
     val isSiteVerifiedSuccess = isUrlInValidList && urlFetchStatus == FetchStatus.SUCCESS
 
-    val queueFieldDisplay = when {
-        !customQueueStatusText.isNullOrBlank() ->
-            if (lang == "uk") "Черга відсутня (не вимикається)" else "No queue (not disconnected)"
-        currentQueue.isBlank() ->
-            if (lang == "uk") "Виберіть чергу" else "Select queue"
-        else -> "${AppStrings.queue(lang)} $currentQueue"
-    }
+    val minShort = AppStrings.minShort(lang)
 
     Column(
         modifier = Modifier
@@ -164,553 +262,290 @@ fun SettingsScreen(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            Icon(
-                Icons.Default.Tune,
-                contentDescription = null,
-                tint = Color(0xFFFF5E3A),
-                modifier = Modifier.size(24.dp)
-            )
+            Icon(Icons.Default.Tune, contentDescription = null, tint = ZtColors.Accent, modifier = Modifier.size(24.dp))
             Text(
                 text = AppStrings.settingsTitle(lang),
-                fontSize = 22.sp,
-                fontWeight = FontWeight.Bold,
-                color = Color.White
+                style = ZtType.heading,
+                color = Color.White,
+                modifier = Modifier.weight(1f)
             )
         }
 
-        // 1. Queue Selection Card (Frosted Glass)
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .floatingShadow(color = Color(0xB3000000), borderRadius = 24.dp, blurRadius = 24.dp, offsetY = 10.dp)
-                .shadow(10.dp, RoundedCornerShape(24.dp), ambientColor = Color(0x66000000), spotColor = Color(0x80000000))
-                .clip(RoundedCornerShape(24.dp))
-                .background(Color(0xBF141A29))
-                .padding(18.dp)
-        ) {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column(
-                        modifier = Modifier
-                            .weight(1f)
-                            .padding(end = 12.dp),
-                        verticalArrangement = Arrangement.spacedBy(2.dp)
+        // Exact-alarm permission (Android 12+): plain instruction and a button to the right system screen
+        if (exactAlarmMissing) {
+            GlassCard(
+                modifier = Modifier.fillMaxWidth(),
+                borderColor = Color(0x59FF5E3A),
+                contentPadding = PaddingValues18
+            ) {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
+                        Icon(Icons.Default.AlarmOff, contentDescription = null, tint = ZtColors.Accent, modifier = Modifier.size(24.dp))
                         Text(
-                            text = AppStrings.queueTitle(lang),
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Color.White
-                        )
-                        Text(
-                            text = AppStrings.queueDesc(lang),
-                            fontSize = 11.sp,
-                            color = Color(0xB3BAE6FD)
+                            text = AppStrings.exactAlarmTitle(lang),
+                            style = ZtType.subhead,
+                            color = Color.White,
+                            modifier = Modifier.weight(1f)
                         )
                     }
-                    // Prominent "?" button on the right matching Workbench size (40x40dp), color (#FF5E3A), and rounded-2xl (16.dp) shape
-                    Box(
-                        modifier = Modifier
-                            .size(40.dp)
-                            .clip(RoundedCornerShape(16.dp))
-                            .background(Color(0xFFFF5E3A))
-                            .border(1.dp, Color(0x40FFFFFF), RoundedCornerShape(16.dp))
-                            .clickable { showQueueHelpDialog = true },
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.HelpOutline,
-                            contentDescription = AppStrings.queueHelpTitle(lang),
-                            tint = Color.White,
-                            modifier = Modifier.size(20.dp)
-                        )
-                    }
-                }
-
-                // Clean Native Exposed Dropdown Menu
-                ExposedDropdownMenuBox(
-                    expanded = queueDropdownExpanded,
-                    onExpandedChange = { queueDropdownExpanded = it }
-                ) {
-                    OutlinedTextField(
-                        value = queueFieldDisplay,
-                        onValueChange = {},
-                        readOnly = true,
-                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = queueDropdownExpanded) },
-                        modifier = Modifier.menuAnchor().fillMaxWidth(),
-                        shape = RoundedCornerShape(16.dp),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedTextColor = Color.White,
-                            unfocusedTextColor = Color.White,
-                            focusedBorderColor = Color(0xFFFF5E3A),
-                            unfocusedBorderColor = Color(0x33FFFFFF),
-                            focusedContainerColor = Color(0x1AFFFFFF),
-                            unfocusedContainerColor = Color(0x14FFFFFF)
-                        )
+                    Text(text = AppStrings.exactAlarmBody(lang), style = ZtType.body, color = ZtColors.TextSecondary)
+                    ActionButton(
+                        text = AppStrings.exactAlarmButton(lang),
+                        icon = null,
+                        filled = true,
+                        onClick = onOpenExactAlarmSettings,
+                        modifier = Modifier.fillMaxWidth()
                     )
-                    ExposedDropdownMenu(
-                        expanded = queueDropdownExpanded,
-                        onDismissRequest = { queueDropdownExpanded = false },
-                        modifier = Modifier.background(Color(0xFF141A29))
-                    ) {
-                        queues.forEach { q ->
-                            DropdownMenuItem(
-                                text = { Text("${AppStrings.queue(lang)} $q", fontWeight = FontWeight.Bold, color = Color.White) },
-                                onClick = {
-                                    onQueueSelected(q)
-                                    queueDropdownExpanded = false
-                                }
-                            )
-                        }
-                    }
                 }
             }
         }
 
-        // 2. Site Address with Strict Verification Glyph against /valid-urls.json & live table check
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .floatingShadow(color = Color(0xB3000000), borderRadius = 24.dp, blurRadius = 24.dp, offsetY = 10.dp)
-                .shadow(10.dp, RoundedCornerShape(24.dp), ambientColor = Color(0x66000000), spotColor = Color(0x80000000))
-                .clip(RoundedCornerShape(24.dp))
-                .background(Color(0xBF141A29))
-                .padding(18.dp)
-        ) {
+        // 1. My addresses: up to 5 addresses (or queues), each with its own planned / emergency switches
+        MyAddressesCard(
+            store = subscriptions,
+            alertsMaster = alertsMaster,
+            advanceMinutes = advanceMinutes,
+            lang = lang,
+            onHelp = { showQueueHelpDialog = true },
+            onAddQueueOnly = onAddQueueOnly,
+            onMove = onMoveSubscription,
+            onRemove = { removeCandidate = it },
+            onRename = { renameCandidate = it },
+            onMakePrimary = onMakePrimary,
+            onSetPlanned = onSetPlanned,
+            onSetEmergency = onSetEmergency
+        )
+
+        // 2. Site address with a strict check against valid-urls.json and the live table
+        GlassCard(modifier = Modifier.fillMaxWidth(), contentPadding = PaddingValues18) {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Row(
+                @OptIn(ExperimentalLayoutApi::class)
+                FlowRow(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
                     Text(
                         text = AppStrings.siteAddressTitle(lang),
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = Color.White
+                        style = ZtType.overline,
+                        color = Color.White,
+                        modifier = Modifier.padding(vertical = 6.dp)
                     )
-
-                    // Verification Glyph
-                    val statusBadgeText = when {
-                        isSiteVerifiedSuccess -> AppStrings.siteReachable(lang)
-                        urlFetchStatus == FetchStatus.NO_INTERNET -> AppStrings.errorNoInternet(lang)
-                        else -> AppStrings.errorNoQueuesFound(lang)
-                    }
-                    Box(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(if (isSiteVerifiedSuccess) Color(0x3310B981) else Color(0x33EF4444))
-                            .padding(horizontal = 8.dp, vertical = 3.dp)
-                    ) {
-                        Text(
-                            text = statusBadgeText,
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = if (isSiteVerifiedSuccess) Color(0xFF34D399) else Color(0xFFF87171)
+                    when {
+                        isChecking -> StatusChip(
+                            text = AppStrings.siteStateChecking(lang),
+                            background = ZtColors.ChipGrey,
+                            foreground = ZtColors.ChipGreyText,
+                            icon = null
+                        )
+                        isSiteVerifiedSuccess -> StatusChip(
+                            text = AppStrings.siteReachable(lang),
+                            background = ZtColors.ChipGreen,
+                            foreground = ZtColors.ChipGreenText,
+                            icon = null
+                        )
+                        else -> StatusChip(
+                            text = if (urlFetchStatus == FetchStatus.NO_INTERNET) {
+                                AppStrings.errorNoInternet(lang)
+                            } else {
+                                AppStrings.errorNoQueuesFound(lang)
+                            },
+                            background = ZtColors.ChipRed,
+                            foreground = ZtColors.ChipRedText,
+                            icon = Icons.Default.ErrorOutline
                         )
                     }
                 }
 
-                Text(
-                    text = AppStrings.siteAddressDesc(lang),
-                    fontSize = 11.sp,
-                    color = Color(0xB3BAE6FD)
-                )
+                Text(text = AppStrings.siteAddressDesc(lang), style = ZtType.caption, color = ZtColors.TextSecondary)
 
+                val urlBad = !isChecking && !isSiteVerifiedSuccess
                 OutlinedTextField(
                     value = siteUrl,
                     onValueChange = { onSiteUrlChanged(it) },
                     singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(16.dp),
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedTextColor = Color.White,
-                        unfocusedTextColor = Color.White,
-                        focusedBorderColor = if (isSiteVerifiedSuccess) Color(0xFFFF5E3A) else Color(0xFFEF4444),
-                        unfocusedBorderColor = if (isSiteVerifiedSuccess) Color(0x33FFFFFF) else Color(0x66EF4444),
-                        focusedContainerColor = Color(0x1AFFFFFF),
-                        unfocusedContainerColor = Color(0x14FFFFFF)
+                    textStyle = ZtType.body,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp),
+                    shape = ZtShapes.Control,
+                    colors = glassFieldColors(
+                        focusedBorder = if (urlBad) Color(0xFFEF4444) else ZtColors.Accent,
+                        unfocusedBorder = if (urlBad) Color(0x66EF4444) else ZtColors.InputBorder
                     )
                 )
-
-                if (!isSiteVerifiedSuccess && !isVerifyingUrl) {
-                    val errText = if (urlFetchStatus == FetchStatus.NO_INTERNET) {
-                        AppStrings.errorNoInternet(lang)
-                    } else {
-                        AppStrings.errorNoQueuesFound(lang)
-                    }
-                    Text(
-                        text = errText,
-                        fontSize = 10.sp,
-                        color = Color(0xFFF87171)
-                    )
-                }
             }
         }
 
-        // 3. Timers: Native Android Spinners restricted to 1..240 (No Edit Boxes!)
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .floatingShadow(color = Color(0xB3000000), borderRadius = 24.dp, blurRadius = 24.dp, offsetY = 10.dp)
-                .shadow(10.dp, RoundedCornerShape(24.dp), ambientColor = Color(0x66000000), spotColor = Color(0x80000000))
-                .clip(RoundedCornerShape(24.dp))
-                .background(Color(0xBF141A29))
-                .padding(18.dp)
-        ) {
+        // 3. Timers: presets only (no free text), ranges match what really works
+        GlassCard(modifier = Modifier.fillMaxWidth(), contentPadding = PaddingValues18) {
             Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                // Spinner 1: Advance Warning Notice
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
+                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Text(text = AppStrings.advanceNoticeTitle(lang), style = ZtType.overline, color = Color.White)
                         Text(
-                            text = AppStrings.advanceNoticeTitle(lang),
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Color.White
-                        )
-                        Text(
-                            text = "1–240 ${AppStrings.minShort(lang)}",
-                            fontSize = 10.sp,
-                            color = Color(0x99BAE6FD)
+                            text = "${AppStrings.advanceNoticeHint(lang)} · ${AppStrings.rangeMinutes(lang, ADVANCE_PRESETS.first(), ADVANCE_PRESETS.last())}",
+                            style = ZtType.caption,
+                            color = ZtColors.TextTertiary
                         )
                     }
-
-                    ExposedDropdownMenuBox(
-                        expanded = advanceDropdownExpanded,
-                        onExpandedChange = { advanceDropdownExpanded = it }
-                    ) {
-                        OutlinedTextField(
-                            value = "$advanceMinutes ${AppStrings.minShort(lang)}",
-                            onValueChange = {},
-                            readOnly = true,
-                            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = advanceDropdownExpanded) },
-                            modifier = Modifier.menuAnchor().fillMaxWidth(),
-                            shape = RoundedCornerShape(16.dp),
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedTextColor = Color.White,
-                                unfocusedTextColor = Color.White,
-                                focusedBorderColor = Color(0xFFFF5E3A),
-                                unfocusedBorderColor = Color(0x33FFFFFF),
-                                focusedContainerColor = Color(0x1AFFFFFF),
-                                unfocusedContainerColor = Color(0x14FFFFFF)
-                            )
-                        )
-                        ExposedDropdownMenu(
-                            expanded = advanceDropdownExpanded,
-                            onDismissRequest = { advanceDropdownExpanded = false },
-                            modifier = Modifier.background(Color(0xFF141A29))
-                        ) {
-                            timerOptions.forEach { mins ->
-                                DropdownMenuItem(
-                                    text = { Text("$mins ${AppStrings.minShort(lang)}", fontWeight = FontWeight.Bold, color = Color.White) },
-                                    onClick = {
-                                        onAdvanceMinutesChanged(mins)
-                                        advanceDropdownExpanded = false
-                                    }
-                                )
-                            }
-                        }
-                    }
-                }
-
-                Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(Color(0x1AFFFFFF)))
-
-                // Spinner 2: Site Refresh Interval
-                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = AppStrings.refreshIntervalTitle(lang),
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Color.White
-                        )
-                        Text(
-                            text = "1–240 ${AppStrings.minShort(lang)}",
-                            fontSize = 10.sp,
-                            color = Color(0x99BAE6FD)
-                        )
-                    }
-
-                    ExposedDropdownMenuBox(
-                        expanded = refreshDropdownExpanded,
-                        onExpandedChange = { refreshDropdownExpanded = it }
-                    ) {
-                        OutlinedTextField(
-                            value = "$refreshMinutes ${AppStrings.minShort(lang)}",
-                            onValueChange = {},
-                            readOnly = true,
-                            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = refreshDropdownExpanded) },
-                            modifier = Modifier.menuAnchor().fillMaxWidth(),
-                            shape = RoundedCornerShape(16.dp),
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedTextColor = Color.White,
-                                unfocusedTextColor = Color.White,
-                                focusedBorderColor = Color(0xFFFF5E3A),
-                                unfocusedBorderColor = Color(0x33FFFFFF),
-                                focusedContainerColor = Color(0x1AFFFFFF),
-                                unfocusedContainerColor = Color(0x14FFFFFF)
-                            )
-                        )
-                        ExposedDropdownMenu(
-                            expanded = refreshDropdownExpanded,
-                            onDismissRequest = { refreshDropdownExpanded = false },
-                            modifier = Modifier.background(Color(0xFF141A29))
-                        ) {
-                            timerOptions.forEach { mins ->
-                                DropdownMenuItem(
-                                    text = { Text("$mins ${AppStrings.minShort(lang)}", fontWeight = FontWeight.Bold, color = Color.White) },
-                                    onClick = {
-                                        onRefreshMinutesChanged(mins)
-                                        refreshDropdownExpanded = false
-                                    }
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        // 4. Notification Toggles (Sound & Vibration shared by Notifications and Emergency Power Outages)
-        val anyAlertsEnabled = notificationsEnabled || emergencyNotificationsEnabled
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .floatingShadow(color = Color(0xB3000000), borderRadius = 24.dp, blurRadius = 24.dp, offsetY = 10.dp)
-                .shadow(10.dp, RoundedCornerShape(24.dp), ambientColor = Color(0x66000000), spotColor = Color(0x80000000))
-                .clip(RoundedCornerShape(24.dp))
-                .background(Color(0xBF141A29))
-                .border(1.dp, Color(0x26FFFFFF), RoundedCornerShape(24.dp))
-                .padding(18.dp)
-        ) {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Notifications,
-                            contentDescription = null,
-                            tint = Color.White,
-                            modifier = Modifier.size(16.dp)
-                        )
-                        Text(AppStrings.notifications(lang), fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.White)
-                    }
-                    Switch(
-                        checked = notificationsEnabled,
-                        onCheckedChange = onToggleNotifications,
-                        colors = SwitchDefaults.colors(
-                            checkedThumbColor = Color.White,
-                            checkedTrackColor = Color(0xFFFF5E3A),
-                            uncheckedThumbColor = Color.LightGray,
-                            uncheckedTrackColor = Color(0x33FFFFFF)
-                        )
+                    GlassDropdown(
+                        value = "$advanceMinutes $minShort",
+                        options = ADVANCE_PRESETS.map { "$it $minShort" },
+                        onSelect = { onAdvanceMinutesChanged(ADVANCE_PRESETS[it]) }
                     )
                 }
 
-                Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(Color(0x1AFFFFFF)))
+                Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(ZtColors.Divider))
 
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.VolumeUp,
-                            contentDescription = null,
-                            tint = if (anyAlertsEnabled) Color(0xB3BAE6FD) else Color(0x4DBAE6FD),
-                            modifier = Modifier.size(16.dp)
-                        )
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Text(text = AppStrings.refreshIntervalTitle(lang), style = ZtType.overline, color = Color.White)
                         Text(
-                            text = AppStrings.sound(lang),
-                            fontSize = 12.sp,
-                            color = if (anyAlertsEnabled) Color.White else Color(0x66FFFFFF)
+                            text = "${AppStrings.rangeMinutes(lang, REFRESH_PRESETS.first(), REFRESH_PRESETS.last())} · ${AppStrings.refreshFloorHint(lang)}",
+                            style = ZtType.caption,
+                            color = ZtColors.TextTertiary
                         )
                     }
-                    Switch(
-                        checked = anyAlertsEnabled && soundEnabled,
-                        onCheckedChange = onToggleSound,
-                        enabled = anyAlertsEnabled,
-                        colors = SwitchDefaults.colors(
-                            checkedThumbColor = Color.White,
-                            checkedTrackColor = Color(0xFFFF5E3A),
-                            uncheckedThumbColor = Color.LightGray,
-                            uncheckedTrackColor = Color(0x33FFFFFF),
-                            disabledCheckedTrackColor = Color(0x33FF5E3A),
-                            disabledUncheckedTrackColor = Color(0x1AFFFFFF),
-                            disabledUncheckedThumbColor = Color(0x4DFFFFFF)
-                        )
-                    )
-                }
-
-                Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(Color(0x1AFFFFFF)))
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Vibration,
-                            contentDescription = null,
-                            tint = if (anyAlertsEnabled) Color(0xB3BAE6FD) else Color(0x4DBAE6FD),
-                            modifier = Modifier.size(16.dp)
-                        )
-                        Text(
-                            text = AppStrings.vibration(lang),
-                            fontSize = 12.sp,
-                            color = if (anyAlertsEnabled) Color.White else Color(0x66FFFFFF)
-                        )
-                    }
-                    Switch(
-                        checked = anyAlertsEnabled && vibrationEnabled,
-                        onCheckedChange = onToggleVibration,
-                        enabled = anyAlertsEnabled,
-                        colors = SwitchDefaults.colors(
-                            checkedThumbColor = Color.White,
-                            checkedTrackColor = Color(0xFFFF5E3A),
-                            uncheckedThumbColor = Color.LightGray,
-                            uncheckedTrackColor = Color(0x33FFFFFF),
-                            disabledCheckedTrackColor = Color(0x33FF5E3A),
-                            disabledUncheckedTrackColor = Color(0x1AFFFFFF),
-                            disabledUncheckedThumbColor = Color(0x4DFFFFFF)
-                        )
+                    GlassDropdown(
+                        value = "$refreshMinutes $minShort",
+                        options = REFRESH_PRESETS.map { "$it $minShort" },
+                        onSelect = { onRefreshMinutesChanged(REFRESH_PRESETS[it]) }
                     )
                 }
             }
         }
 
-        // 4b. Emergency Power Outages Switch (Separate block below Notifications block; always visible even when no outages detected; ON by default)
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .floatingShadow(color = Color(0xB3000000), borderRadius = 24.dp, blurRadius = 24.dp, offsetY = 10.dp)
-                .shadow(10.dp, RoundedCornerShape(24.dp), ambientColor = Color(0x66000000), spotColor = Color(0x80000000))
-                .clip(RoundedCornerShape(24.dp))
-                .background(Color(0xBF141A29))
-                .border(1.dp, Color(0x26FFFFFF), RoundedCornerShape(24.dp))
-                .padding(18.dp)
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Row(
-                    modifier = Modifier
-                        .weight(1f)
-                        .padding(end = 12.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Warning,
-                        contentDescription = null,
-                        tint = Color(0xFFFF5E3A),
-                        modifier = Modifier.size(16.dp)
-                    )
-                    Text(
-                        text = AppStrings.emergencyNotifications(lang),
-                        fontSize = 12.sp,
-                        lineHeight = 16.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = Color.White
-                    )
+        // 4. Alerts: the master switch for all addresses (owner decision 1), then sound and vibration.
+        // Sound and vibration follow the master switch (spec/SUBSCRIPTIONS.md section 7).
+        val anyAlertsEnabled = alertsMaster
+        val noAddressAlerts = Subscriptions.noAlertsCaption(alertsMaster, subscriptions)
+        GlassCard(modifier = Modifier.fillMaxWidth(), contentPadding = PaddingValues18) {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                SwitchRow(
+                    icon = Icons.Default.Notifications,
+                    iconTint = Color.White,
+                    title = AppStrings.notifications(lang),
+                    hint = AppStrings.masterHint(lang),
+                    checked = alertsMaster,
+                    onCheckedChange = onToggleMaster,
+                    lang = lang
+                )
+                if (noAddressAlerts) {
+                    Text(text = AppStrings.noAddressAlerts(lang), style = ZtType.caption, color = ZtColors.Accent)
                 }
-                Switch(
-                    checked = emergencyNotificationsEnabled,
-                    onCheckedChange = onToggleEmergencyNotifications,
-                    enabled = true,
-                    colors = SwitchDefaults.colors(
-                        checkedThumbColor = Color.White,
-                        checkedTrackColor = Color(0xFFFF5E3A),
-                        uncheckedThumbColor = Color.LightGray,
-                        uncheckedTrackColor = Color(0x33FFFFFF)
-                    )
+                Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(ZtColors.Divider))
+                SwitchRow(
+                    icon = Icons.Default.VolumeUp,
+                    iconTint = if (anyAlertsEnabled) Color(0xB3BAE6FD) else Color(0x4DBAE6FD),
+                    title = AppStrings.sound(lang),
+                    hint = null,
+                    checked = anyAlertsEnabled && soundEnabled,
+                    onCheckedChange = onToggleSound,
+                    lang = lang,
+                    enabled = anyAlertsEnabled
+                )
+                Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(ZtColors.Divider))
+                SwitchRow(
+                    icon = Icons.Default.Vibration,
+                    iconTint = if (anyAlertsEnabled) Color(0xB3BAE6FD) else Color(0x4DBAE6FD),
+                    title = AppStrings.vibration(lang),
+                    hint = null,
+                    checked = anyAlertsEnabled && vibrationEnabled,
+                    onCheckedChange = onToggleVibration,
+                    lang = lang,
+                    enabled = anyAlertsEnabled
+                )
+                Text(
+                    text = AppStrings.soundVibrationHint(lang),
+                    style = ZtType.caption,
+                    color = ZtColors.TextTertiary,
+                    modifier = Modifier.padding(top = 2.dp)
                 )
             }
         }
 
-        // 5. Language Selection Card (Dynamic Localization!)
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .floatingShadow(color = Color(0xB3000000), borderRadius = 24.dp, blurRadius = 24.dp, offsetY = 10.dp)
-                .shadow(10.dp, RoundedCornerShape(24.dp), ambientColor = Color(0x66000000), spotColor = Color(0x80000000))
-                .clip(RoundedCornerShape(24.dp))
-                .background(Color(0xBF141A29))
-                .border(1.dp, Color(0x26FFFFFF), RoundedCornerShape(24.dp))
-                .padding(18.dp)
-        ) {
+        // 4b. Emergency follow-ups for all addresses: restoration time changes and restoration. The start is
+        // always announced (spec/NOTIFICATIONS.md 2.4). Locked and shown off while the master is off.
+        GlassCard(modifier = Modifier.fillMaxWidth(), contentPadding = PaddingValues18) {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(text = AppStrings.emergencyAlertsTitle(lang), style = ZtType.overline, color = Color.White)
+                Text(text = AppStrings.emergencyAlertsDesc(lang), style = ZtType.caption, color = ZtColors.TextSecondary)
+                SwitchRow(
+                    icon = Icons.Default.Schedule,
+                    iconTint = if (alertsMaster) ZtColors.EmergencyAmberStart else Color(0x4DBAE6FD),
+                    title = AppStrings.emergencyEtaAlertsTitle(lang),
+                    hint = AppStrings.emergencyEtaAlertsHint(lang),
+                    checked = alertsMaster && emergencyEtaAlerts,
+                    onCheckedChange = onToggleEmergencyEtaAlerts,
+                    lang = lang,
+                    enabled = alertsMaster
+                )
+                Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(ZtColors.Divider))
+                SwitchRow(
+                    icon = Icons.Default.Bolt,
+                    iconTint = if (alertsMaster) ZtColors.ChipGreenText else Color(0x4DBAE6FD),
+                    title = AppStrings.emergencyEndAlertsTitle(lang),
+                    hint = AppStrings.emergencyEndAlertsHint(lang),
+                    checked = alertsMaster && emergencyEndAlerts,
+                    onCheckedChange = onToggleEmergencyEndAlerts,
+                    lang = lang,
+                    enabled = alertsMaster
+                )
+            }
+        }
+
+        // 5. Language
+        GlassCard(modifier = Modifier.fillMaxWidth(), contentPadding = PaddingValues18) {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.Language,
-                        contentDescription = null,
-                        tint = Color(0xFFFF5E3A),
-                        modifier = Modifier.size(14.dp)
-                    )
+                    Icon(Icons.Default.Language, contentDescription = null, tint = ZtColors.Accent, modifier = Modifier.size(18.dp))
                     Text(
                         text = AppStrings.languageTitle(lang),
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = Color.White
+                        style = ZtType.overline,
+                        color = Color.White,
+                        modifier = Modifier.weight(1f)
                     )
                 }
 
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
+                        .selectableGroup()
                         .clip(RoundedCornerShape(12.dp))
                         .background(Color(0x59000000))
                         .border(1.dp, Color(0x1AFFFFFF), RoundedCornerShape(12.dp))
                         .padding(4.dp),
                     horizontalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
-                    listOf("SYSTEM" to (if (lang == "uk") "Системна" else "System"), "uk" to "Українська", "en" to "English").forEach { (code, label) ->
+                    listOf(
+                        "SYSTEM" to AppStrings.langSystem(lang),
+                        "uk" to "Українська",
+                        "en" to "English"
+                    ).forEach { (code, label) ->
                         val isSelected = currentLanguage.equals(code, ignoreCase = true)
                         Box(
                             modifier = Modifier
                                 .weight(1f)
+                                .heightIn(min = ZtMinTouch - 8.dp)
                                 .clip(RoundedCornerShape(9.dp))
                                 .background(if (isSelected) Color.White else Color.Transparent)
-                                .clickable { onLanguageSelected(code) }
-                                .padding(vertical = 8.dp, horizontal = 8.dp),
+                                .selectable(selected = isSelected, role = Role.RadioButton) { onLanguageSelected(code) }
+                                .padding(vertical = 8.dp, horizontal = 6.dp),
                             contentAlignment = Alignment.Center
                         ) {
                             Text(
                                 text = label,
-                                fontSize = 11.sp,
+                                style = ZtType.label,
                                 fontWeight = if (isSelected) FontWeight.Bold else FontWeight.SemiBold,
-                                color = if (isSelected) Color.Black else Color(0xBFE0F2FE)
+                                color = if (isSelected) Color.Black else Color(0xBFE0F2FE),
+                                textAlign = TextAlign.Center,
+                                maxLines = 2
                             )
                         }
                     }
@@ -718,198 +553,815 @@ fun SettingsScreen(
             }
         }
 
-        // 6. Diagnostics & Actions Card
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .floatingShadow(color = Color(0xB3000000), borderRadius = 24.dp, blurRadius = 24.dp, offsetY = 10.dp)
-                .shadow(10.dp, RoundedCornerShape(24.dp), ambientColor = Color(0x66000000), spotColor = Color(0x80000000))
-                .clip(RoundedCornerShape(24.dp))
-                .background(Color(0xBF141A29))
-                .border(1.dp, Color(0x26FFFFFF), RoundedCornerShape(24.dp))
-                .padding(18.dp)
-        ) {
+        // 6. Diagnostics and actions
+        GlassCard(modifier = Modifier.fillMaxWidth(), contentPadding = PaddingValues18) {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    // Send Test Alert Button (Respects Sound & Vibration)
-                    Box(
-                        modifier = Modifier
-                            .weight(1f)
-                            .clip(RoundedCornerShape(16.dp))
-                            .background(Color(0xFFFF5E3A))
-                            .clickable {
-                                onSendTestAlert()
-                                onShowAppBanner(if (lang == "uk") "Тестове сповіщення надіслано" else "Test alert dispatched")
-                            }
-                            .padding(vertical = 12.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
-                        ) {
-                            Icon(Icons.Default.Send, contentDescription = null, tint = Color.White, modifier = Modifier.size(14.dp))
-                            Text(AppStrings.testAlertBtn(lang), fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.White)
-                        }
-                    }
-
-                    // Refresh Button with In-App Application Icon Notification Banner
-                    Box(
-                        modifier = Modifier
-                            .weight(1f)
-                            .clip(RoundedCornerShape(16.dp))
-                            .background(Color(0x1AFFFFFF))
-                            .border(1.dp, Color(0x26FFFFFF), RoundedCornerShape(16.dp))
-                            .clickable {
-                                onForceRefresh()
-                            }
-                            .padding(vertical = 12.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
-                        ) {
-                            Icon(Icons.Default.Language, contentDescription = null, tint = Color.White, modifier = Modifier.size(14.dp))
-                            Text(AppStrings.refreshBtn(lang), fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = Color.White)
-                        }
+                val stackButtons = LocalDensity.current.fontScale >= 1.3f
+                val testButton: @Composable (Modifier) -> Unit = { m ->
+                    ActionButton(
+                        text = AppStrings.testAlertBtn(lang),
+                        icon = Icons.Default.Send,
+                        filled = true,
+                        onClick = {
+                            onSendTestAlert()
+                            onShowAppBanner(AppStrings.testAlertSent(lang))
+                        },
+                        modifier = m
+                    )
+                }
+                val refreshButton: @Composable (Modifier) -> Unit = { m ->
+                    ActionButton(
+                        text = AppStrings.refreshBtn(lang),
+                        icon = Icons.Default.Refresh,
+                        filled = false,
+                        onClick = onForceRefresh,
+                        modifier = m,
+                        busy = isRefreshing,
+                        busyText = AppStrings.refreshing(lang)
+                    )
+                }
+                if (stackButtons) {
+                    testButton(Modifier.fillMaxWidth())
+                    refreshButton(Modifier.fillMaxWidth())
+                } else {
+                    // Same height even when only one label wraps to two lines
+                    Row(modifier = Modifier.fillMaxWidth().height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        testButton(Modifier.weight(1f).fillMaxHeight())
+                        refreshButton(Modifier.weight(1f).fillMaxHeight())
                     }
                 }
 
-                // Reset to Defaults
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(16.dp))
-                        .border(1.dp, Color(0x1AFFFFFF), RoundedCornerShape(16.dp))
-                        .clickable { showResetConfirmDialog = true }
-                        .padding(vertical = 10.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        Icon(Icons.Default.Refresh, contentDescription = null, tint = Color(0xB3BAE6FD), modifier = Modifier.size(14.dp))
-                        Text(AppStrings.resetDefaultsBtn(lang), fontSize = 12.sp, fontWeight = FontWeight.Medium, color = Color(0xB3BAE6FD))
-                    }
-                }
+                ActionButton(
+                    text = AppStrings.resetDefaultsBtn(lang),
+                    icon = Icons.Default.Refresh,
+                    filled = false,
+                    subdued = true,
+                    onClick = { showResetConfirmDialog = true },
+                    modifier = Modifier.fillMaxWidth()
+                )
             }
         }
 
         Spacer(modifier = Modifier.height(96.dp))
     }
 
-    // =========================================================================================
-    // Full-Screen Queue Help & Interactive ZTOE Address Lookup Dialog ("?" Button)
-    // =========================================================================================
     if (showQueueHelpDialog) {
-        var allRems by remember {
-            mutableStateOf(ZtoeAddressLookup.getRems())
-        }
-        val currentRem = allRems.find { it.id == selectedRemId } ?: allRems.first()
+        AddressLookupDialog(
+            siteUrl = siteUrl,
+            lang = lang,
+            saved = selectedAddressQuery,
+            onDismiss = { showQueueHelpDialog = false },
+            onApply = { queue, statusText, addressLabel, query ->
+                onAddAddress(queue, statusText, addressLabel, query)
+                showQueueHelpDialog = false
+            },
+            onShowAppBanner = onShowAppBanner
+        )
+    }
 
-        var settlementsList by remember(selectedRemId) {
-            mutableStateOf(ZtoeAddressLookup.getSettlementsForRem(selectedRemId))
-        }
-        var streetsList by remember(selectedSettlementId) {
-            mutableStateOf(
-                if (selectedSettlementId.isNotBlank()) {
-                    ZtoeAddressLookup.getStreetsForSettlement(selectedSettlementId)
-                } else {
-                    emptyList()
+    removeCandidate?.let { item ->
+        AlertDialog(
+            onDismissRequest = { removeCandidate = null },
+            title = { Text(AppStrings.removeConfirmTitle(lang), style = ZtType.heading, color = Color.White) },
+            text = {
+                Text(
+                    AppStrings.removeConfirmBody(lang, Subscriptions.displayLabel(item)),
+                    style = ZtType.body,
+                    color = ZtColors.TextSecondary
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        onRemoveSubscription(item.id)
+                        removeCandidate = null
+                    },
+                    modifier = Modifier.heightIn(min = ZtMinTouch)
+                ) {
+                    Text(AppStrings.removeAddress(lang), style = ZtType.label, color = ZtColors.Accent, fontWeight = FontWeight.Bold)
                 }
-            )
-        }
-        var housesList by remember(selectedStreetId) {
-            mutableStateOf(
-                if (selectedStreetId.isNotBlank()) {
-                    ZtoeAddressLookup.getHousesForStreet(selectedStreetId)
-                } else {
-                    emptyList()
+            },
+            dismissButton = {
+                TextButton(onClick = { removeCandidate = null }, modifier = Modifier.heightIn(min = ZtMinTouch)) {
+                    Text(AppStrings.cancel(lang), style = ZtType.label, color = Color.White)
                 }
-            )
-        }
+            },
+            containerColor = ZtColors.CardSolid
+        )
+    }
 
-        // Refresh the list of all REMs, Cities, Streets and Houses whenever User enters the "?" screen
-        LaunchedEffect(siteUrl) {
-            val fetchedRems = withContext(Dispatchers.IO) {
-                ZtoeAddressLookup.fetchRemsFromZtoe(siteUrl, forceRefresh = true)
-            }
-            if (fetchedRems.isNotEmpty()) {
-                allRems = fetchedRems
-            }
-        }
-
-        // Dynamically load full settlement list for selected REM from ZTOE (refreshed when entering "?" screen)
-        LaunchedEffect(selectedRemId, siteUrl) {
-            val fetched = withContext(Dispatchers.IO) {
-                ZtoeAddressLookup.fetchSettlementsForRem(selectedRemId, siteUrl, forceRefresh = true)
-            }
-            if (fetched.isNotEmpty()) {
-                settlementsList = fetched
-                if (selectedSettlementId.isBlank() || fetched.none { it.id == selectedSettlementId }) {
-                    selectedSettlementId = fetched.first().id
+    renameCandidate?.let { item ->
+        var text by remember(item.id) { mutableStateOf(item.label) }
+        AlertDialog(
+            onDismissRequest = { renameCandidate = null },
+            title = { Text(AppStrings.renameAddress(lang), style = ZtType.heading, color = Color.White) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(
+                        value = text,
+                        onValueChange = { text = it.take(Subscriptions.MAX_LABEL_LENGTH) },
+                        singleLine = true,
+                        textStyle = ZtType.body,
+                        placeholder = { Text(Subscriptions.defaultLabel(item), style = ZtType.body, color = ZtColors.TextTertiary) },
+                        modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp),
+                        shape = ZtShapes.Control,
+                        colors = glassFieldColors()
+                    )
+                    Text(AppStrings.renameHint(lang), style = ZtType.caption, color = ZtColors.TextTertiary)
                 }
-            }
-        }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        onRenameSubscription(item.id, text)
+                        renameCandidate = null
+                    },
+                    modifier = Modifier.heightIn(min = ZtMinTouch)
+                ) {
+                    Text(AppStrings.save(lang), style = ZtType.label, color = ZtColors.Accent, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { renameCandidate = null }, modifier = Modifier.heightIn(min = ZtMinTouch)) {
+                    Text(AppStrings.cancel(lang), style = ZtType.label, color = Color.White)
+                }
+            },
+            containerColor = ZtColors.CardSolid
+        )
+    }
 
-        // Dynamically load full street list (and bulk-index all houses for every street in the settlement) from ZTOE
-        LaunchedEffect(selectedRemId, selectedSettlementId, siteUrl) {
-            if (selectedSettlementId.isBlank()) {
-                streetsList = emptyList()
-                return@LaunchedEffect
-            }
-            val fetched = withContext(Dispatchers.IO) {
-                ZtoeAddressLookup.fetchStreetsForSettlement(selectedRemId, selectedSettlementId, siteUrl, forceRefresh = true)
-            }
-            if (fetched.isNotEmpty()) {
-                streetsList = fetched
-                allRems = ZtoeAddressLookup.getRems()
-                settlementsList = ZtoeAddressLookup.getSettlementsForRem(selectedRemId)
-                if (selectedStreetId.isNotBlank()) {
-                    val bulkIndexed = ZtoeAddressLookup.getHousesForStreet(selectedStreetId)
-                    if (bulkIndexed.isNotEmpty()) {
-                        housesList = bulkIndexed
+    if (showResetConfirmDialog) {
+        AlertDialog(
+            onDismissRequest = { showResetConfirmDialog = false },
+            title = { Text(AppStrings.resetConfirmTitle(lang), style = ZtType.heading, color = Color.White) },
+            text = { Text(AppStrings.resetConfirmDesc(lang), style = ZtType.body, color = ZtColors.TextSecondary) },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        onResetDefaults()
+                        showResetConfirmDialog = false
+                        onShowAppBanner(AppStrings.settingsReset(lang))
+                    },
+                    modifier = Modifier.heightIn(min = ZtMinTouch)
+                ) {
+                    Text(AppStrings.resetYes(lang), style = ZtType.label, color = ZtColors.Accent, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showResetConfirmDialog = false }, modifier = Modifier.heightIn(min = ZtMinTouch)) {
+                    Text(AppStrings.cancel(lang), style = ZtType.label, color = Color.White)
+                }
+            },
+            containerColor = ZtColors.CardSolid
+        )
+    }
+}
+
+private val PaddingValues18 = PaddingValues(18.dp)
+
+// =============================================================================================
+// "Мої адреси" card (multi-address step 2, spec/SUBSCRIPTIONS.md, mockup frame 1)
+// =============================================================================================
+
+@Composable
+private fun MyAddressesCard(
+    store: SubscriptionStore,
+    /** Master off: every address's switches show off and are locked; their own values are kept. */
+    alertsMaster: Boolean,
+    advanceMinutes: Int,
+    lang: String,
+    onHelp: () -> Unit,
+    onAddQueueOnly: (String) -> Unit,
+    onMove: (String, Int) -> Unit,
+    onRemove: (Subscription) -> Unit,
+    onRename: (Subscription) -> Unit,
+    onMakePrimary: (String) -> Unit,
+    onSetPlanned: (String, Boolean) -> Unit,
+    onSetEmergency: (String, Boolean) -> Unit
+) {
+    val count = store.items.size
+    val canAdd = count < Subscriptions.MAX_ITEMS
+    GlassCard(modifier = Modifier.fillMaxWidth(), contentPadding = PaddingValues18) {
+        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(text = AppStrings.myAddressesTitle(lang), style = ZtType.overline, color = Color.White)
+                    Text(text = AppStrings.myAddressesDesc(lang), style = ZtType.caption, color = ZtColors.TextSecondary)
+                }
+                if (count > 0) {
+                    StatusChip(
+                        text = AppStrings.addressesCount(lang, count, Subscriptions.MAX_ITEMS),
+                        background = ZtColors.ChipGrey,
+                        foreground = ZtColors.ChipGreyText,
+                        icon = null
+                    )
+                }
+                // 48 dp touch target around the 40 dp "?" tile; opens the address lookup
+                Box(
+                    modifier = Modifier
+                        .size(ZtMinTouch)
+                        .clickable(role = Role.Button, onClickLabel = AppStrings.queueHelpTitle(lang), onClick = onHelp)
+                        .semantics { contentDescription = AppStrings.queueHelpTitle(lang) },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(40.dp)
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(ZtColors.Accent)
+                            .border(1.dp, Color(0x40FFFFFF), RoundedCornerShape(16.dp)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(Icons.Default.HelpOutline, contentDescription = null, tint = Color.White, modifier = Modifier.size(20.dp))
                     }
                 }
             }
+
+            if (!alertsMaster && store.items.isNotEmpty()) {
+                Text(text = AppStrings.masterOffCaption(lang), style = ZtType.caption, color = ZtColors.ChipAmberText)
+            }
+            // Drag the handle to reorder: a local order follows the finger, the store is written on release
+            val ids = store.items.map { it.id }
+            var order by remember { mutableStateOf(ids) }
+            var draggingId by remember { mutableStateOf<String?>(null) }
+            var dragOffset by remember { mutableFloatStateOf(0f) }
+            val heights = remember { mutableStateMapOf<String, Int>() }
+            val gapPx = with(LocalDensity.current) { 12.dp.toPx() }
+            val currentOnMove by rememberUpdatedState(onMove)
+            // the drag gesture outlives recompositions: read the newest store order through this
+            val currentIds by rememberUpdatedState(ids)
+            if (draggingId == null && order != ids) order = ids
+            val byId = store.items.associateBy { it.id }
+
+            fun dragBy(id: String, dy: Float) {
+                dragOffset += dy
+                val i = order.indexOf(id)
+                if (i < 0) return
+                if (dragOffset > 0f && i < order.lastIndex) {
+                    val step = (heights[order[i + 1]] ?: 0) + gapPx
+                    if (dragOffset > step / 2f) {
+                        order = order.toMutableList().apply { add(i + 1, removeAt(i)) }
+                        dragOffset -= step
+                    }
+                } else if (dragOffset < 0f && i > 0) {
+                    val step = (heights[order[i - 1]] ?: 0) + gapPx
+                    if (-dragOffset > step / 2f) {
+                        order = order.toMutableList().apply { add(i - 1, removeAt(i)) }
+                        dragOffset += step
+                    }
+                }
+            }
+
+            fun dropped(id: String) {
+                val to = order.indexOf(id)
+                draggingId = null
+                dragOffset = 0f
+                if (to >= 0 && to != currentIds.indexOf(id)) currentOnMove(id, to)
+            }
+
+            order.mapNotNull { byId[it] }.forEachIndexed { index, item ->
+              // key: when the order changes the block keeps its own composition, so the drag gesture in
+              // progress is not handed to another block and cancelled (the card then "hung" mid-drag)
+              key(item.id) {
+                val label = Subscriptions.displayLabel(item)
+                val isDragging = draggingId == item.id
+                val handle = if (store.items.size < 2) null else Modifier
+                    .pointerInput(item.id) {
+                        detectDragGestures(
+                            onDragStart = {
+                                draggingId = item.id
+                                dragOffset = 0f
+                            },
+                            onDragEnd = { dropped(item.id) },
+                            onDragCancel = { dropped(item.id) },
+                            onDrag = { change, amount ->
+                                change.consume()
+                                dragBy(item.id, amount.y)
+                            }
+                        )
+                    }
+                    .semantics {
+                        contentDescription = "${AppStrings.reorderHandle(lang)}: $label"
+                        customActions = buildList {
+                            if (index > 0) add(CustomAccessibilityAction(AppStrings.moveUp(lang)) { currentOnMove(item.id, index - 1); true })
+                            if (index < store.items.lastIndex) add(CustomAccessibilityAction(AppStrings.moveDown(lang)) { currentOnMove(item.id, index + 1); true })
+                        }
+                    }
+                SubscriptionBlock(
+                    item = item,
+                    alertsMaster = alertsMaster,
+                    isPrimary = item.id == store.primaryId,
+                    advanceMinutes = advanceMinutes,
+                    lang = lang,
+                    onRemove = { onRemove(item) },
+                    onRename = { onRename(item) },
+                    onMakePrimary = { onMakePrimary(item.id) },
+                    onSetPlanned = { onSetPlanned(item.id, it) },
+                    onSetEmergency = { onSetEmergency(item.id, it) },
+                    dragHandle = handle,
+                    modifier = Modifier
+                        .onSizeChanged { heights[item.id] = it.height }
+                        .zIndex(if (isDragging) 1f else 0f)
+                        .graphicsLayer {
+                            translationY = if (isDragging) dragOffset else 0f
+                            scaleX = if (isDragging) 1.02f else 1f
+                            scaleY = if (isDragging) 1.02f else 1f
+                        }
+                        .then(if (isDragging) Modifier.shadow(10.dp, RoundedCornerShape(16.dp)) else Modifier)
+                )
+              }
+            }
+
+            if (canAdd) {
+                ActionButton(
+                    text = AppStrings.addAddress(lang),
+                    icon = Icons.Default.Add,
+                    filled = true,
+                    onClick = onHelp,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                val used = store.items.mapNotNull { if (it.address == null) it.queue else null }.toSet()
+                val free = QUEUES.filter { it !in used }
+                GlassDropdown(
+                    value = AppStrings.addQueueOnly(lang),
+                    options = free.map { "${AppStrings.queue(lang)} $it" },
+                    onSelect = { onAddQueueOnly(free[it]) }
+                )
+                if (count > 0) {
+                    Text(
+                        text = AppStrings.addressesLeft(lang, Subscriptions.MAX_ITEMS - count),
+                        style = ZtType.caption,
+                        color = ZtColors.TextTertiary
+                    )
+                }
+            } else {
+                Text(
+                    text = AppStrings.addressLimitReached(lang, Subscriptions.MAX_ITEMS),
+                    style = ZtType.caption,
+                    color = ZtColors.TextSecondary
+                )
+            }
         }
+    }
+}
 
-        // Dynamically load full house list for selected street from ZTOE (served in 0ms when already bulk-indexed)
-        LaunchedEffect(selectedRemId, selectedSettlementId, selectedStreetId, siteUrl) {
-            if (selectedStreetId.isBlank()) {
-                housesList = emptyList()
-                return@LaunchedEffect
+@Composable
+private fun SubscriptionBlock(
+    item: Subscription,
+    alertsMaster: Boolean,
+    isPrimary: Boolean,
+    advanceMinutes: Int,
+    lang: String,
+    onRemove: () -> Unit,
+    onRename: () -> Unit,
+    onMakePrimary: () -> Unit,
+    onSetPlanned: (Boolean) -> Unit,
+    onSetEmergency: (Boolean) -> Unit,
+    /** Gesture and accessibility actions of the reorder handle; null hides it (one address). */
+    dragHandle: Modifier? = null,
+    modifier: Modifier = Modifier
+) {
+    val shape = RoundedCornerShape(16.dp)
+    val label = Subscriptions.displayLabel(item)
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(shape)
+            .background(Color(0x14FFFFFF))
+            .border(1.dp, if (isPrimary) Color(0x59FF5E3A) else Color(0x1AFFFFFF), shape)
+            .padding(horizontal = 14.dp, vertical = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            if (dragHandle != null) {
+                // 48 dp grip: press and drag up or down; TalkBack offers "move up" / "move down"
+                Box(modifier = Modifier.size(ZtMinTouch).then(dragHandle), contentAlignment = Alignment.Center) {
+                    Icon(Icons.Default.DragIndicator, contentDescription = null, tint = ZtColors.TextSecondary, modifier = Modifier.size(22.dp))
+                }
             }
-            housesList = ZtoeAddressLookup.getHousesForStreet(selectedStreetId)
-            val fetched = withContext(Dispatchers.IO) {
-                ZtoeAddressLookup.fetchHousesForStreet(selectedRemId, selectedSettlementId, selectedStreetId, siteUrl, forceRefresh = true)
+            @OptIn(ExperimentalLayoutApi::class)
+            FlowRow(
+                modifier = Modifier.weight(1f),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                // a queue-only item already says "Черга X" in its label
+                if (item.address != null) {
+                    StatusChip(
+                        text = when {
+                            item.queue != null -> "${AppStrings.queue(lang)} ${item.queue}"
+                            !item.queueStatusText.isNullOrBlank() -> AppStrings.noQueueNotDisconnected(lang)
+                            else -> AppStrings.selectQueueAction(lang)
+                        },
+                        background = ZtColors.ChipGrey,
+                        foreground = ZtColors.ChipGreyText,
+                        icon = null
+                    )
+                }
+                if (isPrimary) {
+                    StatusChip(
+                        text = AppStrings.primaryBadge(lang),
+                        background = ZtColors.ChipGrey,
+                        foreground = Color.White,
+                        icon = Icons.Default.Star
+                    )
+                }
             }
-            if (fetched.isNotEmpty()) {
-                housesList = fetched
+            IconTile(icon = Icons.Default.Edit, description = "${AppStrings.renameAddress(lang)}: $label", onClick = onRename)
+            IconTile(icon = Icons.Default.Delete, description = "${AppStrings.removeAddress(lang)}: $label", onClick = onRemove, danger = true)
+        }
+        Text(text = label, style = ZtType.subhead, color = Color.White)
+        val caption = item.address?.text?.takeIf { it.isNotBlank() } ?: if (item.address == null) AppStrings.queueOnlyCaption(lang) else null
+        if (caption != null) {
+            Text(text = caption, style = ZtType.caption, color = ZtColors.TextSecondary)
+        }
+        SwitchRow(
+            icon = Icons.Default.Notifications,
+            iconTint = Color.White,
+            title = AppStrings.plannedShort(lang),
+            hint = AppStrings.plannedDesc(lang, advanceMinutes),
+            checked = alertsMaster && item.plannedAlerts,
+            onCheckedChange = onSetPlanned,
+            lang = lang,
+            enabled = alertsMaster && item.queue != null
+        )
+        SwitchRow(
+            icon = Icons.Default.Warning,
+            iconTint = ZtColors.Accent,
+            title = AppStrings.emergencyShort(lang),
+            hint = if (item.address != null) AppStrings.emergencyDesc(lang) else AppStrings.emergencyNeedsAddress(lang),
+            checked = alertsMaster && item.emergencyAlerts && item.address != null,
+            onCheckedChange = onSetEmergency,
+            lang = lang,
+            enabled = alertsMaster && item.address != null
+        )
+        if (!isPrimary) {
+            ActionButton(
+                text = AppStrings.makePrimary(lang),
+                icon = Icons.Default.Star,
+                filled = false,
+                onClick = onMakePrimary,
+                modifier = Modifier.fillMaxWidth()
+            )
+        }
+    }
+}
+
+/** 48 dp touch target around a 36 dp icon tile. */
+@Composable
+private fun IconTile(icon: ImageVector, description: String, onClick: () -> Unit, danger: Boolean = false) {
+    Box(
+        modifier = Modifier
+            .size(ZtMinTouch)
+            .clickable(role = Role.Button, onClick = onClick)
+            .semantics { contentDescription = description },
+        contentAlignment = Alignment.Center
+    ) {
+        Box(
+            modifier = Modifier
+                .size(36.dp)
+                .clip(RoundedCornerShape(12.dp))
+                .background(if (danger) Color(0x33EF4444) else Color(0x1AFFFFFF)),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(icon, contentDescription = null, tint = if (danger) Color(0xFFFCA5A5) else Color.White, modifier = Modifier.size(18.dp))
+        }
+    }
+}
+
+// =============================================================================================
+// Small building blocks
+// =============================================================================================
+
+@Composable
+private fun StatusChip(text: String, background: Color, foreground: Color, icon: ImageVector?) {
+    Row(
+        modifier = Modifier
+            .clip(ZtShapes.Chip)
+            .background(background)
+            .padding(horizontal = 10.dp, vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        if (icon != null) Icon(icon, contentDescription = null, tint = foreground, modifier = Modifier.size(16.dp))
+        Text(text = text, style = ZtType.label, color = foreground)
+    }
+}
+
+@Composable
+private fun switchColors(): androidx.compose.material3.SwitchColors = SwitchDefaults.colors(
+    checkedThumbColor = Color.White,
+    checkedTrackColor = ZtColors.Accent,
+    uncheckedThumbColor = Color.LightGray,
+    uncheckedTrackColor = Color(0x33FFFFFF),
+    disabledCheckedTrackColor = Color(0x33FF5E3A),
+    disabledUncheckedTrackColor = Color(0x1AFFFFFF),
+    disabledUncheckedThumbColor = Color(0x4DFFFFFF)
+)
+
+/**
+ * A labelled switch row. The whole row is the toggle target (role Switch, localized On/Off state), so
+ * TalkBack reads "title, hint, On" once; the [Switch] itself is only drawn.
+ */
+@Composable
+private fun SwitchRow(
+    icon: ImageVector,
+    iconTint: Color,
+    title: String,
+    hint: String?,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+    lang: String,
+    enabled: Boolean = true
+) {
+    val stateText = if (checked) AppStrings.switchOn(lang) else AppStrings.switchOff(lang)
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = ZtMinTouch)
+            .toggleable(value = checked, enabled = enabled, role = Role.Switch, onValueChange = onCheckedChange)
+            .semantics { stateDescription = stateText },
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        Icon(icon, contentDescription = null, tint = iconTint, modifier = Modifier.size(20.dp))
+        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(
+                text = title,
+                style = ZtType.subhead,
+                color = if (enabled) Color.White else Color(0x80FFFFFF)
+            )
+            if (hint != null) {
+                Text(
+                    text = hint,
+                    style = ZtType.caption,
+                    color = if (enabled) ZtColors.TextSecondary else ZtColors.TextTertiary
+                )
             }
         }
+        Switch(checked = checked, onCheckedChange = null, enabled = enabled, colors = switchColors())
+    }
+}
 
-        val currentSettlement = settlementsList.find { it.id == selectedSettlementId }
-            ?: ZtoeAddressLookup.findSettlementById(selectedSettlementId)
-            ?: settlementsList.firstOrNull()
-        val currentStreet = streetsList.find { it.id == selectedStreetId }
-            ?: ZtoeAddressLookup.findStreetById(selectedStreetId)
-        val currentHouseRecord = housesList.find { it.house.equals(selectedHouse, ignoreCase = true) }
-
-        // Automatically query ZTOE when a valid street and house are selected (do NOT close or apply until user clicks button)
-        LaunchedEffect(selectedRemId, selectedSettlementId, selectedStreetId, selectedHouse) {
-            addressLookupResult = null
-            if (selectedStreetId.isBlank() || selectedHouse.isBlank()) {
-                isCheckingAddressOnSite = false
-                return@LaunchedEffect
+/** Read-only dropdown for short preset lists (queues, minutes). Long searchable lists use SearchablePickerField. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun GlassDropdown(value: String, options: List<String>, onSelect: (Int) -> Unit) {
+    var expanded by remember { mutableStateOf(false) }
+    ExposedDropdownMenuBox(expanded = expanded, onExpandedChange = { expanded = it }) {
+        OutlinedTextField(
+            value = value,
+            onValueChange = {},
+            readOnly = true,
+            singleLine = true,
+            textStyle = ZtType.body,
+            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
+            modifier = Modifier.menuAnchor().fillMaxWidth().heightIn(min = 56.dp),
+            shape = ZtShapes.Control,
+            colors = glassFieldColors()
+        )
+        ExposedDropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false },
+            modifier = Modifier.background(ZtColors.CardSolid)
+        ) {
+            options.forEachIndexed { index, text ->
+                DropdownMenuItem(
+                    text = { Text(text, style = ZtType.subhead, color = Color.White) },
+                    onClick = {
+                        onSelect(index)
+                        expanded = false
+                    }
+                )
             }
-            isCheckingAddressOnSite = true
-            val res = withContext(Dispatchers.IO) {
+        }
+    }
+}
+
+/** Button with a 48 dp minimum height. [filled] is the accent button, [subdued] the quiet outlined one. */
+@Composable
+private fun ActionButton(
+    text: String,
+    icon: ImageVector?,
+    filled: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    subdued: Boolean = false,
+    /** Work is running: the icon rotates, taps are ignored and [busyText] is announced. */
+    busy: Boolean = false,
+    busyText: String? = null
+) {
+    val shape = ZtShapes.Control
+    val contentColor = if (subdued) ZtColors.TextSecondary else Color.White
+    Box(
+        modifier = modifier
+            .heightIn(min = ZtMinTouch)
+            .clip(shape)
+            .then(
+                when {
+                    filled -> Modifier.background(ZtColors.Accent)
+                    subdued -> Modifier.border(1.dp, Color(0x1AFFFFFF), shape)
+                    else -> Modifier.background(Color(0x1AFFFFFF)).border(1.dp, ZtColors.CardBorder, shape)
+                }
+            )
+            .semantics { if (busy && busyText != null) stateDescription = busyText }
+            .clickable(enabled = !busy, role = Role.Button, onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally)
+        ) {
+            if (icon != null) Icon(icon, contentDescription = null, tint = contentColor, modifier = Modifier.size(16.dp).spinWhile(busy))
+            Text(
+                text = text,
+                style = ZtType.label,
+                fontWeight = if (filled) FontWeight.Bold else FontWeight.SemiBold,
+                color = contentColor,
+                textAlign = TextAlign.Center
+            )
+        }
+    }
+}
+
+private fun ZtoeRemOption.displayName(lang: String) = if (lang == "uk") nameUk else nameEn
+private fun ZtoeSettlementOption.displayName(lang: String) = if (lang == "uk") nameUk else nameEn
+private fun ZtoeStreetOption.displayName(lang: String) = if (lang == "uk") nameUk else nameEn
+
+/** Loading flags of one level of the REM, city, street, house cascade; [retry] re-runs its fetch with forceRefresh. */
+private class LevelState {
+    var loading by mutableStateOf(false)
+    var failed by mutableStateOf(false)
+    var retry by mutableIntStateOf(0)
+}
+
+// =============================================================================================
+// Full-screen queue help and address lookup dialog ("?" button)
+// =============================================================================================
+
+@Composable
+private fun AddressLookupDialog(
+    siteUrl: String,
+    lang: String,
+    saved: SelectedAddressQuery?,
+    onDismiss: () -> Unit,
+    onApply: (queue: String, statusText: String?, addressLabel: String, query: SelectedAddressQuery) -> Unit,
+    onShowAppBanner: (String) -> Unit
+) {
+    // The cascade starts from the saved address, or from Zhytomyr city on a first launch. After that a REM
+    // never picks a city for the user: choosing another REM clears city, street and house.
+    var selectedRemId by remember { mutableStateOf(saved?.remId?.ifBlank { "zhytomyr" } ?: "zhytomyr") }
+    var selectedSettlementId by remember { mutableStateOf(saved?.settlementId?.ifBlank { "zt_city" } ?: "zt_city") }
+    var selectedStreetId by remember { mutableStateOf(saved?.streetId ?: "") }
+    var selectedHouse by remember { mutableStateOf(saved?.house ?: "") }
+
+    var allRems by remember { mutableStateOf(ZtoeAddressLookup.getRems()) }
+    var settlementsList by remember { mutableStateOf(ZtoeAddressLookup.getSettlementsForRem(selectedRemId)) }
+    var streetsList by remember {
+        mutableStateOf(
+            if (selectedSettlementId.isNotBlank()) ZtoeAddressLookup.getStreetsForSettlement(selectedSettlementId) else emptyList()
+        )
+    }
+    var housesList by remember {
+        mutableStateOf(
+            if (selectedStreetId.isNotBlank()) ZtoeAddressLookup.getHousesForStreet(selectedStreetId) else emptyList()
+        )
+    }
+    val remsState = remember { LevelState() }
+    val settlementsState = remember { LevelState() }
+    val streetsState = remember { LevelState() }
+    val housesState = remember { LevelState() }
+
+    var isCheckingAddressOnSite by remember { mutableStateOf(false) }
+    var addressCheckFailed by remember { mutableStateOf(false) }
+    var addressLookupResult by remember { mutableStateOf<AddressLookupResult?>(null) }
+
+    fun clearBelowRem() {
+        selectedSettlementId = ""
+        selectedStreetId = ""
+        selectedHouse = ""
+        streetsList = emptyList()
+        housesList = emptyList()
+        addressLookupResult = null
+    }
+
+    fun clearBelowSettlement() {
+        selectedStreetId = ""
+        selectedHouse = ""
+        housesList = emptyList()
+        addressLookupResult = null
+    }
+
+    // REM list. A retry forces a fresh fetch; otherwise the in-memory cache is used.
+    LaunchedEffect(siteUrl, remsState.retry) {
+        remsState.loading = true
+        remsState.failed = false
+        val fetched = withContext(Dispatchers.IO) {
+            runCatching { ZtoeAddressLookup.fetchRemsFromZtoe(siteUrl, forceRefresh = remsState.retry > 0) }.getOrNull()
+        }
+        if (!fetched.isNullOrEmpty()) allRems = fetched
+        remsState.failed = allRems.isEmpty()
+        remsState.loading = false
+    }
+
+    // City list of the chosen REM. Never selects a city by itself; only drops a choice that no longer exists.
+    LaunchedEffect(selectedRemId, siteUrl, settlementsState.retry) {
+        settlementsList = ZtoeAddressLookup.getSettlementsForRem(selectedRemId)
+        settlementsState.loading = true
+        settlementsState.failed = false
+        val fetched = withContext(Dispatchers.IO) {
+            runCatching {
+                ZtoeAddressLookup.fetchSettlementsForRem(selectedRemId, siteUrl, forceRefresh = settlementsState.retry > 0)
+            }.getOrDefault(emptyList())
+        }
+        if (fetched.isNotEmpty()) settlementsList = fetched
+        settlementsState.failed = settlementsList.isEmpty()
+        settlementsState.loading = false
+        if (selectedSettlementId.isNotBlank() && settlementsList.isNotEmpty() && settlementsList.none { it.id == selectedSettlementId }) {
+            selectedSettlementId = ""
+            clearBelowSettlement()
+        }
+    }
+
+    // Street list (the fetch also bulk-indexes the houses of the whole settlement)
+    LaunchedEffect(selectedRemId, selectedSettlementId, siteUrl, streetsState.retry) {
+        if (selectedSettlementId.isBlank()) {
+            streetsList = emptyList()
+            streetsState.loading = false
+            streetsState.failed = false
+            return@LaunchedEffect
+        }
+        streetsList = ZtoeAddressLookup.getStreetsForSettlement(selectedSettlementId)
+        streetsState.loading = true
+        streetsState.failed = false
+        val fetched = withContext(Dispatchers.IO) {
+            runCatching {
+                ZtoeAddressLookup.fetchStreetsForSettlement(
+                    selectedRemId, selectedSettlementId, siteUrl, forceRefresh = streetsState.retry > 0
+                )
+            }.getOrDefault(emptyList())
+        }
+        if (fetched.isNotEmpty()) {
+            streetsList = fetched
+            allRems = ZtoeAddressLookup.getRems()
+            settlementsList = ZtoeAddressLookup.getSettlementsForRem(selectedRemId)
+            if (selectedStreetId.isNotBlank()) {
+                val bulkIndexed = ZtoeAddressLookup.getHousesForStreet(selectedStreetId)
+                if (bulkIndexed.isNotEmpty()) housesList = bulkIndexed
+            }
+        }
+        streetsState.failed = streetsList.isEmpty()
+        streetsState.loading = false
+    }
+
+    // House list of the chosen street (served from the bulk index when it is already there)
+    LaunchedEffect(selectedRemId, selectedSettlementId, selectedStreetId, siteUrl, housesState.retry) {
+        if (selectedStreetId.isBlank()) {
+            housesList = emptyList()
+            housesState.loading = false
+            housesState.failed = false
+            return@LaunchedEffect
+        }
+        housesList = ZtoeAddressLookup.getHousesForStreet(selectedStreetId)
+        housesState.loading = true
+        housesState.failed = false
+        val fetched = withContext(Dispatchers.IO) {
+            runCatching {
+                ZtoeAddressLookup.fetchHousesForStreet(
+                    selectedRemId, selectedSettlementId, selectedStreetId, siteUrl, forceRefresh = housesState.retry > 0
+                )
+            }.getOrDefault(emptyList())
+        }
+        if (fetched.isNotEmpty()) housesList = fetched
+        housesState.failed = housesList.isEmpty()
+        housesState.loading = false
+    }
+
+    val currentRem = allRems.firstOrNull { it.id == selectedRemId }
+    val currentSettlement = if (selectedSettlementId.isBlank()) null else {
+        settlementsList.find { it.id == selectedSettlementId } ?: ZtoeAddressLookup.findSettlementById(selectedSettlementId)
+    }
+    val currentStreet = if (selectedStreetId.isBlank()) null else {
+        streetsList.find { it.id == selectedStreetId } ?: ZtoeAddressLookup.findStreetById(selectedStreetId)
+    }
+    val currentHouseRecord = housesList.find { it.house.equals(selectedHouse, ignoreCase = true) }
+
+    // Queries the site when street and house are chosen. Nothing closes or applies until the user presses the button.
+    LaunchedEffect(selectedRemId, selectedSettlementId, selectedStreetId, selectedHouse, siteUrl) {
+        addressLookupResult = null
+        addressCheckFailed = false
+        if (selectedStreetId.isBlank() || selectedHouse.isBlank()) {
+            isCheckingAddressOnSite = false
+            return@LaunchedEffect
+        }
+        isCheckingAddressOnSite = true
+        val res = withContext(Dispatchers.IO) {
+            runCatching {
                 ZtoeAddressLookup.checkAddressOnZtoeWebsite(
                     remId = selectedRemId,
                     settlementId = selectedSettlementId,
@@ -917,706 +1369,469 @@ fun SettingsScreen(
                     house = selectedHouse,
                     siteUrl = siteUrl
                 )
-            }
-            isCheckingAddressOnSite = false
-            addressLookupResult = res
-            if (res != null) {
-                val exists = housesList.any { it.house.equals(res.house, ignoreCase = true) }
-                housesList = if (!exists) {
-                    housesList + res
-                } else {
-                    housesList.map { h ->
-                        if (h.house.equals(res.house, ignoreCase = true)) {
-                            h.copy(
-                                queue = res.queue.ifEmpty { h.queue },
-                                statusText = res.statusText ?: h.statusText,
-                                emergencyOutage = res.emergencyOutage ?: h.emergencyOutage,
-                                addressLabel = res.addressLabel.ifEmpty { h.addressLabel }
-                            )
-                        } else h
-                    }
-                }
-            }
+            }.getOrNull()
         }
-
-        val selectedAddressStr = if (currentStreet != null && selectedHouse.isNotBlank()) {
-            val remName = if (lang == "uk") currentRem.nameUk else currentRem.nameEn
-            val settlementName = if (currentSettlement != null) {
-                if (lang == "uk") currentSettlement.nameUk else currentSettlement.nameEn
-            } else ""
-            val streetName = if (lang == "uk") currentStreet.nameUk else currentStreet.nameEn
-            val housePrefix = if (lang == "uk") "буд." else "bldg."
-            "$remName, $settlementName,\n$streetName, $housePrefix $selectedHouse"
-        } else {
-            ""
-        }
-
-        Dialog(
-            onDismissRequest = { showQueueHelpDialog = false },
-            properties = DialogProperties(usePlatformDefaultWidth = false)
-        ) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(Color(0xFF141A29))
-                    .statusBarsPadding()
-                    .navigationBarsPadding()
-            ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .verticalScroll(rememberScrollState())
-                        .padding(horizontal = 14.dp, vertical = 16.dp),
-                    verticalArrangement = Arrangement.spacedBy(20.dp)
-                ) {
-                    // Modal Header matching Workbench
-                    Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 4.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                                modifier = Modifier.weight(1f)
-                            ) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(40.dp)
-                                        .clip(RoundedCornerShape(12.dp))
-                                        .background(Color(0xFFFF5E3A)),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Text(
-                                        text = "?",
-                                        fontSize = 20.sp,
-                                        fontWeight = FontWeight.Black,
-                                        color = Color.White
-                                    )
-                                }
-                                Text(
-                                    text = AppStrings.queueHelpTitle(lang),
-                                    fontSize = 20.sp,
-                                    fontWeight = FontWeight.ExtraBold,
-                                    color = Color.White
-                                )
-                            }
-                            Box(
-                                modifier = Modifier
-                                    .size(40.dp)
-                                    .clip(CircleShape)
-                                    .background(Color(0x1AFFFFFF))
-                                    .border(1.dp, Color(0x26FFFFFF), CircleShape)
-                                    .clickable { showQueueHelpDialog = false },
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(
-                                    Icons.Default.Close,
-                                    contentDescription = "Close",
-                                    tint = Color.White,
-                                    modifier = Modifier.size(20.dp)
-                                )
-                            }
-                        }
-                        Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(Color(0x33FFFFFF)))
-                    }
-
-                    // 1) Interactive Search by Address Card matching Workbench
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(24.dp))
-                            .background(Color(0x0DFFFFFF))
-                            .border(2.dp, Color.White.copy(alpha = 0.25f), RoundedCornerShape(24.dp))
-                            .padding(20.dp)
-                    ) {
-                        Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                Text(
-                                    text = (if (lang == "uk") "Пошук черги за адресою" else "Find Queue by Address").uppercase(),
-                                    fontSize = 14.sp,
-                                    fontWeight = FontWeight.ExtraBold,
-                                    color = Color.White,
-                                    letterSpacing = 0.8.sp
-                                )
-                                Text(
-                                    text = AppStrings.queueHelpAddressSubtitle(lang),
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.Medium,
-                                    color = Color(0xCCBAE6FD)
-                                )
-                            }
-
-                            // 1. РЕМ Dropdown
-                            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                Text(
-                                    text = if (lang == "uk") "РЕМ" else "District (РЕМ)",
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = Color(0xE6BAE6FD)
-                                )
-                                ExposedDropdownMenuBox(
-                                    expanded = remDropdownExpanded,
-                                    onExpandedChange = { remDropdownExpanded = it }
-                                ) {
-                                    OutlinedTextField(
-                                        value = if (lang == "uk") currentRem.nameUk else currentRem.nameEn,
-                                        onValueChange = {},
-                                        readOnly = true,
-                                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = remDropdownExpanded) },
-                                        modifier = Modifier.menuAnchor().fillMaxWidth(),
-                                        shape = RoundedCornerShape(16.dp),
-                                        colors = OutlinedTextFieldDefaults.colors(
-                                            focusedTextColor = Color.White,
-                                            unfocusedTextColor = Color.White,
-                                            focusedBorderColor = Color(0xFFFF5E3A),
-                                            unfocusedBorderColor = Color(0x33FFFFFF),
-                                            focusedContainerColor = Color(0x14FFFFFF),
-                                            unfocusedContainerColor = Color(0x14FFFFFF)
-                                        )
-                                    )
-                                    ExposedDropdownMenu(
-                                        expanded = remDropdownExpanded,
-                                        onDismissRequest = { remDropdownExpanded = false },
-                                        modifier = Modifier
-                                            .background(Color(0xFF141A29))
-                                            .heightIn(max = 320.dp)
-                                    ) {
-                                        allRems.forEach { rem ->
-                                            DropdownMenuItem(
-                                                text = {
-                                                    Text(
-                                                        if (lang == "uk") rem.nameUk else rem.nameEn,
-                                                        fontWeight = FontWeight.Bold,
-                                                        color = Color.White
-                                                    )
-                                                },
-                                                onClick = {
-                                                    selectedRemId = rem.id
-                                                    val nextSettlements = ZtoeAddressLookup.getSettlementsForRem(rem.id)
-                                                    settlementsList = nextSettlements
-                                                    val nextSettlementId = nextSettlements.firstOrNull()?.id ?: ""
-                                                    selectedSettlementId = nextSettlementId
-                                                    streetsList = if (nextSettlementId.isNotBlank()) {
-                                                        ZtoeAddressLookup.getStreetsForSettlement(nextSettlementId)
-                                                    } else {
-                                                        emptyList()
-                                                    }
-                                                    selectedStreetId = ""
-                                                    housesList = emptyList()
-                                                    selectedHouse = ""
-                                                    addressLookupResult = null
-                                                    remDropdownExpanded = false
-                                                }
-                                            )
-                                        }
-                                    }
-                                }
-                            }
-
-                            // 2. Населений пункт Dropdown
-                            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                Text(
-                                    text = if (lang == "uk") "Населений пункт" else "City / Settlement",
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = Color(0xE6BAE6FD)
-                                )
-                                ExposedDropdownMenuBox(
-                                    expanded = settlementDropdownExpanded,
-                                    onExpandedChange = { settlementDropdownExpanded = it }
-                                ) {
-                                    val settlementDisplay = if (currentSettlement != null) {
-                                        if (lang == "uk") currentSettlement.nameUk else currentSettlement.nameEn
-                                    } else {
-                                        if (lang == "uk") "Оберіть населений пункт" else "Select settlement"
-                                    }
-                                    OutlinedTextField(
-                                        value = settlementDisplay,
-                                        onValueChange = {},
-                                        readOnly = true,
-                                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = settlementDropdownExpanded) },
-                                        modifier = Modifier.menuAnchor().fillMaxWidth(),
-                                        shape = RoundedCornerShape(16.dp),
-                                        colors = OutlinedTextFieldDefaults.colors(
-                                            focusedTextColor = Color.White,
-                                            unfocusedTextColor = Color.White,
-                                            focusedBorderColor = Color(0xFFFF5E3A),
-                                            unfocusedBorderColor = Color(0x33FFFFFF),
-                                            focusedContainerColor = Color(0x14FFFFFF),
-                                            unfocusedContainerColor = Color(0x14FFFFFF)
-                                        )
-                                    )
-                                    ExposedDropdownMenu(
-                                        expanded = settlementDropdownExpanded,
-                                        onDismissRequest = { settlementDropdownExpanded = false },
-                                        modifier = Modifier
-                                            .background(Color(0xFF141A29))
-                                            .heightIn(max = 320.dp)
-                                    ) {
-                                        settlementsList.forEach { settlement ->
-                                            DropdownMenuItem(
-                                                text = {
-                                                    Text(
-                                                        if (lang == "uk") settlement.nameUk else settlement.nameEn,
-                                                        fontWeight = FontWeight.Bold,
-                                                        color = Color.White
-                                                    )
-                                                },
-                                                onClick = {
-                                                    selectedSettlementId = settlement.id
-                                                    streetsList = ZtoeAddressLookup.getStreetsForSettlement(settlement.id)
-                                                    selectedStreetId = ""
-                                                    housesList = emptyList()
-                                                    selectedHouse = ""
-                                                    addressLookupResult = null
-                                                    settlementDropdownExpanded = false
-                                                }
-                                            )
-                                        }
-                                    }
-                                }
-                            }
-
-                            // 3. Вулиця Dropdown (unselected by default on first launch)
-                            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                Text(
-                                    text = if (lang == "uk") "Вулиця" else "Street",
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = Color(0xE6BAE6FD)
-                                )
-                                ExposedDropdownMenuBox(
-                                    expanded = streetDropdownExpanded,
-                                    onExpandedChange = { streetDropdownExpanded = it }
-                                ) {
-                                    val streetDisplay = when {
-                                        currentStreet == null -> if (lang == "uk") "Оберіть вулицю" else "Select street"
-                                        lang == "uk" -> currentStreet.nameUk
-                                        else -> currentStreet.nameEn
-                                    }
-                                    OutlinedTextField(
-                                        value = streetDisplay,
-                                        onValueChange = {},
-                                        readOnly = true,
-                                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = streetDropdownExpanded) },
-                                        modifier = Modifier.menuAnchor().fillMaxWidth(),
-                                        shape = RoundedCornerShape(16.dp),
-                                        colors = OutlinedTextFieldDefaults.colors(
-                                            focusedTextColor = Color.White,
-                                            unfocusedTextColor = Color.White,
-                                            focusedBorderColor = Color(0xFFFF5E3A),
-                                            unfocusedBorderColor = Color(0x33FFFFFF),
-                                            focusedContainerColor = Color(0x14FFFFFF),
-                                            unfocusedContainerColor = Color(0x14FFFFFF)
-                                        )
-                                    )
-                                    ExposedDropdownMenu(
-                                        expanded = streetDropdownExpanded,
-                                        onDismissRequest = { streetDropdownExpanded = false },
-                                        modifier = Modifier
-                                            .background(Color(0xFF141A29))
-                                            .heightIn(max = 320.dp)
-                                    ) {
-                                        streetsList.forEach { street ->
-                                            DropdownMenuItem(
-                                                text = {
-                                                    Text(
-                                                        if (lang == "uk") street.nameUk else street.nameEn,
-                                                        fontWeight = FontWeight.Bold,
-                                                        color = Color.White
-                                                    )
-                                                },
-                                                onClick = {
-                                                    selectedStreetId = street.id
-                                                    housesList = ZtoeAddressLookup.getHousesForStreet(street.id)
-                                                    selectedHouse = ""
-                                                    addressLookupResult = null
-                                                    streetDropdownExpanded = false
-                                                }
-                                            )
-                                        }
-                                    }
-                                }
-                            }
-
-                            // 4. Будинок Dropdown (unselected by default on first launch)
-                            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                Text(
-                                    text = if (lang == "uk") "Будинок" else "House Number",
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = Color(0xE6BAE6FD)
-                                )
-                                ExposedDropdownMenuBox(
-                                    expanded = houseDropdownExpanded,
-                                    onExpandedChange = {
-                                        if (currentStreet != null) {
-                                            houseDropdownExpanded = it
-                                        }
-                                    }
-                                ) {
-                                    val houseDisplay = when {
-                                        selectedHouse.isBlank() -> if (lang == "uk") "Оберіть будинок" else "Select house"
-                                        else -> selectedHouse
-                                    }
-                                    OutlinedTextField(
-                                        value = houseDisplay,
-                                        onValueChange = {},
-                                        readOnly = true,
-                                        enabled = currentStreet != null,
-                                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = houseDropdownExpanded) },
-                                        modifier = Modifier.menuAnchor().fillMaxWidth(),
-                                        shape = RoundedCornerShape(16.dp),
-                                        colors = OutlinedTextFieldDefaults.colors(
-                                            focusedTextColor = Color.White,
-                                            unfocusedTextColor = Color.White,
-                                            disabledTextColor = Color(0x80FFFFFF),
-                                            focusedBorderColor = Color(0xFFFF5E3A),
-                                            unfocusedBorderColor = Color(0x33FFFFFF),
-                                            disabledBorderColor = Color(0x1AFFFFFF),
-                                            focusedContainerColor = Color(0x14FFFFFF),
-                                            unfocusedContainerColor = Color(0x14FFFFFF),
-                                            disabledContainerColor = Color(0x0DFFFFFF)
-                                        )
-                                    )
-                                    ExposedDropdownMenu(
-                                        expanded = houseDropdownExpanded,
-                                        onDismissRequest = { houseDropdownExpanded = false },
-                                        modifier = Modifier
-                                            .background(Color(0xFF141A29))
-                                            .heightIn(max = 320.dp)
-                                    ) {
-                                        housesList.forEach { h ->
-                                            DropdownMenuItem(
-                                                text = {
-                                                    Text(
-                                                        h.house,
-                                                        fontWeight = FontWeight.Bold,
-                                                        color = Color.White
-                                                    )
-                                                },
-                                                onClick = {
-                                                    selectedHouse = h.house
-                                                    addressLookupResult = null
-                                                    houseDropdownExpanded = false
-                                                }
-                                            )
-                                        }
-                                    }
-                                }
-                            }
-
-                            // Result Card matching Workbench (shown when a house is selected)
-                            val validLookupResult = addressLookupResult?.takeIf {
-                                it.house.equals(selectedHouse, ignoreCase = true)
-                            }
-                            val matchedRecord = when {
-                                validLookupResult != null && currentHouseRecord != null -> validLookupResult.copy(
-                                    queue = validLookupResult.queue.ifEmpty { currentHouseRecord.queue },
-                                    statusText = validLookupResult.statusText ?: currentHouseRecord.statusText,
-                                    emergencyOutage = validLookupResult.emergencyOutage ?: currentHouseRecord.emergencyOutage
-                                )
-                                validLookupResult != null -> validLookupResult
-                                currentHouseRecord != null -> currentHouseRecord
-                                selectedHouse.isNotBlank() -> AddressLookupResult(
-                                    house = selectedHouse,
-                                    queue = "",
-                                    addressLabel = selectedAddressStr
-                                )
-                                else -> null
-                            }
-                            if (selectedHouse.isNotBlank() && matchedRecord != null) {
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(top = 6.dp)
-                                        .clip(RoundedCornerShape(16.dp))
-                                        .background(Color(0xD9141A29))
-                                        .border(2.dp, Color.White.copy(alpha = 0.25f), RoundedCornerShape(16.dp))
-                                        .padding(16.dp)
-                                ) {
-                                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                                        if (selectedAddressStr.isNotBlank()) {
-                                            Text(
-                                                text = selectedAddressStr,
-                                                fontSize = 14.sp,
-                                                fontWeight = FontWeight.SemiBold,
-                                                color = Color(0xE6BAE6FD),
-                                                lineHeight = 19.sp
-                                            )
-                                        }
-
-                                        if (matchedRecord.queue.isNotBlank()) {
-                                            Row(
-                                                modifier = Modifier.fillMaxWidth(),
-                                                horizontalArrangement = Arrangement.SpaceBetween,
-                                                verticalAlignment = Alignment.CenterVertically
-                                            ) {
-                                                Text(
-                                                    text = if (lang == "uk") "Знайдена черга:" else "Found Queue:",
-                                                    fontSize = 14.sp,
-                                                    fontWeight = FontWeight.Medium,
-                                                    color = Color(0xCCBAE6FD)
-                                                )
-                                                Text(
-                                                    text = "${AppStrings.queue(lang)} ${matchedRecord.queue}",
-                                                    fontSize = 16.sp,
-                                                    fontWeight = FontWeight.ExtraBold,
-                                                    fontFamily = FontFamily.Monospace,
-                                                    color = Color.White
-                                                )
-                                            }
-                                        }
-
-                                        if (!matchedRecord.statusText.isNullOrBlank()) {
-                                            Box(
-                                                modifier = Modifier
-                                                    .fillMaxWidth()
-                                                    .clip(RoundedCornerShape(16.dp))
-                                                    .background(Color(0x0FFFFFFF))
-                                                    .border(2.dp, Color(0x33FFFFFF), RoundedCornerShape(16.dp))
-                                                    .padding(horizontal = 16.dp, vertical = 12.dp)
-                                            ) {
-                                                Text(
-                                                    text = matchedRecord.statusText,
-                                                    fontSize = 14.sp,
-                                                    fontWeight = FontWeight.Bold,
-                                                    color = Color.White,
-                                                    lineHeight = 19.sp
-                                                )
-                                            }
-                                        }
-
-                                        val emerg = matchedRecord.emergencyOutage
-                                        if (emerg != null) {
-                                            Box(
-                                                modifier = Modifier
-                                                    .fillMaxWidth()
-                                                    .clip(RoundedCornerShape(16.dp))
-                                                    .background(Color(0x1AFF5E3A))
-                                                    .border(2.dp, Color(0x59FF5E3A), RoundedCornerShape(16.dp))
-                                                    .padding(horizontal = 16.dp, vertical = 12.dp)
-                                            ) {
-                                                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                                    Text(
-                                                        text = if (lang == "uk") {
-                                                            emerg.outageType.ifBlank { "Аварійне відключення" }
-                                                        } else {
-                                                            "Emergency Outage"
-                                                        },
-                                                        fontSize = 14.sp,
-                                                        fontWeight = FontWeight.Bold,
-                                                        color = Color(0xFFFF5E3A)
-                                                    )
-                                                    Text(
-                                                        text = if (lang == "uk") {
-                                                            "Початок: ${emerg.startTime} · Відновлення: ${emerg.estimatedRestoreTime}"
-                                                        } else {
-                                                            "Start: ${emerg.startTime} · Restore: ${emerg.estimatedRestoreTime}"
-                                                        },
-                                                        fontSize = 12.sp,
-                                                        fontFamily = FontFamily.Monospace,
-                                                        color = Color.White
-                                                    )
-                                                }
-                                            }
-                                        }
-
-                                        // Full-width "Обрати чергу X.Y" / "Apply Queue X.Y" button UNDER address matching Workbench
-                                        Box(
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .clip(RoundedCornerShape(16.dp))
-                                                .background(Color(0xFFFF5E3A))
-                                                .clickable {
-                                                    val query = SelectedAddressQuery(
-                                                        remId = selectedRemId,
-                                                        settlementId = selectedSettlementId,
-                                                        streetId = selectedStreetId,
-                                                        house = selectedHouse
-                                                    )
-                                                    val addressToSave = selectedAddressStr.ifBlank { matchedRecord.addressLabel }
-                                                    if (matchedRecord.queue.isNotBlank()) {
-                                                        onAddressQueueResolved(
-                                                            matchedRecord.queue,
-                                                            null,
-                                                            addressToSave,
-                                                            matchedRecord.emergencyOutage,
-                                                            query
-                                                        )
-                                                        showQueueHelpDialog = false
-                                                        onShowAppBanner("${AppStrings.queue(lang)} ${matchedRecord.queue}")
-                                                    } else {
-                                                        onAddressQueueResolved(
-                                                            "",
-                                                            matchedRecord.statusText,
-                                                            addressToSave,
-                                                            matchedRecord.emergencyOutage,
-                                                            query
-                                                        )
-                                                        showQueueHelpDialog = false
-                                                        onShowAppBanner(
-                                                            matchedRecord.statusText
-                                                                ?: if (lang == "uk") "Адресу збережено" else "Address saved"
-                                                        )
-                                                    }
-                                                }
-                                                .padding(vertical = 14.dp, horizontal = 16.dp),
-                                            contentAlignment = Alignment.Center
-                                        ) {
-                                            Text(
-                                                text = if (matchedRecord.queue.isNotBlank()) {
-                                                    if (lang == "uk") "Обрати чергу ${matchedRecord.queue}" else "Apply Queue ${matchedRecord.queue}"
-                                                } else {
-                                                    if (lang == "uk") "Підтвердити вибір" else "Confirm selection"
-                                                },
-                                                fontSize = 16.sp,
-                                                fontWeight = FontWeight.ExtraBold,
-                                                color = Color.White
-                                            )
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    // 2) "Пошук вручну" / "Manual search" Heading matching Workbench
-                    Text(
-                        text = AppStrings.queueHelpManualSearchTitle(lang).uppercase(),
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.ExtraBold,
-                        color = Color.White,
-                        letterSpacing = 0.8.sp,
-                        modifier = Modifier.padding(top = 4.dp, start = 4.dp)
-                    )
-
-                    // 3) Numbered instructions 1-4 inside cards matching Workbench
-                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                        AppStrings.queueHelpSteps(lang).forEachIndexed { idx, step ->
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clip(RoundedCornerShape(16.dp))
-                                    .background(Color(0x0AFFFFFF))
-                                    .border(2.dp, Color(0x26FFFFFF), RoundedCornerShape(16.dp))
-                                    .padding(16.dp)
-                            ) {
-                                Row(
-                                    verticalAlignment = Alignment.Top,
-                                    horizontalArrangement = Arrangement.spacedBy(14.dp)
-                                ) {
-                                    Box(
-                                        modifier = Modifier
-                                            .padding(top = 2.dp)
-                                            .size(24.dp)
-                                            .clip(CircleShape)
-                                            .background(Color(0x26FFFFFF)),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Text(
-                                            text = "${idx + 1}",
-                                            fontSize = 12.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            fontFamily = FontFamily.Monospace,
-                                            color = Color.White
-                                        )
-                                    }
-                                    val targetUrl = "https://www.ztoe.com.ua/unhooking-search.php"
-                                    val urlStart = step.indexOf(targetUrl)
-                                    if (urlStart >= 0) {
-                                        val urlEnd = urlStart + targetUrl.length
-                                        val annotatedStep = buildAnnotatedString {
-                                            append(step)
-                                            addStyle(
-                                                style = SpanStyle(
-                                                    color = Color(0xFFFF5E3A),
-                                                    fontWeight = FontWeight.SemiBold,
-                                                    textDecoration = TextDecoration.Underline
-                                                ),
-                                                start = urlStart,
-                                                end = urlEnd
-                                            )
-                                        }
-                                        Text(
-                                            text = annotatedStep,
-                                            color = Color(0xFFF4F4F5),
-                                            fontSize = 14.sp,
-                                            lineHeight = 20.sp,
-                                            modifier = Modifier
-                                                .weight(1f)
-                                                .clickable {
-                                                    try {
-                                                        val intent = android.content.Intent(
-                                                            android.content.Intent.ACTION_VIEW,
-                                                            android.net.Uri.parse(targetUrl)
-                                                        )
-                                                        context.startActivity(intent)
-                                                    } catch (_: Exception) {}
-                                                }
-                                        )
-                                    } else {
-                                        Text(
-                                            text = step,
-                                            color = Color(0xFFF4F4F5),
-                                            fontSize = 14.sp,
-                                            lineHeight = 20.sp,
-                                            modifier = Modifier.weight(1f)
-                                        )
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    // Bottom "Зрозуміло" / "Got it" button matching Workbench (white bg, black text)
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(top = 4.dp)
-                            .clip(RoundedCornerShape(16.dp))
-                            .background(Color.White)
-                            .clickable { showQueueHelpDialog = false }
-                            .padding(vertical = 14.dp, horizontal = 20.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            text = AppStrings.queueHelpGotIt(lang),
-                            color = Color.Black,
-                            fontSize = 16.sp,
-                            fontWeight = FontWeight.ExtraBold
+        isCheckingAddressOnSite = false
+        addressLookupResult = res
+        addressCheckFailed = res == null
+        if (res != null) {
+            val exists = housesList.any { it.house.equals(res.house, ignoreCase = true) }
+            housesList = if (!exists) {
+                housesList + res
+            } else {
+                housesList.map { h ->
+                    if (h.house.equals(res.house, ignoreCase = true)) {
+                        h.copy(
+                            queue = res.queue.ifEmpty { h.queue },
+                            statusText = res.statusText ?: h.statusText,
+                            addressLabel = res.addressLabel.ifEmpty { h.addressLabel }
                         )
-                    }
+                    } else h
                 }
             }
         }
     }
 
-    // Reset Confirm Dialog
-    if (showResetConfirmDialog) {
-        AlertDialog(
-            onDismissRequest = { showResetConfirmDialog = false },
-            title = { Text(AppStrings.resetConfirmTitle(lang), fontWeight = FontWeight.Bold, color = Color.White) },
-            text = { Text(AppStrings.resetConfirmDesc(lang), color = Color.LightGray) },
-            confirmButton = {
-                TextButton(onClick = {
-                    onResetDefaults()
-                    showResetConfirmDialog = false
-                    onShowAppBanner(if (lang == "uk") "Налаштування скинуто" else "Settings reset")
-                }) {
-                    Text(AppStrings.resetYes(lang), color = Color(0xFFFF5E3A), fontWeight = FontWeight.Bold)
+    val selectedAddressStr = if (currentStreet != null && selectedHouse.isNotBlank()) {
+        val remName = currentRem?.displayName(lang).orEmpty()
+        val settlementName = currentSettlement?.displayName(lang).orEmpty()
+        val streetName = currentStreet.displayName(lang)
+        "$remName, $settlementName,\n$streetName, ${AppStrings.addrHousePrefix(lang)} $selectedHouse"
+    } else {
+        ""
+    }
+
+    val remItems = remember(allRems, lang) { allRems.map { PickerItem(it.id, it.displayName(lang)) } }
+    val settlementItems = remember(settlementsList, lang) { settlementsList.map { PickerItem(it.id, it.displayName(lang)) } }
+    val streetItems = remember(streetsList, lang) { streetsList.map { PickerItem(it.id, it.displayName(lang)) } }
+    val houseItems = remember(housesList) { housesList.map { PickerItem(it.house, it.house) } }
+
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(ZtColors.CardSolid)
+                .statusBarsPadding()
+                .navigationBarsPadding()
+                .imePadding()
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = 14.dp, vertical = 16.dp),
+                verticalArrangement = Arrangement.spacedBy(20.dp)
+            ) {
+                // Modal header
+                Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(40.dp)
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(ZtColors.Accent),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(text = "?", style = ZtType.heading, fontWeight = FontWeight.Black, color = Color.White, maxLines = 1)
+                            }
+                            Text(
+                                text = AppStrings.queueHelpTitle(lang),
+                                style = ZtType.heading,
+                                color = Color.White,
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
+                        Box(
+                            modifier = Modifier
+                                .size(ZtMinTouch)
+                                .clickable(role = Role.Button, onClickLabel = AppStrings.pickerClose(lang), onClick = onDismiss)
+                                .semantics { contentDescription = AppStrings.pickerClose(lang) },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(40.dp)
+                                    .clip(CircleShape)
+                                    .background(Color(0x1AFFFFFF))
+                                    .border(1.dp, ZtColors.CardBorder, CircleShape),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(Icons.Default.Close, contentDescription = null, tint = Color.White, modifier = Modifier.size(20.dp))
+                            }
+                        }
+                    }
+                    Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(ZtColors.InputBorder))
                 }
-            },
-            dismissButton = {
-                TextButton(onClick = { showResetConfirmDialog = false }) {
-                    Text(AppStrings.cancel(lang), color = Color.White)
+
+                // 1) Interactive search by address
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(24.dp))
+                        .background(Color(0x0DFFFFFF))
+                        .border(2.dp, Color.White.copy(alpha = 0.25f), RoundedCornerShape(24.dp))
+                        .padding(20.dp)
+                ) {
+                    Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text(
+                                text = AppStrings.addrFindTitle(lang).uppercase(),
+                                style = ZtType.label,
+                                fontWeight = FontWeight.ExtraBold,
+                                letterSpacing = 0.7.sp,
+                                color = Color.White
+                            )
+                            Text(
+                                text = AppStrings.queueHelpAddressSubtitle(lang),
+                                style = ZtType.caption,
+                                color = Color(0xCCBAE6FD)
+                            )
+                        }
+
+                        SearchablePickerField(
+                            label = AppStrings.addrRemLabel(lang),
+                            value = currentRem?.displayName(lang),
+                            placeholder = AppStrings.addrRemPlaceholder(lang),
+                            items = remItems,
+                            selectedId = selectedRemId,
+                            onSelect = { item ->
+                                if (item.id != selectedRemId) {
+                                    selectedRemId = item.id
+                                    clearBelowRem()
+                                }
+                            },
+                            lang = lang,
+                            loading = remsState.loading,
+                            loadFailed = remsState.failed,
+                            onRetry = { remsState.retry++ }
+                        )
+
+                        SearchablePickerField(
+                            label = AppStrings.addrCityLabel(lang),
+                            value = currentSettlement?.displayName(lang),
+                            placeholder = AppStrings.addrCityPlaceholder(lang),
+                            items = settlementItems,
+                            selectedId = selectedSettlementId.ifBlank { null },
+                            onSelect = { item ->
+                                if (item.id != selectedSettlementId) {
+                                    selectedSettlementId = item.id
+                                    clearBelowSettlement()
+                                }
+                            },
+                            lang = lang,
+                            loading = settlementsState.loading,
+                            loadFailed = settlementsState.failed,
+                            onRetry = { settlementsState.retry++ }
+                        )
+
+                        SearchablePickerField(
+                            label = AppStrings.addrStreetLabel(lang),
+                            value = currentStreet?.displayName(lang),
+                            placeholder = AppStrings.addrStreetPlaceholder(lang),
+                            items = streetItems,
+                            selectedId = selectedStreetId.ifBlank { null },
+                            onSelect = { item ->
+                                if (item.id != selectedStreetId) {
+                                    selectedStreetId = item.id
+                                    selectedHouse = ""
+                                    housesList = ZtoeAddressLookup.getHousesForStreet(item.id)
+                                    addressLookupResult = null
+                                }
+                            },
+                            lang = lang,
+                            enabled = selectedSettlementId.isNotBlank(),
+                            disabledHint = AppStrings.pickerChooseFirst(lang),
+                            loading = streetsState.loading,
+                            loadFailed = streetsState.failed && selectedSettlementId.isNotBlank(),
+                            onRetry = { streetsState.retry++ }
+                        )
+
+                        SearchablePickerField(
+                            label = AppStrings.addrHouseLabel(lang),
+                            value = selectedHouse,
+                            placeholder = AppStrings.addrHousePlaceholder(lang),
+                            items = houseItems,
+                            selectedId = selectedHouse.ifBlank { null },
+                            onSelect = { item ->
+                                selectedHouse = item.id
+                                addressLookupResult = null
+                            },
+                            lang = lang,
+                            enabled = currentStreet != null,
+                            disabledHint = AppStrings.pickerChooseFirst(lang),
+                            loading = housesState.loading,
+                            loadFailed = housesState.failed && currentStreet != null,
+                            onRetry = { housesState.retry++ },
+                            kind = PickerSearch.Kind.HOUSE
+                        )
+
+                        // Result card (shown when a house is selected)
+                        val validLookupResult = addressLookupResult?.takeIf {
+                            it.house.equals(selectedHouse, ignoreCase = true)
+                        }
+                        val matchedRecord: ZtoeHouseLookupResult? = when {
+                            validLookupResult != null && currentHouseRecord != null -> validLookupResult.copy(
+                                queue = validLookupResult.queue.ifEmpty { currentHouseRecord.queue },
+                                statusText = validLookupResult.statusText ?: currentHouseRecord.statusText
+                            )
+                            validLookupResult != null -> validLookupResult
+                            currentHouseRecord != null -> currentHouseRecord
+                            selectedHouse.isNotBlank() -> AddressLookupResult(
+                                house = selectedHouse,
+                                queue = "",
+                                addressLabel = selectedAddressStr
+                            )
+                            else -> null
+                        }
+                        if (selectedHouse.isNotBlank() && matchedRecord != null) {
+                            // while the site answers, an address without a known queue cannot be confirmed yet
+                            val canApply = !(isCheckingAddressOnSite && matchedRecord.queue.isBlank())
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(top = 6.dp)
+                                    .clip(RoundedCornerShape(16.dp))
+                                    .background(Color(0xD9141A29))
+                                    .border(2.dp, Color.White.copy(alpha = 0.25f), RoundedCornerShape(16.dp))
+                                    .padding(16.dp)
+                            ) {
+                                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                                    if (selectedAddressStr.isNotBlank()) {
+                                        Text(
+                                            text = selectedAddressStr,
+                                            style = ZtType.label,
+                                            color = Color(0xE6BAE6FD)
+                                        )
+                                    }
+
+                                    if (isCheckingAddressOnSite) {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                        ) {
+                                            CircularProgressIndicator(
+                                                modifier = Modifier.size(20.dp),
+                                                strokeWidth = 2.dp,
+                                                color = ZtColors.Accent
+                                            )
+                                            Text(
+                                                text = AppStrings.addrChecking(lang),
+                                                style = ZtType.caption,
+                                                color = ZtColors.TextSecondary,
+                                                modifier = Modifier.weight(1f)
+                                            )
+                                        }
+                                    } else if (addressCheckFailed) {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                        ) {
+                                            Icon(
+                                                Icons.Default.ErrorOutline,
+                                                contentDescription = null,
+                                                tint = ZtColors.ChipAmberText,
+                                                modifier = Modifier.size(20.dp)
+                                            )
+                                            Text(
+                                                text = AppStrings.addrCheckFailed(lang),
+                                                style = ZtType.caption,
+                                                color = ZtColors.ChipAmberText,
+                                                modifier = Modifier.weight(1f)
+                                            )
+                                        }
+                                    }
+
+                                    if (matchedRecord.queue.isNotBlank()) {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Text(
+                                                text = if (lang == "uk") "Знайдена черга:" else "Found Queue:",
+                                                style = ZtType.label,
+                                                color = Color(0xCCBAE6FD),
+                                                modifier = Modifier.weight(1f)
+                                            )
+                                            Text(
+                                                text = "${AppStrings.queue(lang)} ${matchedRecord.queue}",
+                                                style = ZtType.timeMono,
+                                                fontWeight = FontWeight.ExtraBold,
+                                                color = Color.White,
+                                                softWrap = false
+                                            )
+                                        }
+                                    }
+
+                                    if (!matchedRecord.statusText.isNullOrBlank()) {
+                                        Box(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .clip(RoundedCornerShape(16.dp))
+                                                .background(Color(0x0FFFFFFF))
+                                                .border(2.dp, Color(0x33FFFFFF), RoundedCornerShape(16.dp))
+                                                .padding(horizontal = 16.dp, vertical = 12.dp)
+                                        ) {
+                                            Text(
+                                                text = matchedRecord.statusText,
+                                                style = ZtType.label,
+                                                fontWeight = FontWeight.Bold,
+                                                color = Color.White
+                                            )
+                                        }
+                                    }
+
+                                    // Full-width "Обрати чергу X.Y" / "Apply Queue X.Y" button under the address
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .heightIn(min = ZtMinTouch)
+                                            .clip(RoundedCornerShape(16.dp))
+                                            .background(if (canApply) ZtColors.Accent else Color(0x66FF5E3A))
+                                            .clickable(enabled = canApply, role = Role.Button) {
+                                                val query = SelectedAddressQuery(
+                                                    remId = selectedRemId,
+                                                    settlementId = selectedSettlementId,
+                                                    streetId = selectedStreetId,
+                                                    house = selectedHouse
+                                                )
+                                                val addressToSave = selectedAddressStr.ifBlank { matchedRecord.addressLabel }
+                                                if (matchedRecord.queue.isNotBlank()) {
+                                                    onApply(matchedRecord.queue, null, addressToSave, query)
+                                                    onShowAppBanner("${AppStrings.queue(lang)} ${matchedRecord.queue}")
+                                                } else {
+                                                    onApply("", matchedRecord.statusText, addressToSave, query)
+                                                    onShowAppBanner(matchedRecord.statusText ?: AppStrings.addrSaved(lang))
+                                                }
+                                            }
+                                            .padding(vertical = 12.dp, horizontal = 16.dp),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text(
+                                            text = if (matchedRecord.queue.isNotBlank()) {
+                                                if (lang == "uk") "Обрати чергу ${matchedRecord.queue}" else "Apply Queue ${matchedRecord.queue}"
+                                            } else {
+                                                AppStrings.addrConfirm(lang)
+                                            },
+                                            style = ZtType.subhead,
+                                            fontWeight = FontWeight.ExtraBold,
+                                            color = Color.White,
+                                            textAlign = TextAlign.Center
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
-            },
-            containerColor = Color(0xFF141A29)
-        )
+
+                // 2) "Пошук вручну" / "Manual search"
+                Text(
+                    text = AppStrings.queueHelpManualSearchTitle(lang).uppercase(),
+                    style = ZtType.label,
+                    fontWeight = FontWeight.ExtraBold,
+                    letterSpacing = 0.7.sp,
+                    color = Color.White,
+                    modifier = Modifier.padding(top = 4.dp, start = 4.dp)
+                )
+
+                // 3) Numbered instructions 1-4 (text comes unchanged from AppStrings.queueHelpSteps)
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    AppStrings.queueHelpSteps(lang).forEachIndexed { idx, step ->
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(16.dp))
+                                .background(Color(0x0AFFFFFF))
+                                .border(2.dp, Color(0x26FFFFFF), RoundedCornerShape(16.dp))
+                                .padding(16.dp)
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.Top,
+                                horizontalArrangement = Arrangement.spacedBy(14.dp)
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .padding(top = 2.dp)
+                                        .defaultMinSize(minWidth = 24.dp, minHeight = 24.dp)
+                                        .clip(CircleShape)
+                                        .background(Color(0x26FFFFFF)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        text = "${idx + 1}",
+                                        style = ZtType.captionMono,
+                                        color = Color.White,
+                                        modifier = Modifier.padding(horizontal = 6.dp)
+                                    )
+                                }
+                                val urlStart = step.indexOf(ZTOE_SEARCH_URL)
+                                // only the address itself is a link, not the whole step
+                                val annotatedStep = buildAnnotatedString {
+                                    if (urlStart >= 0) {
+                                        append(step.substring(0, urlStart))
+                                        withLink(
+                                            LinkAnnotation.Url(
+                                                ZTOE_SEARCH_URL,
+                                                TextLinkStyles(
+                                                    SpanStyle(
+                                                        color = ZtColors.Accent,
+                                                        fontWeight = FontWeight.SemiBold,
+                                                        textDecoration = TextDecoration.Underline
+                                                    )
+                                                )
+                                            )
+                                        ) {
+                                            append(ZTOE_SEARCH_URL)
+                                        }
+                                        append(step.substring(urlStart + ZTOE_SEARCH_URL.length))
+                                    } else {
+                                        append(step)
+                                    }
+                                }
+                                Text(
+                                    text = annotatedStep,
+                                    style = ZtType.body,
+                                    color = Color(0xFFF4F4F5),
+                                    modifier = Modifier.weight(1f)
+                                )
+                            }
+                        }
+                    }
+                }
+
+                // Bottom "Зрозуміло" / "Got it" button (white bg, black text)
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 4.dp)
+                        .heightIn(min = ZtMinTouch)
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(Color.White)
+                        .clickable(role = Role.Button, onClick = onDismiss)
+                        .padding(vertical = 12.dp, horizontal = 20.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = AppStrings.queueHelpGotIt(lang),
+                        color = Color.Black,
+                        style = ZtType.subhead,
+                        fontWeight = FontWeight.ExtraBold
+                    )
+                }
+            }
+        }
     }
 }

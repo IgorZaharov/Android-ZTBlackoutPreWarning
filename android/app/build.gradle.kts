@@ -17,7 +17,7 @@ android {
         targetSdk = 36
         versionCode = (System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull() ?: 300) + 300
         val semverEnv = System.getenv("APP_VERSION_NAME")?.removePrefix("v")?.trim()?.takeIf { it.matches(Regex("^[0-9]+\\.[0-9]+\\.[0-9]+.*")) }
-        versionName = semverEnv ?: "1.3.5"
+        versionName = semverEnv ?: "1.4.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
@@ -148,6 +148,8 @@ dependencies {
 
     // Testing
     testImplementation(libs.junit)
+    // JVM unit tests only get stubbed android.jar org.json; the real implementation is needed to read spec/vectors/*.json
+    testImplementation("org.json:json:20240303")
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
     androidTestImplementation(platform(libs.androidx.compose.bom))

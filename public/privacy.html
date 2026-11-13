@@ -137,7 +137,8 @@
       <h2>4. Network Connections and Data Sources</h2>
       <p>The Application requires internet access exclusively to fetch publicly accessible data necessary for its primary utility function:</p>
       <ul>
-        <li><strong>JSC "Zhytomyroblenergo" Schedule Server:</strong> (<code>https://www.ztoe.com.ua/unhooking-search.php</code>) &mdash; Retrieving publicly published hourly power outage schedule HTML tables. No user credentials, cookies, device identifiers, or personal parameters are sent.</li>
+        <li><strong>JSC "Zhytomyroblenergo" Schedule Server:</strong> (<code>https://www.ztoe.com.ua/unhooking-search.php</code>) &mdash; Retrieving publicly published hourly power outage schedule HTML tables. When you look up an address in Settings, the public ids of the chosen district, settlement and street are sent as form fields to find the matching queue. No user credentials, cookies, device identifiers, or personal parameters are sent.</li>
+        <li><strong>JSC "Zhytomyroblenergo" Emergency Outage Service (PowerOn):</strong> (<code>https://api-ztoe-poweron.inneti.net/api/</code>) &mdash; Retrieving publicly published emergency outages and planned repair works for the street you selected. Only the public identifiers of the selected settlement and street are sent as query filters; the house number is matched on your device and never sent. No user credentials, cookies, device identifiers, or personal parameters are sent.</li>
         <li><strong>Static Configuration File (GitHub Raw):</strong> (<code>https://raw.githubusercontent.com/IgorZaharov/Android-ZTBlackoutPreWarning/main/donations.json</code>) &mdash; Periodically retrieving optional community donation URLs and official information links using standard conditional HTTP headers (<code>ETag</code> / <code>If-Modified-Since</code>).</li>
       </ul>
 
@@ -152,19 +153,19 @@
         <tbody>
           <tr>
             <td><code>android.permission.INTERNET</code></td>
-            <td>Required to communicate via HTTPS with the public servers of JSC "Zhytomyroblenergo" and retrieve blackout schedules.</td>
+            <td>Required to communicate via HTTPS with the public servers of JSC "Zhytomyroblenergo" (schedule site and emergency outage service) and retrieve blackout schedules and emergency outages.</td>
           </tr>
           <tr>
             <td><code>android.permission.ACCESS_NETWORK_STATE</code></td>
-            <td>Required to verify whether an active Wi-Fi or cellular network connection is available prior to initiating network queries.</td>
+            <td>Required to verify whether an active Wi-Fi or cellular network connection is available prior to initiating network queries, and to tell "no internet" apart from "the power company's site is not responding". Only the status the operating system already reports is used; no third-party host is contacted.</td>
           </tr>
           <tr>
             <td><code>android.permission.POST_NOTIFICATIONS</code></td>
             <td>Required on Android 13+ (API 33+) to present local notifications warning the user of imminent electrical outages according to their configured preference.</td>
           </tr>
           <tr>
-            <td><code>android.permission.SCHEDULE_EXACT_ALARM</code><br/><code>android.permission.USE_EXACT_ALARM</code></td>
-            <td>Required to schedule exact, time-critical local alarms using Android <code>AlarmManager</code> so pre-warnings trigger at the precise minute chosen by the user even in Doze mode.</td>
+            <td><code>android.permission.SCHEDULE_EXACT_ALARM</code></td>
+            <td>Required to schedule exact, time-critical local alarms using Android <code>AlarmManager</code> so pre-warnings trigger at the precise minute chosen by the user even in Doze mode. On Android 12+ the user grants it in the system setting "Alarms &amp; reminders"; the Application explains this in Settings and opens the system screen on request. Without it, warnings are still delivered but may be a few minutes late.</td>
           </tr>
           <tr>
             <td><code>android.permission.RECEIVE_BOOT_COMPLETED</code></td>
@@ -213,7 +214,7 @@
       <p>Усі налаштування (номер черги, час нагадування, налаштування звуку) зберігаються <strong>виключно на вашому телефоні</strong> (у SharedPreferences) і нікуди не передаються.</p>
 
       <h3>3. Дозволи Android</h3>
-      <p>Дозволи використовуються виключно для технічного функціонування (завантаження графіка з сайту ztoe.com.ua, надсилання локальних сповіщень та точний таймер попередження).</p>
+      <p>Дозволи використовуються виключно для технічного функціонування (завантаження графіка з сайту ztoe.com.ua та аварійних відключень зі служби ztoe-poweron.inneti.net (надсилаються лише публічні коди вибраного населеного пункту й вулиці), надсилання локальних сповіщень та точний таймер попередження (дозвіл «Будильники й нагадування»)).</p>
 
       <h3>4. Видалення даних</h3>
       <p>Користувач може будь-коли стерти всі налаштування через «Налаштування &gt; Програми &gt; Світло в Житомирі &gt; Очистити дані» або просто видаливши додаток.</p>

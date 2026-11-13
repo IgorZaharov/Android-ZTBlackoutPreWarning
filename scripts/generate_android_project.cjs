@@ -32,6 +32,21 @@ while ((match = entryRegex.exec(existingTs)) !== null) {
 
 const additionalFiles = [
   {
+    path: 'app/src/main/java/ua/blackout/prewarning/core/Subscriptions.kt',
+    language: 'kotlin',
+    description: 'Multi-address subscriptions: model, repair, store operations and migration (spec/SUBSCRIPTIONS.md)',
+  },
+  {
+    path: 'app/src/main/java/ua/blackout/prewarning/data/repository/SubscriptionRepository.kt',
+    language: 'kotlin',
+    description: 'Stores the multi-address subscriptions and the alerts master switch in the user settings',
+  },
+  {
+    path: 'app/src/main/java/ua/blackout/prewarning/data/repository/SubscriptionSync.kt',
+    language: 'kotlin',
+    description: 'Changes the subscription store and mirrors the primary address into the single-address settings',
+  },
+  {
     path: 'app/src/main/java/ua/blackout/prewarning/ui/screens/AboutScreen.kt',
     language: 'kotlin',
     description: 'About screen with app version, developer links, donations, and disclaimer',

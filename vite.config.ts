@@ -14,7 +14,7 @@ function readAndroidBuildVersion(): string {
   } catch {
     // Fallback
   }
-  return '1.3.5';
+  return '1.4.0';
 }
 
 export default defineConfig(() => {

@@ -1,227 +1,345 @@
-import React, { useState, useMemo, useEffect } from 'react';
-import { 
-  Bell, 
-  BellOff, 
-  RefreshCw, 
-  Clock,
-  Zap,
-  ExternalLink
-} from 'lucide-react';
-import { DaySchedule, Language, UserSettings } from '../types';
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
-  applyEmergencyOutageToSchedule,
-  calculateOutageCountdown,
-  getBlackoutIntervals,
-  getChartHalfHourBlocks
-} from '../services/ztoeParser';
-import { isValidEmergencyOutage } from '../services/ztoeAddressLookup';
-import { translations } from '../services/i18n';
+  AlertTriangle,
+  Bell,
+  BellOff,
+  CalendarCheck,
+  CalendarX,
+  CheckCircle2,
+  Clock,
+  CloudOff,
+  ExternalLink,
+  HelpCircle,
+  Info,
+  RefreshCw,
+  Star,
+  WifiOff,
+  Wrench,
+  Zap
+} from 'lucide-react';
+import { Language, BlackoutSlot, UserSettings } from '../types';
+import { siteNoticeA11y, siteNoticeTitle, translations } from '../services/i18n';
+import type { OutageSnapshot } from '../services/outageRepository';
+import { formatLocalDate, hourOf, minuteOf, plusDays, type LocalDateTime, toLocalDate } from '../core/localTime';
+import { statusAt, type Outage } from '../core/outageModels';
+import { formatRow, hhmm } from './outageRowFormat';
+import { poweronLine, siteBanner, siteChips, siteNotice as siteNoticeOf, TONE_COLORS, formatHhmm, type StatusIcon, type StatusChip } from './siteStatus';
+import { DrumChart } from './DrumChart';
+import { GlassCard, TEXT_SECONDARY, TEXT_TERTIARY } from './GlassCard';
+import { displayLabel, type Subscription } from '../core/subscriptions';
+
+export type RefreshStatus = 'SUCCESS' | 'NO_INTERNET' | 'NO_QUEUES_FOUND';
+
+/**
+ * Text kept on one line (SiteStatusIndicator.kt OneLineText): when it does not fit, the size steps down
+ * 5 % at a time to at most 15 % below `size` (never under 12 px); if it still does not fit, it wraps.
+ */
+const OneLineText: React.FC<{ text: string; size: number; lineHeight: number; className?: string; style?: React.CSSProperties }> = ({
+  text,
+  size,
+  lineHeight,
+  className = '',
+  style
+}) => {
+  const ref = useRef<HTMLDivElement>(null);
+  const [fit, setFit] = useState<{ size: number; wrap: boolean }>({ size, wrap: false });
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const measure = () => {
+      const min = Math.max(size * 0.85, 12);
+      let s = size;
+      el.style.whiteSpace = 'nowrap';
+      el.style.fontSize = `${s}px`;
+      while (el.scrollWidth > el.clientWidth && s * 0.95 >= min) {
+        s *= 0.95;
+        el.style.fontSize = `${s}px`;
+      }
+      const wrap = el.scrollWidth > el.clientWidth;
+      el.style.whiteSpace = '';
+      setFit((prev) => (prev.size === s && prev.wrap === wrap ? prev : { size: s, wrap }));
+    };
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el.parentElement ?? el);
+    return () => ro.disconnect();
+  }, [text, size]);
+  return (
+    <div
+      ref={ref}
+      className={`overflow-hidden ${fit.wrap ? 'whitespace-normal break-words' : 'whitespace-nowrap'} ${className}`}
+      style={{ ...style, fontSize: `${fit.size}px`, lineHeight: `${(lineHeight * fit.size) / size}px` }}
+    >
+      {text}
+    </div>
+  );
+};
 
 interface MainViewProps {
-  schedule: DaySchedule;
-  tomorrowSchedule: DaySchedule | null;
+  /** Everything below is derived from this one snapshot (OutageRepository.snapshot), like MainScreen.kt. */
+  snapshot: OutageSnapshot;
   settings: UserSettings;
   lang: 'uk' | 'en';
-  now?: Date;
   onToggleNotifications: () => void;
-  onRefresh: () => Promise<'SUCCESS' | 'NO_INTERNET' | 'NO_QUEUES_FOUND' | void> | void;
+  onRefresh: () => Promise<RefreshStatus | void> | void;
   isRefreshing: boolean;
-  onSendTestAlert: () => void;
+  onSendTestAlert?: () => void;
   onOpenQueueSelection?: () => void;
   onChangeLanguage?: (lang: Language) => void;
+  /** Address switcher (spec/SUBSCRIPTIONS.md 9): empty with fewer than 2 addresses, then the view looks as in 1.4.0. */
+  addresses?: readonly Subscription[];
+  primaryAddressId?: string | null;
+  shownAddressId?: string | null;
+  onSelectAddress?: (id: string) => void;
+  /** The master is on but no address has a switch on. */
+  showNoAlertsCaption?: boolean;
+  onOpenSettings?: () => void;
 }
 
+/** 48 light POWER_ON half-hour slots for buildings that are never disconnected by hourly schedules. */
+const LIGHT_NO_OUTAGE_SLOTS: BlackoutSlot[] = Array.from({ length: 48 }, (_, idx) => {
+  const p2 = (n: number) => String(n).padStart(2, '0');
+  const sh = Math.floor(idx / 2);
+  const eh = Math.floor((idx + 1) / 2);
+  const startStr = `${p2(sh)}:${idx % 2 === 0 ? '00' : '30'}`;
+  const endStr = `${p2(eh)}:${(idx + 1) % 2 === 0 ? '00' : '30'}`;
+  return {
+    id: `no_outage_${startStr}`,
+    startHour: sh,
+    endHour: eh,
+    startTimeStr: startStr,
+    endTimeStr: endStr,
+    status: 'POWER_ON' as const,
+  };
+});
+
+/** "Житомирський РЕМ, м. Житомир,\nвул. Київська, буд. 37": the city part and the street part on two lines. */
+export function formatAddressAfterCity(address?: string | null): string | null {
+  if (!address || address.trim() === '') return null;
+  const trimmed = address.trim();
+  const commaIdx = trimmed.indexOf(',');
+  if (commaIdx !== -1) {
+    const cityPart = trimmed.substring(0, commaIdx + 1).trim();
+    const streetPart = trimmed.substring(commaIdx + 1).trim();
+    if (streetPart.length > 0) return `${cityPart}\n${streetPart}`;
+  }
+  return trimmed;
+}
+
+/** "dd.MM.yyyy HH:mm" */
+function formatDateTime(t: LocalDateTime): string {
+  const d = formatLocalDate(toLocalDate(t));
+  return `${d.slice(8, 10)}.${d.slice(5, 7)}.${d.slice(0, 4)} ${hhmm(t)}`;
+}
+
+const ICONS: Record<StatusIcon, React.ComponentType<{ className?: string; 'aria-hidden'?: boolean }>> = {
+  OK: CheckCircle2,
+  WARNING: AlertTriangle,
+  SERVER_DOWN: CloudOff,
+  OFFLINE: WifiOff,
+  UNKNOWN: HelpCircle,
+  TOMORROW_OK: CalendarCheck,
+  TOMORROW_PENDING: CalendarX,
+};
+
+/** One status pill: tinted background, icon and text in the same family. Text wraps instead of clipping. */
+const StatusChipView: React.FC<{ chip: StatusChip }> = ({ chip }) => {
+  const Icon = ICONS[chip.icon];
+  const c = TONE_COLORS[chip.tone];
+  return (
+    <span
+      data-testid="site-status-chip"
+      className="inline-flex items-center gap-1.5 rounded-[10px] px-2.5 py-1 text-sm font-semibold leading-5"
+      style={{ background: c.fill, color: c.text }}
+    >
+      <Icon className="h-4 w-4 shrink-0" aria-hidden={true} />
+      <span>{chip.text}</span>
+    </span>
+  );
+};
+
+const LabelledValue: React.FC<{ label: string; value: string }> = ({ label, value }) => (
+  <div className="flex gap-1.5 text-[13px] leading-[19px]">
+    <span className={`${TEXT_TERTIARY} font-medium`}>{label}</span>
+    <span className="whitespace-nowrap font-mono font-bold tabular-nums text-white">{value}</span>
+  </div>
+);
+
 export const MainView: React.FC<MainViewProps> = ({
-  schedule,
-  tomorrowSchedule,
+  snapshot,
   settings,
   lang,
-  now = new Date(),
   onToggleNotifications,
   onRefresh,
   isRefreshing,
   onOpenQueueSelection,
   onChangeLanguage,
+  addresses = [],
+  primaryAddressId = null,
+  shownAddressId = null,
+  onSelectAddress,
+  showNoAlertsCaption = false,
+  onOpenSettings,
 }) => {
   const t = translations[lang];
+  // the header bell shows and toggles the master switch for all addresses (owner decision 4)
+  const alertsOn = settings.alertsMaster ?? settings.notificationsEnabled;
   const [selectedDayTab, setSelectedDayTab] = useState<'today' | 'tomorrow'>('today');
+  // Another address starts on Today (spec/SUBSCRIPTIONS.md 9)
+  useEffect(() => setSelectedDayTab('today'), [shownAddressId]);
+  const hasSwitcher = addresses.length > 0;
   const [toastMessage, setToastMessage] = useState<string | null>(null);
-  const hasActiveEmergencyOutage = isValidEmergencyOutage(settings.activeEmergencyOutage);
-  const hasNoQueueMessage = Boolean(
-    settings.customQueueStatusText &&
-      (!settings.queue || settings.queue.trim() === '') &&
-      !hasActiveEmergencyOutage
-  );
-  const isQueueUnselected =
-    (!settings.queue || settings.queue.trim() === '') &&
-    !hasNoQueueMessage &&
-    !hasActiveEmergencyOutage;
 
-  const effectiveTodaySchedule = useMemo(
-    () => applyEmergencyOutageToSchedule(schedule, settings.activeEmergencyOutage, false) || schedule,
-    [schedule, settings.activeEmergencyOutage]
-  );
+  const queue = settings.queue || '';
+  const hasQueue = queue.trim() !== '';
+  const customStatus = settings.customQueueStatusText?.trim() ? settings.customQueueStatusText : null;
 
-  const effectiveTomorrowSchedule = useMemo(
-    () => applyEmergencyOutageToSchedule(tomorrowSchedule, settings.activeEmergencyOutage, true),
-    [tomorrowSchedule, settings.activeEmergencyOutage]
-  );
+  // Everything below is derived from the one outage snapshot
+  const todayDate = snapshot.today;
+  const tomorrowDate = plusDays(todayDate, 1);
+  const isTomorrowSelected = selectedDayTab === 'tomorrow';
+  const activeDate = isTomorrowSelected ? tomorrowDate : todayDate;
 
-  useEffect(() => {
-    if (!effectiveTomorrowSchedule && selectedDayTab === 'tomorrow') {
-      setSelectedDayTab('today');
-    }
-  }, [effectiveTomorrowSchedule, selectedDayTab]);
+  const activeView = useMemo(() => snapshot.dayView(activeDate), [snapshot, activeDate]);
+  const featured: Outage | null = useMemo(() => snapshot.featuredEmergency(), [snapshot]);
+  const banner = useMemo(() => siteBanner(snapshot, lang), [snapshot, lang]);
+  const chips = useMemo(() => siteChips(snapshot, lang), [snapshot, lang]);
+  const poweron = useMemo(() => poweronLine(snapshot, lang), [snapshot, lang]);
+  const statusInfo = useMemo(() => snapshot.scheduleStatus(), [snapshot]);
 
-  const [entryTick, setEntryTick] = useState(0);
+  const siteNotice = useMemo(() => siteNoticeOf(snapshot), [snapshot]);
+  const hasEmergencyOutage = featured !== null;
+  const hasCustomNoQueueStatus = customStatus !== null && !hasEmergencyOutage;
+  const isQueueUnselected = !hasQueue && !hasCustomNoQueueStatus && !hasEmergencyOutage;
+  const formattedSelectedAddress = formatAddressAfterCity(settings.selectedAddress);
 
-  // Automatically refresh timer and drum bar when User enters main screen
-  useEffect(() => {
-    setEntryTick((prev) => prev + 1);
-  }, []);
+  // The ztoe table of the shown day is not known: the drum is grey, known emergency/repair outages are drawn on top
+  const isTodayUnclear = !hasCustomNoQueueStatus && hasQueue && !snapshot.plannedKnown;
+  const isTomorrowUnclear = !hasCustomNoQueueStatus && hasQueue && !snapshot.tomorrowPublished;
+  const activeUnclear = isTomorrowSelected ? isTomorrowUnclear : isTodayUnclear;
 
-  const isTomorrowActive = selectedDayTab === 'tomorrow' && effectiveTomorrowSchedule !== null;
-  const activeSchedule = isTomorrowActive ? effectiveTomorrowSchedule! : effectiveTodaySchedule;
-  const activeSlotsSignature = useMemo(
-    () => activeSchedule.slots.map(s => (s.isEmergency ? 'E' : s.status === 'POWER_OFF' ? '1' : '0')).join(''),
-    [activeSchedule]
+  const activeSlots = useMemo<BlackoutSlot[]>(
+    () => (hasCustomNoQueueStatus ? LIGHT_NO_OUTAGE_SLOTS : snapshot.slotsFor(activeDate)),
+    [snapshot, activeDate, hasCustomNoQueueStatus]
   );
 
-  const blackoutIntervals = useMemo(
-    () => getBlackoutIntervals(activeSchedule.slots),
-    [selectedDayTab, activeSchedule.dateStr, activeSlotsSignature, activeSchedule.slots, entryTick]
-  );
+  const isStatusUnclear = (snapshot.isUnclear && !hasCustomNoQueueStatus) || isQueueUnselected;
+  const rows = activeView.rows;
+  const showOutageList = !isQueueUnselected && (rows.length > 0 || (!activeUnclear && activeSlots.length > 0));
+  const off = !isStatusUnclear && statusInfo.isBlackoutNow;
 
-  const chartBlocks = useMemo(
-    () => getChartHalfHourBlocks(activeSchedule.slots),
-    [selectedDayTab, activeSchedule.dateStr, activeSlotsSignature, activeSchedule.slots, entryTick]
-  );
+  const slotTimeText = isStatusUnclear ? '--:-- - --:--' : statusInfo.nextSlotTime;
+  const nowStr = hhmm(snapshot.now);
 
-  const countdown = useMemo(
-    () => calculateOutageCountdown(effectiveTodaySchedule, now, effectiveTomorrowSchedule),
-    [effectiveTodaySchedule, now, effectiveTomorrowSchedule, entryTick]
-  );
-
-  const isUnclear =
-    isQueueUnselected ||
-    hasNoQueueMessage ||
-    activeSchedule.slots.length === 0 ||
-    Boolean(activeSchedule.isUnclear);
-  const isStatusUnclear =
-    isQueueUnselected ||
-    hasNoQueueMessage ||
-    effectiveTodaySchedule.slots.length === 0 ||
-    Boolean(effectiveTodaySchedule.isUnclear) ||
-    Boolean(countdown.isUnclear);
-
-  const currentHour = now.getHours();
-  const currentMinute = now.getMinutes();
-
-  const format24Time = (d: Date): string => {
-    const h = d.getHours().toString().padStart(2, '0');
-    const m = d.getMinutes().toString().padStart(2, '0');
-    return `${h}:${m}`;
-  };
-
-  const formatAddressAfterCity = (address: string): string => {
-    if (address.includes('\n')) return address;
-    const parts = address
-      .split(',')
-      .map((p) => p.trim())
-      .filter(Boolean);
-    if (parts.length >= 3) {
-      return `${parts.slice(0, 2).join(', ')},\n${parts.slice(2).join(', ')}`;
-    }
-    return address;
-  };
-
-  const nextRefreshTimeStr = useMemo((): string => {
-    try {
-      const parts = (activeSchedule.lastUpdated || '').split(':');
-      if (parts.length >= 2) {
-        const lastH = parseInt(parts[0], 10);
-        const lastM = parseInt(parts[1], 10);
-        const lastTotalM = lastH * 60 + lastM;
-        const nextTotalM = (lastTotalM + settings.refreshIntervalMinutes) % 1440;
-        const nH = Math.floor(nextTotalM / 60);
-        const nM = nextTotalM % 60;
-        return `${nH.toString().padStart(2, '0')}:${nM.toString().padStart(2, '0')}`;
-      }
-    } catch {
-      // fallback
-    }
-    const nextDate = new Date(Date.now() + settings.refreshIntervalMinutes * 60000);
-    return format24Time(nextDate);
-  }, [activeSchedule.lastUpdated, settings.refreshIntervalMinutes]);
+  const lastUpdated = snapshot.site?.lastSuccessMs ? formatHhmm(snapshot.site.lastSuccessMs) : '--:--';
+  const nextUpdated = useMemo(() => {
+    const ms = snapshot.site?.checkedAtMs && snapshot.site.checkedAtMs > 0 ? snapshot.site.checkedAtMs : Date.now();
+    return formatHhmm(ms + Math.max(1, settings.refreshIntervalMinutes || 30) * 60_000);
+  }, [snapshot.site, settings.refreshIntervalMinutes]);
 
   const handleManualRefresh = async () => {
     const status = await onRefresh();
     let msg = t.refreshSuccessToast;
-    if (status === 'NO_INTERNET') {
-      msg = t.errorNoInternet;
-    } else if (status === 'NO_QUEUES_FOUND') {
-      msg = t.errorNoQueuesFound;
-    }
+    if (status === 'NO_INTERNET') msg = t.errorNoInternet;
+    else if (status === 'NO_QUEUES_FOUND') msg = t.errorNoQueuesFound;
     setToastMessage(msg);
     setTimeout(() => setToastMessage(null), 3000);
   };
 
+  /** The featured emergency card; with a switcher it sits under the chips (spec/SUBSCRIPTIONS.md 9). */
+  const emergencyBanner = (featured: Outage) => (
+    <GlassCard data-testid="main-emergency-outage-banner" className="flex flex-col gap-1.5">
+      {(() => {
+        const status = statusAt(featured, snapshot.now);
+        const title =
+          lang === 'uk' && featured.label && featured.label.trim() !== ''
+            ? featured.label
+            : status === 'UPCOMING'
+            ? t.emergencyUpcomingTitle
+            : t.emergencyOutageTitle;
+        const restore = featured.overdue || !(featured.end > featured.start) ? '--:--' : formatDateTime(featured.end);
+        return (
+          <>
+            <div data-testid="main-emergency-outage-title" className="text-base font-bold leading-[23px] text-[#FF5E3A]">
+              {title}
+            </div>
+            <div data-testid="main-emergency-outage-times" className="flex flex-col gap-0.5">
+              <div className="flex items-center justify-between gap-2 text-[13px] leading-[19px]">
+                <span className={`${TEXT_SECONDARY} font-medium`}>{t.emergencyStartLabel}</span>
+                <span className="whitespace-nowrap text-right font-mono font-bold tabular-nums text-white">{formatDateTime(featured.start)}</span>
+              </div>
+              <div className="flex items-center justify-between gap-2 text-[13px] leading-[19px]">
+                <span className={`${TEXT_SECONDARY} font-medium`}>{t.emergencyRestoreLabel}</span>
+                <span className="whitespace-nowrap text-right font-mono font-bold tabular-nums text-white">{restore}</span>
+              </div>
+              {status === 'OVERDUE' && <div className={`text-[13px] font-medium leading-[19px] ${TEXT_SECONDARY}`}>{t.rowOverdue}</div>}
+            </div>
+          </>
+        );
+      })()}
+    </GlassCard>
+  );
+
+  const dimmed = isQueueUnselected;
+  const tabClass = (selected: boolean) =>
+    `flex-1 min-h-12 rounded-xl px-2 py-2 text-sm font-bold transition-colors ${
+      selected ? 'bg-white/20 text-white' : 'text-[#BAE6FD]/80 hover:text-white'
+    } disabled:opacity-50`;
+
   return (
-    <div className="flex flex-col gap-4 max-w-lg mx-auto select-none">
+    <div className="mx-auto flex max-w-lg select-none flex-col gap-4">
       {/* In-App Toast Banner with Application Icon */}
       {toastMessage && (
-        <div className="fixed top-14 left-1/2 -translate-x-1/2 z-50 bg-[#141A29]/95 backdrop-blur-2xl text-white text-xs py-2 px-4 rounded-2xl shadow-2xl flex items-center gap-2.5 border border-white/20">
-          <div className="w-6 h-6 rounded-lg bg-[#FF5E3A] flex items-center justify-center text-white shrink-0">
-            <Zap className="w-3.5 h-3.5 fill-current" />
+        <div
+          role="status"
+          className="fixed top-14 left-1/2 z-50 flex -translate-x-1/2 items-center gap-2.5 rounded-2xl border border-white/20 bg-[#141A29]/95 px-4 py-2 text-sm text-white shadow-2xl backdrop-blur-2xl"
+        >
+          <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-lg bg-[#FF5E3A] text-white">
+            <Zap className="h-3.5 w-3.5 fill-current" />
           </div>
           <span className="font-bold">{toastMessage}</span>
         </div>
       )}
 
-      {/* First application start: Full-screen overlay with centered, enlarged "Select queue" button and Auto/English/Ukrainian language switch blocking all other clicks */}
+      {/* First application start: centred "Виберіть чергу" button and the Auto/English/Ukrainian switch; everything else is dimmed and inert */}
       {isQueueUnselected && (
         <div
           data-testid="first-start-select-queue-overlay"
-          className="fixed inset-0 z-50 flex flex-col items-center justify-center gap-6 px-6 pointer-events-auto"
+          className="pointer-events-auto fixed inset-0 z-50 flex flex-col items-center justify-center gap-6 px-6"
         >
           <button
             type="button"
             data-testid="unselected-queue-header-btn"
             onClick={onOpenQueueSelection}
-            className="group cursor-pointer px-8 py-5 rounded-3xl bg-[#FF5E3A] hover:bg-[#ff4b24] text-white shadow-[0_20px_50px_rgba(255,94,58,0.5)] border border-white/25 transition-all active:scale-95 text-center flex flex-col items-center justify-center gap-1.5 min-w-[260px]"
+            className="flex min-h-12 min-w-[260px] cursor-pointer flex-col items-center justify-center gap-1.5 rounded-3xl border border-white/25 bg-[#FF5E3A] px-8 py-5 text-center shadow-[0_20px_50px_rgba(255,94,58,0.5)] transition-transform hover:bg-[#ff4b24] active:scale-95 motion-reduce:transition-none motion-reduce:active:scale-100"
           >
-            <div className="text-2xl font-extrabold tracking-tight text-white drop-shadow-sm">
-              {lang === 'uk' ? 'Виберіть чергу' : 'Select queue'}
-            </div>
-            <div className="text-xs text-white/90 font-semibold">
-              Житомиробленерго (ZTOE)
-            </div>
+            {/* White label on the accent fill (owner request; 3.0:1, large bold title) */}
+            <span className="text-2xl font-extrabold leading-[30px] tracking-tight text-white">{t.selectQueueAction}</span>
+            <span className="text-sm font-bold leading-5 text-white">{t.mainUtilityName}</span>
           </button>
 
           <div
             data-testid="first-start-language-switch"
-            role="tablist"
-            className="grid grid-cols-3 gap-1 p-1.5 bg-[#141A29]/90 backdrop-blur-2xl rounded-2xl border border-white/20 shadow-[0_12px_32px_rgba(0,0,0,0.5)] min-w-[260px]"
+            role="radiogroup"
+            aria-label={t.settingsLanguage}
+            className="grid min-w-[260px] grid-cols-3 gap-1 rounded-2xl border border-white/20 bg-[#141A29]/90 p-1.5 shadow-[0_12px_32px_rgba(0,0,0,0.5)] backdrop-blur-2xl"
           >
             {[
-              { id: 'system', label: 'Auto' },
+              { id: 'system', label: t.mainLangAuto },
               { id: 'en', label: 'English' },
               { id: 'uk', label: 'Українська' }
             ].map((item) => {
-              const currentLangSetting = settings.language || 'system';
-              const isSelected = currentLangSetting === item.id;
+              const isSelected = (settings.language || 'system') === item.id;
               return (
                 <button
                   key={item.id}
                   type="button"
-                  role="tab"
+                  role="radio"
+                  aria-checked={isSelected}
                   data-testid={`first-start-lang-${item.id}`}
-                  aria-selected={isSelected}
                   onClick={() => onChangeLanguage?.(item.id as Language)}
-                  className={`py-2 px-3 text-xs leading-tight text-center flex items-center justify-center font-bold rounded-xl transition-all duration-150 cursor-pointer ${
-                    isSelected
-                      ? 'bg-white text-black shadow-[0_2px_6px_rgba(0,0,0,0.3)]'
-                      : 'text-sky-100/80 hover:text-white'
+                  className={`flex min-h-12 cursor-pointer items-center justify-center rounded-xl px-2 py-2 text-center text-sm font-bold leading-tight transition-colors ${
+                    isSelected ? 'bg-white text-black shadow-[0_2px_6px_rgba(0,0,0,0.3)]' : 'text-[#BAE6FD]/90 hover:text-white'
                   }`}
                 >
                   {item.label}
@@ -232,476 +350,435 @@ export const MainView: React.FC<MainViewProps> = ({
         </div>
       )}
 
-      {/* Top Header: Queue title (or empty if queue is unselected or house has no queue) + Sleek pill toggle switch */}
-      <div className="flex items-center justify-between pt-1">
-        {isQueueUnselected || hasNoQueueMessage || !settings.queue || settings.queue.trim() === '' ? (
-          <div data-testid="empty-queue-header" className="min-h-[44px]" />
+      {/* Top header: queue title + address (or empty) and the pill switch */}
+      <div
+        className={`flex items-center justify-between pt-1 ${dimmed ? 'pointer-events-none select-none opacity-15 brightness-50' : ''}`}
+        aria-hidden={dimmed || undefined}
+      >
+        {isQueueUnselected || hasCustomNoQueueStatus || !hasQueue ? (
+          <div data-testid="empty-queue-header" className="min-h-12" />
         ) : (
-          <div>
-            <div className="text-2xl font-bold tracking-tight text-white drop-shadow-sm">
-              {t.queue} {settings.queue}
+          <div className="min-w-0 flex-1 pr-3">
+            <div className="text-2xl font-bold leading-[30px] tracking-tight text-white drop-shadow-sm">
+              {t.queue} {queue}
             </div>
-            <div className="text-xs text-sky-200/70 font-medium whitespace-pre-line leading-snug">
-              {settings.selectedAddress
-                ? formatAddressAfterCity(settings.selectedAddress)
-                : 'Житомиробленерго (ZTOE)'}
+            <div className={`line-clamp-3 whitespace-pre-line text-[13px] font-medium leading-[19px] ${TEXT_SECONDARY}`}>
+              {formattedSelectedAddress ?? t.mainUtilityName}
             </div>
           </div>
         )}
 
-        {/* Enlarged Pill Switch (No text ВКЛ/ВИКЛ) — dimmed when queue is not selected */}
+        {/* 58 x 34 pill; the touch target is 48 px tall without changing the look */}
         <button
+          type="button"
+          role="switch"
+          aria-checked={alertsOn}
+          aria-label={t.notifications}
+          title={t.quickToggleAlerts}
+          data-testid="main-notifications-switch"
           onClick={onToggleNotifications}
           disabled={isQueueUnselected}
-          className={`w-16 h-9 rounded-full p-1 transition-all duration-300 flex items-center shadow-lg ${
-            isQueueUnselected ? 'opacity-15 brightness-50 pointer-events-none select-none' : ''
-          } ${
-            settings.notificationsEnabled
-              ? 'bg-[#FF5E3A] shadow-[#FF5E3A]/30'
-              : 'bg-white/10 backdrop-blur-md border border-white/15'
-          }`}
-          title={t.quickToggleAlerts}
+          className="flex min-h-12 min-w-[58px] shrink-0 cursor-pointer items-center justify-center"
         >
-          <div
-            className={`w-7 h-7 rounded-full bg-white shadow-md flex items-center justify-center transition-transform duration-300 ${
-              settings.notificationsEnabled ? 'translate-x-7' : 'translate-x-0'
+          <span
+            className={`flex h-[34px] w-[58px] items-center rounded-full p-1 shadow-lg transition-colors duration-300 motion-reduce:transition-none ${
+              alertsOn ? 'bg-[#FF5E3A] shadow-[#FF5E3A]/30' : 'border border-white/15 bg-white/15'
             }`}
           >
-            {settings.notificationsEnabled ? (
-              <Bell className="w-4 h-4 text-[#FF5E3A] stroke-[2.5]" />
-            ) : (
-              <BellOff className="w-4 h-4 text-zinc-500 stroke-[2]" />
-            )}
-          </div>
+            <span
+              className={`flex h-[26px] w-[26px] items-center justify-center rounded-full bg-white shadow-md transition-transform duration-300 motion-reduce:transition-none ${
+                alertsOn ? 'translate-x-6' : 'translate-x-0'
+              }`}
+            >
+              {alertsOn ? (
+                <Bell className="h-4 w-4 stroke-[2.5] text-[#FF5E3A]" aria-hidden="true" />
+              ) : (
+                <BellOff className="h-4 w-4 stroke-[2] text-zinc-500" aria-hidden="true" />
+              )}
+            </span>
+          </span>
         </button>
       </div>
 
-      {/* All other UI elements dimmed when Queue is not selected */}
+      {/* All other UI elements dimmed (and hidden from assistive technology) while the queue is not selected */}
       <div
         data-testid="main-dimmed-content-wrapper"
-        className={`flex flex-col gap-4 transition-opacity duration-300 ${
-          isQueueUnselected ? 'opacity-15 brightness-50 pointer-events-none select-none' : ''
+        aria-hidden={dimmed || undefined}
+        className={`flex flex-col gap-4 transition-opacity duration-300 motion-reduce:transition-none ${
+          dimmed ? 'pointer-events-none select-none opacity-15 brightness-50' : ''
         }`}
       >
-      {/* Active Emergency Outage ("Аварійне відключення") Banner with Start & Estimated Restore Times */}
-      {!isQueueUnselected && hasActiveEmergencyOutage && settings.activeEmergencyOutage && (
-        <div
-          data-testid="main-emergency-outage-banner"
-          className="bg-[#141A29]/75 backdrop-blur-2xl rounded-3xl p-4 border border-white/15 shadow-[0_16px_40px_rgba(0,0,0,0.55)] flex flex-col gap-1.5"
-        >
-          <div
-            data-testid="main-emergency-outage-title"
-            className="text-sm font-bold text-[#FF5E3A] leading-snug"
-          >
-            {lang === 'uk'
-              ? settings.activeEmergencyOutage.outageType || 'Аварійне відключення'
-              : 'Emergency Outage'}
-          </div>
-          <div
-            data-testid="main-emergency-outage-times"
-            className="flex flex-col gap-0.5 text-xs text-white font-mono tabular-nums leading-snug"
-          >
-            <div className="flex items-center justify-between gap-2">
-              <span className="text-sky-200/70 font-sans font-medium">
-                {lang === 'uk' ? 'Початок: ' : 'Start: '}
-              </span>
-              <span className="font-bold text-right">{settings.activeEmergencyOutage.startTime || '--:--'}</span>
-            </div>
-            <div className="flex items-center justify-between gap-2">
-              <span className="text-sky-200/70 font-sans font-medium">
-                {lang === 'uk' ? 'Орієнтовне відновлення: ' : 'Estimated restore: '}
-              </span>
-              <span className="font-bold text-right">
-                {settings.activeEmergencyOutage.estimatedRestoreTime || '--:--'}
-              </span>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Custom ZTOE Queue/House Status Message Bar — exact same style/color as other Main screen bars */}
-      {!isQueueUnselected && settings.customQueueStatusText && (
-        <div
-          data-testid="main-custom-queue-status-text"
-          className="bg-[#141A29]/75 backdrop-blur-2xl rounded-3xl p-4 border border-white/15 shadow-[0_16px_40px_rgba(0,0,0,0.55)] flex flex-col gap-1"
-        >
-          {settings.selectedAddress && (
-            <div
-              data-testid="main-selected-address-text"
-              className="text-xs text-sky-200/70 font-medium whitespace-pre-line leading-snug"
+        {/* The master is on but no address has a switch on: say so, with a way to Settings */}
+        {!isQueueUnselected && showNoAlertsCaption && (
+          <div data-testid="main-no-alerts-caption" className="flex items-center gap-2">
+            <span className="flex-1 text-[13px] font-medium leading-[19px] text-[#FF5E3A]">{t.noAddressAlerts}</span>
+            <button
+              type="button"
+              onClick={onOpenSettings}
+              className="min-h-12 shrink-0 rounded-xl px-2 text-sm font-bold text-white hover:bg-white/10"
             >
-              {formatAddressAfterCity(settings.selectedAddress)}
-            </div>
-          )}
-          <div className="text-sm font-bold text-white leading-snug whitespace-normal break-words">
-            {settings.customQueueStatusText}
+              {t.settingsTitle}
+            </button>
           </div>
-        </div>
-      )}
+        )}
 
-      {/* Hero Outage Status Card (Frosted Glass with Subtle Blue Glow) */}
-      <div
-        data-testid="main-counter-card"
-        className="rounded-3xl p-5 bg-[#141A29]/75 backdrop-blur-2xl border border-white/15 shadow-[0_16px_40px_rgba(0,0,0,0.55)] transition-all"
-      >
-        {hasNoQueueMessage ? (
-          <div data-testid="main-counter-empty" className="my-4 text-center">
-            <div
-              data-testid="main-counter-no-queue-placeholder"
-              className="text-4xl sm:text-5xl font-black font-mono tracking-tight text-white drop-shadow-md"
-            >
-              --:--:--
+        {/* Featured emergency outage: active, overdue or the next upcoming one; finished ones never show here */}
+        {!hasSwitcher && !isQueueUnselected && featured !== null && emergencyBanner(featured)}
+
+        {/* Site is degraded (no table / unreachable / no internet): persistent banner, not a toast */}
+        {!isQueueUnselected && banner !== null && (
+          <GlassCard data-testid="site-status-banner" role="status" aria-live="polite" padding={14} className="flex items-center gap-2.5 py-3">
+            {(() => {
+              const Icon = ICONS[banner.icon];
+              const c = TONE_COLORS[banner.tone];
+              return (
+                <>
+                  <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full" style={{ background: c.fill }}>
+                    <Icon className="h-[18px] w-[18px]" aria-hidden={true} />
+                  </span>
+                  <div className="flex min-w-0 flex-1 flex-col">
+                    <OneLineText text={banner.title} size={14} lineHeight={20} className="font-bold" style={{ color: c.text }} />
+                    {banner.message.split('\n').filter((l) => l.trim() !== '').map((line) => (
+                      <OneLineText key={line} text={line} size={13} lineHeight={19} className="font-medium text-[#BAE6FD]/90" />
+                    ))}
+                  </div>
+                </>
+              );
+            })()}
+          </GlassCard>
+        )}
+
+        {/* ztoe is up but publishes a notice instead of the table: quote it as is (shown even without a queue) */}
+        {siteNotice !== null && (
+          <GlassCard data-testid="site-notice-card" role="note" aria-label={`${siteNoticeA11y(lang)}. ${siteNotice}`} className="flex items-start gap-3">
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full" style={{ background: TONE_COLORS.AMBER.fill }}>
+              <Info className="h-5 w-5" style={{ color: TONE_COLORS.AMBER.text }} aria-hidden="true" />
+            </span>
+            <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+              <div className="text-xs font-bold uppercase leading-[17px] tracking-[0.05em]" style={{ color: TONE_COLORS.AMBER.text }}>
+                {siteNoticeTitle(lang)}
+              </div>
+              {siteNotice.split(/\r?\n/).map((line, i) => (
+                <div
+                  key={i}
+                  className={`break-words ${i === 0 ? 'text-base font-bold leading-[23px] text-white' : 'text-base font-medium leading-6 text-[#BAE6FD]/90'}`}
+                >
+                  {line}
+                </div>
+              ))}
             </div>
-          </div>
-        ) : (
-          <>
-            {/* Status Line */}
-            <div className="flex items-center justify-between mb-3">
-              <div className="flex items-center gap-2.5">
-                <span
-                  data-testid="power-status-indicator"
-                  className={`w-3 h-3 rounded-full ${
-                    isStatusUnclear
-                      ? 'bg-zinc-400 shadow-md shadow-zinc-400/40'
-                      : countdown.isCurrentlyBlackout
-                      ? 'bg-[#FF5E3A] shadow-md shadow-[#FF5E3A]/60 animate-pulse'
-                      : 'bg-emerald-400 shadow-md shadow-emerald-400/40'
+          </GlassCard>
+        )}
+
+        {/* Address switcher: under the global banners, above everything of one address */}
+        {hasSwitcher && (
+          <div data-testid="main-address-switcher" role="tablist" className="-mx-1 flex gap-2 overflow-x-auto px-1">
+            {addresses.map((item) => {
+              const selected = item.id === shownAddressId;
+              const isPrimary = item.id === primaryAddressId;
+              return (
+                <button
+                  key={item.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={selected}
+                  data-testid={`main-address-chip-${item.id}`}
+                  onClick={() => onSelectAddress?.(item.id)}
+                  className={`flex min-h-12 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-2xl border px-3.5 py-2 text-sm font-bold transition-colors ${
+                    selected ? 'border-white/40 bg-white/20 text-white' : 'border-white/[0.12] bg-[#141A29]/50 text-[#BAE6FD]/80 hover:text-white'
                   }`}
-                />
-                <span
-                  data-testid="power-status-text"
-                  className="text-sm font-bold tracking-wide uppercase text-white"
                 >
-                  {isStatusUnclear
-                    ? t.statusUnclear
-                    : countdown.isCurrentlyBlackout
-                    ? (lang === 'uk' ? 'Зараз немає світла' : 'Power is OFF')
-                    : (lang === 'uk' ? 'Зараз світло є' : 'Power is ON')}
-                </span>
-              </div>
+                  {isPrimary && <Star className="h-4 w-4 fill-current text-[#FF5E3A]" aria-label={t.primaryBadge} role="img" />}
+                  <span>{displayLabel(item)}</span>
+                </button>
+              );
+            })}
+          </div>
+        )}
+        {hasSwitcher && !isQueueUnselected && featured !== null && emergencyBanner(featured)}
 
-              <div className="text-xs font-mono text-sky-200/80 flex items-center gap-1.5 font-bold">
-                <Clock className="w-3.5 h-3.5" />
-                <span>{format24Time(now)}</span>
-              </div>
-            </div>
-
-            {/* Big Countdown Digits */}
-            <div className="my-4 text-center">
-              <div className="text-xs uppercase tracking-wider text-sky-200/70 font-semibold mb-1">
-                {isStatusUnclear
-                  ? (lang === 'uk' ? 'До відключення залишилось:' : 'Time until next outage:')
-                  : countdown.isCurrentlyBlackout
-                  ? (lang === 'uk' ? 'Світло увімкнуть через:' : 'Power on in:')
-                  : countdown.closestBlackoutSlot
-                  ? (lang === 'uk' ? 'До відключення залишилось:' : 'Time until next outage:')
-                  : (lang === 'uk' ? 'Відключень більше немає' : 'No more blackouts today')}
-              </div>
-              <div className="text-5xl font-black font-mono tracking-tight text-white drop-shadow-md">
-                {isStatusUnclear ? '--:--:--' : countdown.formattedTimeLeft}
-              </div>
-            </div>
-
-            {/* Outage Window */}
-            {countdown.slotDescription && countdown.slotDescription !== 'Відключень немає' && (
-              <div className="mt-4 pt-3.5 border-t border-white/10 flex items-center justify-between text-sm">
-                <span className="text-sky-200/70">
-                  {!isStatusUnclear && countdown.isCurrentlyBlackout 
-                    ? (lang === 'uk' ? 'Період відключення:' : 'Outage period:') 
-                    : (lang === 'uk' ? 'Найближчий період:' : 'Next period:')}
-                </span>
-                <span
-                  data-testid="next-period-value"
-                  className="text-base font-bold text-white font-mono bg-white/10 backdrop-blur-md px-3 py-1 rounded-xl border border-white/15"
-                >
-                  {isStatusUnclear ? '--:-- - --:--' : countdown.slotDescription}
-                </span>
+        {/* Custom ZTOE queue/house status message */}
+        {!isQueueUnselected && customStatus !== null && (
+          <GlassCard data-testid="main-custom-queue-status-text" className="flex flex-col gap-1">
+            {formattedSelectedAddress && (
+              <div data-testid="main-selected-address-text" className={`whitespace-pre-line text-[13px] font-medium leading-[19px] ${TEXT_SECONDARY}`}>
+                {formattedSelectedAddress}
               </div>
             )}
-          </>
+            <div className="whitespace-normal break-words text-base font-bold leading-[23px] text-white">{customStatus}</div>
+          </GlassCard>
         )}
-      </div>
 
-      {/* Day Selector (Today / Tomorrow if Tomorrow table exists on site; otherwise centered Today button) */}
-      {effectiveTomorrowSchedule ? (
-        <div className="flex gap-2 p-1.5 bg-[#141A29]/70 backdrop-blur-xl rounded-2xl border border-white/10 shadow-[0_12px_36px_rgba(0,0,0,0.45)]">
-          <button
-            onClick={() => setSelectedDayTab('today')}
-            className={`flex-1 py-2.5 px-4 rounded-xl text-sm font-bold transition-all ${
-              selectedDayTab === 'today'
-                ? 'bg-white/20 text-white shadow-md border border-white/20 backdrop-blur-md'
-                : 'text-sky-200/60 hover:text-white'
-            }`}
-          >
-            {t.today}
-          </button>
-          <button
-            onClick={() => setSelectedDayTab('tomorrow')}
-            className={`flex-1 py-2.5 px-4 rounded-xl text-sm font-bold transition-all ${
-              selectedDayTab === 'tomorrow'
-                ? 'bg-white/20 text-white shadow-md border border-white/20 backdrop-blur-md'
-                : 'text-sky-200/60 hover:text-white'
-            }`}
-          >
-            {t.tomorrow}
-          </button>
-        </div>
-      ) : (
-        <div className="flex justify-center">
-          <div className="py-2.5 px-6 bg-[#141A29]/80 backdrop-blur-xl rounded-2xl border border-white/15 text-sm font-bold text-white shadow-[0_12px_36px_rgba(0,0,0,0.45)]">
-            {t.today}
-          </div>
-        </div>
-      )}
-
-      {/* Schedule Card with 24h Timeline */}
-      <div className="bg-[#141A29]/75 backdrop-blur-2xl rounded-3xl p-5 border border-white/15 shadow-[0_16px_44px_rgba(0,0,0,0.55)] flex flex-col gap-4">
-        
-        {/* Inner 24h Timeline Graph & Needle styled after classic analog electricity meter (САЗУ-ИТ) */}
-        <div className="bg-gradient-to-b from-[#DFDDD0] via-[#D4D1C1] to-[#C6C2B0] border-2 border-[#7A7768] shadow-[inset_0_2px_5px_rgba(0,0,0,0.3)] rounded-2xl px-3 pt-4 pb-3 select-none flex flex-col">
-          
-          {/* 24-hour block row with recessed metallic drum bezel and stamped tick marks */}
-          <div className="relative w-full pb-6">
-            
-            {/* Recessed metallic counter drum slot */}
-            <div className="bg-[#4E514E] p-1.5 rounded-lg border-2 border-[#6E716B] shadow-[inset_0_3px_6px_rgba(0,0,0,0.85)]">
-              {isUnclear && !hasNoQueueMessage ? (
-                <div
-                  data-testid="drum-chart-unclear"
-                  className="relative flex w-full h-8 items-center justify-center bg-gradient-to-b from-[#7E8287] via-[#94989E] to-[#6E7277] rounded-[2px] overflow-visible"
-                >
-                  <span className="text-xs font-extrabold tracking-wide text-white drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)] z-10">
-                    {t.outagesUnclear}
+        {/* Hero outage status card */}
+        <GlassCard data-testid="main-counter-card" padding={18} className="transition-all">
+          {hasCustomNoQueueStatus && !hasEmergencyOutage ? (
+            <div data-testid="main-counter-empty" className="my-4 text-center">
+              <div
+                data-testid="main-counter-no-queue-placeholder"
+                className="whitespace-nowrap font-mono text-[44px] font-black leading-[48px] tracking-tight text-white drop-shadow-md"
+              >
+                --:--:--
+              </div>
+            </div>
+          ) : (
+            <>
+              <div className="mb-3.5 flex items-center justify-between gap-2">
+                <div className="flex min-w-0 flex-1 items-center gap-2">
+                  <span
+                    data-testid="power-status-indicator"
+                    aria-hidden="true"
+                    className={`h-2.5 w-2.5 shrink-0 rounded-full ${
+                      isStatusUnclear
+                        ? 'bg-[#9CA3AF]'
+                        : statusInfo.isBlackoutNow
+                        ? 'animate-pulse bg-[#FF5E3A] motion-reduce:animate-none'
+                        : 'bg-[#34D399]'
+                    }`}
+                  />
+                  <span data-testid="power-status-text" className="text-sm font-bold leading-5 text-white">
+                    {isStatusUnclear ? t.powerUnclear : statusInfo.isBlackoutNow ? t.powerOff : t.powerOn}
                   </span>
-                  {selectedDayTab === 'today' && (
-                    <div
-                      className="absolute -top-3 -bottom-3 w-[3px] bg-[#0B0B0A] rounded-full shadow-[0_0_2px_rgba(255,255,255,0.9)] pointer-events-none z-20 -translate-x-1/2"
-                      style={{ left: `${((currentHour * 60 + currentMinute) / 1440) * 100}%` }}
-                    />
-                  )}
                 </div>
-              ) : (
-                /* The 24 hours with 1-2px light gray hour separators and no half-hour separators */
-                <div
-                  data-testid={hasNoQueueMessage ? 'drum-chart-no-outage-light' : undefined}
-                  className="flex w-full items-center justify-between gap-[1.5px] bg-[#C8C6BC] rounded-[2px] overflow-visible"
-                >
-                  {chartBlocks.map(({ hour: h, half1Off, half2Off }) => {
-                    const hStr = h.toString().padStart(2, '0');
-                    const nextHStr = (h + 1 === 24 ? 24 : h + 1).toString().padStart(2, '0');
-                    const isCurrentHour = selectedDayTab === 'today' && h === currentHour;
+                <div className={`flex shrink-0 items-center gap-1 font-mono text-[13px] font-bold leading-[19px] ${TEXT_SECONDARY}`}>
+                  <Clock className="h-3.5 w-3.5" aria-hidden="true" />
+                  <span>{nowStr}</span>
+                </div>
+              </div>
 
+              <div className="flex flex-col items-center text-center">
+                <div className={`text-[13px] font-medium leading-[19px] ${TEXT_SECONDARY}`}>{off ? t.powerOnIn : t.powerOffIn}</div>
+                <div className="mt-1 whitespace-nowrap font-mono text-[44px] font-black leading-[48px] tracking-tight text-white drop-shadow-md tabular-nums">
+                  {isStatusUnclear ? '--:--:--' : statusInfo.countdownText}
+                </div>
+              </div>
+
+              {slotTimeText !== '' && slotTimeText !== 'Відключень немає' && (
+                <div className="mt-3.5 flex items-center gap-2 border-t border-white/10 pt-2.5">
+                  <span className={`flex-1 text-[13px] font-medium leading-[19px] ${TEXT_SECONDARY}`}>{off ? t.outagePeriod : t.nextPeriod}</span>
+                  <span
+                    data-testid="next-period-value"
+                    className="whitespace-nowrap rounded-[10px] bg-white/15 px-2.5 py-1 font-mono text-sm font-bold leading-5 text-white"
+                  >
+                    {slotTimeText}
+                  </span>
+                </div>
+              )}
+            </>
+          )}
+        </GlassCard>
+
+        {/* Day selector: Tomorrow is always there; before ztoe publishes it, it shows the grey drum plus a notice */}
+        <GlassCard control padding={4} data-testid="main-day-tabs">
+          <div role="tablist" aria-label={`${t.today} / ${t.tomorrow}`} className="flex gap-1">
+            <button
+              type="button"
+              role="tab"
+              id="main-tab-today"
+              aria-selected={!isTomorrowSelected}
+              aria-label={!isTomorrowSelected ? `${t.today}, ${t.tabSelected}` : t.today}
+              disabled={isQueueUnselected}
+              onClick={() => setSelectedDayTab('today')}
+              className={tabClass(!isTomorrowSelected)}
+            >
+              {t.today}
+            </button>
+            <button
+              type="button"
+              role="tab"
+              id="main-tab-tomorrow"
+              aria-selected={isTomorrowSelected}
+              aria-label={isTomorrowSelected ? `${t.tomorrow}, ${t.tabSelected}` : t.tomorrow}
+              disabled={isQueueUnselected}
+              onClick={() => setSelectedDayTab('tomorrow')}
+              className={tabClass(isTomorrowSelected)}
+            >
+              {t.tomorrow}
+            </button>
+          </div>
+        </GlassCard>
+
+        {isTomorrowSelected && isTomorrowUnclear && !isQueueUnselected && (
+          <GlassCard data-testid="tomorrow-not-published" role="status">
+            <div className="text-base font-bold leading-[23px] text-white">{t.tomorrowNotPublished}</div>
+          </GlassCard>
+        )}
+
+        {/* Schedule card with the 24 h drum and the list of outages of the shown day */}
+        <GlassCard padding={18} className="flex flex-col gap-3.5" role="tabpanel" aria-labelledby={isTomorrowSelected ? 'main-tab-tomorrow' : 'main-tab-today'}>
+          <DrumChart
+            slots={activeSlots}
+            currentHour={hourOf(snapshot.now)}
+            currentMinute={minuteOf(snapshot.now)}
+            showNeedle={!isTomorrowSelected}
+            lang={lang}
+            unclearBase={activeUnclear}
+            testId={isTomorrowSelected ? 'drum-tomorrow' : 'drum-today'}
+          />
+
+          {showOutageList && (
+            <div className="flex flex-col gap-2 border-t border-white/10 pt-3.5">
+              <div className={`text-sm font-semibold leading-5 ${TEXT_SECONDARY}`}>
+                {isTomorrowSelected ? t.blackoutHoursForTomorrowHeader : t.blackoutHoursForDayHeader}
+              </div>
+
+              {rows.length > 0 ? (
+                <div role="list" className="flex flex-col gap-2">
+                  {rows.map((row, idx) => {
+                    const text = formatRow(lang, row);
+                    const tags = [text.kindTag, text.originTag, text.statusTag, text.continueTag].filter((x): x is string => x !== null).join(' · ');
                     return (
                       <div
-                        key={`${selectedDayTab}_hour_${h}`}
-                        className="relative flex-1"
+                        key={`${idx}_${row.outage.id}`}
+                        role="listitem"
+                        aria-label={text.contentDescription}
+                        data-testid={text.isEmergency ? 'blackout-interval-row-emergency' : 'blackout-interval-row'}
+                        className={`flex items-center gap-2.5 rounded-[14px] bg-white/[0.08] px-3.5 py-2.5 ${text.isFinished ? 'opacity-55' : ''}`}
                       >
-                        {/* Two 30-min vertical drum blocks with no half-hour separator */}
-                        <div className="flex w-full items-center gap-0">
-                          {/* 00 - 30 */}
-                          <div
-                            className={`flex-1 h-8 transition-colors cursor-pointer ${
-                              half1Off 
-                                ? 'bg-gradient-to-b from-[#9E1E18] via-[#D62E26] to-[#8C1914]' 
-                                : 'bg-gradient-to-b from-[#D8D6CC] via-[#FCFBF7] to-[#CCC9BE]'
-                            }`}
-                            title={`${hStr}:00 – ${hStr}:30: ${half1Off ? 'Немає світла (відключення)' : 'Світло є'}`}
-                          />
-                          {/* 30 - 60 */}
-                          <div
-                            className={`flex-1 h-8 transition-colors cursor-pointer ${
-                              half2Off 
-                                ? 'bg-gradient-to-b from-[#9E1E18] via-[#D62E26] to-[#8C1914]' 
-                                : 'bg-gradient-to-b from-[#D8D6CC] via-[#FCFBF7] to-[#CCC9BE]'
-                            }`}
-                            title={`${hStr}:30 – ${nextHStr}:00: ${half2Off ? 'Немає світла (відключення)' : 'Світло є'}`}
-                          />
+                        {/* Fixed 20x20 leading indicator slot so the text start is identical in every row */}
+                        <span data-testid="blackout-interval-indicator-slot" aria-hidden="true" className="flex h-5 w-5 shrink-0 items-center justify-center">
+                          {text.isEmergency ? (
+                            <span
+                              data-testid="blackout-interval-emergency-icon"
+                              className="flex h-5 w-5 items-center justify-center rounded-full bg-[#FF5E3A] text-xs font-black leading-none text-white"
+                            >
+                              !
+                            </span>
+                          ) : text.isRepair ? (
+                            <Wrench className="h-[18px] w-[18px] text-[#FF5E3A]" aria-hidden="true" />
+                          ) : (
+                            <span className="h-2.5 w-2.5 rounded-full bg-[#FF5E3A]" />
+                          )}
+                        </span>
+                        <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+                          <span className="font-mono text-base font-bold leading-[22px] tabular-nums text-white">{text.timeText}</span>
+                          {tags !== '' && (
+                            <span
+                              className={`text-[13px] font-medium leading-[19px] ${
+                                text.isEmergency && !text.isFinished ? 'text-[#FF5E3A]' : TEXT_SECONDARY
+                              }`}
+                            >
+                              {tags}
+                            </span>
+                          )}
                         </div>
-
-                        {/* Exact Current Time Position (black needle protruding 4px above and below dark-grey contour) */}
-                        {isCurrentHour && (
-                          <div
-                            className="absolute -top-3 -bottom-3 w-[3px] bg-[#0B0B0A] rounded-full shadow-[0_0_2px_rgba(255,255,255,0.9)] pointer-events-none z-20 -translate-x-1/2"
-                            style={{ left: `${(currentMinute / 60) * 100}%` }}
-                          />
-                        )}
-
-                        {/* Stamped black tick mark and hour label at the left boundary of every even hour (00, 02..22) */}
-                        {h % 2 === 0 && (
-                          <div className="absolute top-[46px] left-0 -translate-x-1/2 flex flex-col items-center pointer-events-none z-10">
-                            <div className="w-[1.5px] h-[5px] bg-[#1C1B18]" />
-                            <span className="text-[10px] sm:text-[11px] font-mono text-[#1C1B18] font-bold mt-0.5 leading-none">
-                              {hStr}
-                            </span>
-                          </div>
-                        )}
-
-                        {/* Stamped black tick mark and label 24 at the right boundary of hour 23 */}
-                        {h === 23 && (
-                          <div className="absolute top-[46px] right-0 translate-x-1/2 flex flex-col items-center pointer-events-none z-10">
-                            <div className="w-[1.5px] h-[5px] bg-[#1C1B18]" />
-                            <span className="text-[10px] sm:text-[11px] font-mono text-[#1C1B18] font-bold mt-0.5 leading-none">
-                              24
-                            </span>
-                          </div>
+                        {text.durationText !== null && (
+                          <span className="whitespace-nowrap rounded-lg bg-[#FF5E3A]/15 px-2 py-[3px] font-mono text-[13px] font-bold leading-[19px] text-[#FF5E3A]">
+                            {text.durationText}
+                          </span>
                         )}
                       </div>
                     );
                   })}
                 </div>
+              ) : (
+                <div className={`rounded-[14px] bg-white/[0.08] p-3.5 text-center text-[13px] font-medium leading-[19px] ${TEXT_SECONDARY}`}>
+                  {t.noBlackoutsScheduled}
+                </div>
               )}
             </div>
+          )}
+        </GlassCard>
 
-            {isUnclear && !hasNoQueueMessage && (
-              <div className="flex justify-between text-[10px] sm:text-[11px] font-mono text-[#1C1B18] font-bold mt-1.5 px-0.5">
-                {['00', '02', '04', '06', '08', '10', '12', '14', '16', '18', '20', '22', '24'].map((lbl) => (
-                  <span key={lbl}>{lbl}</span>
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* Clear List of Outage Hours for this day (removed when outages are unclear or house has no queue) */}
-        {!isUnclear && !hasNoQueueMessage && (
-          <div className="pt-3 border-t border-white/10 flex flex-col gap-2">
-            <div className="text-xs font-bold text-sky-200/70 uppercase tracking-wider">
-              {selectedDayTab === 'tomorrow'
-                ? lang === 'uk'
-                  ? 'Години відключень на завтра:'
-                  : 'Blackout hours for tomorrow:'
-                : lang === 'uk'
-                ? 'Години відключень на сьогодні:'
-                : 'Blackout hours for today:'}
+        {/* Last updated, site status chips and the circular refresh button */}
+        <GlassCard padding={14} className="flex flex-col gap-2.5">
+          <div className="flex items-center gap-3">
+            <div className="flex min-w-0 flex-1 flex-col gap-1">
+              <LabelledValue label={t.lastUpdated} value={lastUpdated} />
+              <LabelledValue label={t.nextUpdated} value={nextUpdated} />
             </div>
-
-            {blackoutIntervals.length > 0 ? (
-              <div className="flex flex-col gap-2">
-                {blackoutIntervals.map((interval, idx) => (
-                  <div
-                    key={`${selectedDayTab}_${interval.start}_${interval.end}_${idx}`}
-                    data-testid={interval.isEmergency ? 'blackout-interval-row-emergency' : 'blackout-interval-row'}
-                    className="flex items-center justify-between p-3 rounded-xl bg-white/[0.06] backdrop-blur-md border border-white/10"
-                  >
-                    <div className="flex items-center gap-3">
-                      <span
-                        data-testid="blackout-interval-indicator-slot"
-                        className="w-5 h-5 flex items-center justify-center shrink-0"
-                      >
-                        {interval.isEmergency ? (
-                          <span
-                            data-testid="blackout-interval-emergency-icon"
-                            className="w-5 h-5 rounded-full border-2 border-[#FF5E3A] bg-[#FF5E3A]/20 text-[#FF5E3A] font-black text-xs leading-none flex items-center justify-center shadow-[0_0_8px_rgba(255,94,58,0.45)] shrink-0"
-                            title={lang === 'uk' ? 'Аварійне відключення' : 'Emergency outage'}
-                          >
-                            !
-                          </span>
-                        ) : (
-                          <span className="w-2.5 h-2.5 rounded-full bg-[#FF5E3A] shadow-[0_0_8px_#FF5E3A]" />
-                        )}
-                      </span>
-                      <span className="text-base font-black text-white font-mono tracking-tight">
-                        {interval.start} – {interval.end}
-                      </span>
-                    </div>
-                    <span className="text-xs font-bold px-3 py-1 rounded-full bg-[#FF5E3A]/15 text-[#FF5E3A] font-mono border border-[#FF5E3A]/30">
-                      {interval.durationHours} {lang === 'uk' ? 'год' : 'h'}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <div className="p-4 rounded-xl bg-emerald-500/10 text-emerald-300 font-bold text-center text-sm border border-emerald-400/20">
-                {lang === 'uk' ? 'Відключень не заплановано' : 'No blackouts scheduled'}
-              </div>
-            )}
+            {/* 42 px white disc with a 48 px touch target */}
+            <button
+              type="button"
+              onClick={handleManualRefresh}
+              disabled={isQueueUnselected || isRefreshing}
+              aria-label={t.refreshBtn}
+              title={t.forceRefresh}
+              aria-busy={isRefreshing}
+              data-testid="main-refresh-button"
+              className="flex min-h-12 min-w-12 shrink-0 cursor-pointer items-center justify-center disabled:cursor-default"
+            >
+              <span className="flex h-[42px] w-[42px] items-center justify-center rounded-full bg-white text-black shadow-lg transition-colors hover:bg-zinc-200">
+                <RefreshCw className={`h-5 w-5 ${isRefreshing ? 'animate-spin' : ''}`} aria-hidden="true" />
+              </span>
+              {isRefreshing && <span className="sr-only">{t.refreshing}</span>}
+            </button>
           </div>
-        )}
-      </div>
-
-      {/* Last Updated, Next Refresh & Circular Refresh Button */}
-      <div className="bg-[#141A29]/75 backdrop-blur-2xl rounded-2xl p-4 border border-white/15 shadow-[0_12px_40px_rgba(0,0,0,0.45)] flex items-center justify-between gap-3">
-        <div className="text-xs text-sky-200/80 space-y-1">
-          <div>
-            <span className="font-medium text-sky-200/60">{t.lastUpdated}: </span>
-            <span className="font-bold text-white font-mono">{activeSchedule.lastUpdated}</span>
-          </div>
-          <div>
-            <span className="font-medium text-sky-200/60">{t.nextRefreshAt}: </span>
-            <span className="font-bold text-white font-mono">{nextRefreshTimeStr}</span>
-          </div>
-        </div>
-
-        {/* Circular Action Refresh Button */}
-        <button
-          onClick={handleManualRefresh}
-          disabled={isRefreshing}
-          className="w-11 h-11 rounded-full bg-white text-black hover:bg-zinc-200 flex items-center justify-center transition-all shadow-lg disabled:opacity-50 cursor-pointer"
-          title={t.forceRefresh}
-        >
-          <RefreshCw className={`w-4 h-4 ${isRefreshing ? 'animate-spin' : ''}`} />
-        </button>
-      </div>
-
-      {/* Emergency Outages Info Link right after the Refresh block (with Facebook logo and word wrapping on caption only) */}
-      <div className="bg-[#141A29]/75 backdrop-blur-2xl rounded-3xl p-4 border border-white/15 shadow-[0_12px_40px_rgba(0,0,0,0.45)]">
-        <a
-          href="https://www.facebook.com/ztoe.com.ua"
-          target="_blank"
-          rel="noopener noreferrer"
-          title="https://www.facebook.com/ztoe.com.ua"
-          className="flex items-center justify-between p-3.5 rounded-2xl bg-white/[0.06] hover:bg-white/[0.12] border border-white/10 transition-all group overflow-hidden"
-        >
-          <div className="flex items-center gap-3.5 min-w-0 flex-1 mr-2">
-            <div className="w-10 h-10 rounded-2xl bg-[#1877F2] text-white flex items-center justify-center shrink-0 shadow-sm">
-              <svg
-                className="w-5 h-5 fill-current"
-                viewBox="0 0 24 24"
-                aria-label="Facebook"
-              >
-                <path d="M15.12 5.32H17V2.14A26.11 26.11 0 0 0 14.26 2c-2.72 0-4.58 1.66-4.58 4.7v2.62H6.61v3.56h3.07V22h3.68v-9.12h3.06l.46-3.56h-3.52V6.65c0-1.05.29-1.73 1.76-1.73Z" />
-              </svg>
+          {(chips.length > 0 || poweron !== null) && (
+            <div className="flex flex-col gap-2" data-testid="site-status-chip-row">
+              {chips.length > 0 && (
+                <div className="flex flex-wrap gap-2">
+                  {chips.map((chip, i) => (
+                    <StatusChipView key={`${chip.icon}_${i}`} chip={chip} />
+                  ))}
+                </div>
+              )}
+              {poweron !== null && (
+                <div data-testid="poweron-status-line" className="flex items-center gap-1.5 text-[13px] font-medium leading-[19px]" style={{ color: TONE_COLORS[poweron.tone].text }}>
+                  {(() => {
+                    const Icon = ICONS[poweron.icon];
+                    return <Icon className="h-4 w-4 shrink-0" aria-hidden={true} />;
+                  })()}
+                  <span>{poweron.text}</span>
+                </div>
+              )}
             </div>
-            <div className="min-w-0 flex-1">
-              <div className="text-xs font-bold text-white group-hover:text-[#FF5E3A] transition-colors whitespace-normal break-words leading-snug">
-                {t.emergencyOutagesLabel}
+          )}
+        </GlassCard>
+
+        {/* Emergency outages info link (Facebook): the URL wraps to two lines instead of a dead ellipsis */}
+        <GlassCard padding={14}>
+          <a
+            href="https://www.facebook.com/ztoe.com.ua"
+            target="_blank"
+            rel="noopener noreferrer"
+            title="https://www.facebook.com/ztoe.com.ua"
+            className="group flex min-h-12 items-center justify-between gap-2.5 overflow-hidden rounded-[14px] bg-white/[0.08] p-3 transition-colors hover:bg-white/[0.14]"
+          >
+            <div className="flex min-w-0 flex-1 items-center gap-2.5">
+              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[10px] bg-[#1877F2] text-white shadow-sm">
+                <svg className="h-5 w-5 fill-current" viewBox="0 0 24 24" aria-label="Facebook">
+                  <path d="M15.12 5.32H17V2.14A26.11 26.11 0 0 0 14.26 2c-2.72 0-4.58 1.66-4.58 4.7v2.62H6.61v3.56h3.07V22h3.68v-9.12h3.06l.46-3.56h-3.52V6.65c0-1.05.29-1.73 1.76-1.73Z" />
+                </svg>
               </div>
-              <div className="text-[11px] text-sky-200/70 font-mono truncate mt-0.5">
-                https://www.facebook.com/ztoe.com.ua
+              <div className="min-w-0 flex-1">
+                <div className="whitespace-normal break-words text-sm font-bold leading-5 text-white transition-colors group-hover:text-[#FF5E3A]">
+                  {t.emergencyOutagesLabel}
+                </div>
+                <div className={`line-clamp-2 break-all font-mono text-[13px] font-normal leading-[19px] ${TEXT_TERTIARY}`}>
+                  https://www.facebook.com/ztoe.com.ua
+                </div>
               </div>
             </div>
-          </div>
-          <ExternalLink className="w-4 h-4 text-sky-200/70 group-hover:text-white transition-colors shrink-0" />
-        </a>
-      </div>
+            <ExternalLink className={`h-4 w-4 shrink-0 ${TEXT_TERTIARY}`} aria-hidden="true" />
+          </a>
+        </GlassCard>
 
-      {/* Blackout Schedules on ZTOE Website Link at very bottom after Facebook link */}
-      <div className="bg-[#141A29]/75 backdrop-blur-2xl rounded-3xl p-4 border border-white/15 shadow-[0_12px_40px_rgba(0,0,0,0.45)]">
-        <a
-          href="https://www.ztoe.com.ua/unhooking-search.php"
-          target="_blank"
-          rel="noopener noreferrer"
-          title="https://www.ztoe.com.ua/unhooking-search.php"
-          className="flex items-center justify-between p-3.5 rounded-2xl bg-white/[0.06] hover:bg-white/[0.12] border border-white/10 transition-all group overflow-hidden"
-        >
-          <div className="flex items-center gap-3.5 min-w-0 flex-1 mr-2">
-            <div className="w-10 h-10 rounded-2xl bg-[#FF5E3A] text-white flex items-center justify-center shrink-0 shadow-sm">
-              <Zap className="w-5 h-5 fill-current" />
-            </div>
-            <div className="min-w-0 flex-1">
-              <div className="text-xs font-bold text-white group-hover:text-[#FF5E3A] transition-colors whitespace-normal break-words leading-snug">
-                {lang === 'uk' ? 'Графіки відключень на сайті' : 'Blackout schedules on website'}
+        {/* Blackout schedules on the ZTOE website, at the very bottom */}
+        <GlassCard padding={14}>
+          <a
+            href="https://www.ztoe.com.ua/unhooking-search.php"
+            target="_blank"
+            rel="noopener noreferrer"
+            title="https://www.ztoe.com.ua/unhooking-search.php"
+            className="group flex min-h-12 items-center justify-between gap-2.5 overflow-hidden rounded-[14px] bg-white/[0.08] p-3 transition-colors hover:bg-white/[0.14]"
+          >
+            <div className="flex min-w-0 flex-1 items-center gap-2.5">
+              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[10px] bg-[#FF5E3A] text-white shadow-sm">
+                <Zap className="h-5 w-5 fill-current" aria-hidden="true" />
               </div>
-              <div className="text-[11px] text-sky-200/70 font-mono truncate mt-0.5">
-                https://www.ztoe.com.ua/unhooking-search.php
+              <div className="min-w-0 flex-1">
+                <div className="whitespace-normal break-words text-sm font-bold leading-5 text-white transition-colors group-hover:text-[#FF5E3A]">
+                  {t.siteSchedulesLabel}
+                </div>
+                <div className={`line-clamp-2 break-all font-mono text-[13px] font-normal leading-[19px] ${TEXT_TERTIARY}`}>
+                  https://www.ztoe.com.ua/unhooking-search.php
+                </div>
               </div>
             </div>
-          </div>
-          <ExternalLink className="w-4 h-4 text-sky-200/70 group-hover:text-white transition-colors shrink-0" />
-        </a>
+            <ExternalLink className={`h-4 w-4 shrink-0 ${TEXT_TERTIARY}`} aria-hidden="true" />
+          </a>
+        </GlassCard>
       </div>
-      </div>
-
     </div>
   );
 };

@@ -4,10 +4,11 @@ import android.appwidget.AppWidgetManager
 import android.content.Context
 import androidx.glance.appwidget.GlanceAppWidget
 import androidx.glance.appwidget.GlanceAppWidgetReceiver
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import ua.blackout.prewarning.data.parser.ZtoeParser
+import ua.blackout.prewarning.data.repository.OutageRepository
 import ua.blackout.prewarning.data.repository.ScheduleRepository
 import ua.blackout.prewarning.data.repository.SettingsRepository
 import ua.blackout.prewarning.notification.AlarmScheduler
@@ -17,7 +18,7 @@ open class BlackoutWidgetReceiver : GlanceAppWidgetReceiver() {
 
     override fun onEnabled(context: Context) {
         super.onEnabled(context)
-        fetchAndRefreshWidgetImmediately(context, forceNetwork = true)
+        refreshAndRedraw(context, forceNetwork = true)
     }
 
     override fun onUpdate(
@@ -26,36 +27,64 @@ open class BlackoutWidgetReceiver : GlanceAppWidgetReceiver() {
         appWidgetIds: IntArray
     ) {
         super.onUpdate(context, appWidgetManager, appWidgetIds)
-        fetchAndRefreshWidgetImmediately(context, forceNetwork = false)
+        refreshAndRedraw(context, forceNetwork = false)
     }
 
-    private fun fetchAndRefreshWidgetImmediately(context: Context, forceNetwork: Boolean) {
+    override fun onDeleted(context: Context, appWidgetIds: IntArray) {
+        super.onDeleted(context, appWidgetIds)
+        WidgetBindings.unbind(context, appWidgetIds)
+    }
+
+    override fun onDisabled(context: Context) {
+        super.onDisabled(context)
+        // The last widget is gone: re-plan so the widget transition alarms are cancelled
+        refreshAndRedraw(context, forceNetwork = false, fetch = false)
+    }
+
+    /**
+     * Refreshes through [OutageRepository] when the cache is missing or older than the refresh interval
+     * (always when [forceNetwork]), then re-plans alarms (which schedule or cancel the widget transition
+     * redraws) and redraws. A failed fetch keeps the previous data and still redraws.
+     */
+    private fun refreshAndRedraw(context: Context, forceNetwork: Boolean, fetch: Boolean = true) {
         val pendingResult = goAsync()
         val appContext = context.applicationContext
         CoroutineScope(Dispatchers.IO).launch {
             try {
-                val settings = SettingsRepository(appContext).getSettings()
-                val scheduleRepo = ScheduleRepository(appContext)
-                val cacheFresh = scheduleRepo.hasValidTodayCache(settings.queue) &&
-                    scheduleRepo.isCacheFresh(settings.refreshIntervalMinutes)
-
-                if (forceNetwork || !cacheFresh) {
-                    val res = ZtoeParser.fetchFullSchedule(settings.cityUrl, settings.queue, appContext)
-                    if (res.status == ua.blackout.prewarning.data.parser.FetchStatus.SUCCESS) {
-                        scheduleRepo.saveSchedule(settings.queue, res.todaySlots, res.tomorrowSlots)
+                if (fetch) {
+                    try {
+                        val settings = SettingsRepository(appContext).getSettings()
+                        val hasSource = settings.queue.isNotBlank() || settings.selectedAddressQuery != null
+                        if (hasSource) {
+                            val scheduleRepo = ScheduleRepository(appContext)
+                            val cacheFresh = scheduleRepo.hasValidTodayCache(settings.queue) &&
+                                scheduleRepo.isCacheFresh(settings.refreshIntervalMinutes)
+                            if (forceNetwork || !cacheFresh) {
+                                OutageRepository(appContext).refresh(settings, forceNetwork)
+                            }
+                        }
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (_: Exception) {
                     }
                 }
-                AlarmScheduler.syncAlarms(appContext)
-                BlackoutGlanceWidget.syncAllWidgets(appContext)
-            } catch (_: Exception) {
                 try {
                     AlarmScheduler.syncAlarms(appContext)
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (_: Exception) {
+                }
+                try {
                     BlackoutGlanceWidget.syncAllWidgets(appContext)
-                } catch (_: Exception) {}
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (_: Exception) {
+                }
             } finally {
                 try {
                     pendingResult.finish()
-                } catch (_: Exception) {}
+                } catch (_: Exception) {
+                }
             }
         }
     }
@@ -63,4 +92,8 @@ open class BlackoutWidgetReceiver : GlanceAppWidgetReceiver() {
 
 class BlackoutBigWidgetReceiver : BlackoutWidgetReceiver() {
     override val glanceAppWidget: GlanceAppWidget = BlackoutBigGlanceWidget()
+}
+
+class BlackoutStripWidgetReceiver : BlackoutWidgetReceiver() {
+    override val glanceAppWidget: GlanceAppWidget = BlackoutStripGlanceWidget()
 }

@@ -9,19 +9,37 @@ import {
   Zap, 
   X
 } from 'lucide-react';
-import { DaySchedule, UserSettings, NotificationRecord } from '../types';
+import { UserSettings, NotificationRecord } from '../types';
+import type { OutageSnapshot } from '../services/outageRepository';
 import { translations } from '../services/i18n';
 import { getInterpolatedTimePalette } from '../services/timeOfDayPalette';
 import { MainView } from './MainView';
 import { SettingsView } from './SettingsView';
 import { AboutView } from './AboutView';
 import { WidgetSimulator } from './WidgetSimulator';
+import { AnimatePresence, motion, useReducedMotion, type PanInfo } from 'motion/react';
 import { ZhytomyrRouletteModal } from './ZhytomyrRouletteModal';
 import { cacheQueueSlotsForRoulette } from '../services/rouletteGame';
+import { noAlertsCaption, switcherItems, type SubscriptionStore } from '../core/subscriptions';
 
 interface PhoneSimulatorProps {
-  schedule: DaySchedule;
-  tomorrowSchedule: DaySchedule | null;
+  /** One outage snapshot feeds the main screen and the three widgets (see OutageRepository.snapshot). */
+  snapshot: OutageSnapshot;
+  /** The address the main screen shows (spec/SUBSCRIPTIONS.md 9); the primary when absent. */
+  mainSnapshot?: OutageSnapshot;
+  mainSettings?: UserSettings;
+  subscriptionStore?: SubscriptionStore;
+  shownSubscriptionId?: string | null;
+  onSelectSubscription?: (id: string) => void;
+  /** What the widgets show (spec/SUBSCRIPTIONS.md 10); the primary when absent. */
+  widgetSnapshot?: OutageSnapshot;
+  widgetSettings?: UserSettings;
+  widgetAddressLabel?: string | null;
+  widgetBoundId?: string | null;
+  onBindWidget?: (id: string | null) => void;
+  widgetItemId?: string | null;
+  /** A tap on the heads-up card: shows its address on the main screen. */
+  onOpenNotification?: (record: NotificationRecord) => void;
   settings: UserSettings;
   lang: 'uk' | 'en';
   activeNotification: NotificationRecord | null;
@@ -38,8 +56,19 @@ interface PhoneSimulatorProps {
 }
 
 export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
-  schedule,
-  tomorrowSchedule,
+  snapshot,
+  mainSnapshot,
+  mainSettings,
+  subscriptionStore,
+  shownSubscriptionId = null,
+  onSelectSubscription,
+  widgetSnapshot,
+  widgetSettings,
+  widgetAddressLabel = null,
+  widgetBoundId = null,
+  onBindWidget,
+  widgetItemId = null,
+  onOpenNotification,
   settings,
   lang,
   activeNotification,
@@ -70,10 +99,12 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
   }, []);
 
   React.useEffect(() => {
-    if (schedule?.queue && schedule?.slots?.length) {
-      cacheQueueSlotsForRoulette(schedule.queue, schedule.slots);
+    // The roulette plays on today's 48 cells of the selected queue, the same cells the drum shows
+    const slots = snapshot.slotsFor(snapshot.today);
+    if (snapshot.queue && slots.length) {
+      cacheQueueSlotsForRoulette(snapshot.queue, slots);
     }
-  }, [schedule]);
+  }, [snapshot]);
 
   React.useEffect(() => {
     if (activeTab !== 'about') {
@@ -101,7 +132,21 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
     }
   }, [activeTab]);
 
+  // Screens in the order of the bottom dock: swiping left goes to the next one (as the Android pager)
+  const tabOrder = ['schedule', 'widget', 'settings', 'about'] as const;
+  const tabIndex = tabOrder.indexOf(activeTab);
+  const previousTab = React.useRef(activeTab);
+  const direction = tabIndex >= tabOrder.indexOf(previousTab.current) ? 1 : -1;
+  React.useEffect(() => {
+    previousTab.current = activeTab;
+  }, [activeTab]);
+  const reduceMotion = useReducedMotion() ?? false;
+  const pageRef = React.useRef<HTMLDivElement>(null);
+
   const displayedNotification = imitatedNotification || activeNotification;
+  const hasFeaturedEmergency = React.useMemo(() => snapshot.featuredEmergency() !== null, [snapshot]);
+  const isQueueUnselectedView =
+    (!settings.queue || settings.queue.trim() === '') && !settings.customQueueStatusText && !hasFeaturedEmergency && activeTab === 'schedule';
 
   return (
     <div className="relative mx-auto w-[416px] max-w-full rounded-[52px] bg-[#07090E] p-3.5 shadow-[0_25px_60px_rgba(0,0,0,0.8)] ring-1 ring-white/10 select-none">
@@ -118,26 +163,32 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
             background: `radial-gradient(circle at 50% 45%, ${timePalette.primary} 0%, ${timePalette.secondary} 100%)`,
           }}
         />
-        {/* Secondary (30%) blurred orb */}
+        {/* The orbs drift very slowly (zt-drift-*) and move a little against the screen change (3 % per screen) */}
         <div
-          className="absolute -top-8 -right-8 w-80 h-80 rounded-full opacity-75 blur-3xl pointer-events-none transition-colors duration-1000"
-          style={{ backgroundColor: timePalette.secondary }}
-        />
-        {/* Supporting/Core top-left contrast orb for crisp header readability */}
-        <div
-          className="absolute -top-12 -left-12 w-72 h-72 rounded-full opacity-70 blur-3xl pointer-events-none transition-colors duration-1000"
-          style={{ backgroundColor: timePalette.supporting }}
-        />
-        {/* Secondary (30%) lower-left wave */}
-        <div
-          className="absolute bottom-1/4 -left-16 w-80 h-80 rounded-full opacity-65 blur-3xl pointer-events-none transition-colors duration-1000"
-          style={{ backgroundColor: timePalette.secondary }}
-        />
-        {/* Accent (10%) blurred highlight orb */}
-        <div
-          className="absolute bottom-12 right-6 w-60 h-60 rounded-full opacity-60 blur-3xl pointer-events-none transition-colors duration-1000"
-          style={{ backgroundColor: timePalette.accent }}
-        />
+          className="pointer-events-none absolute inset-0 translate-x-(--zt-parallax) transition-transform duration-[600ms] ease-[cubic-bezier(0.77,0,0.175,1)] motion-reduce:translate-x-0 motion-reduce:transition-none"
+          style={{ ['--zt-parallax' as string]: `${-tabIndex * 3}%` }}
+        >
+          {/* Secondary (30%) blurred orb */}
+          <div
+            className="zt-drift-1 absolute -top-8 -right-8 w-80 h-80 rounded-full opacity-75 blur-3xl pointer-events-none transition-colors duration-1000"
+            style={{ backgroundColor: timePalette.secondary }}
+          />
+          {/* Supporting/Core top-left contrast orb for crisp header readability */}
+          <div
+            className="zt-drift-2 absolute -top-12 -left-12 w-72 h-72 rounded-full opacity-70 blur-3xl pointer-events-none transition-colors duration-1000"
+            style={{ backgroundColor: timePalette.supporting }}
+          />
+          {/* Secondary (30%) lower-left wave */}
+          <div
+            className="zt-drift-3 absolute bottom-1/4 -left-16 w-80 h-80 rounded-full opacity-65 blur-3xl pointer-events-none transition-colors duration-1000"
+            style={{ backgroundColor: timePalette.secondary }}
+          />
+          {/* Accent (10%) blurred highlight orb */}
+          <div
+            className="zt-drift-4 absolute bottom-12 right-6 w-60 h-60 rounded-full opacity-60 blur-3xl pointer-events-none transition-colors duration-1000"
+            style={{ backgroundColor: timePalette.accent }}
+          />
+        </div>
         {/* Subtle top scrim to guarantee status bar and header contrast across all 4 day phases */}
         <div className="absolute inset-x-0 top-0 h-36 bg-gradient-to-b from-[#0B0C10]/65 via-[#0B0C10]/25 to-transparent pointer-events-none" />
 
@@ -164,7 +215,15 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
                 <div className="w-9 h-9 rounded-xl bg-[#FF5E3A] flex items-center justify-center text-white shrink-0 mt-0.5 shadow-md">
                   <Zap className="w-4 h-4 fill-current" />
                 </div>
-                <div>
+                <div
+                  role={!imitatedNotification && onOpenNotification ? 'button' : undefined}
+                  tabIndex={!imitatedNotification && onOpenNotification ? 0 : undefined}
+                  data-testid="heads-up-open"
+                  onClick={() => {
+                    if (!imitatedNotification && activeNotification) onOpenNotification?.(activeNotification);
+                  }}
+                  className={!imitatedNotification && onOpenNotification ? 'cursor-pointer' : undefined}
+                >
                   <div className="flex items-center gap-2">
                     <span className="text-[11px] font-bold text-[#FF5E3A] uppercase tracking-wider">Світло в Житомирі</span>
                     <span className="text-[10px] text-sky-200/70 font-mono">· {t.now}</span>
@@ -200,19 +259,53 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
           className={`flex-1 min-h-0 ${
             (!settings.queue || settings.queue.trim() === '') &&
             !settings.customQueueStatusText &&
-            !settings.activeEmergencyOutage &&
+            !hasFeaturedEmergency &&
             activeTab === 'schedule'
               ? 'overflow-hidden'
               : 'overflow-y-auto overscroll-contain scroll-smooth'
-          } px-4 pt-2 pb-28 relative z-10 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden`}
+          } overflow-x-hidden px-4 pt-2 pb-28 relative z-10 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden`}
         >
+          {/* Swipe between screens: the page follows the finger and, past a quarter of its width (or on a
+              flick), slides out while the next one comes in from that side; dock taps play the same slide.
+              Spring 300/30 = PageGlide on Android. Under reduced motion the pages only cross-fade. */}
+          <AnimatePresence initial={false} custom={direction} mode="popLayout">
+          <motion.div
+            key={activeTab}
+            ref={pageRef}
+            data-testid="phone-page"
+            custom={direction}
+            variants={{
+              enter: (d: number) => (reduceMotion ? { x: 0, opacity: 0 } : { x: d > 0 ? '100%' : '-100%', opacity: 0.65 }),
+              center: { x: 0, opacity: 1 },
+              exit: (d: number) => (reduceMotion ? { x: 0, opacity: 0 } : { x: d > 0 ? '-100%' : '100%', opacity: 0.65 }),
+            }}
+            initial="enter"
+            animate="center"
+            exit="exit"
+            transition={{ x: { type: 'spring', stiffness: 300, damping: 30 }, opacity: { duration: 0.2, ease: [0.215, 0.61, 0.355, 1] } }}
+            drag={isRouletteOpen || isQueueUnselectedView ? false : 'x'}
+            dragDirectionLock
+            dragConstraints={{ left: 0, right: 0 }}
+            dragElastic={{ left: tabIndex < tabOrder.length - 1 ? 1 : 0.2, right: tabIndex > 0 ? 1 : 0.2 }}
+            dragTransition={{ bounceStiffness: 300, bounceDamping: 30 }}
+            onDragEnd={(_e: PointerEvent, info: PanInfo) => {
+              const width = pageRef.current?.offsetWidth ?? 360;
+              const swipe = info.offset.x + info.velocity.x * 0.2;
+              if (swipe < -width * 0.25 && tabIndex < tabOrder.length - 1) setActiveTab(tabOrder[tabIndex + 1]);
+              else if (swipe > width * 0.25 && tabIndex > 0) setActiveTab(tabOrder[tabIndex - 1]);
+            }}
+          >
           {activeTab === 'schedule' && (
             <MainView
-              schedule={schedule}
-              tomorrowSchedule={tomorrowSchedule}
-              settings={settings}
+              snapshot={mainSnapshot ?? snapshot}
+              settings={mainSettings ?? settings}
+              addresses={subscriptionStore ? switcherItems(subscriptionStore) : []}
+              primaryAddressId={subscriptionStore?.primaryId ?? null}
+              shownAddressId={shownSubscriptionId}
+              onSelectAddress={onSelectSubscription}
+              showNoAlertsCaption={subscriptionStore ? noAlertsCaption(settings.alertsMaster ?? true, subscriptionStore) : false}
+              onOpenSettings={() => setActiveTab('settings')}
               lang={lang}
-              now={now}
               onToggleNotifications={onToggleNotifications}
               onRefresh={onRefresh}
               isRefreshing={isRefreshing}
@@ -232,15 +325,21 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
 
           {activeTab === 'widget' && (
             <WidgetSimulator
-              schedule={schedule}
-              tomorrowSchedule={tomorrowSchedule}
+              snapshot={widgetSnapshot ?? snapshot}
               now={now}
-              settings={settings}
+              settings={widgetSettings ?? settings}
               lang={lang}
               onToggleNotifications={onToggleNotifications}
               onRefresh={onRefresh}
               isRefreshing={isRefreshing}
-              onOpenApp={() => setActiveTab('schedule')}
+              addressLabel={widgetAddressLabel}
+              subscriptionStore={subscriptionStore}
+              boundId={widgetBoundId}
+              onBind={onBindWidget}
+              onOpenApp={() => {
+                if (widgetItemId) onSelectSubscription?.(widgetItemId);
+                setActiveTab('schedule');
+              }}
             />
           )}
 
@@ -248,22 +347,11 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
             <SettingsView
               settings={settings}
               lang={lang}
-              onUpdateSettings={(newSettings) => {
-                const wasUnselected =
-                  (!settings.queue || settings.queue.trim() === '') &&
-                  !settings.customQueueStatusText &&
-                  !settings.selectedAddress;
-                const isNowSelected =
-                  Boolean(newSettings.queue && newSettings.queue.trim() !== '') ||
-                  Boolean(newSettings.customQueueStatusText) ||
-                  Boolean(newSettings.selectedAddress);
-                onUpdateSettings(newSettings);
-                if (wasUnselected && isNowSelected) {
-                  setActiveTab('schedule');
-                }
-              }}
+              // the first address keeps the user in Settings (owner request)
+              onUpdateSettings={onUpdateSettings}
               onSendTestAlert={onSendTestAlert}
               onForceRefresh={onRefresh}
+              isRefreshing={isRefreshing}
               onResetDefaults={onResetDefaults}
               autoOpenQueueHelp={autoOpenQueueHelp}
               onQueueHelpOpened={() => setAutoOpenQueueHelp(false)}
@@ -277,6 +365,8 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
               onOpenRoulette={() => setIsRouletteOpen(true)}
             />
           )}
+          </motion.div>
+          </AnimatePresence>
         </div>
 
         {/* Zhytomyr Roulette Full-Screen Overlay (positioned below Android Status Bar, hiding Navigation Bar) */}
@@ -297,13 +387,13 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
             className={`absolute bottom-5 left-1/2 -translate-x-1/2 z-40 w-[84%] max-w-[320px] transition-all duration-300 ${
               (!settings.queue || settings.queue.trim() === '') &&
               !settings.customQueueStatusText &&
-              !settings.activeEmergencyOutage &&
+              !hasFeaturedEmergency &&
               activeTab === 'schedule'
                 ? 'opacity-15 brightness-50 pointer-events-none select-none'
                 : ''
             }`}
           >
-            <div className="bg-[#141A29]/80 backdrop-blur-2xl rounded-full p-1.5 border border-white/20 shadow-2xl flex items-center justify-around">
+            <div className="zt-glass rounded-full p-1.5 flex items-center justify-around">
               
               {/* 1. Schedule */}
               <button
@@ -311,7 +401,7 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
                 disabled={
                   (!settings.queue || settings.queue.trim() === '') &&
                   !settings.customQueueStatusText &&
-                  !settings.activeEmergencyOutage &&
+                  !hasFeaturedEmergency &&
                   activeTab === 'schedule'
                 }
                 className={`w-11 h-11 rounded-full flex items-center justify-center transition-all ${
@@ -330,7 +420,7 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
                 disabled={
                   (!settings.queue || settings.queue.trim() === '') &&
                   !settings.customQueueStatusText &&
-                  !settings.activeEmergencyOutage &&
+                  !hasFeaturedEmergency &&
                   activeTab === 'schedule'
                 }
                 className={`w-11 h-11 rounded-full flex items-center justify-center transition-all ${
@@ -349,7 +439,7 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
                 disabled={
                   (!settings.queue || settings.queue.trim() === '') &&
                   !settings.customQueueStatusText &&
-                  !settings.activeEmergencyOutage &&
+                  !hasFeaturedEmergency &&
                   activeTab === 'schedule'
                 }
                 className={`w-11 h-11 rounded-full flex items-center justify-center transition-all ${
@@ -368,7 +458,7 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
                 disabled={
                   (!settings.queue || settings.queue.trim() === '') &&
                   !settings.customQueueStatusText &&
-                  !settings.activeEmergencyOutage &&
+                  !hasFeaturedEmergency &&
                   activeTab === 'schedule'
                 }
                 className={`w-11 h-11 rounded-full flex items-center justify-center transition-all ${
@@ -383,6 +473,9 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
             </div>
           </div>
         )}
+
+        {/* Modal root: dialogs of the screens (address picker, queue help) render here, above the navigation dock */}
+        <div data-phone-modal-root className="pointer-events-none absolute inset-0 z-[55] [&>*]:pointer-events-auto" />
 
         {/* Android Gesture Bar */}
         <div className="shrink-0 flex justify-center pb-2 bg-transparent z-10">

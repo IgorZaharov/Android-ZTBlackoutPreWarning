@@ -780,25 +780,10 @@ class ZtoeParserTest {
         assertEquals(null, parsedNoQueue?.first)
         assertEquals("В цей час не вимикається, за винятком випадків аварійних відключень", parsedNoQueue?.second)
 
-        // 2. Verify Emergency Outages parser (pw_accidents JSON & HTML table) and Kyivska 37 Demo Outage
-        val demoEmergency = ua.blackout.prewarning.data.parser.ZtoeAddressLookup.getKyivska37DemoEmergencyOutage()
+        // 2. Test fixture emergency (the production emergency pipeline is PowerOnClient)
+        val demoEmergency = ua.blackout.prewarning.data.parser.AddressFixtures.kyivska37Demo()
         assertEquals("06.04 19:21", demoEmergency.startTime)
         assertEquals("07.04 20:00", demoEmergency.estimatedRestoreTime)
-
-        val sampleAccidentsHtml = """
-            <script>
-            let pw_accidents = [{"rem_id":4,"rem_name":"Житомирський"," date_begin":"06.04 19:21","date_plan":"07.04 20:00","Otkl_Type_Name":"Аварійне відключення","naspunkt":[{"id":2,"name":"м. Житомир","streets":[{"id":22,"name":"вул. Київська, 37"}]}]}];
-            </script>
-        """.trimIndent()
-        val matchedJson = ua.blackout.prewarning.data.parser.ZtoeAddressLookup.matchEmergencyOutageFromAccidentsJson(
-            sampleAccidentsHtml,
-            "Житомирський РЕМ",
-            "м. Житомир",
-            "вул. Київська",
-            "37"
-        )
-        assertEquals("06.04 19:21", matchedJson?.startTime)
-        assertEquals("07.04 20:00", matchedJson?.estimatedRestoreTime)
 
         // 3. Verify Cross-Day Emergency Overlay on Today (2026-04-06 -> 19:00-24:00) and Tomorrow (2026-04-07 -> 00:00-20:00)
         val base48PowerOn = (0 until 48).map { idx ->
@@ -902,7 +887,7 @@ class ZtoeParserTest {
         ua.blackout.prewarning.data.parser.ZtoeAddressLookup.clearCacheForTesting()
         val mockCacheJson = """
             {
-              "version": 1,
+              "version": ${ua.blackout.prewarning.data.parser.ZtoeAddressLookup.CACHE_VERSION},
               "rems": [
                 {"id": "zhytomyr", "ztoeRemId": 7, "nameUk": "Житомирський РЕМ", "nameEn": "Zhytomyr REM"},
                 {"id": "berdychiv", "ztoeRemId": 3, "nameUk": "Бердичівський РЕМ", "nameEn": "Berdychiv REM"}
@@ -1005,28 +990,11 @@ class ZtoeParserTest {
         val parsedKyivska74 = ua.blackout.prewarning.data.parser.ZtoeAddressLookup.parseZtoeAddressLookupTableHtml(kyivska74Html, "74")
         assertEquals(null, parsedKyivska74?.first)
         assertEquals("В цей час не вимикається, за винятком випадків аварійних відключень", parsedKyivska74?.second)
-        val parsedKyivska74EmergencyList = ua.blackout.prewarning.data.parser.ZtoeAddressLookup.parseZtoeEmergencyOutagesTableHtml(kyivska74Html)
-        assertTrue(parsedKyivska74EmergencyList.isEmpty())
-        val parsedKyivska74Emergency = ua.blackout.prewarning.data.parser.ZtoeAddressLookup.parseZtoeEmergencyOutagesTableHtml(kyivska74Html, "74")
-        assertEquals(null, parsedKyivska74Emergency)
         assertEquals(false, ua.blackout.prewarning.data.parser.ZtoeAddressLookup.isValidOutageTimestamp("В цей час не вимикається, за винятком випадків аварійних відключень"))
         assertEquals(false, ua.blackout.prewarning.data.parser.ZtoeAddressLookup.isValidOutageTimestamp("побутові споживачі"))
         assertEquals(true, ua.blackout.prewarning.data.parser.ZtoeAddressLookup.isValidOutageTimestamp("06.04 19:21"))
         assertEquals(true, ua.blackout.prewarning.data.parser.ZtoeAddressLookup.isValidOutageTimestamp("10.11.2026 22:00"))
-        // 9. Verify priority scoring (switchSubReason 0 Аварійне відключення > switchSubReason 2 ГПВ), Latin/Cyrillic house letter normalization, and empty-slot emergency synthesis
-        val multiAccidentsJson = """
-            {"hydra:member":[{"id":1001,"city":{"id":1,"name":"м. Житомир"},"street":{"id":162,"name":"вул. Степана Бандери"},"buildingNames":"16, 16А","dateEvent":"2026-11-11T08:00:00+02:00","datePlanIn":"2026-11-11T12:00:00+02:00","koment":"ГПВ 4.1","typeOff":1,"switchSubReason":2},{"id":1002,"city":{"id":1,"name":"м. Житомир"},"street":{"id":162,"name":"вул. Степана Бандери"},"buildingNames":"16, 16A","dateEvent":"2026-11-11T09:15:00+02:00","datePlanIn":"2026-11-11T17:30:00+02:00","koment":"Аварійне відключення","typeOff":1,"switchSubReason":0}]}
-        """.trimIndent()
-        val matchedBandery = ua.blackout.prewarning.data.parser.ZtoeAddressLookup.matchEmergencyOutageFromAccidentsJson(
-            multiAccidentsJson,
-            "Житомирський РЕМ",
-            "м. Житомир",
-            "вул. Степана Бандери",
-            "16А"
-        )
-        assertEquals("11.11.2026 09:15", matchedBandery?.startTime)
-        assertEquals("11.11.2026 17:30", matchedBandery?.estimatedRestoreTime)
-
+        // 9. Verify empty-slot emergency synthesis
         val synthesizedFromEmpty = ua.blackout.prewarning.data.repository.ScheduleRepository.applyEmergencyOutageToSlots(
             emptyList(),
             "2026-04-06",
@@ -1075,51 +1043,6 @@ class ZtoeParserTest {
         assertEquals("", bulkBerdy22?.queue)
         assertEquals("В цей час не вимикається, за винятком випадків аварійних відключень", bulkBerdy22?.statusText)
 
-        // (b) Live PowerOn JSON with nested street.city.name ("Житомир") before street.name ("вул. Велика Бердичівська")
-        val liveBerdy22PoweronJson = """
-            {"hydra:member":[{"id":401740077,"code_otg":"6","city":{"@id":"/api/pw_cities/333","@type":"PwCity","id":333,"name":"Житомир","codeOtg":""},"street":{"@id":"/api/pw_streets/4550","@type":"PwStreet","id":4550,"city":{"@id":"/api/pw_cities/333","@type":"PwCity","name":"Житомир"},"name":"вул. Велика Бердичівська"},"dateEvent":"2026-11-10T23:28:00+00:00","datePlanIn":"2026-11-11T17:00:00+00:00","koment":"АВАРІЯ","switchSubReason":0,"otg":{"@id":"/api/pw_otgs/6","@type":"PwOtg","id":6,"code":"6","name":"Житомирський РЕМ"},"buildingNames":"10, 11, 12, 12А, 13, 14, 15, 15/1, 17, 18, 20, 22, 24, 28, 28/1, 30, 32, 34, 34-А, 6, 8, 9","typeOff":1}]}
-        """.trimIndent()
-        val matchedBerdy22ByName = ua.blackout.prewarning.data.parser.ZtoeAddressLookup.matchEmergencyOutageFromAccidentsJson(
-            htmlOrJson = liveBerdy22PoweronJson,
-            remName = "Житомирський РЕМ",
-            settlementName = "м. Житомир",
-            streetName = "вул. Велика Бердичівська",
-            house = "22",
-            poweronStreetId = null,
-            poweronCityId = null
-        )
-        assertNotNull(matchedBerdy22ByName)
-        assertEquals("pw_accident_401740077", matchedBerdy22ByName?.id)
-        assertEquals("вул. Велика Бердичівська", matchedBerdy22ByName?.streetName)
-        assertEquals("10.11.2026 23:28", matchedBerdy22ByName?.startTime)
-        assertEquals("11.11.2026 17:00", matchedBerdy22ByName?.estimatedRestoreTime)
-        assertEquals("Аварійне відключення", matchedBerdy22ByName?.outageType)
-
-        val matchedBerdy22ByQuery = ua.blackout.prewarning.data.parser.ZtoeAddressLookup.matchEmergencyOutageFromAccidentsJson(
-            liveBerdy22PoweronJson,
-            ua.blackout.prewarning.data.model.SelectedAddressQuery(
-                remId = "zhytomyr",
-                settlementId = "zt_city",
-                streetId = "zt_velyka_berdychivska",
-                house = "22"
-            )
-        )
-        assertNotNull(matchedBerdy22ByQuery)
-        assertEquals("10.11.2026 23:28", matchedBerdy22ByQuery?.startTime)
-        assertEquals("11.11.2026 17:00", matchedBerdy22ByQuery?.estimatedRestoreTime)
-
-        // Verify hyphenated building number normalization ("34А" <-> "34-А")
-        val matchedBerdy34A = ua.blackout.prewarning.data.parser.ZtoeAddressLookup.matchEmergencyOutageFromAccidentsJson(
-            liveBerdy22PoweronJson,
-            ua.blackout.prewarning.data.model.SelectedAddressQuery(
-                remId = "zhytomyr",
-                settlementId = "zt_city",
-                streetId = "zt_velyka_berdychivska",
-                house = "34А"
-            )
-        )
-        assertNotNull(matchedBerdy34A)
-        assertEquals("11.11.2026 17:00", matchedBerdy34A?.estimatedRestoreTime)
 
         ua.blackout.prewarning.data.parser.ZtoeAddressLookup.clearCacheForTesting()
     }

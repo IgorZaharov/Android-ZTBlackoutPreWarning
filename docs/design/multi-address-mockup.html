@@ -1,0 +1,664 @@
+<!doctype html>
+<html lang="uk">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Світло в Житомирі — кілька адрес (макет)</title>
+<!--
+  DESIGN DRAFT (not implemented). Static mockup: inline CSS only, no scripts, no network.
+  Sources of the look (see docs/design/MULTI_ADDRESS.md):
+    cards  : rgba(20,26,41,.75), 1px rgba(255,255,255,.15), radius 24
+    rows   : rgba(255,255,255,.08), radius 14        inputs: radius 16
+    accent : #FF5E3A (primary buttons, toggle-on)    secondary text: rgba(186,230,253,.7)
+    type   : roles from plan section 3.4 (display 44, title 24, heading 20, subhead 16,
+             body 16, label 14, caption 13, overline 12). Nothing below 12px.
+    targets: every interactive element is at least 48px high.
+  Toggles are real checkboxes with role="switch", so they can be flipped without JavaScript.
+-->
+<style>
+:root {
+  color-scheme: dark;
+  /* palette */
+  --night: #0B0C10;
+  --slate: #1F2833;
+  --card: rgba(20, 26, 41, .75);
+  --line: rgba(255, 255, 255, .15);
+  --line-soft: rgba(255, 255, 255, .10);
+  --row: rgba(255, 255, 255, .08);
+  --chip: rgba(255, 255, 255, .15);
+  --accent: #FF5E3A;
+  --text: #fff;
+  --text2: rgba(186, 230, 253, .7);
+  --green: #34D399;  --green-bg: rgba(16, 185, 129, .2);
+  --amber: #FBBF24;  --amber-bg: rgba(245, 158, 11, .2);
+  --red: #F87171;    --red-bg: rgba(239, 68, 68, .2);
+  --crimson: #D62E26;
+  /* type */
+  --sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --mono: ui-monospace, "Cascadia Mono", "SFMono-Regular", Menlo, Consolas, monospace;
+}
+/* The product look is dark. Light scheme only keeps the same dark page (trivial on purpose). */
+@media (prefers-color-scheme: light) { :root { color-scheme: dark; } }
+
+*, *::before, *::after { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0; background: #05060A; color: var(--text);
+  font: 500 16px/24px var(--sans); overflow-wrap: break-word;
+}
+svg.i { width: 20px; height: 20px; fill: currentColor; flex: none; }
+button { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+
+/* ---------- page chrome ---------- */
+.page { max-width: 1760px; margin: 0 auto; padding: 24px clamp(16px, 4vw, 32px) 48px; }
+.page-head { max-width: 760px; margin: 0 auto 28px; text-align: center; }
+.page-head h1 { margin: 0 0 8px; font-size: 28px; line-height: 34px; font-weight: 800; }
+.page-head p { margin: 0 0 12px; font-size: 16px; line-height: 24px; color: var(--text2); }
+.stage { display: flex; flex-wrap: wrap; justify-content: center; align-items: flex-start; gap: 36px 28px; }
+.shot { width: min(390px, 100%); margin: 0; }
+.cap { margin: 0 0 10px; font-size: 14px; line-height: 20px; font-weight: 700; color: #fff; }
+.cap span { color: var(--text2); font-weight: 500; }
+.note { margin: 12px 4px 0; padding: 0; list-style: none; font-size: 13px; line-height: 18px; color: var(--text2); }
+.note li { padding-left: 14px; position: relative; margin-bottom: 6px; }
+.note li::before { content: ""; position: absolute; left: 0; top: 7px; width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
+.note b { color: #fff; font-weight: 700; }
+
+/* ---------- phone frame ---------- */
+.phone {
+  border: 1px solid var(--line); border-radius: 36px; overflow: hidden;
+  background:
+    radial-gradient(120% 50% at 85% 0%, rgba(102, 252, 241, .10), transparent 60%),
+    linear-gradient(180deg, var(--night) 0%, #141B24 55%, var(--slate) 100%);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, .55);
+}
+.status { display: flex; justify-content: space-between; align-items: center; padding: 14px 24px 2px; font-size: 14px; line-height: 20px; font-weight: 700; font-family: var(--mono); }
+.screen { padding: 10px 16px 24px; display: flex; flex-direction: column; gap: 16px; }
+
+/* ---------- glass card ---------- */
+.card {
+  background: var(--card); border: 1px solid var(--line); border-radius: 24px; padding: 18px;
+  box-shadow: 0 10px 24px rgba(0, 0, 0, .45);
+}
+.card > * + * { margin-top: 12px; }
+.over { margin: 0; font-size: 12px; line-height: 16px; letter-spacing: .05em; font-weight: 700; text-transform: uppercase; }
+.subhead { margin: 0; font-size: 16px; line-height: 22px; font-weight: 700; }
+.heading { margin: 0; font-size: 20px; line-height: 26px; font-weight: 800; }
+.body { margin: 0; font-size: 16px; line-height: 24px; font-weight: 500; }
+.label { font-size: 14px; line-height: 20px; font-weight: 600; }
+.cap13 { margin: 0; font-size: 13px; line-height: 18px; font-weight: 500; color: var(--text2); }
+.mono { font-family: var(--mono); }
+.head-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; }
+.head-row > div { min-width: 0; }
+
+/* ---------- chips / badges ---------- */
+.chip {
+  display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 12px;
+  font-size: 13px; line-height: 18px; font-weight: 700;
+}
+.chip svg.i { width: 16px; height: 16px; }
+.chip.green { background: var(--green-bg); color: var(--green); }
+.chip.amber { background: var(--amber-bg); color: var(--amber); }
+.chip.red   { background: var(--red-bg);   color: var(--red); }
+.chip.neutral { background: var(--chip); color: #fff; }
+/* original "Черга 3.1" look: bold white text, 10px-radius light pill like the slot-time chip */
+.qbadge { display: inline-flex; align-items: center; padding: 4px 10px; border-radius: 10px; background: var(--chip); font-size: 14px; line-height: 20px; font-weight: 700; color: #fff; }
+.qbadge .mono { margin-left: 4px; }
+
+/* ---------- buttons ---------- */
+.btn-accent {
+  display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; min-height: 52px; padding: 0 20px;
+  border: 1px solid rgba(255, 255, 255, .25); border-radius: 16px; background: var(--accent); color: #fff;
+  font-size: 16px; line-height: 22px; font-weight: 700; cursor: pointer; transition: transform .15s cubic-bezier(.4, 0, .2, 1);
+}
+.btn-accent:active { transform: scale(.96); }
+.btn-accent[disabled] { background: rgba(255, 94, 58, .25); color: rgba(255, 255, 255, .7); cursor: not-allowed; }
+.btn-ghost {
+  display: flex; align-items: center; justify-content: center; gap: 8px; width: 100%; min-height: 48px; padding: 0 16px;
+  border: 1px solid var(--line); border-radius: 16px; background: var(--row); color: #fff;
+  font-size: 14px; line-height: 20px; font-weight: 600; cursor: pointer; transition: transform .15s cubic-bezier(.4, 0, .2, 1);
+}
+.btn-ghost:active { transform: scale(.96); }
+.icon-btn {
+  flex: none; display: inline-flex; align-items: center; justify-content: center; width: 48px; height: 48px;
+  border: 1px solid var(--line); border-radius: 16px; background: var(--row); color: #fff; cursor: pointer; padding: 0;
+  transition: transform .15s cubic-bezier(.4, 0, .2, 1);
+}
+.icon-btn:active { transform: scale(.96); }
+.icon-btn.danger { background: var(--red-bg); color: var(--red); border-color: rgba(239, 68, 68, .35); }
+@media (prefers-reduced-motion: reduce) { .btn-accent, .btn-ghost, .icon-btn { transition: none; } .btn-accent:active, .btn-ghost:active, .icon-btn:active { transform: none; } }
+
+/* ---------- switches (58x34 pill, accent when on) ---------- */
+.pill { flex: none; position: relative; width: 58px; height: 34px; padding: 4px; border-radius: 17px; background: rgba(255, 255, 255, .15); display: flex; align-items: center; justify-content: flex-start; }
+.pill .thumb { width: 26px; height: 26px; border-radius: 50%; background: #fff; color: #6B7280; display: flex; align-items: center; justify-content: center; }
+.pill .thumb svg.i { width: 16px; height: 16px; }
+.row-switch { position: relative; display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 56px; padding: 8px 14px; border-radius: 14px; background: var(--row); cursor: pointer; }
+.row-switch.flat { background: transparent; border-radius: 0; padding: 8px 0; border-top: 1px solid var(--line-soft); }
+.row-switch.flat:first-child { border-top: 0; }
+.row-switch input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: pointer; }
+.row-switch:has(input:focus-visible) { outline: 2px solid #fff; outline-offset: 2px; }
+.rs-text { min-width: 0; display: block; }
+.rs-label { font-size: 16px; line-height: 24px; font-weight: 700; }
+.rs-state { font-size: 13px; line-height: 18px; font-weight: 600; color: var(--text2); }
+.rs-state::before { content: " · Вимкнено"; }
+.rs-desc { display: block; font-size: 13px; line-height: 18px; font-weight: 500; color: var(--text2); }
+.row-switch input:checked ~ .rs-text .rs-state::before { content: " · Увімкнено"; }
+.row-switch input:checked ~ .pill { background: var(--accent); justify-content: flex-end; }
+.row-switch input:checked ~ .pill .thumb { color: var(--accent); }
+.row-switch input:disabled ~ * { opacity: .55; }
+/* same pill as a single button (bell on the Main header) */
+.pill-hit { flex: none; width: 58px; min-height: 48px; padding: 7px 0; border: 0; background: transparent; cursor: pointer; display: flex; align-items: center; }
+.pill-hit .pill.on { background: var(--accent); justify-content: flex-end; }
+.pill-hit .pill.on .thumb { color: var(--accent); }
+
+/* ---------- subscription block ---------- */
+.sub { margin-top: 12px; padding: 14px; border-radius: 18px; background: rgba(255, 255, 255, .04); border: 1px solid var(--line-soft); display: flex; flex-direction: column; gap: 10px; }
+.sub-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+.sub-meta { min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+.sub-badges { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.sub-toggles { display: flex; flex-direction: column; gap: 8px; }
+
+/* ---------- main screen ---------- */
+.switcher { display: flex; gap: 8px; overflow-x: auto; scroll-snap-type: x proximity; scrollbar-width: none; padding: 2px 0; margin: 0 -2px; }
+.switcher::-webkit-scrollbar { display: none; }
+.addr-chip {
+  scroll-snap-align: start; flex: none; display: inline-flex; align-items: center; gap: 6px; min-height: 48px; padding: 0 14px;
+  border: 1px solid var(--line); border-radius: 16px; background: var(--row); color: #fff;
+  font-size: 14px; line-height: 20px; font-weight: 600; cursor: pointer; white-space: nowrap;
+  transition: transform .15s cubic-bezier(.4, 0, .2, 1);
+}
+.addr-chip:active { transform: scale(.96); }
+.addr-chip[aria-pressed="true"] { border-color: var(--accent); background: rgba(255, 94, 58, .18); font-weight: 700; }
+.addr-chip svg.i { width: 14px; height: 14px; color: var(--amber); }
+.addr-add { flex: none; width: 48px; padding: 0; justify-content: center; }
+.hdr { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.hdr > div { min-width: 0; }
+.title24 { margin: 0; font-size: 24px; line-height: 30px; font-weight: 700; }
+.status-line { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.status-line .l { display: flex; align-items: center; gap: 8px; font-size: 14px; line-height: 20px; font-weight: 700; }
+.dot10 { width: 10px; height: 10px; border-radius: 50%; background: var(--green); flex: none; }
+.clock { display: inline-flex; align-items: center; gap: 4px; font-family: var(--mono); font-size: 13px; line-height: 18px; font-weight: 700; color: var(--text2); }
+.clock svg.i { width: 14px; height: 14px; }
+.hero { text-align: center; padding: 6px 0 2px; }
+.hero .cap13 { font-weight: 600; }
+.display { margin: 4px 0 0; font-family: var(--mono); font-size: 44px; line-height: 48px; font-weight: 900; letter-spacing: 0; }
+.hero-foot { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 6px 10px; padding-top: 10px; border-top: 1px solid var(--line-soft); }
+.timechip { padding: 4px 10px; border-radius: 10px; background: rgba(255, 255, 255, .15); font-family: var(--mono); font-size: 14px; line-height: 20px; font-weight: 700; }
+.seg { display: flex; gap: 0; padding: 4px; border-radius: 16px; background: rgba(20, 26, 41, .5); box-shadow: 0 6px 16px rgba(0, 0, 0, .35); }
+.seg button { flex: 1; min-height: 48px; border: 0; border-radius: 12px; background: transparent; color: var(--text2); font-size: 14px; line-height: 20px; font-weight: 700; cursor: pointer; }
+.seg button[aria-selected="true"] { background: rgba(255, 255, 255, .2); color: #fff; }
+
+/* drum (meter) */
+.drum-face { background: linear-gradient(180deg, #DFDDD0, #D4D1C1, #C6C2B0); border: 2px solid #7A7768; border-radius: 16px; padding: 12px 12px 10px; }
+.drum-wrap { position: relative; padding: 4px 0; }
+.drum-slot { background: #4E514E; border: 2px solid #6E716B; border-radius: 8px; padding: 6px; }
+.drum { position: relative; height: 32px; border-radius: 2px; overflow: hidden; background: linear-gradient(180deg, #D8D6CC, #FCFBF7, #CCC9BE); }
+.drum::after { content: ""; position: absolute; inset: 0; pointer-events: none;
+  background: repeating-linear-gradient(90deg, transparent 0, transparent calc(100% / 24 - 1.5px), #C8C6BC calc(100% / 24 - 1.5px), #C8C6BC calc(100% / 24)); }
+.blk { position: absolute; top: 0; bottom: 0; }
+/* planned (crimson) */
+.blk.plan { background: linear-gradient(180deg, #9E1E18, #D62E26, #8C1914); }
+/* emergency overlay: amber gradient with 45deg dark stripes 3/3 */
+.blk.emg { background: repeating-linear-gradient(45deg, rgba(26, 18, 8, .55) 0 3px, transparent 3px 6px), linear-gradient(180deg, #FFB020, #F28A1B, #C96A0B); }
+/* emergency over planned: crimson base, amber stripes at 85% */
+.blk.ovl { background: repeating-linear-gradient(45deg, rgba(255, 176, 32, .85) 0 3px, transparent 3px 6px), linear-gradient(180deg, #9E1E18, #D62E26, #8C1914); }
+/* needle at 22:45 = 94.79% of the track (track = slot inner width) */
+.needle { position: absolute; top: 0; bottom: 0; left: calc(8px + (100% - 16px) * .9479); width: 3px; margin-left: -1.5px; border-radius: 2px; background: #0B0B0A; box-shadow: 0 0 0 .75px rgba(255, 255, 255, .85); }
+.ticks { display: flex; justify-content: space-between; padding: 2px 2px 0; }
+.tick { display: flex; flex-direction: column; align-items: center; font-family: var(--mono); font-size: 12px; line-height: 16px; font-weight: 700; color: #1C1B18; }
+.tick::before { content: ""; width: 1.5px; height: 5px; background: #1C1B18; margin-bottom: 1px; }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 14px; }
+.lg { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; line-height: 18px; font-weight: 500; color: var(--text2); }
+.sw { width: 16px; height: 16px; border-radius: 4px; flex: none; border: 1px solid rgba(255, 255, 255, .35); }
+.sw.on { background: #FCFBF7; }
+.sw.plan { background: linear-gradient(180deg, #9E1E18, #D62E26, #8C1914); }
+.sw.emg { background: repeating-linear-gradient(45deg, rgba(26, 18, 8, .55) 0 3px, transparent 3px 6px), linear-gradient(180deg, #FFB020, #F28A1B, #C96A0B); }
+
+/* outage rows */
+.rows { display: flex; flex-direction: column; gap: 8px; margin-top: 12px; }
+.orow { display: flex; align-items: center; gap: 10px; min-height: 52px; padding: 8px 12px; border-radius: 14px; background: var(--row); flex-wrap: wrap; }
+.orow.done { opacity: .75; }
+.orow .t { font-family: var(--mono); font-size: 14px; line-height: 20px; font-weight: 700; }
+.orow .sp { margin-left: auto; display: inline-flex; gap: 6px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
+.dotp { width: 10px; height: 10px; border-radius: 50%; background: var(--accent); flex: none; }
+.excl { width: 20px; height: 20px; border-radius: 50%; background: var(--accent); color: #fff; font-size: 13px; line-height: 20px; font-weight: 800; text-align: center; flex: none; }
+
+/* ---------- picker ---------- */
+.pk-bar { display: flex; align-items: center; gap: 8px; }
+.pk-bar .heading { flex: 1; }
+.crumbs { margin: 0; padding: 0; list-style: none; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.crumb { display: flex; flex-direction: column; justify-content: center; min-height: 48px; padding: 4px 12px; border-radius: 14px; border: 1px solid var(--line); background: var(--row); text-align: left; }
+.crumb .over { color: var(--text2); }
+.crumb .v { font-size: 14px; line-height: 20px; font-weight: 700; display: flex; align-items: center; gap: 4px; }
+.crumb .v svg.i { width: 16px; height: 16px; color: var(--green); }
+button.crumb { cursor: pointer; }
+.crumb.cur { border-color: var(--accent); background: rgba(255, 94, 58, .18); }
+.crumb.todo { opacity: .75; border-style: dashed; }
+.sep { color: var(--text2); font-size: 16px; line-height: 24px; }
+.search { position: sticky; top: 0; display: flex; align-items: center; gap: 4px; min-height: 56px; padding: 0 4px 0 14px; border-radius: 16px; background: rgba(255, 255, 255, .08); border: 1px solid rgba(255, 255, 255, .2); }
+.search:focus-within { border-color: var(--accent); background: rgba(255, 255, 255, .10); }
+.search > svg.i { color: var(--text2); }
+.search input { flex: 1; min-width: 0; height: 54px; border: 0; outline: 0; background: transparent; color: #fff; font: 500 16px/24px var(--sans); padding: 0 6px; }
+.search input::placeholder { color: var(--text2); opacity: 1; }
+.opts { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 8px; }
+.opt { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 52px; padding: 6px 14px; border-radius: 14px; background: var(--row); border: 1px solid transparent; cursor: pointer; font-size: 16px; line-height: 24px; font-weight: 500; }
+.opt small { display: block; font-size: 13px; line-height: 18px; color: var(--text2); font-weight: 500; }
+.opt[aria-selected="true"] { border-color: var(--accent); background: rgba(255, 94, 58, .14); font-weight: 700; }
+.opt svg.i { color: var(--accent); }
+/* search highlight: underline instead of a filled box, so a word is not visually split */
+mark { background: transparent; color: #fff; font-weight: 800; text-decoration: underline; text-decoration-color: var(--accent); text-decoration-thickness: 2px; text-underline-offset: 3px; }
+.pk-foot { margin: 12px -18px -18px; padding: 12px 18px 18px; border-top: 1px solid var(--line-soft); border-radius: 0 0 24px 24px; background: rgba(11, 12, 16, .45); }
+
+/* ---------- notifications ---------- */
+.shade { display: flex; flex-direction: column; gap: 16px; }
+.clockbig { text-align: center; padding: 8px 0 0; }
+.clockbig b { display: block; font-size: 48px; line-height: 52px; font-weight: 300; font-family: var(--sans); }
+.clockbig span { font-size: 14px; line-height: 20px; color: var(--text2); font-weight: 500; }
+.group { display: flex; flex-direction: column; gap: 6px; }
+.group-lab { margin: 0 6px; display: flex; align-items: center; gap: 6px; font-size: 13px; line-height: 18px; font-weight: 600; color: var(--text2); }
+.group-lab svg.i { width: 16px; height: 16px; }
+.notif { background: #1E2230; border: 1px solid rgba(255, 255, 255, .12); border-radius: 24px; padding: 14px 16px 16px; box-shadow: 0 8px 20px rgba(0, 0, 0, .4); }
+.notif-head { display: flex; align-items: center; gap: 8px; font-size: 13px; line-height: 18px; font-weight: 500; color: rgba(255, 255, 255, .72); margin-bottom: 8px; }
+.app-ico { width: 20px; height: 20px; border-radius: 6px; background: var(--accent); display: flex; align-items: center; justify-content: center; color: #fff; flex: none; }
+.app-ico svg.i { width: 14px; height: 14px; }
+.notif-title { margin: 0; font-size: 16px; line-height: 22px; font-weight: 700; color: #fff; }
+.notif-body { margin: 4px 0 0; font-size: 14px; line-height: 20px; font-weight: 500; color: rgba(255, 255, 255, .86); }
+.notif.emg { border-left: 4px solid #FFB020; }
+.ghost { margin: 0; padding: 10px 14px; border: 1px dashed rgba(255, 255, 255, .3); border-radius: 18px; font-size: 13px; line-height: 18px; font-weight: 500; color: var(--text2); }
+
+/* ---------- logic table ---------- */
+.logic { max-width: 900px; margin: 40px auto 0; }
+.logic h2 { margin: 0 0 6px; font-size: 20px; line-height: 26px; font-weight: 800; }
+.logic > p { margin: 0 0 14px; font-size: 14px; line-height: 20px; color: var(--text2); }
+table { width: 100%; border-collapse: separate; border-spacing: 0; }
+caption { text-align: left; }
+th, td { padding: 10px 12px; text-align: left; vertical-align: top; font-size: 14px; line-height: 20px; border-top: 1px solid var(--line-soft); }
+thead th { border-top: 0; font-size: 12px; line-height: 16px; letter-spacing: .05em; text-transform: uppercase; color: var(--text2); font-weight: 700; }
+tbody th { font-weight: 600; }
+td .chip { margin-bottom: 4px; }
+td small { display: block; font-size: 13px; line-height: 18px; color: var(--text2); }
+.sr { position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+</style>
+</head>
+<body>
+
+<!-- Icon sprite (Material-style paths). Referenced with <use>. -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true" focusable="false">
+  <defs>
+    <symbol id="i-check" viewBox="0 0 24 24"><path d="M9 16.17L4.83 12l-1.42 1.41L9 19 21 7l-1.41-1.41z"/></symbol>
+    <symbol id="i-trash" viewBox="0 0 24 24"><path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-5l-1 1H5v2h14V4z"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24"><path d="M15.5 14h-.79l-.28-.27A6.47 6.47 0 0016 9.5 6.5 6.5 0 109.5 16c1.61 0 3.09-.59 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5zm-6 0C7.01 14 5 11.99 5 9.5S7.01 5 9.5 5 14 7.01 14 9.5 11.99 14 9.5 14z"/></symbol>
+    <symbol id="i-back" viewBox="0 0 24 24"><path d="M20 11H7.83l5.59-5.59L12 4l-8 8 8 8 1.41-1.41L7.83 13H20v-2z"/></symbol>
+    <symbol id="i-close" viewBox="0 0 24 24"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></symbol>
+    <symbol id="i-star" viewBox="0 0 24 24"><path d="M12 17.27L18.18 21l-1.64-7.03L22 9.24l-7.19-.61L12 2 9.19 8.63 2 9.24l5.46 4.73L5.82 21z"/></symbol>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></symbol>
+    <symbol id="i-bell" viewBox="0 0 24 24"><path d="M12 22c1.1 0 2-.9 2-2h-4c0 1.1.89 2 2 2zm6-6v-5c0-3.07-1.64-5.64-4.5-6.32V4c0-.83-.67-1.5-1.5-1.5s-1.5.67-1.5 1.5v.68C7.63 5.36 6 7.92 6 11v5l-2 2v1h16v-1l-2-2z"/></symbol>
+    <symbol id="i-warn" viewBox="0 0 24 24"><path d="M1 21h22L12 2 1 21zm12-3h-2v-2h2v2zm0-4h-2v-4h2v4z"/></symbol>
+    <symbol id="i-vol" viewBox="0 0 24 24"><path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3A4.5 4.5 0 0014 7.97v8.05c1.48-.73 2.5-2.25 2.5-4.02z"/></symbol>
+    <symbol id="i-vib" viewBox="0 0 24 24"><path d="M0 15h2V9H0v6zm3 2h2V7H3v10zm19-8v6h2V9h-2zm-3 8h2V7h-2v10zM16.5 3h-9C6.67 3 6 3.67 6 4.5v15c0 .83.67 1.5 1.5 1.5h9c.83 0 1.5-.67 1.5-1.5v-15c0-.83-.67-1.5-1.5-1.5zM16 19H8V5h8v14z"/></symbol>
+    <symbol id="i-clock" viewBox="0 0 24 24"><path d="M11.99 2C6.47 2 2 6.48 2 12s4.47 10 9.99 10C17.52 22 22 17.52 22 12S17.52 2 11.99 2zM12 20c-4.42 0-8-3.58-8-8s3.58-8 8-8 8 3.58 8 8-3.58 8-8 8zm.5-13H11v6l5.25 3.15.75-1.23-4.5-2.67z"/></symbol>
+    <symbol id="i-bolt" viewBox="0 0 24 24"><path d="M7 2v11h3v9l7-12h-4l4-8z"/></symbol>
+    <symbol id="i-home" viewBox="0 0 24 24"><path d="M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z"/></symbol>
+  </defs>
+</svg>
+
+<main class="page">
+  <header class="page-head">
+    <h1>Кілька адрес: чернетка макета</h1>
+    <p>Окремі сповіщення для кожної адреси. Приклад із завдання: адреса A отримує всі сповіщення, адреса B — лише аварійні.</p>
+    <span class="chip amber">Чернетка · не реалізовано в версії 1.4.0</span>
+  </header>
+
+  <div class="stage">
+
+    <!-- ============ FRAME 1: Settings ============ -->
+    <figure class="shot" aria-labelledby="cap1">
+      <figcaption class="cap" id="cap1">1 · Налаштування <span>— нова картка «Мої адреси»</span></figcaption>
+      <div class="phone">
+        <div class="status"><span>22:45</span><span aria-hidden="true">87%</span></div>
+        <div class="screen">
+
+          <section class="card" aria-labelledby="my-addr">
+            <div class="head-row">
+              <div>
+                <h2 class="over" id="my-addr">Мої адреси</h2>
+                <p class="cap13">Окремі сповіщення для кожної адреси</p>
+              </div>
+              <span class="chip neutral">2 з 5</span>
+            </div>
+
+            <!-- Address A: planned ON, emergency ON, primary -->
+            <article class="sub" aria-label="Адреса A: Київська 77">
+              <div class="sub-top">
+                <div class="sub-meta">
+                  <div class="sub-badges">
+                    <span class="qbadge">Черга 5.2</span>
+                    <span class="chip neutral"><svg class="i" aria-hidden="true"><use href="#i-star"/></svg>Основна</span>
+                  </div>
+                  <p class="subhead">Київська 77</p>
+                  <p class="cap13">Житомирський РЕМ, м. Житомир, вул. Київська, буд. 77</p>
+                </div>
+                <button type="button" class="icon-btn danger" aria-label="Видалити адресу: вул. Київська, буд. 77">
+                  <svg class="i" aria-hidden="true"><use href="#i-trash"/></svg>
+                </button>
+              </div>
+              <div class="sub-toggles">
+                <label class="row-switch">
+                  <input type="checkbox" role="switch" checked>
+                  <span class="rs-text"><span class="rs-label">Планові</span><span class="rs-state"></span><span class="rs-desc">За графіком, за 15 хв до початку</span></span>
+                  <span class="pill" aria-hidden="true"><span class="thumb"><svg class="i"><use href="#i-bell"/></svg></span></span>
+                </label>
+                <label class="row-switch">
+                  <input type="checkbox" role="switch" checked>
+                  <span class="rs-text"><span class="rs-label">Аварійні</span><span class="rs-state"></span><span class="rs-desc">Початок, зміна часу, відновлення</span></span>
+                  <span class="pill" aria-hidden="true"><span class="thumb"><svg class="i"><use href="#i-warn"/></svg></span></span>
+                </label>
+              </div>
+            </article>
+
+            <!-- Address B: planned OFF, emergency ON -->
+            <article class="sub" aria-label="Адреса B: Європейська 12">
+              <div class="sub-top">
+                <div class="sub-meta">
+                  <div class="sub-badges">
+                    <span class="qbadge">Черга 3.1</span>
+                  </div>
+                  <p class="subhead">Європейська 12</p>
+                  <p class="cap13">Бердичівський РЕМ, м. Бердичів, вул. Європейська, буд. 12</p>
+                </div>
+                <button type="button" class="icon-btn danger" aria-label="Видалити адресу: вул. Європейська, буд. 12">
+                  <svg class="i" aria-hidden="true"><use href="#i-trash"/></svg>
+                </button>
+              </div>
+              <div class="sub-toggles">
+                <label class="row-switch">
+                  <input type="checkbox" role="switch">
+                  <span class="rs-text"><span class="rs-label">Планові</span><span class="rs-state"></span><span class="rs-desc">За графіком, за 15 хв до початку</span></span>
+                  <span class="pill" aria-hidden="true"><span class="thumb"><svg class="i"><use href="#i-bell"/></svg></span></span>
+                </label>
+                <label class="row-switch">
+                  <input type="checkbox" role="switch" checked>
+                  <span class="rs-text"><span class="rs-label">Аварійні</span><span class="rs-state"></span><span class="rs-desc">Початок, зміна часу, відновлення</span></span>
+                  <span class="pill" aria-hidden="true"><span class="thumb"><svg class="i"><use href="#i-warn"/></svg></span></span>
+                </label>
+              </div>
+              <button type="button" class="btn-ghost"><svg class="i" aria-hidden="true"><use href="#i-star"/></svg>Зробити основною</button>
+            </article>
+
+            <button type="button" class="btn-accent"><svg class="i" aria-hidden="true"><use href="#i-plus"/></svg>Додати адресу</button>
+            <p class="cap13">Можна додати ще 3 адреси. Графік завантажується один раз для всіх адрес.</p>
+          </section>
+
+          <!-- existing master card, unchanged look -->
+          <section class="card" aria-label="Сповіщення">
+            <div>
+              <label class="row-switch flat">
+                <input type="checkbox" role="switch" checked>
+                <span class="rs-text"><span class="rs-label">Увімкнути сповіщення</span><span class="rs-desc">Головний вимикач для всіх адрес</span></span>
+                <span class="pill" aria-hidden="true"><span class="thumb"><svg class="i"><use href="#i-bell"/></svg></span></span>
+              </label>
+              <label class="row-switch flat">
+                <input type="checkbox" role="switch" checked>
+                <span class="rs-text"><span class="rs-label">Звуковий сигнал</span></span>
+                <span class="pill" aria-hidden="true"><span class="thumb"><svg class="i"><use href="#i-vol"/></svg></span></span>
+              </label>
+              <label class="row-switch flat">
+                <input type="checkbox" role="switch" checked>
+                <span class="rs-text"><span class="rs-label">Вібрація</span></span>
+                <span class="pill" aria-hidden="true"><span class="thumb"><svg class="i"><use href="#i-vib"/></svg></span></span>
+              </label>
+            </div>
+          </section>
+
+        </div>
+      </div>
+      <ul class="note">
+        <li><b>Планові</b> — графік ZTOE та планові роботи PowerOn: одне сповіщення за 15 хв до початку.</li>
+        <li><b>Аварійні</b> — дані PowerOn: початок, зміна орієнтовного часу, відновлення.</li>
+        <li><b>Головний вимикач</b> вимкнено — жодних сповіщень, налаштування адрес зберігаються. Звук і вібрація спільні для всіх адрес.</li>
+        <li><b>Адреса A:</b> усе. <b>Адреса B:</b> лише аварійні. Перемикачі змінюють сповіщення, а не дані на екрані.</li>
+      </ul>
+    </figure>
+
+    <!-- ============ FRAME 2: Main ============ -->
+    <figure class="shot" aria-labelledby="cap2">
+      <figcaption class="cap" id="cap2">2 · Головний екран <span>— перемикач адрес над вкладками</span></figcaption>
+      <div class="phone">
+        <div class="status"><span>22:45</span><span aria-hidden="true">87%</span></div>
+        <div class="screen">
+
+          <!-- address switcher: chip row, hidden when there is only one address -->
+          <div class="switcher" role="group" aria-label="Адреса">
+            <button type="button" class="addr-chip" aria-pressed="true"><svg class="i" aria-hidden="true"><use href="#i-star"/></svg>Київська 77</button>
+            <button type="button" class="addr-chip" aria-pressed="false">Європейська 12</button>
+            <button type="button" class="addr-chip addr-add" aria-label="Додати адресу"><svg class="i" aria-hidden="true" style="width:20px;height:20px;color:#fff"><use href="#i-plus"/></svg></button>
+          </div>
+
+          <div class="hdr">
+            <div>
+              <h1 class="title24">Черга 5.2</h1>
+              <p class="cap13">Житомирський РЕМ, м. Житомир, вул. Київська, буд. 77</p>
+            </div>
+            <!-- bell = master switch for all addresses (owner decision 4) -->
+            <button type="button" class="pill-hit" aria-pressed="true" aria-label="Усі сповіщення">
+              <span class="pill on" aria-hidden="true"><span class="thumb"><svg class="i"><use href="#i-bell"/></svg></span></span>
+            </button>
+          </div>
+
+          <section class="card" aria-label="Стан живлення">
+            <div class="status-line">
+              <span class="l"><span class="dot10"></span>ЗАРАЗ СВІТЛО Є</span>
+              <span class="clock"><svg class="i" aria-hidden="true"><use href="#i-clock"/></svg>22:45</span>
+            </div>
+            <div class="hero">
+              <p class="cap13">До відключення залишилось:</p>
+              <p class="display">00:14:36</p>
+            </div>
+            <div class="hero-foot">
+              <span class="cap13">Найближчий період:</span>
+              <span class="timechip">23:00 – 01:00</span>
+            </div>
+          </section>
+
+          <div class="seg" role="tablist" aria-label="День">
+            <button type="button" role="tab" aria-selected="true">Сьогодні</button>
+            <button type="button" role="tab" aria-selected="false">Завтра</button>
+          </div>
+
+          <section class="card" aria-label="Графік на сьогодні">
+            <div class="drum-face">
+              <div class="drum-wrap">
+                <div class="drum-slot">
+                  <div class="drum" role="img" aria-label="Шкала доби: планові відключення 12:00–15:00 та 23:00–24:00, аварійне 13:30–15:30">
+                    <!-- planned 12:00-15:00 -->
+                    <div class="blk plan" style="left:50%;width:12.5%"></div>
+                    <!-- planned 23:00-24:00 (continues to 01:00 tomorrow) -->
+                    <div class="blk plan" style="left:95.8333%;width:4.1667%"></div>
+                    <!-- emergency 13:30-15:30 (amber, dark stripes) -->
+                    <div class="blk emg" style="left:56.25%;width:8.3333%"></div>
+                    <!-- overlap emergency+planned 13:30-15:00 (crimson base, amber stripes) -->
+                    <div class="blk ovl" style="left:56.25%;width:6.25%"></div>
+                  </div>
+                </div>
+                <div class="needle" aria-hidden="true"></div>
+              </div>
+              <div class="ticks" aria-hidden="true">
+                <span class="tick">00</span><span class="tick">02</span><span class="tick">04</span><span class="tick">06</span><span class="tick">08</span><span class="tick">10</span><span class="tick">12</span><span class="tick">14</span><span class="tick">16</span><span class="tick">18</span><span class="tick">20</span><span class="tick">22</span><span class="tick">24</span>
+              </div>
+            </div>
+            <div class="legend">
+              <span class="lg"><span class="sw on"></span>Світло є</span>
+              <span class="lg"><span class="sw plan"></span>Планове</span>
+              <span class="lg"><span class="sw emg"></span>Аварійне</span>
+            </div>
+            <div class="rows">
+              <div class="orow">
+                <span class="dotp" aria-hidden="true"></span>
+                <span class="t">23:00 – 01:00 (14.11)</span>
+                <span class="sp"><span class="chip neutral">2 год</span></span>
+              </div>
+              <div class="orow done">
+                <span class="excl" aria-hidden="true">!</span>
+                <span class="t">13:30 – 15:30</span>
+                <span class="sp"><span class="chip amber">Аварійне</span><span class="chip neutral">завершено</span></span>
+              </div>
+              <div class="orow done">
+                <span class="dotp" aria-hidden="true"></span>
+                <span class="t">12:00 – 15:00</span>
+                <span class="sp"><span class="chip neutral">3 год</span><span class="chip neutral">завершено</span></span>
+              </div>
+            </div>
+          </section>
+
+          <section class="card" aria-label="Стан джерел даних">
+            <div class="head-row">
+              <span class="label">Оновлено</span>
+              <span class="mono label">22:35</span>
+            </div>
+            <span class="chip green"><svg class="i" aria-hidden="true"><use href="#i-check"/></svg>Сайт ZTOE доступний, графік опубліковано</span>
+            <p class="cap13">Аварійні (PowerOn) для цієї адреси: оновлено 22:35</p>
+          </section>
+
+        </div>
+      </div>
+      <ul class="note">
+        <li><b>Перемикач адрес</b> — рядок чипів (до 5, прокручується). Вибір змінює чергу, вкладки «Сьогодні/Завтра», шкалу й відлік. З однією адресою рядок не показується.</li>
+        <li><b>Дзвіночок</b> у шапці — головний вимикач усіх сповіщень для всіх адрес; «Планові» й «Аварійні» кожної адреси — у налаштуваннях. Основна адреса (зірка) визначає старт і віджет за замовчуванням.</li>
+        <li><b>Шкала:</b> аварійні — бурштинові смуги під 45°; де вони накладаються на планове, лишається малинова основа зі смугами.</li>
+      </ul>
+    </figure>
+
+    <!-- ============ FRAME 3: Add address picker ============ -->
+    <figure class="shot" aria-labelledby="cap3">
+      <figcaption class="cap" id="cap3">3 · Додати адресу <span>— повноекранний вибір із пошуком</span></figcaption>
+      <div class="phone">
+        <div class="status"><span>22:45</span><span aria-hidden="true">87%</span></div>
+        <div class="screen">
+
+          <div class="pk-bar">
+            <button type="button" class="icon-btn" aria-label="Назад"><svg class="i" aria-hidden="true"><use href="#i-back"/></svg></button>
+            <h2 class="heading">Нова адреса</h2>
+          </div>
+
+          <!-- breadcrumb: REM / City / Street / House -->
+          <ol class="crumbs" aria-label="Кроки вибору адреси">
+            <li><button type="button" class="crumb"><span class="over">РЕМ</span><span class="v"><svg class="i" aria-hidden="true"><use href="#i-check"/></svg>Житомирський</span></button></li>
+            <li><button type="button" class="crumb"><span class="over">Місто</span><span class="v"><svg class="i" aria-hidden="true"><use href="#i-check"/></svg>м. Житомир</span></button></li>
+            <li class="crumb cur" aria-current="step"><span class="over">Вулиця</span><span class="v">Оберіть</span></li>
+            <li class="crumb todo"><span class="over">Будинок</span><span class="v">—</span></li>
+          </ol>
+
+          <section class="card" aria-label="Пошук вулиці">
+            <div class="search">
+              <svg class="i" aria-hidden="true"><use href="#i-search"/></svg>
+              <input type="search" value="київ" aria-label="Пошук вулиці" placeholder="Пошук вулиці">
+              <button type="button" class="icon-btn" style="border:0;background:transparent" aria-label="Очистити пошук"><svg class="i" aria-hidden="true"><use href="#i-close"/></svg></button>
+            </div>
+            <p class="cap13">Знайдено 3 з 967 вулиць. Однакові назви об’єднано.</p>
+            <!-- illustrative street names -->
+            <ul class="opts" role="listbox" aria-label="Вулиці">
+              <li class="opt" role="option" aria-selected="true">
+                <span><mark>Київ</mark>ська<small>вул.</small></span>
+                <svg class="i" aria-hidden="true"><use href="#i-check"/></svg>
+              </li>
+              <li class="opt" role="option" aria-selected="false">
+                <span><mark>Київ</mark>ський<small>пров.</small></span>
+              </li>
+              <li class="opt" role="option" aria-selected="false">
+                <span><mark>Київ</mark>ська Слобідка<small>вул.</small></span>
+              </li>
+            </ul>
+            <div class="pk-foot">
+              <button type="button" class="btn-accent">Далі: будинок</button>
+            </div>
+          </section>
+
+        </div>
+      </div>
+      <ul class="note">
+        <li><b>Кроки:</b> РЕМ → Місто → Вулиця → Будинок. Пройдені кроки — кнопки для повернення; поточний виділено акцентом.</li>
+        <li>Пошук не залежить від апострофів і регістру, відмічена поточна вибрана вулиця.</li>
+        <li>Останній крок: «Сповіщення для цієї адреси» — «Планові» та «Аварійні», обидва увімкнені за замовчуванням. Ліміт 5 адрес: кнопка «Додати» неактивна.</li>
+      </ul>
+    </figure>
+
+    <!-- ============ FRAME 4: Notifications ============ -->
+    <figure class="shot" aria-labelledby="cap4">
+      <figcaption class="cap" id="cap4">4 · Сповіщення <span>— окрема група на кожну адресу</span></figcaption>
+      <div class="phone">
+        <div class="status"><span>22:45</span><span aria-hidden="true">87%</span></div>
+        <div class="screen shade">
+
+          <div class="clockbig"><b>22:45</b><span>п’ятниця, 13 листопада</span></div>
+
+          <div class="group">
+            <p class="group-lab"><svg class="i" aria-hidden="true"><use href="#i-bell"/></svg>Київська 77 · канал «Планові відключення»</p>
+            <article class="notif" aria-label="Сповіщення для адреси Київська 77">
+              <div class="notif-head"><span class="app-ico" aria-hidden="true"><svg class="i"><use href="#i-bolt"/></svg></span>Світло в Житомирі · Київська 77 · 22:45</div>
+              <p class="notif-title">Київська 77 — Відключення о 23:00, орієнтовно до 01:00 (2 год)</p>
+              <p class="notif-body">Черга 5.2 · планове відключення</p>
+            </article>
+          </div>
+
+          <div class="group">
+            <p class="group-lab"><svg class="i" aria-hidden="true"><use href="#i-warn"/></svg>Європейська 12 · канал «Аварійні відключення»</p>
+            <article class="notif emg" aria-label="Сповіщення для адреси Європейська 12">
+              <div class="notif-head"><span class="app-ico" aria-hidden="true"><svg class="i"><use href="#i-bolt"/></svg></span>Світло в Житомирі · Європейська 12 · 22:13</div>
+              <p class="notif-title">Європейська 12 — Аварійне відключення</p>
+              <p class="notif-body">Початок 22:12, відновлення орієнтовно о 00:30</p>
+            </article>
+            <p class="ghost">Для цієї адреси «Планові» вимкнено, тому планове відключення на черзі 3.1 сповіщення не створить.</p>
+          </div>
+
+        </div>
+      </div>
+      <ul class="note">
+        <li>Ідентифікатор сповіщення = адреса + тип + відключення. Підпис адреси — у тексті, групи й теми окремі для кожної адреси.</li>
+        <li>Кілька адрес на одній черзі з однаковим відключенням — <b>одне</b> спільне сповіщення: «Київська 77 · Соборна 3 — Відключення о 23:00…».</li>
+        <li>Два канали: <b>Планові відключення</b> і <b>Аварійні відключення</b>. Звук і вібрація — спільні.</li>
+      </ul>
+    </figure>
+
+  </div>
+
+  <!-- ============ Logic table ============ -->
+  <section class="card logic" aria-labelledby="logic-h">
+    <h2 id="logic-h">Що спрацює в прикладі</h2>
+    <p>Головний вимикач увімкнено. Адреса A (Київська 77, черга 5.2): «Планові» та «Аварійні» увімкнено. Адреса B (Європейська 12, черга 3.1): «Планові» вимкнено, «Аварійні» увімкнено.</p>
+    <table>
+      <thead>
+        <tr><th scope="col">Подія</th><th scope="col">Адреса A</th><th scope="col">Адреса B</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <th scope="row">Планове відключення на черзі 5.2</th>
+          <td><span class="chip green">Так</span><small>Одне сповіщення за 15 хв до початку</small></td>
+          <td><span class="chip neutral">Ні</span><small>Інша черга</small></td>
+        </tr>
+        <tr>
+          <th scope="row">Планове відключення на черзі 3.1</th>
+          <td><span class="chip neutral">Ні</span><small>Інша черга</small></td>
+          <td><span class="chip red">Ні</span><small>«Планові» вимкнено, нагадування не планується</small></td>
+        </tr>
+        <tr>
+          <th scope="row">Аварійне відключення за адресою A</th>
+          <td><span class="chip green">Так</span><small>Початок, зміна часу, відновлення</small></td>
+          <td><span class="chip neutral">Ні</span><small>Інша адреса</small></td>
+        </tr>
+        <tr>
+          <th scope="row">Аварійне відключення за адресою B</th>
+          <td><span class="chip neutral">Ні</span><small>Інша адреса</small></td>
+          <td><span class="chip green">Так</span><small>Початок, зміна часу, відновлення</small></td>
+        </tr>
+        <tr>
+          <th scope="row">Головний вимикач вимкнено</th>
+          <td><span class="chip red">Ні</span><small>Нічого не надсилається</small></td>
+          <td><span class="chip red">Ні</span><small>Нічого не надсилається</small></td>
+        </tr>
+      </tbody>
+    </table>
+  </section>
+</main>
+
+</body>
+</html>

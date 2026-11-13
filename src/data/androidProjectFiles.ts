@@ -34,7 +34,7 @@ android {
         targetSdk = 36
         versionCode = (System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull() ?: 300) + 300
         val semverEnv = System.getenv("APP_VERSION_NAME")?.removePrefix("v")?.trim()?.takeIf { it.matches(Regex("^[0-9]+\\\\.[0-9]+\\\\.[0-9]+.*")) }
-        versionName = semverEnv ?: "1.3.5"
+        versionName = semverEnv ?: "1.4.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
@@ -165,6 +165,8 @@ dependencies {
 
     // Testing
     testImplementation(libs.junit)
+    // JVM unit tests only get stubbed android.jar org.json; the real implementation is needed to read spec/vectors/*.json
+    testImplementation("org.json:json:20240303")
     androidTestImplementation(libs.androidx.junit)
     androidTestImplementation(libs.androidx.espresso.core)
     androidTestImplementation(platform(libs.androidx.compose.bom))
@@ -235,8 +237,8 @@ kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "ko
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Exact pre-warnings need the "Alarms & reminders" special access (granted by the user, see ExactAlarmGate) -->
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
-    <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
     <uses-permission android:name="android.permission.VIBRATE" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
@@ -254,6 +256,15 @@ kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "ko
         tools:targetApi="35">
 
         <!-- Main UI Activity -->
+        <activity
+            android:name=".widget.WidgetConfigActivity"
+            android:exported="true"
+            android:theme="@style/Theme.ZTBlackoutPreWarning">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_CONFIGURE" />
+            </intent-filter>
+        </activity>
+
         <activity
             android:name=".MainActivity"
             android:exported="true"
@@ -273,6 +284,17 @@ kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "ko
             <intent-filter>
                 <action android:name="ua.blackout.prewarning.ACTION_TRIGGER_BLACKOUT_ALERT" />
                 <action android:name="ua.blackout.prewarning.ACTION_WIDGET_TRANSITION_UPDATE" />
+                <action android:name="ua.blackout.prewarning.ACTION_MIDNIGHT_SYNC" />
+            </intent-filter>
+        </receiver>
+
+        <!-- The user granted or revoked exact alarms: plan the alerts again -->
+        <receiver
+            android:name=".notification.ExactAlarmPermissionReceiver"
+            android:enabled="true"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.app.action.SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED" />
             </intent-filter>
         </receiver>
 
@@ -294,7 +316,7 @@ kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "ko
         <receiver
             android:name=".widget.WidgetToggleReceiver"
             android:enabled="true"
-            android:exported="true">
+            android:exported="false">
             <intent-filter>
                 <action android:name="ua.blackout.prewarning.ACTION_TOGGLE_WIDGET_NOTIFICATIONS" />
             </intent-filter>
@@ -326,6 +348,20 @@ kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "ko
             <meta-data
                 android:name="android.appwidget.provider"
                 android:resource="@xml/blackout_widget_big_info" />
+        </receiver>
+
+        <!-- Glance Home Screen Strip (4x1) AppWidget Receiver: drum chart with needle only -->
+        <receiver
+            android:name=".widget.BlackoutStripWidgetReceiver"
+            android:label="@string/widget_strip_name"
+            android:enabled="true"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/blackout_widget_strip_info" />
         </receiver>
 
     </application>
@@ -369,7 +405,9 @@ data class BlackoutSlot(
     val startTimeStr: String, // "14:00" or "14:30"
     val endTimeStr: String, // "18:00" or "15:00"
     val status: SlotStatus,
-    val isEmergency: Boolean = false
+    val isEmergency: Boolean = false,
+    /** Off because of the planned ztoe schedule (or repair works). With [isEmergency] both overlap on the drum. */
+    val isPlanned: Boolean = status == SlotStatus.POWER_OFF && !isEmergency
 ) {
     val hour: Int get() = startHour
     val startStr: String get() = startTimeStr
@@ -420,6 +458,10 @@ data class UserSettings(
     val vibrationEnabled: Boolean = true,
     val prevSoundEnabled: Boolean = true,
     val prevVibrationEnabled: Boolean = true,
+    /** Notify when the estimated restoration of an emergency moves (ETA_CHANGED), all addresses (spec/NOTIFICATIONS.md 2.4). */
+    val emergencyEtaAlerts: Boolean = true,
+    /** Notify when an emergency ends (END), all addresses. The start always notifies. */
+    val emergencyEndAlerts: Boolean = true,
     val themeMode: String = "SYSTEM", // "SYSTEM", "DARK", "LIGHT"
     val language: String = "SYSTEM" // "SYSTEM", "UK", "EN"
 )`
@@ -445,6 +487,12 @@ import java.net.ConnectException
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import ua.blackout.prewarning.data.KYIV_ZONE
+import ua.blackout.prewarning.core.FetchFailure
+import ua.blackout.prewarning.core.SiteNotice
+import ua.blackout.prewarning.core.SiteState
+import ua.blackout.prewarning.core.SiteStateResolver
+import ua.blackout.prewarning.data.net.NetworkProbe
+import javax.net.ssl.SSLException
 
 enum class FetchStatus {
     SUCCESS,
@@ -456,7 +504,16 @@ data class ScheduleFetchResult(
     val todaySlots: List<BlackoutSlot>,
     val tomorrowSlots: List<BlackoutSlot>?,
     val hasTomorrowSchedule: Boolean,
-    val status: FetchStatus = FetchStatus.SUCCESS
+    val status: FetchStatus = FetchStatus.SUCCESS,
+    /** What the user is told about the site; derived from [status] unless set explicitly. */
+    val siteState: SiteState = when (status) {
+        FetchStatus.SUCCESS -> SiteState.AVAILABLE_WITH_TABLE
+        FetchStatus.NO_QUEUES_FOUND -> SiteState.AVAILABLE_NO_TABLE
+        FetchStatus.NO_INTERNET -> SiteState.SITE_UNREACHABLE
+    },
+    val failure: FetchFailure = FetchFailure.NONE,
+    /** Text of the "УВАГА! ВАЖЛИВА ІНФОРМАЦІЯ!" notice when the page has no schedule table (core/SiteNotice). */
+    val notice: String? = null
 )
 
 // =========================================================================================
@@ -553,14 +610,29 @@ object ZtoeParser {
             null
         }
 
+        // A failed refresh never erases a schedule that is still valid for today: alarms and screens keep
+        // using it and the site state tells the user why it was not refreshed (spec/SITE_STATE.md).
+        fun failed(failure: FetchFailure, status: FetchStatus): ScheduleFetchResult = ScheduleFetchResult(
+            todaySlots = emptyList(),
+            tomorrowSlots = null,
+            hasTomorrowSchedule = false,
+            status = status,
+            siteState = SiteStateResolver.resolve(failure, hasTodayTable = false, networkValidated = NetworkProbe.isValidated(context)),
+            failure = failure
+        )
+
+        fun noTable(doc: Document? = null): ScheduleFetchResult = ScheduleFetchResult(
+            todaySlots = emptyList(),
+            tomorrowSlots = null,
+            hasTomorrowSchedule = false,
+            status = FetchStatus.NO_QUEUES_FOUND,
+            siteState = SiteState.AVAILABLE_NO_TABLE,
+            notice = doc?.let { d -> runCatching { SiteNotice.extract(d.outerHtml()) }.getOrNull() }
+        )
+
         if (!isValidUrl(url, context)) {
-            repo?.clearScheduleCache()
-            return ScheduleFetchResult(
-                todaySlots = emptyList(),
-                tomorrowSlots = null,
-                hasTomorrowSchedule = false,
-                status = FetchStatus.NO_QUEUES_FOUND
-            )
+            repo?.clearScheduleCache() // a schedule from a non-whitelisted source is meaningless
+            return noTable()
         }
 
         val trimmedQueue = queue.trim()
@@ -601,15 +673,7 @@ object ZtoeParser {
                 )
             }
 
-            val effectiveDoc = doc ?: run {
-                repo?.clearScheduleCache()
-                return ScheduleFetchResult(
-                    todaySlots = emptyList(),
-                    tomorrowSlots = null,
-                    hasTomorrowSchedule = false,
-                    status = FetchStatus.NO_QUEUES_FOUND
-                )
-            }
+            val effectiveDoc = doc ?: return noTable()
 
             // Single-pass DOM table lookup for all 12 queues + single batched asynchronous SharedPreferences write
             val allQueueResults = parseAllQueuesSinglePass(effectiveDoc, today)
@@ -622,60 +686,37 @@ object ZtoeParser {
                 } catch (_: Exception) {}
             }
 
+            val hasTable = allQueueResults.isNotEmpty()
+            if (!hasTable) return noTable(effectiveDoc)
+
             if (trimmedQueue.isEmpty()) {
                 return ScheduleFetchResult(
                     todaySlots = emptyList(),
                     tomorrowSlots = null,
                     hasTomorrowSchedule = false,
-                    status = if (allQueueResults.isNotEmpty()) FetchStatus.SUCCESS else FetchStatus.NO_QUEUES_FOUND
+                    status = FetchStatus.SUCCESS
                 )
             }
 
             val finalRes = allQueueResults[trimmedQueue] ?: parseDocumentFull(effectiveDoc, trimmedQueue, today)
-            if (finalRes.status != FetchStatus.SUCCESS) {
-                repo?.clearScheduleCache()
-            }
-            finalRes
+            // The page and its table are there even when this queue's row is missing
+            finalRes.copy(siteState = SiteState.AVAILABLE_WITH_TABLE)
         } catch (e: UnknownHostException) {
-            repo?.clearScheduleCache()
-            ScheduleFetchResult(
-                todaySlots = emptyList(),
-                tomorrowSlots = null,
-                hasTomorrowSchedule = false,
-                status = FetchStatus.NO_INTERNET
-            )
+            failed(FetchFailure.DNS, FetchStatus.NO_INTERNET)
         } catch (e: ConnectException) {
-            repo?.clearScheduleCache()
-            ScheduleFetchResult(
-                todaySlots = emptyList(),
-                tomorrowSlots = null,
-                hasTomorrowSchedule = false,
-                status = FetchStatus.NO_INTERNET
-            )
+            failed(FetchFailure.CONNECT, FetchStatus.NO_INTERNET)
         } catch (e: SocketTimeoutException) {
-            repo?.clearScheduleCache()
-            ScheduleFetchResult(
-                todaySlots = emptyList(),
-                tomorrowSlots = null,
-                hasTomorrowSchedule = false,
-                status = FetchStatus.NO_INTERNET
-            )
+            failed(FetchFailure.TIMEOUT, FetchStatus.NO_INTERNET)
+        } catch (e: SSLException) {
+            failed(FetchFailure.TLS, FetchStatus.NO_INTERNET)
         } catch (e: IOException) {
-            repo?.clearScheduleCache()
-            ScheduleFetchResult(
-                todaySlots = emptyList(),
-                tomorrowSlots = null,
-                hasTomorrowSchedule = false,
-                status = FetchStatus.NO_INTERNET
+            failed(
+                if (e.message?.startsWith("HTTP") == true) FetchFailure.HTTP_ERROR else FetchFailure.OTHER,
+                FetchStatus.NO_INTERNET
             )
         } catch (e: Exception) {
-            repo?.clearScheduleCache()
-            ScheduleFetchResult(
-                todaySlots = emptyList(),
-                tomorrowSlots = null,
-                hasTomorrowSchedule = false,
-                status = FetchStatus.NO_QUEUES_FOUND
-            )
+            // The page arrived but could not be read as a schedule
+            noTable()
         }
     }
 
@@ -1011,7 +1052,7 @@ class AlertRegistry(context: Context) {
         appContext.getSharedPreferences("zt_notified_blackouts_v1", Context.MODE_PRIVATE)
 
     companion object {
-        const val MAX_STORED_ENTRIES = 100
+        const val MAX_STORED_ENTRIES = 300
     }
 
     /**
@@ -1028,7 +1069,7 @@ class AlertRegistry(context: Context) {
 
     /**
      * Marks the slot as notified with timestamp, prunes entries older than 7 days,
-     * and bounds total stored entries to MAX_STORED_ENTRIES = 100.
+     * and bounds total stored entries to MAX_STORED_ENTRIES (300: up to 5 addresses share it).
      */
     fun markNotified(slotId: String) {
         val now = System.currentTimeMillis()
@@ -1119,18 +1160,37 @@ import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
 import androidx.core.app.NotificationCompat
+import androidx.core.app.NotificationManagerCompat
 import ua.blackout.prewarning.MainActivity
 import ua.blackout.prewarning.R
-import ua.blackout.prewarning.data.model.EmergencyOutageInfo
+import ua.blackout.prewarning.core.EmergencyEvent
+import ua.blackout.prewarning.core.EmergencyDelivery
+import ua.blackout.prewarning.core.EmergencyEventKind
+import ua.blackout.prewarning.core.OutageEngine
+import ua.blackout.prewarning.core.Span
+import ua.blackout.prewarning.data.KYIV_ZONE
 import ua.blackout.prewarning.data.model.UserSettings
 import ua.blackout.prewarning.data.repository.AlertRegistry
 import ua.blackout.prewarning.data.repository.SettingsRepository
+import ua.blackout.prewarning.data.repository.SubscriptionSync
+import ua.blackout.prewarning.ui.AppStrings
+import java.time.LocalDate
+import java.time.LocalDateTime
 
 object NotificationHelper {
+    /** Intent extra of a notification tap: the subscription id to show on the main screen. */
+    const val EXTRA_SUBSCRIPTION_ID = "ua.blackout.prewarning.SUBSCRIPTION_ID"
+
     const val CHANNEL_SOUND_VIBE = "zt_blackout_sound_vibe_v2"
     const val CHANNEL_SOUND_ONLY = "zt_blackout_sound_only_v2"
     const val CHANNEL_VIBE_ONLY = "zt_blackout_vibe_only_v2"
     const val CHANNEL_SILENT = "zt_blackout_silent_v2"
+
+    // Emergency outages get their own channels so users can tune them separately in the system settings
+    const val CHANNEL_EMERGENCY_SOUND_VIBE = "zt_emergency_sound_vibe_v1"
+    const val CHANNEL_EMERGENCY_SOUND_ONLY = "zt_emergency_sound_only_v1"
+    const val CHANNEL_EMERGENCY_VIBE_ONLY = "zt_emergency_vibe_only_v1"
+    const val CHANNEL_EMERGENCY_SILENT = "zt_emergency_silent_v1"
 
     private val VIBRATION_PATTERN = longArrayOf(0, 400, 200, 400)
 
@@ -1195,7 +1255,23 @@ object NotificationHelper {
                 setSound(null, null)
             }
 
-            manager.createNotificationChannels(listOf(ch1, ch2, ch3, ch4))
+            fun emergencyChannel(id: String, name: String, importance: Int, sound: Boolean, vibrate: Boolean) =
+                NotificationChannel(id, name, importance).apply {
+                    description = "Сповіщення про аварійні відключення"
+                    enableVibration(vibrate)
+                    vibrationPattern = if (vibrate) VIBRATION_PATTERN else longArrayOf(0)
+                    if (sound) setSound(soundUri, audioAttributes) else setSound(null, null)
+                }
+
+            manager.createNotificationChannels(
+                listOf(
+                    ch1, ch2, ch3, ch4,
+                    emergencyChannel(CHANNEL_EMERGENCY_SOUND_VIBE, "Аварійні відключення (Звук + Вібрація)", NotificationManager.IMPORTANCE_HIGH, true, true),
+                    emergencyChannel(CHANNEL_EMERGENCY_SOUND_ONLY, "Аварійні відключення (Тільки звук)", NotificationManager.IMPORTANCE_HIGH, true, false),
+                    emergencyChannel(CHANNEL_EMERGENCY_VIBE_ONLY, "Аварійні відключення (Тільки вібрація)", NotificationManager.IMPORTANCE_HIGH, false, true),
+                    emergencyChannel(CHANNEL_EMERGENCY_SILENT, "Аварійні відключення (Без звуку і вібрації)", NotificationManager.IMPORTANCE_LOW, false, false)
+                )
+            )
         }
     }
 
@@ -1232,81 +1308,82 @@ object NotificationHelper {
         } catch (_: Exception) {}
     }
 
-    fun checkAndTriggerEmergencyOutageAlert(
+    /**
+     * Posts the notifications for ledger events (start / restore time changed / end). Each event is
+     * announced once: its key (\`spec/NOTIFICATIONS.md\`) is remembered in [AlertRegistry].
+     * Callers only pass events produced by a confirmed fetch, so a failed request never reaches here.
+     */
+    fun postEmergencyEvents(
         context: Context,
         settings: UserSettings,
-        previousEmergency: EmergencyOutageInfo?,
-        currentEmergency: EmergencyOutageInfo?
-    ): Pair<String, String>? {
-        val lang = ua.blackout.prewarning.ui.AppStrings.resolveLang(settings.language)
-        return checkAndTriggerEmergencyOutageAlert(
-            context = context,
-            prevOutage = previousEmergency,
-            nextOutage = currentEmergency,
-            settings = settings,
-            lang = lang
-        )
+        addressKey: String,
+        events: List<EmergencyEvent>,
+        // Default: the primary address (mirrored settings); another subscription passes its own (spec/SUBSCRIPTIONS.md 8.4)
+        addressLine: String? = settings.selectedAddress,
+        enabled: Boolean = settings.emergencyNotificationsEnabled,
+        // The subscription a tap shows on the main screen (spec/SUBSCRIPTIONS.md 9)
+        subscriptionId: String? = null,
+        // The address's planned spans and whether it is warned about them: one continuous outage is
+        // announced once (spec/NOTIFICATIONS.md 2.4a)
+        plannedSpans: List<Span> = emptyList(),
+        plannedAlertsOn: Boolean = false
+    ) {
+        if (!enabled || events.isEmpty()) return
+        val appContext = context.applicationContext
+        val lang = AppStrings.resolveLang(settings.language)
+        val today = LocalDate.now(KYIV_ZONE)
+        val registry = AlertRegistry(appContext)
+        val address = addressLine?.replace("\\n", " ")?.takeIf { it.isNotBlank() }
+
+        for (ev in events) {
+            val key = ev.key(addressKey)
+            if (registry.hasFired(key)) continue
+            registry.markFired(key)
+            // One continuous outage, one announcement (spec/NOTIFICATIONS.md 2.4a)
+            val delivery = OutageEngine.emergencyDelivery(ev.kind, ev.start, ev.eta, LocalDateTime.now(KYIV_ZONE), plannedSpans, plannedAlertsOn)
+            if (delivery == EmergencyDelivery.DROP) continue
+            // Follow-ups the user turned off are dropped, never replayed later (spec/NOTIFICATIONS.md 2.4)
+            val asKind = if (delivery == EmergencyDelivery.PROLONG) EmergencyEventKind.ETA_CHANGED else ev.kind
+            if (asKind == EmergencyEventKind.ETA_CHANGED && !settings.emergencyEtaAlerts) continue
+            if (asKind == EmergencyEventKind.END && !settings.emergencyEndAlerts) continue
+
+            val start = formatWhen(lang, ev.start, today)
+            val eta = ev.eta?.let { formatWhen(lang, it, today) }
+            val (title, body) = when (asKind) {
+                EmergencyEventKind.START -> {
+                    val t = if (ev.upcoming) AppStrings.emergencyUpcomingTitle(lang) else AppStrings.emergencyStartTitle(lang)
+                    t to AppStrings.emergencyStartBody(lang, start, eta)
+                }
+                EmergencyEventKind.ETA_CHANGED ->
+                    AppStrings.emergencyChangedTitle(lang) to AppStrings.emergencyChangedBody(lang, eta ?: start)
+                EmergencyEventKind.END ->
+                    if (ev.earlyEnd && eta != null) {
+                        AppStrings.emergencyEarlyEndTitle(lang) to AppStrings.emergencyEarlyEndBody(lang, eta)
+                    } else {
+                        AppStrings.emergencyEndTitle(lang) to AppStrings.emergencyEndBody(lang, start)
+                    }
+            }
+            showPreWarningNotification(
+                context = appContext,
+                notificationId = AlarmCodes.codeFor(appContext, key),
+                title = title,
+                body = if (address != null) "$body\\n$address" else body,
+                isTest = false,
+                isEmergencyAlert = true,
+                subscriptionId = subscriptionId
+            )
+        }
     }
 
-    fun checkAndTriggerEmergencyOutageAlert(
-        context: Context,
-        prevOutage: EmergencyOutageInfo?,
-        nextOutage: EmergencyOutageInfo?,
-        settings: UserSettings,
-        lang: String
-    ): Pair<String, String>? {
-        if (!settings.emergencyNotificationsEnabled) return null
-        val registry = AlertRegistry(context.applicationContext)
-
-        // 1. Outage Restored (prev active -> next null)
-        if (prevOutage != null && nextOutage == null) {
-            val restoreKey = "emergency_restore_\${prevOutage.id}_\${prevOutage.startTime}"
-            if (registry.hasFired(restoreKey)) return null
-            registry.markFired(restoreKey)
-            val title = if (lang == "uk") "Аварійне відключення завершено" else "Emergency Outage Restored"
-            val body = if (lang == "uk") {
-                "Електропостачання за вашою адресою відновлено (початок був: \${prevOutage.startTime})."
-            } else {
-                "Power supply at your address has been restored (started: \${prevOutage.startTime})."
-            }
-            showPreWarningNotification(
-                context = context,
-                notificationId = restoreKey.hashCode(),
-                title = title,
-                body = body,
-                isTest = false,
-                isEmergencyAlert = true
-            )
-            return title to body
+    /** "22:04", "завтра 01:00" or "13.11 22:04" relative to [today]. */
+    fun formatWhen(lang: String, dt: LocalDateTime, today: LocalDate): String {
+        val hm = "\${dt.hour.toString().padStart(2, '0')}:\${dt.minute.toString().padStart(2, '0')}"
+        return when (dt.toLocalDate()) {
+            today -> hm
+            today.plusDays(1) -> "\${AppStrings.tomorrowWord(lang)} $hm"
+            today.minusDays(1) -> "\${AppStrings.yesterdayWord(lang)} $hm"
+            else -> "\${dt.dayOfMonth.toString().padStart(2, '0')}.\${dt.monthValue.toString().padStart(2, '0')} $hm"
         }
-
-        // 2. Outage Detected (next active)
-        if (nextOutage != null) {
-            val detectKey = "emergency_detect_\${nextOutage.id}_\${nextOutage.startTime}_\${nextOutage.estimatedRestoreTime}"
-            if (registry.hasFired(detectKey)) return null
-            registry.markFired(detectKey)
-            val title = if (lang == "uk") {
-                nextOutage.outageType.ifBlank { "Аварійне відключення" }
-            } else {
-                "Emergency Outage"
-            }
-            val body = if (lang == "uk") {
-                "Зафіксовано аварійне відключення. Початок: \${nextOutage.startTime}. Орієнтовне відновлення: \${nextOutage.estimatedRestoreTime}."
-            } else {
-                "Emergency outage detected. Start: \${nextOutage.startTime}. Estimated restore: \${nextOutage.estimatedRestoreTime}."
-            }
-            showPreWarningNotification(
-                context = context,
-                notificationId = detectKey.hashCode(),
-                title = title,
-                body = body,
-                isTest = false,
-                isEmergencyAlert = true
-            )
-            return title to body
-        }
-
-        return null
     }
 
     fun showPreWarningNotification(
@@ -1315,39 +1392,43 @@ object NotificationHelper {
         title: String,
         body: String,
         isTest: Boolean = false,
-        isEmergencyAlert: Boolean = false
+        isEmergencyAlert: Boolean = false,
+        subscriptionId: String? = null
     ) {
         val settings = SettingsRepository(context).getSettings()
+        // The master switch silences every alert (owner decision 1); the per-address switches were
+        // checked by the caller (spec/SUBSCRIPTIONS.md section 8). A test notification still shows.
+        val master = try {
+            SubscriptionSync(context).master()
+        } catch (_: Exception) {
+            settings.notificationsEnabled || settings.emergencyNotificationsEnabled
+        }
+        if (!master && !isTest) return
 
-        // If notifications are disabled globally in the app, do NOT send unless this is an explicit Test or an enabled Emergency Alert
-        if (isEmergencyAlert) {
-            if (!settings.emergencyNotificationsEnabled) return
-        } else if (!settings.notificationsEnabled && !isTest) {
-            return
-        }
-
-        val activeSound = if (isEmergencyAlert) {
-            settings.emergencyNotificationsEnabled && settings.soundEnabled
-        } else {
-            settings.notificationsEnabled && settings.soundEnabled
-        }
-        val activeVibe = if (isEmergencyAlert) {
-            settings.emergencyNotificationsEnabled && settings.vibrationEnabled
-        } else {
-            settings.notificationsEnabled && settings.vibrationEnabled
-        }
+        val activeSound = master && settings.soundEnabled
+        val activeVibe = master && settings.vibrationEnabled
 
         createNotificationChannels(context)
 
-        val targetChannelId = when {
-            activeSound && activeVibe -> CHANNEL_SOUND_VIBE
-            activeSound && !activeVibe -> CHANNEL_SOUND_ONLY
-            !activeSound && activeVibe -> CHANNEL_VIBE_ONLY
-            else -> CHANNEL_SILENT
+        val targetChannelId = if (isEmergencyAlert) {
+            when {
+                activeSound && activeVibe -> CHANNEL_EMERGENCY_SOUND_VIBE
+                activeSound && !activeVibe -> CHANNEL_EMERGENCY_SOUND_ONLY
+                !activeSound && activeVibe -> CHANNEL_EMERGENCY_VIBE_ONLY
+                else -> CHANNEL_EMERGENCY_SILENT
+            }
+        } else {
+            when {
+                activeSound && activeVibe -> CHANNEL_SOUND_VIBE
+                activeSound && !activeVibe -> CHANNEL_SOUND_ONLY
+                !activeSound && activeVibe -> CHANNEL_VIBE_ONLY
+                else -> CHANNEL_SILENT
+            }
         }
 
         val intent = Intent(context, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            if (subscriptionId != null) putExtra(EXTRA_SUBSCRIPTION_ID, subscriptionId)
         }
 
         val pendingIntent = PendingIntent.getActivity(
@@ -1381,8 +1462,11 @@ object NotificationHelper {
             if (!activeSound) {
                 builder.setDefaults(NotificationCompat.DEFAULT_VIBRATE)
             }
-            // Trigger hardware vibrator directly with USAGE_ALARM so vibration always fires even when sound is disabled
-            triggerVibration(context)
+            // Trigger hardware vibrator directly with USAGE_ALARM so vibration always fires even when sound is disabled,
+            // but never when the notification itself is blocked (no POST_NOTIFICATIONS permission or app muted)
+            if (NotificationManagerCompat.from(context).areNotificationsEnabled()) {
+                triggerVibration(context)
+            }
         } else {
             builder.setVibrate(longArrayOf(0))
         }
@@ -1392,6 +1476,7 @@ object NotificationHelper {
             builder.setSilent(true)
         }
 
+        if (!NotificationManagerCompat.from(context).areNotificationsEnabled()) return
         val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         manager.notify(notificationId, builder.build())
     }
@@ -1409,14 +1494,17 @@ import android.content.Intent
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import ua.blackout.prewarning.data.repository.AlertRegistry
-import ua.blackout.prewarning.data.repository.ScheduleRepository
-import ua.blackout.prewarning.data.repository.SettingsRepository
-import ua.blackout.prewarning.widget.BlackoutGlanceWidget
-import java.time.LocalDate
-import java.time.LocalDateTime
-import java.time.LocalTime
+import ua.blackout.prewarning.core.OutageEngine
+import ua.blackout.prewarning.core.Subscriptions
 import ua.blackout.prewarning.data.KYIV_ZONE
+import ua.blackout.prewarning.data.repository.AlertRegistry
+import ua.blackout.prewarning.data.repository.SettingsRepository
+import ua.blackout.prewarning.data.repository.SubscriptionSync
+import ua.blackout.prewarning.ui.AppStrings
+import ua.blackout.prewarning.widget.BlackoutGlanceWidget
+import java.time.Instant
+import java.time.LocalDateTime
+import java.time.temporal.ChronoUnit
 
 class AlarmReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
@@ -1425,85 +1513,89 @@ class AlarmReceiver : BroadcastReceiver() {
 
         CoroutineScope(Dispatchers.IO).launch {
             try {
+                // The notification goes first: redrawing widgets can involve a network fetch and must never delay a warning
+                when (intent.action) {
+                    AlarmScheduler.ACTION_ALERT -> handleAlert(appContext, intent)
+                    AlarmScheduler.ACTION_MIDNIGHT -> AlarmScheduler.syncAlarms(appContext)
+                }
                 try {
                     BlackoutGlanceWidget.syncAllWidgets(appContext)
-                } catch (_: Exception) {}
-
-                if (intent.action == "ua.blackout.prewarning.ACTION_WIDGET_TRANSITION_UPDATE") {
-                    return@launch
+                } catch (_: Exception) {
                 }
-
-                val currentSettings = SettingsRepository(appContext).getSettings()
-                if (!currentSettings.notificationsEnabled) {
-                    return@launch
-                }
-
-                val slotId = intent.getStringExtra("EXTRA_SLOT_ID") ?: return@launch
-                val intentQueue = intent.getStringExtra("EXTRA_QUEUE") ?: return@launch
-
-                // Reject stale alarms from any queue other than the user's currently selected queue (e.g. default 1.1)
-                if (intentQueue != currentSettings.queue || !slotId.endsWith("_Q\${currentSettings.queue}")) {
-                    return@launch
-                }
-
-                val kyivZone = KYIV_ZONE
-                val today = LocalDate.now(kyivZone)
-                if (!slotId.startsWith("block_\${today}_")) {
-                    return@launch
-                }
-
-                val timeStr = intent.getStringExtra("EXTRA_TIME") ?: return@launch
-                val minutes = intent.getIntExtra("EXTRA_MINUTES", currentSettings.advanceNoticeMinutes)
-
-                // Verify that the alarm corresponds to an active blackout interval in today's schedule for the selected queue
-                val scheduleRepo = ScheduleRepository(appContext)
-                val todayIntervals = scheduleRepo.getDetailedIntervals(scheduleRepo.getTodaySlots(currentSettings.queue))
-                val matchingInterval = todayIntervals.firstOrNull { "\${it.startStr}–\${it.endStr}" == timeStr }
-                    ?: return@launch
-
-                // Verify current time is within the valid pre-warning window [alertTime - 2min, blockStartTime + 2min]
-                // Prevents past-due alarms from firing when the user changes system time on mobile
-                val startParts = matchingInterval.startStr.split(":")
-                val startH = startParts.getOrNull(0)?.toIntOrNull() ?: return@launch
-                val startM = startParts.getOrNull(1)?.toIntOrNull() ?: return@launch
-                val blockStartTime = LocalDateTime.of(today, LocalTime.of(startH, startM))
-                val alertTime = blockStartTime.minusMinutes(minutes.toLong())
-                val now = LocalDateTime.now(kyivZone)
-
-                if (now.isBefore(alertTime.minusMinutes(2))) {
-                    // System clock was moved backward before the alert window; reschedule alarms
-                    AlarmScheduler.syncAlarms(appContext, onTimeChanged = true)
-                    return@launch
-                }
-                if (now.isAfter(blockStartTime.plusMinutes(2))) {
-                    // System clock was moved forward past the outage start time; do not fire stale pre-warning
-                    return@launch
-                }
-
-                val alertRegistry = AlertRegistry(appContext)
-
-                // STRICT REQUIREMENT: Send notification only once per blackout slot
-                if (alertRegistry.hasNotified(slotId)) {
-                    return@launch
-                }
-
-                // Mark as notified immediately
-                alertRegistry.markNotified(slotId)
-
-                val queue = currentSettings.queue
-                val title = "Попередження: відключення світла"
-                val body = "Черга $queue: відключення розпочнеться о $timeStr (через $minutes хв)."
-
-                val notificationId = slotId.hashCode()
-                NotificationHelper.showPreWarningNotification(appContext, notificationId, title, body)
             } finally {
                 try {
                     pendingResult.finish()
-                } catch (_: Exception) {}
+                } catch (_: Exception) {
+                }
             }
         }
     }
-}`
+
+    /**
+     * Posts every planned group that starts at the alarm's span start and still has a member that
+     * was not warned (spec/SUBSCRIPTIONS.md 8.2). The plan is recomputed from the current state, so
+     * a changed schedule, queue or address list never posts a stale warning or loses a due one.
+     */
+    private suspend fun handleAlert(appContext: Context, intent: Intent) {
+        val settings = SettingsRepository(appContext).getSettings()
+        val sync = SubscriptionSync(appContext)
+        val master = sync.master()
+        if (!master) return
+        val subs = sync.store()
+
+        val startMs = intent.getLongExtra(AlarmScheduler.EXTRA_SPAN_START_MS, -1L)
+        if (startMs < 0L) return
+        val advance = intent.getIntExtra(AlarmScheduler.EXTRA_MINUTES, settings.advanceNoticeMinutes)
+
+        val spanStart = LocalDateTime.ofInstant(Instant.ofEpochMilli(startMs), KYIV_ZONE)
+        val now = LocalDateTime.now(KYIV_ZONE)
+        val alertTime = spanStart.minusMinutes(advance.toLong())
+
+        if (now.isBefore(alertTime.minusMinutes(2))) {
+            // The system clock moved backward before the alert window: plan again
+            AlarmScheduler.syncAlarms(appContext, onTimeChanged = true)
+            return
+        }
+        if (now.isAfter(spanStart.plusMinutes(2))) {
+            // The outage has already begun: a pre-warning would be stale
+            return
+        }
+
+        // Plan as seen a little before the alarm, so the alert that is firing now is still part of it
+        val lookback = now.minusMinutes(advance.toLong() + 3)
+        val groups = AlarmScheduler.plannedGroups(appContext, subs, master, lookback, advance)
+            .filter { it.spanStart == spanStart }
+        if (groups.isEmpty()) return
+
+        val registry = AlertRegistry(appContext)
+        val lang = AppStrings.resolveLang(settings.language)
+        for (group in groups) {
+            if (Subscriptions.pendingMembers(group) { registry.hasNotified(it) }.isEmpty()) continue
+            for (id in group.memberIds) registry.markNotified(Subscriptions.memberKey(id, group.spanStart))
+
+            val body = AppStrings.plannedAlertBody(
+                lang = lang,
+                queue = group.queue,
+                // A start is never "24:00": an outage starting at midnight reads 00:00 (spec/NOTIFICATIONS.md)
+                start = "%02d:%02d".format(group.spanStart.hour, group.spanStart.minute),
+                end = OutageEngine.formatSpanTime(group.spanEnd),
+                minutesLeft = ChronoUnit.MINUTES.between(now, spanStart),
+                durationMinutes = group.durationMinutes,
+                mayContinue = group.mayContinue,
+                labels = Subscriptions.alertLabels(subs, group.memberIds)
+            )
+            NotificationHelper.showPreWarningNotification(
+                appContext,
+                AlarmCodes.codeFor(appContext, group.key),
+                AppStrings.plannedAlertTitle(lang),
+                body,
+                // a tap shows the first member, the primary when it is one (spec/SUBSCRIPTIONS.md 9)
+                subscriptionId = group.memberIds.firstOrNull()
+            )
+        }
+    }
+}
+`
   },
   {
     path: 'app/src/main/java/ua/blackout/prewarning/worker/ScheduleSyncWorker.kt',
@@ -1519,14 +1611,12 @@ import androidx.work.NetworkType
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
-import ua.blackout.prewarning.data.parser.FetchStatus
+import kotlinx.coroutines.CancellationException
 import ua.blackout.prewarning.data.parser.ZtoeAddressLookup
-import ua.blackout.prewarning.data.parser.ZtoeParser
-import ua.blackout.prewarning.data.repository.ScheduleRepository
+import ua.blackout.prewarning.data.repository.OutageRepository
 import ua.blackout.prewarning.data.repository.SettingsRepository
+import ua.blackout.prewarning.data.repository.SubscriptionSync
 import ua.blackout.prewarning.notification.AlarmScheduler
-import ua.blackout.prewarning.notification.NotificationHelper
-import ua.blackout.prewarning.ui.AppStrings
 import ua.blackout.prewarning.widget.BlackoutGlanceWidget
 import java.util.concurrent.TimeUnit
 
@@ -1536,87 +1626,62 @@ class ScheduleSyncWorker(
 ) : CoroutineWorker(context, workerParams) {
 
     override suspend fun doWork(): Result {
-        return try {
-            val appContext = context.applicationContext
+        val appContext = context.applicationContext
+        try {
             val settingsRepo = SettingsRepository(appContext)
-            var settings = settingsRepo.getSettings()
-            val resolvedLang = AppStrings.resolveLang(settings.language)
+            val settings = settingsRepo.getSettings()
 
-            // Re-check saved address query & emergency outages on ZTOE website
+            // A house without a queue may be given one by the site later. Only the two fields that
+            // belong to this check are written, so a setting the user changes meanwhile is never reverted.
             val addressQuery = settings.selectedAddressQuery
-            if (addressQuery != null) {
-                ZtoeAddressLookup.initDiskCache(appContext)
-                val latestAddressLookup = ZtoeAddressLookup.checkAddressOnZtoeWebsite(addressQuery, settings.cityUrl)
-                if (latestAddressLookup != null) {
-                    val prevEmergency = settings.activeEmergencyOutage
-                    val nextEmergency = latestAddressLookup.emergencyOutage
-
-                    NotificationHelper.checkAndTriggerEmergencyOutageAlert(
-                        context = appContext,
-                        prevOutage = prevEmergency,
-                        nextOutage = nextEmergency,
-                        settings = settings,
-                        lang = resolvedLang
-                    )
-
-                    val emergencyChanged =
-                        (prevEmergency?.id != nextEmergency?.id) ||
-                            (prevEmergency?.startTime != nextEmergency?.startTime) ||
-                            (prevEmergency?.estimatedRestoreTime != nextEmergency?.estimatedRestoreTime)
-
-                    val hadNoQueue = settings.queue.isBlank()
-                    val queueAssignedForNoQueueHouse = hadNoQueue &&
-                        (latestAddressLookup.queue != settings.queue ||
-                            latestAddressLookup.statusText != settings.customQueueStatusText)
-
-                    if (queueAssignedForNoQueueHouse || emergencyChanged) {
-                        val nextQueue = if (queueAssignedForNoQueueHouse) latestAddressLookup.queue else settings.queue
-                        val nextStatusText = if (queueAssignedForNoQueueHouse) latestAddressLookup.statusText else settings.customQueueStatusText
-                        settings = settings.copy(
-                            queue = nextQueue,
-                            customQueueStatusText = nextStatusText,
-                            activeEmergencyOutage = nextEmergency
-                        )
-                        settingsRepo.saveSettings(settings)
-                    }
-                }
-            }
-
-            val scheduleRepo = ScheduleRepository(appContext)
-            val fetchRes = ZtoeParser.fetchFullSchedule(settings.cityUrl, settings.queue, appContext)
-
-            // Only save schedule when live fetch succeeded; clear cached results if unreachable or no queues found
-            if (fetchRes.status == FetchStatus.SUCCESS) {
-                if (settings.queue.isNotBlank()) {
-                    scheduleRepo.saveSchedule(settings.queue, fetchRes.todaySlots, fetchRes.tomorrowSlots)
-                }
-            } else {
-                scheduleRepo.clearScheduleCache()
-            }
-
-            val hasWidgets = try {
-                BlackoutGlanceWidget.hasActiveWidgets(appContext)
-            } catch (_: Exception) {
-                false
-            }
-
-            if (hasWidgets) {
+            if (addressQuery != null && settings.queue.isBlank()) {
                 try {
-                    BlackoutGlanceWidget.syncAllWidgets(appContext)
-                } catch (_: Exception) {}
+                    ZtoeAddressLookup.initDiskCache(appContext)
+                    val lookup = ZtoeAddressLookup.checkAddressOnZtoeWebsite(addressQuery, settings.cityUrl)
+                    if (lookup != null && (lookup.queue != settings.queue || lookup.statusText != settings.customQueueStatusText)) {
+                        // through the subscription store, which writes the primary back into these keys
+                        SubscriptionSync(appContext).assignPrimaryQueue(lookup.queue, lookup.statusText, null)
+                    }
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (_: Exception) {
+                }
             }
 
-            // Re-read latest settings right before scheduling alarms in case user changed queue while network fetch was running
-            AlarmScheduler.syncAlarms(appContext)
+            // Each source is isolated inside OutageRepository: a failing site never stops the other one,
+            // and a failure is never treated as "no outage".
+            try {
+                OutageRepository(appContext).refresh(settingsRepo.getSettings())
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+            }
 
-            Result.success()
+            try {
+                if (BlackoutGlanceWidget.hasActiveWidgets(appContext)) {
+                    BlackoutGlanceWidget.syncAllWidgets(appContext)
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+            }
+            return Result.success()
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
-            Result.retry()
+            return if (runAttemptCount < MAX_ATTEMPTS) Result.retry() else Result.success()
+        } finally {
+            // Alarms are planned from the latest stored state even when a source failed above
+            try {
+                AlarmScheduler.syncAlarms(appContext)
+            } catch (_: Exception) {
+            }
         }
     }
 
     companion object {
         const val WORK_NAME = "ScheduleSyncWorker"
+        private const val MAX_ATTEMPTS = 3
 
         fun schedulePeriodicWork(
             context: Context,
@@ -1624,6 +1689,7 @@ class ScheduleSyncWorker(
         ) {
             val appContext = context.applicationContext
             val settings = SettingsRepository(appContext).getSettings()
+            // WorkManager never runs periodic work more often than every 15 minutes
             val intervalMinutes = settings.refreshIntervalMinutes.coerceAtLeast(15L)
 
             val constraints = Constraints.Builder()
@@ -1641,7 +1707,8 @@ class ScheduleSyncWorker(
             )
         }
     }
-}`
+}
+`
   },
   {
     path: 'app/src/main/java/ua/blackout/prewarning/widget/BlackoutGlanceWidget.kt',
@@ -1672,9 +1739,12 @@ import androidx.glance.GlanceTheme
 import androidx.glance.Image
 import androidx.glance.ImageProvider
 import androidx.glance.LocalSize
+import androidx.glance.action.Action
 import androidx.glance.action.ActionParameters
+import androidx.glance.action.actionParametersOf
 import androidx.glance.action.actionStartActivity
 import androidx.glance.action.clickable
+import androidx.glance.appwidget.CircularProgressIndicator
 import androidx.glance.appwidget.GlanceAppWidget
 import androidx.glance.appwidget.GlanceAppWidgetManager
 import androidx.glance.appwidget.SizeMode
@@ -1692,21 +1762,25 @@ import androidx.glance.text.FontWeight
 import androidx.glance.text.Text
 import androidx.glance.text.TextStyle
 import androidx.glance.unit.ColorProvider
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import ua.blackout.prewarning.MainActivity
 import ua.blackout.prewarning.R
+import ua.blackout.prewarning.core.OutageEngine
+import ua.blackout.prewarning.data.KYIV_ZONE
 import ua.blackout.prewarning.data.model.BlackoutSlot
 import ua.blackout.prewarning.data.model.SlotStatus
-import ua.blackout.prewarning.data.parser.ZtoeParser
-import ua.blackout.prewarning.data.repository.ScheduleRepository
+import ua.blackout.prewarning.data.model.UserSettings
+import ua.blackout.prewarning.data.repository.OutageRepository
+import ua.blackout.prewarning.data.repository.OutageSnapshot
 import ua.blackout.prewarning.data.repository.SettingsRepository
+import ua.blackout.prewarning.notification.NotificationHelper
+import ua.blackout.prewarning.data.repository.SubscriptionSync
 import ua.blackout.prewarning.notification.AlarmScheduler
 import ua.blackout.prewarning.ui.AppStrings
-import java.time.LocalDate
-import java.time.LocalTime
-import java.time.format.DateTimeFormatter
-import ua.blackout.prewarning.data.KYIV_ZONE
+import java.time.Instant
+import java.time.LocalDateTime
 
 open class BlackoutGlanceWidget(private val forceBigLayout: Boolean = false) : GlanceAppWidget() {
 
@@ -1724,12 +1798,12 @@ open class BlackoutGlanceWidget(private val forceBigLayout: Boolean = false) : G
         val KEY_NOTIFICATIONS_ENABLED = booleanPreferencesKey("glance_notifications_enabled")
         val KEY_QUEUE = stringPreferencesKey("glance_queue")
         val KEY_LANGUAGE = stringPreferencesKey("glance_language")
+        /** Bumped on every redraw so Glance recomposes; the widget itself renders only live values. */
         val KEY_REFRESH_TICK = longPreferencesKey("glance_refresh_tick")
-        val KEY_IS_BLACKOUT_NOW = booleanPreferencesKey("glance_is_blackout_now")
-        val KEY_IS_UNCLEAR = booleanPreferencesKey("glance_is_unclear")
-        val KEY_COUNTDOWN_TEXT = stringPreferencesKey("glance_countdown_text")
-        val KEY_NEXT_SLOT_TIME = stringPreferencesKey("glance_next_slot_time")
-        val KEY_NEXT_BLACKOUT_TEXT = stringPreferencesKey("glance_next_blackout_text")
+        /** When the widget refresh button started a refresh (0 = idle); older than [REFRESH_BUSY_MAX_MS] counts as idle. */
+        val KEY_REFRESHING_SINCE = longPreferencesKey("glance_refreshing_since")
+        /** A refresh killed with the process must not leave the ring spinning: 2 clients x 8 s timeouts, plus margin. */
+        const val REFRESH_BUSY_MAX_MS = 30_000L
 
         private val COUNTDOWN_PART_REGEX = Regex("(\\\\d{1,2}|--)")
 
@@ -1744,23 +1818,97 @@ open class BlackoutGlanceWidget(private val forceBigLayout: Boolean = false) : G
             return rawCountdown
         }
 
-        private fun buildLightNoOutageSlots(): List<BlackoutSlot> {
-            return (0 until 48).map { idx ->
-                val sh = idx / 2
-                val sm = if (idx % 2 == 0) "00" else "30"
-                val eh = (idx + 1) / 2
-                val em = if ((idx + 1) % 2 == 0) "00" else "30"
-                val startStr = "\${sh.toString().padStart(2, '0')}:$sm"
-                val endStr = "\${eh.toString().padStart(2, '0')}:$em"
-                BlackoutSlot(
-                    hour = sh,
-                    startStr = startStr,
-                    endStr = endStr,
-                    status = SlotStatus.POWER_ON,
-                    label = "$startStr - $endStr"
+        /** Everything the two widget layouts show, derived from one [OutageSnapshot] (local state only). */
+        internal data class WidgetModel(
+            val lang: String,
+            val queueHeader: String,
+            val isUnclear: Boolean,
+            val isOffNow: Boolean,
+            val countdown: String,
+            /** Current outage when off, otherwise the next one: full "HH:mm – HH:mm" (end may be past midnight). */
+            val period: String,
+            val nextOutage: String,
+            /** The 48 half-hour cells of today (empty when unclear): the same states the main timeline draws. */
+            val slots: List<BlackoutSlot>,
+            val nowHour: Int,
+            val nowMinute: Int,
+            /** Small "data from HH:mm" caption when the cached schedule is shown because the site failed. */
+            val staleCaption: String?,
+            /** Address label of the shown item (\`widgetLabel\`, spec/SUBSCRIPTIONS.md 10); null keeps the 1.4.0 look. */
+            val addressLabel: String? = null
+        )
+
+        private fun p2(n: Int) = n.toString().padStart(2, '0')
+
+        internal fun buildWidgetModel(settings: UserSettings, snapshot: OutageSnapshot, addressLabel: String? = null): WidgetModel {
+            val lang = AppStrings.resolveLang(settings.language)
+            val now = snapshot.now
+            val isNoQueueHouse = !settings.customQueueStatusText.isNullOrBlank()
+            val queueHeader = when {
+                isNoQueueHouse -> if (lang == "uk") "Черга відсутня" else "No queue"
+                settings.queue.isBlank() -> if (lang == "uk") "Черга —" else "Queue —"
+                else -> "Черга \${settings.queue}"
+            }
+            val notConfigured = settings.queue.isBlank() && !isNoQueueHouse && !snapshot.hasAddress
+            if (notConfigured || snapshot.isUnclear) {
+                return WidgetModel(
+                    lang = lang,
+                    queueHeader = queueHeader,
+                    isUnclear = true,
+                    isOffNow = false,
+                    countdown = formatWidgetCountdown("--:--:--", lang),
+                    period = "--:-- - --:--",
+                    nextOutage = "--:-- - --:--",
+                    slots = emptyList(),
+                    nowHour = now.hour,
+                    nowMinute = now.minute,
+                    staleCaption = null,
+                    addressLabel = addressLabel
                 )
             }
+
+            val st = snapshot.status()
+            val period = if (!st.isOffNow && st.nextSpan == null) AppStrings.widgetNoOutages(lang) else st.nextSlotTime
+            // The next outage after the current moment, from the same merged spans the countdown uses
+            val next = OutageEngine.spans(snapshot.outages.filter { !it.stale }).firstOrNull { it.start.isAfter(now) }
+            val nextText = when {
+                next == null -> AppStrings.widgetNoMoreOutages(lang)
+                next.start.toLocalDate() == snapshot.today -> OutageEngine.formatSpan(next)
+                else -> "\${AppStrings.widgetTomorrowPrefix(lang)} \${OutageEngine.formatSpan(next)}"
+            }
+            val staleCaption = if (snapshot.isStale) {
+                snapshot.site?.lastSuccessMs?.let { ms ->
+                    val t = LocalDateTime.ofInstant(Instant.ofEpochMilli(ms), KYIV_ZONE)
+                    AppStrings.staleChip(lang, "\${p2(t.hour)}:\${p2(t.minute)}")
+                }
+            } else {
+                null
+            }
+            return WidgetModel(
+                lang = lang,
+                queueHeader = queueHeader,
+                isUnclear = false,
+                isOffNow = st.isOffNow,
+                countdown = formatWidgetCountdown(st.countdownText, lang),
+                period = period,
+                nextOutage = nextText,
+                slots = snapshot.slotsFor(snapshot.today),
+                nowHour = now.hour,
+                nowMinute = now.minute,
+                staleCaption = staleCaption,
+                addressLabel = addressLabel
+            )
         }
+
+        /** 0 = power on, 1 = planned off, 2 = emergency only, 3 = emergency overlapping planned. */
+        private fun cellKind(s: BlackoutSlot): Int = when {
+            s.isEmergency && s.isPlanned -> 3
+            s.isEmergency -> 2
+            s.status == SlotStatus.POWER_OFF -> 1
+            else -> 0
+        }
+
+        private const val STRIPE_PX = 8f
 
         @Volatile
         private var cachedChartBitmapKey: String? = null
@@ -1772,98 +1920,67 @@ open class BlackoutGlanceWidget(private val forceBigLayout: Boolean = false) : G
                 val appCtx = context.applicationContext
                 val manager = GlanceAppWidgetManager(appCtx)
                 manager.getGlanceIds(BlackoutGlanceWidget::class.java).isNotEmpty() ||
-                    manager.getGlanceIds(BlackoutBigGlanceWidget::class.java).isNotEmpty()
+                    manager.getGlanceIds(BlackoutBigGlanceWidget::class.java).isNotEmpty() ||
+                    manager.getGlanceIds(BlackoutStripGlanceWidget::class.java).isNotEmpty()
             } catch (_: Exception) {
                 false
             }
         }
 
-        suspend fun syncAllWidgets(context: Context) {
+        /**
+         * Redraws every placed widget. The widgets render from [OutageRepository.snapshot] at draw time,
+         * so nothing computed here is persisted: this only bumps a tick that makes Glance recompose.
+         */
+        suspend fun syncAllWidgets(context: Context, refreshing: Boolean? = null) {
             val appCtx = context.applicationContext
             val manager = GlanceAppWidgetManager(appCtx)
             val smallIds = manager.getGlanceIds(BlackoutGlanceWidget::class.java)
             val bigIds = manager.getGlanceIds(BlackoutBigGlanceWidget::class.java)
-            val glanceIds = smallIds + bigIds
-            if (glanceIds.isEmpty()) return
+            val stripIds = manager.getGlanceIds(BlackoutStripGlanceWidget::class.java)
+            if (smallIds.isEmpty() && bigIds.isEmpty() && stripIds.isEmpty()) return
 
             val settings = SettingsRepository(appCtx).getSettings()
+            val alertsMaster = SubscriptionSync(appCtx).master()
             val resolvedLang = AppStrings.resolveLang(settings.language)
-            val scheduleRepo = ScheduleRepository(appCtx)
-
-            val todayDateIso = LocalDate.now(KYIV_ZONE).format(DateTimeFormatter.ISO_LOCAL_DATE)
-            val tomorrowDateIso = LocalDate.now(KYIV_ZONE).plusDays(1).format(DateTimeFormatter.ISO_LOCAL_DATE)
-            val isNoQueueHouse = !settings.customQueueStatusText.isNullOrBlank()
-            val baseTodaySlots = when {
-                isNoQueueHouse && settings.activeEmergencyOutage == null -> buildLightNoOutageSlots()
-                settings.queue.isBlank() && isNoQueueHouse -> buildLightNoOutageSlots()
-                else -> scheduleRepo.getTodaySlots(settings.queue)
-            }
-            val effectiveTodaySlots = ScheduleRepository.applyEmergencyOutageToSlots(
-                baseTodaySlots,
-                todayDateIso,
-                settings.activeEmergencyOutage
-            )
-            val rawTomorrowSlots = scheduleRepo.getTomorrowSlots(settings.queue)
-            val effectiveTomorrowSlots = rawTomorrowSlots?.let {
-                ScheduleRepository.applyEmergencyOutageToSlots(it, tomorrowDateIso, settings.activeEmergencyOutage)
-            }
-
-            val info = when {
-                settings.queue.isBlank() && !isNoQueueHouse && settings.activeEmergencyOutage == null ->
-                    ScheduleRepository.StatusAndCountdown(false, "--:--:--", "--:-- - --:--", true)
-                isNoQueueHouse && settings.activeEmergencyOutage == null ->
-                    ScheduleRepository.StatusAndCountdown(false, "--:--:--", "Відключень немає", false)
-                else ->
-                    ScheduleRepository.calculateStatusAndCountdown(
-                        slots = effectiveTodaySlots,
-                        tomorrowSlots = effectiveTomorrowSlots,
-                        now = LocalTime.now(KYIV_ZONE)
-                    )
-            }
-            val formattedCountdown = formatWidgetCountdown(info.countdownText, resolvedLang)
-            val nextBlackoutText = if (isNoQueueHouse && settings.activeEmergencyOutage == null) {
-                "Сьогодні більше немає"
-            } else {
-                val nowMin = LocalTime.now(KYIV_ZONE).let { it.hour * 60 + it.minute }
-                val upcoming = scheduleRepo.getDetailedIntervals(effectiveTodaySlots).firstOrNull { interval ->
-                    val p = interval.startStr.split(":")
-                    val startMin = (p.getOrNull(0)?.toIntOrNull() ?: 0) * 60 + (p.getOrNull(1)?.toIntOrNull() ?: 0)
-                    startMin > nowMin
-                }
-                if (upcoming != null) "\${upcoming.startStr} – \${upcoming.endStr}" else "Сьогодні більше немає"
-            }
             val nowMs = System.currentTimeMillis()
-            for (gId in smallIds) {
+
+            suspend fun touch(gId: GlanceId) {
                 updateAppWidgetState(appCtx, PreferencesGlanceStateDefinition, gId) { prefs ->
                     prefs.toMutablePreferences().apply {
-                        this[KEY_NOTIFICATIONS_ENABLED] = settings.notificationsEnabled
+                        this[KEY_NOTIFICATIONS_ENABLED] = alertsMaster
                         this[KEY_QUEUE] = settings.queue
                         this[KEY_LANGUAGE] = resolvedLang
                         this[KEY_REFRESH_TICK] = nowMs
-                        this[KEY_IS_BLACKOUT_NOW] = info.isBlackoutNow
-                        this[KEY_IS_UNCLEAR] = info.isUnclear
-                        this[KEY_COUNTDOWN_TEXT] = formattedCountdown
-                        this[KEY_NEXT_SLOT_TIME] = info.nextSlotTime
-                        this[KEY_NEXT_BLACKOUT_TEXT] = nextBlackoutText
+                        if (refreshing != null) this[KEY_REFRESHING_SINCE] = if (refreshing) nowMs else 0L
                     }
                 }
-                BlackoutGlanceWidget().update(appCtx, gId)
+            }
+            for (gId in smallIds) {
+                try {
+                    touch(gId)
+                    BlackoutGlanceWidget().update(appCtx, gId)
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (_: Exception) {
+                }
             }
             for (gId in bigIds) {
-                updateAppWidgetState(appCtx, PreferencesGlanceStateDefinition, gId) { prefs ->
-                    prefs.toMutablePreferences().apply {
-                        this[KEY_NOTIFICATIONS_ENABLED] = settings.notificationsEnabled
-                        this[KEY_QUEUE] = settings.queue
-                        this[KEY_LANGUAGE] = resolvedLang
-                        this[KEY_REFRESH_TICK] = nowMs
-                        this[KEY_IS_BLACKOUT_NOW] = info.isBlackoutNow
-                        this[KEY_IS_UNCLEAR] = info.isUnclear
-                        this[KEY_COUNTDOWN_TEXT] = formattedCountdown
-                        this[KEY_NEXT_SLOT_TIME] = info.nextSlotTime
-                        this[KEY_NEXT_BLACKOUT_TEXT] = nextBlackoutText
-                    }
+                try {
+                    touch(gId)
+                    BlackoutBigGlanceWidget().update(appCtx, gId)
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (_: Exception) {
                 }
-                BlackoutBigGlanceWidget().update(appCtx, gId)
+            }
+            for (gId in stripIds) {
+                try {
+                    touch(gId)
+                    BlackoutStripGlanceWidget().update(appCtx, gId)
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (_: Exception) {
+                }
             }
         }
 
@@ -1876,25 +1993,25 @@ open class BlackoutGlanceWidget(private val forceBigLayout: Boolean = false) : G
             slots: List<BlackoutSlot>,
             currentH: Int,
             currentM: Int,
-            lang: String = "uk"
+            lang: String = "uk",
+            height: Int = 132
         ): Bitmap {
             val slotSignature = if (slots.isEmpty()) {
                 "UNCLEAR"
             } else {
                 buildString(slots.size) {
                     for (s in slots) {
-                        append(if (s.status == SlotStatus.POWER_OFF) '1' else '0')
+                        append(cellKind(s))
                     }
                 }
             }
-            val bitmapKey = "\${slotSignature}_\${currentH}_\${currentM}_$lang"
+            val bitmapKey = "\${slotSignature}_\${currentH}_\${currentM}_\${lang}_$height"
             val existingBmp = cachedChartBitmap
             if (cachedChartBitmapKey == bitmapKey && existingBmp != null && !existingBmp.isRecycled) {
                 return existingBmp
             }
 
             val width = 720
-            val height = 132
             val bmp = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
             val canvas = Canvas(bmp)
             val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply { isDither = true }
@@ -1920,7 +2037,7 @@ open class BlackoutGlanceWidget(private val forceBigLayout: Boolean = false) : G
             val contourLeft = 18f
             val contourTop = 18f
             val contourRight = width - 18f
-            val contourBottom = 84f
+            val contourBottom = height - 48f
             val contourRect = RectF(contourLeft, contourTop, contourRight, contourBottom)
 
             paint.style = Paint.Style.FILL
@@ -1936,7 +2053,7 @@ open class BlackoutGlanceWidget(private val forceBigLayout: Boolean = false) : G
             val trackLeft = 26f
             val trackTop = 26f
             val trackRight = width - 26f
-            val trackBottom = 76f
+            val trackBottom = height - 56f
             val trackWidth = trackRight - trackLeft
             val trackRect = RectF(trackLeft, trackTop, trackRight, trackBottom)
 
@@ -1986,28 +2103,51 @@ open class BlackoutGlanceWidget(private val forceBigLayout: Boolean = false) : G
                 val textYCenter = (trackTop + trackBottom) / 2f - (unclearTextPaint.descent() + unclearTextPaint.ascent()) / 2f
                 canvas.drawText(unclearText, textX, textYCenter, unclearTextPaint)
             } else {
-                val is48 = slots.size >= 48
-                (0 until 24).forEach { hour ->
-                    val half1Off = if (is48) {
-                        slots.getOrNull(hour * 2)?.status == SlotStatus.POWER_OFF
-                    } else {
-                        slots.getOrNull(hour)?.status == SlotStatus.POWER_OFF
-                    }
-                    val half2Off = if (is48) {
-                        slots.getOrNull(hour * 2 + 1)?.status == SlotStatus.POWER_OFF
-                    } else {
-                        slots.getOrNull(hour)?.status == SlotStatus.POWER_OFF
-                    }
+                // Emergency overlay, same recipe as the main drum: the bottom half of the cell is amber with
+                // dark 45 degree stripes; the top half keeps the planned state (spec/UI_DRUM.md 1).
+                val trackMid = (trackTop + trackBottom) / 2f
+                val amberShader = LinearGradient(
+                    0f, trackMid, 0f, trackBottom,
+                    intArrayOf(0xFFFFB020.toInt(), 0xFFF28A1B.toInt(), 0xFFC96A0B.toInt()),
+                    floatArrayOf(0f, 0.5f, 1f),
+                    Shader.TileMode.CLAMP
+                )
+                val stripePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                    style = Paint.Style.STROKE
+                    strokeWidth = STRIPE_PX
+                }
+                val bandH = trackBottom - trackMid
+                val stripeStep = STRIPE_PX * 2f * 1.4142135f
 
+                for (idx in 0 until 48) {
+                    val kind = slots.getOrNull(idx)?.let { cellKind(it) } ?: 0
+                    val hour = idx / 2
                     val hLeft = trackLeft + hour * (hourWidth + sepPx)
+                    val left = if (idx % 2 == 0) hLeft else hLeft + halfWidth
+                    val right = if (idx % 2 == 0) hLeft + halfWidth else hLeft + hourWidth
 
-                    // Half 1: XX:00 - XX:30
-                    paint.shader = if (half1Off) offShader else onShader
-                    canvas.drawRect(hLeft, trackTop, hLeft + halfWidth, trackBottom, paint)
+                    paint.shader = when (kind) {
+                        1, 3 -> offShader
+                        else -> onShader
+                    }
+                    canvas.drawRect(left, trackTop, right, trackBottom, paint)
 
-                    // Half 2: XX:30 - (XX+1):00 (contiguous with Half 1, no half-hour separator)
-                    paint.shader = if (half2Off) offShader else onShader
-                    canvas.drawRect(hLeft + halfWidth, trackTop, hLeft + hourWidth, trackBottom, paint)
+                    if (kind >= 2) {
+                        paint.shader = amberShader
+                        canvas.drawRect(left, trackMid, right, trackBottom, paint)
+                        stripePaint.color = 0x8C1A1208.toInt()
+                        canvas.save()
+                        canvas.clipRect(left, trackMid, right, trackBottom)
+                        // Global phase (anchored at trackLeft) keeps the stripes continuous across cells
+                        var n = Math.floor(((left - trackLeft) / stripeStep).toDouble()).toInt()
+                        while (true) {
+                            val u = trackLeft - bandH + n * stripeStep
+                            if (u >= right) break
+                            canvas.drawLine(u, trackBottom, u + bandH, trackMid, stripePaint)
+                            n++
+                        }
+                        canvas.restore()
+                    }
                 }
                 paint.shader = null
             }
@@ -2037,7 +2177,7 @@ open class BlackoutGlanceWidget(private val forceBigLayout: Boolean = false) : G
             val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
                 color = 0xFF1C1B18.toInt()
                 typeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
-                textSize = 21f
+                textSize = 21f + (height - 132) * 0.1f
             }
             val labels = listOf(
                 0f to "00",
@@ -2046,7 +2186,7 @@ open class BlackoutGlanceWidget(private val forceBigLayout: Boolean = false) : G
                 0.75f to "18",
                 1.0f to "24"
             )
-            val textY = 116f
+            val textY = height - 16f
             labels.forEach { (pos, label) ->
                 val tw = textPaint.measureText(label)
                 val x = when (pos) {
@@ -2065,94 +2205,43 @@ open class BlackoutGlanceWidget(private val forceBigLayout: Boolean = false) : G
 
     override suspend fun provideGlance(context: Context, id: GlanceId) {
         val appContext = context.applicationContext
-        val settingsRepo = SettingsRepository(appContext)
-        val scheduleRepo = ScheduleRepository(appContext)
-        val initialSettings = settingsRepo.getSettings()
-
-        // Immediately fetch live schedule on first widget placement if cache is missing for selected queue
-        if (initialSettings.queue.isNotBlank() && !scheduleRepo.hasValidTodayCache(initialSettings.queue)) {
-            withContext(Dispatchers.IO) {
-                try {
-                    val res = ZtoeParser.fetchFullSchedule(initialSettings.cityUrl, initialSettings.queue, appContext)
-                    if (res.status == ua.blackout.prewarning.data.parser.FetchStatus.SUCCESS) {
-                        scheduleRepo.saveSchedule(initialSettings.queue, res.todaySlots, res.tomorrowSlots)
-                    } else {
-                        scheduleRepo.clearScheduleCache()
-                    }
-                } catch (_: Exception) {
-                    scheduleRepo.clearScheduleCache()
-                }
-            }
+        // Which address this widget shows is looked up by its app widget id (spec/SUBSCRIPTIONS.md 10)
+        val appWidgetId = try {
+            GlanceAppWidgetManager(appContext).getAppWidgetId(id)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            null
         }
 
+        // Drawing never touches the network and never wipes caches (C13/C14): the data is refreshed by the
+        // worker, the widget receiver and the refresh button, and every value below is computed live.
         provideContent {
             val prefs = currentState<Preferences>()
-            // Observe Glance state preferences so recomposition always triggers when toggled or refreshed
-            val currentSettings = settingsRepo.getSettings()
-            val resolvedLang = AppStrings.resolveLang(prefs[KEY_LANGUAGE] ?: currentSettings.language)
-            val notificationsEnabled = prefs[KEY_NOTIFICATIONS_ENABLED] ?: currentSettings.notificationsEnabled
-            val activeQueue = currentSettings.queue
-            val isNoQueueHouse = !currentSettings.customQueueStatusText.isNullOrBlank()
+            // Reading the tick subscribes this composition to the Glance state that syncAllWidgets bumps
+            @Suppress("UNUSED_VARIABLE")
             val refreshTick = prefs[KEY_REFRESH_TICK] ?: 0L
+            val refreshingSince = prefs[KEY_REFRESHING_SINCE] ?: 0L
+            val isRefreshing = refreshingSince > 0L && System.currentTimeMillis() - refreshingSince < REFRESH_BUSY_MAX_MS
+            val source = widgetSource(appContext, appWidgetId)
+            val model = buildWidgetModel(source.settings, source.snapshot, source.label)
+            val openApp = openAppAction(source.itemId)
 
-            val todayDateIso = LocalDate.now(KYIV_ZONE).format(DateTimeFormatter.ISO_LOCAL_DATE)
-            val tomorrowDateIso = LocalDate.now(KYIV_ZONE).plusDays(1).format(DateTimeFormatter.ISO_LOCAL_DATE)
-
-            // Always use Today's schedule for the widget, with active emergency outage overlaid
-            val baseTodaySlots = when {
-                isNoQueueHouse && currentSettings.activeEmergencyOutage == null -> buildLightNoOutageSlots()
-                activeQueue.isBlank() && isNoQueueHouse -> buildLightNoOutageSlots()
-                else -> scheduleRepo.getTodaySlots(activeQueue)
-            }
-            val slots = ScheduleRepository.applyEmergencyOutageToSlots(
-                baseTodaySlots,
-                todayDateIso,
-                currentSettings.activeEmergencyOutage
-            )
-            val rawTomorrowSlots = scheduleRepo.getTomorrowSlots(activeQueue)
-            val effectiveTomorrowSlots = rawTomorrowSlots?.let {
-                ScheduleRepository.applyEmergencyOutageToSlots(it, tomorrowDateIso, currentSettings.activeEmergencyOutage)
-            }
-            val liveInfo = when {
-                activeQueue.isBlank() && !isNoQueueHouse && currentSettings.activeEmergencyOutage == null ->
-                    ScheduleRepository.StatusAndCountdown(false, "--:--:--", "--:-- - --:--", true)
-                isNoQueueHouse && currentSettings.activeEmergencyOutage == null ->
-                    ScheduleRepository.StatusAndCountdown(false, "--:--:--", "Відключень немає", false)
-                else ->
-                    ScheduleRepository.calculateStatusAndCountdown(
-                        slots = slots,
-                        tomorrowSlots = effectiveTomorrowSlots,
-                        now = LocalTime.now(KYIV_ZONE)
-                    )
-            }
-
-            val isUnclear = slots.isEmpty() || (if (refreshTick > 0L) (prefs[KEY_IS_UNCLEAR] ?: liveInfo.isUnclear) else liveInfo.isUnclear)
-            val isBlackoutNow = !isUnclear && (if (refreshTick > 0L) (prefs[KEY_IS_BLACKOUT_NOW] ?: liveInfo.isBlackoutNow) else liveInfo.isBlackoutNow)
-            val rawCountdownText = if (isUnclear) "--:--:--" else (prefs[KEY_COUNTDOWN_TEXT]?.takeIf { it.isNotBlank() && refreshTick > 0L } ?: liveInfo.countdownText)
-            val countdownText = formatWidgetCountdown(rawCountdownText, resolvedLang)
-            val nextSlotTime = if (isUnclear) "--:-- - --:--" else (prefs[KEY_NEXT_SLOT_TIME]?.takeIf { it.isNotBlank() && refreshTick > 0L } ?: liveInfo.nextSlotTime)
-            val nextBlackoutText = if (isUnclear) {
-                "--:-- - --:--"
-            } else if (isNoQueueHouse && currentSettings.activeEmergencyOutage == null) {
-                "Сьогодні більше немає"
-            } else {
-                val nowMin = LocalTime.now(KYIV_ZONE).let { it.hour * 60 + it.minute }
-                val upcoming = scheduleRepo.getDetailedIntervals(slots).firstOrNull { interval ->
-                    val p = interval.startStr.split(":")
-                    val startMin = (p.getOrNull(0)?.toIntOrNull() ?: 0) * 60 + (p.getOrNull(1)?.toIntOrNull() ?: 0)
-                    startMin > nowMin
-                }
-                if (upcoming != null) "\${upcoming.startStr} – \${upcoming.endStr}" else (prefs[KEY_NEXT_BLACKOUT_TEXT] ?: "Сьогодні більше немає")
-            }
+            val resolvedLang = model.lang
+            // the bell shows and toggles the master switch for all addresses (owner decision 4)
+            val notificationsEnabled = SubscriptionSync(appContext).master()
+            val isUnclear = model.isUnclear
+            val isBlackoutNow = model.isOffNow
+            val countdownText = model.countdown
+            val nextSlotTime = model.period
+            val nextBlackoutText = model.nextOutage
+            val slots = model.slots
+            val queueHeaderText = model.queueHeader
+            val addressLabel = model.addressLabel
+            val staleCaption = model.staleCaption
 
             val size = LocalSize.current
             val isBigWidget = forceBigLayout || size.height >= 110.dp || size.width >= 220.dp
-
-            val queueHeaderText = when {
-                isNoQueueHouse -> if (resolvedLang == "uk") "Черга відсутня" else "No queue"
-                activeQueue.isBlank() -> if (resolvedLang == "uk") "Черга —" else "Queue —"
-                else -> "Черга $activeQueue"
-            }
 
             val statusText = when {
                 isUnclear -> AppStrings.powerUnclear(resolvedLang)
@@ -2174,8 +2263,7 @@ open class BlackoutGlanceWidget(private val forceBigLayout: Boolean = false) : G
                         .padding(12.dp)
                 ) {
                     if (isBigWidget) {
-                        val now = LocalTime.now(KYIV_ZONE)
-                        val chartBitmap = renderAnalogCounterBitmap(slots, now.hour, now.minute, resolvedLang)
+                        val chartBitmap = renderAnalogCounterBitmap(slots, model.nowHour, model.nowMinute, resolvedLang)
 
                         // ----------------- 3x2 BIG WIDGET -----------------
                         Column(
@@ -2190,24 +2278,48 @@ open class BlackoutGlanceWidget(private val forceBigLayout: Boolean = false) : G
                                 Column(
                                     modifier = GlanceModifier
                                         .defaultWeight()
-                                        .clickable(actionStartActivity<MainActivity>())
+                                        .clickable(openApp)
                                 ) {
-                                    Text(
-                                        text = queueHeaderText,
-                                        style = TextStyle(
-                                            fontWeight = FontWeight.Bold,
-                                            fontSize = 16.sp,
-                                            color = ColorProvider(Color.White)
+                                    Row(verticalAlignment = Alignment.Vertical.CenterVertically) {
+                                        Text(
+                                            text = queueHeaderText,
+                                            style = TextStyle(
+                                                fontWeight = FontWeight.Bold,
+                                                fontSize = 16.sp,
+                                                color = ColorProvider(Color.White)
+                                            ),
+                                            maxLines = 1
                                         )
-                                    )
-                                    Text(
-                                        text = statusText,
-                                        style = TextStyle(
-                                            fontWeight = FontWeight.Bold,
-                                            fontSize = 11.sp,
-                                            color = ColorProvider(statusColor)
+                                        if (addressLabel != null) {
+                                            Spacer(modifier = GlanceModifier.width(6.dp))
+                                            Text(
+                                                text = addressLabel,
+                                                style = TextStyle(fontSize = 11.sp, color = ColorProvider(Color(0xB3BAE6FD))),
+                                                maxLines = 1
+                                            )
+                                        }
+                                    }
+                                    Row(verticalAlignment = Alignment.Vertical.CenterVertically) {
+                                        Text(
+                                            text = statusText,
+                                            style = TextStyle(
+                                                fontWeight = FontWeight.Bold,
+                                                fontSize = 11.sp,
+                                                color = ColorProvider(statusColor)
+                                            )
                                         )
-                                    )
+                                        if (staleCaption != null) {
+                                            Spacer(modifier = GlanceModifier.width(6.dp))
+                                            Text(
+                                                text = staleCaption,
+                                                style = TextStyle(
+                                                    fontSize = 9.sp,
+                                                    color = ColorProvider(Color(0xFFFFB020))
+                                                ),
+                                                maxLines = 1
+                                            )
+                                        }
+                                    }
                                 }
 
                                 // Round Refresh Button (same style as Notification toggle)
@@ -2219,12 +2331,20 @@ open class BlackoutGlanceWidget(private val forceBigLayout: Boolean = false) : G
                                         .clickable(actionRunCallback<RefreshWidgetActionCallback>()),
                                     contentAlignment = Alignment.Center
                                 ) {
-                                    Image(
-                                        provider = ImageProvider(R.drawable.ic_refresh),
-                                        contentDescription = "Оновити дані",
-                                        colorFilter = ColorFilter.tint(ColorProvider(Color.White)),
-                                        modifier = GlanceModifier.size(18.dp)
-                                    )
+                                    if (isRefreshing) {
+                                        // Glance cannot rotate an image; the platform progress ring animates on its own
+                                        CircularProgressIndicator(
+                                            color = ColorProvider(Color.White),
+                                            modifier = GlanceModifier.size(18.dp)
+                                        )
+                                    } else {
+                                        Image(
+                                            provider = ImageProvider(R.drawable.ic_refresh),
+                                            contentDescription = "Оновити дані",
+                                            colorFilter = ColorFilter.tint(ColorProvider(Color.White)),
+                                            modifier = GlanceModifier.size(18.dp)
+                                        )
+                                    }
                                 }
 
                                 Spacer(modifier = GlanceModifier.width(8.dp))
@@ -2260,7 +2380,7 @@ open class BlackoutGlanceWidget(private val forceBigLayout: Boolean = false) : G
                                     .cornerRadius(12.dp)
                                     .background(ColorProvider(Color(0x33000000)))
                                     .padding(horizontal = 10.dp, vertical = 6.dp)
-                                    .clickable(actionStartActivity<MainActivity>()),
+                                    .clickable(openApp),
                                 verticalAlignment = Alignment.Vertical.CenterVertically
                             ) {
                                 Column(modifier = GlanceModifier.defaultWeight()) {
@@ -2304,7 +2424,7 @@ open class BlackoutGlanceWidget(private val forceBigLayout: Boolean = false) : G
                                 modifier = GlanceModifier
                                     .fillMaxWidth()
                                     .height(52.dp)
-                                    .clickable(actionStartActivity<MainActivity>())
+                                    .clickable(openApp)
                             )
 
                             // Upcoming Outage Interval ("Наступне відключення")
@@ -2315,7 +2435,7 @@ open class BlackoutGlanceWidget(private val forceBigLayout: Boolean = false) : G
                                     .cornerRadius(8.dp)
                                     .background(ColorProvider(Color(0x26000000)))
                                     .padding(horizontal = 8.dp, vertical = 3.dp)
-                                    .clickable(actionStartActivity<MainActivity>()),
+                                    .clickable(openApp),
                                 verticalAlignment = Alignment.Vertical.CenterVertically
                             ) {
                                 Text(
@@ -2354,9 +2474,21 @@ open class BlackoutGlanceWidget(private val forceBigLayout: Boolean = false) : G
                                         fontSize = 14.sp,
                                         color = ColorProvider(Color.White)
                                     ),
-                                    modifier = GlanceModifier.clickable(actionStartActivity<MainActivity>())
+                                    maxLines = 1,
+                                    modifier = GlanceModifier.clickable(openApp)
                                 )
-                                Spacer(modifier = GlanceModifier.defaultWeight())
+                                if (addressLabel != null) {
+                                    Spacer(modifier = GlanceModifier.width(6.dp))
+                                    Text(
+                                        text = addressLabel,
+                                        style = TextStyle(fontSize = 10.sp, color = ColorProvider(Color(0xB3BAE6FD))),
+                                        maxLines = 1,
+                                        modifier = GlanceModifier.defaultWeight().clickable(openApp)
+                                    )
+                                    Spacer(modifier = GlanceModifier.width(6.dp))
+                                } else {
+                                    Spacer(modifier = GlanceModifier.defaultWeight())
+                                }
                                 Text(
                                     text = statusText,
                                     style = TextStyle(
@@ -2364,7 +2496,7 @@ open class BlackoutGlanceWidget(private val forceBigLayout: Boolean = false) : G
                                         fontSize = 10.sp,
                                         color = ColorProvider(statusColor)
                                     ),
-                                    modifier = GlanceModifier.clickable(actionStartActivity<MainActivity>())
+                                    modifier = GlanceModifier.clickable(openApp)
                                 )
                             }
 
@@ -2378,7 +2510,7 @@ open class BlackoutGlanceWidget(private val forceBigLayout: Boolean = false) : G
                                 Column(
                                     modifier = GlanceModifier
                                         .defaultWeight()
-                                        .clickable(actionStartActivity<MainActivity>())
+                                        .clickable(openApp)
                                 ) {
                                     Text(
                                         text = if (isBlackoutNow) "До увімкнення:" else "До відключення:",
@@ -2404,12 +2536,20 @@ open class BlackoutGlanceWidget(private val forceBigLayout: Boolean = false) : G
                                         .clickable(actionRunCallback<RefreshWidgetActionCallback>()),
                                     contentAlignment = Alignment.Center
                                 ) {
-                                    Image(
-                                        provider = ImageProvider(R.drawable.ic_refresh),
-                                        contentDescription = "Оновити дані",
-                                        colorFilter = ColorFilter.tint(ColorProvider(Color.White)),
-                                        modifier = GlanceModifier.size(16.dp)
-                                    )
+                                    if (isRefreshing) {
+                                        // Glance cannot rotate an image; the platform progress ring animates on its own
+                                        CircularProgressIndicator(
+                                            color = ColorProvider(Color.White),
+                                            modifier = GlanceModifier.size(16.dp)
+                                        )
+                                    } else {
+                                        Image(
+                                            provider = ImageProvider(R.drawable.ic_refresh),
+                                            contentDescription = "Оновити дані",
+                                            colorFilter = ColorFilter.tint(ColorProvider(Color.White)),
+                                            modifier = GlanceModifier.size(16.dp)
+                                        )
+                                    }
                                 }
 
                                 Spacer(modifier = GlanceModifier.width(6.dp))
@@ -2445,6 +2585,149 @@ open class BlackoutGlanceWidget(private val forceBigLayout: Boolean = false) : G
 
 class BlackoutBigGlanceWidget : BlackoutGlanceWidget(forceBigLayout = true)
 
+private val OPEN_SUBSCRIPTION = ActionParameters.Key<String>(NotificationHelper.EXTRA_SUBSCRIPTION_ID)
+
+/** A tap opens the main screen with the widget's address shown (spec/SUBSCRIPTIONS.md 9 and 10). */
+internal fun openAppAction(itemId: String?): Action =
+    if (itemId == null) actionStartActivity<MainActivity>()
+    else actionStartActivity<MainActivity>(actionParametersOf(OPEN_SUBSCRIPTION to itemId))
+
+/**
+ * Third widget (4x1): the 24-hour drum chart with the current-time needle, no buttons or switches; a tap
+ * opens the app. It draws from the same snapshot as the other two widgets, so the 48 half-hour states
+ * (including the emergency stripes) are identical. When the launcher cell is at least [INFO_MIN_HEIGHT]
+ * tall (a usual portrait row is about 100 dp) one line with the queue, status and countdown sits above it.
+ */
+class BlackoutStripGlanceWidget : GlanceAppWidget() {
+
+    override val stateDefinition: GlanceStateDefinition<*> = PreferencesGlanceStateDefinition
+
+    override val sizeMode = SizeMode.Responsive(
+        setOf(
+            DpSize(250.dp, 40.dp),              // drum only
+            DpSize(250.dp, INFO_MIN_HEIGHT)     // info line + drum
+        )
+    )
+
+    override suspend fun provideGlance(context: Context, id: GlanceId) {
+        val appContext = context.applicationContext
+        // Which address this widget shows is looked up by its app widget id (spec/SUBSCRIPTIONS.md 10)
+        val appWidgetId = try {
+            GlanceAppWidgetManager(appContext).getAppWidgetId(id)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            null
+        }
+
+        provideContent {
+            val prefs = currentState<Preferences>()
+            @Suppress("UNUSED_VARIABLE")
+            val refreshTick = prefs[BlackoutGlanceWidget.KEY_REFRESH_TICK] ?: 0L
+            val source = widgetSource(appContext, appWidgetId)
+            val model = BlackoutGlanceWidget.buildWidgetModel(source.settings, source.snapshot, source.label)
+            val openApp = openAppAction(source.itemId)
+            // Same bitmap as the big widget's drum (720 x 132), drawn at the same 52 dp height
+            val chartBitmap = BlackoutGlanceWidget.renderAnalogCounterBitmap(
+                model.slots, model.nowHour, model.nowMinute, model.lang
+            )
+            val statusText = when {
+                model.isUnclear -> AppStrings.powerUnclear(model.lang)
+                model.isOffNow -> "СВІТЛА НЕМАЄ"
+                else -> "СВІТЛО Є"
+            }
+            val statusColor = when {
+                model.isUnclear -> Color(0xFF9CA3AF)
+                model.isOffNow -> Color(0xFFFF5E3A)
+                else -> Color(0xFF34D399)
+            }
+            val description = if (model.isUnclear) {
+                AppStrings.outagesUnclear(model.lang)
+            } else {
+                "\${model.queueHeader}. \${if (model.isOffNow) "СВІТЛА НЕМАЄ" else "СВІТЛО Є"}"
+            }
+            val showInfo = LocalSize.current.height >= INFO_MIN_HEIGHT
+
+            GlanceTheme {
+                Column(
+                    modifier = GlanceModifier
+                        .fillMaxSize()
+                        .cornerRadius(20.dp)
+                        .background(ColorProvider(Color(0xCC141A29)))
+                        .padding(6.dp)
+                        .clickable(openApp),
+                    verticalAlignment = Alignment.Vertical.CenterVertically
+                ) {
+                    if (showInfo) {
+                        Row(
+                            modifier = GlanceModifier.fillMaxWidth().padding(horizontal = 6.dp),
+                            verticalAlignment = Alignment.Vertical.CenterVertically
+                        ) {
+                            Text(
+                                text = model.queueHeader,
+                                style = TextStyle(
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 12.sp,
+                                    color = ColorProvider(Color.White)
+                                ),
+                                maxLines = 1
+                            )
+                            Spacer(modifier = GlanceModifier.width(6.dp))
+                            if (model.addressLabel != null) {
+                                Text(
+                                    text = model.addressLabel,
+                                    style = TextStyle(fontSize = 10.sp, color = ColorProvider(Color(0xB3BAE6FD))),
+                                    maxLines = 1,
+                                    modifier = GlanceModifier.defaultWeight()
+                                )
+                                Spacer(modifier = GlanceModifier.width(6.dp))
+                            }
+                            Text(
+                                text = statusText,
+                                style = TextStyle(
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 10.sp,
+                                    color = ColorProvider(statusColor)
+                                ),
+                                maxLines = 1,
+                                modifier = if (model.addressLabel == null) GlanceModifier.defaultWeight() else GlanceModifier
+                            )
+                            if (model.addressLabel != null && !model.isUnclear) Spacer(modifier = GlanceModifier.width(6.dp))
+                            if (!model.isUnclear) {
+                                Text(
+                                    text = model.countdown,
+                                    style = TextStyle(
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 12.sp,
+                                        color = ColorProvider(Color.White)
+                                    ),
+                                    maxLines = 1
+                                )
+                            }
+                        }
+                        Spacer(modifier = GlanceModifier.height(4.dp))
+                    }
+                    Image(
+                        provider = ImageProvider(chartBitmap),
+                        contentDescription = description,
+                        contentScale = ContentScale.FillBounds,
+                        modifier = GlanceModifier
+                            .fillMaxWidth()
+                            .height(DRUM_HEIGHT)
+                    )
+                }
+            }
+        }
+    }
+
+    private companion object {
+        /** Drum height of the big widget, so both widgets show the drum at the same size. */
+        val DRUM_HEIGHT = 52.dp
+        /** Smallest widget height with room for the info line: 52 drum + 12 padding + 4 gap + 16 line. */
+        val INFO_MIN_HEIGHT = 84.dp
+    }
+}
+
 class ToggleAlertsActionCallback : ActionCallback {
     override suspend fun onAction(
         context: Context,
@@ -2452,10 +2735,9 @@ class ToggleAlertsActionCallback : ActionCallback {
         parameters: ActionParameters
     ) {
         val appContext = context.applicationContext
-        val settingsRepo = SettingsRepository(appContext)
-        val current = settingsRepo.getSettings()
-        val newState = !current.notificationsEnabled
-        settingsRepo.updateNotificationsEnabled(newState)
+        // The widget bell is the master switch for all addresses (multi-address owner decision 4)
+        val sync = SubscriptionSync(appContext)
+        sync.setMaster(!sync.master())
         try {
             AlarmScheduler.syncAlarms(appContext)
         } catch (_: Exception) {}
@@ -2472,29 +2754,36 @@ class RefreshWidgetActionCallback : ActionCallback {
         parameters: ActionParameters
     ) {
         val appContext = context.applicationContext
-        val settingsRepo = SettingsRepository(appContext)
-        val scheduleRepo = ScheduleRepository(appContext)
-        val current = settingsRepo.getSettings()
-
-        withContext(Dispatchers.IO) {
-            try {
-                if (current.queue.isNotBlank()) {
-                    val res = ZtoeParser.fetchFullSchedule(current.cityUrl, current.queue, appContext, forceNetwork = true)
-                    if (res.status == ua.blackout.prewarning.data.parser.FetchStatus.SUCCESS) {
-                        scheduleRepo.saveSchedule(current.queue, res.todaySlots, res.tomorrowSlots)
-                    } else {
-                        scheduleRepo.clearScheduleCache()
-                    }
-                }
-                AlarmScheduler.syncAlarms(appContext)
-                BlackoutGlanceWidget.syncAllWidgets(appContext)
-            } catch (_: Exception) {
-                try {
-                    scheduleRepo.clearScheduleCache()
-                    AlarmScheduler.syncAlarms(appContext)
-                    BlackoutGlanceWidget.syncAllWidgets(appContext)
-                } catch (_: Exception) {}
+        // Show the progress ring on the refresh buttons while the refresh runs
+        try {
+            BlackoutGlanceWidget.syncAllWidgets(appContext, refreshing = true)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+        }
+        // Network refresh on IO through the one shared pipeline. A failed source keeps its previous data
+        // (nothing is cleared); each call is bounded by the connection timeouts of the clients (8 s).
+        try {
+            withContext(Dispatchers.IO) {
+                val settings = SettingsRepository(appContext).getSettings()
+                OutageRepository(appContext).refresh(settings, forceNetwork = true)
             }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+        }
+        // Whatever happened, re-plan alarms and redraw from what is stored now
+        try {
+            AlarmScheduler.syncAlarms(appContext)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+        }
+        try {
+            BlackoutGlanceWidget.syncAllWidgets(appContext, refreshing = false)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
         }
     }
 }`
@@ -2509,10 +2798,11 @@ import android.appwidget.AppWidgetManager
 import android.content.Context
 import androidx.glance.appwidget.GlanceAppWidget
 import androidx.glance.appwidget.GlanceAppWidgetReceiver
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import ua.blackout.prewarning.data.parser.ZtoeParser
+import ua.blackout.prewarning.data.repository.OutageRepository
 import ua.blackout.prewarning.data.repository.ScheduleRepository
 import ua.blackout.prewarning.data.repository.SettingsRepository
 import ua.blackout.prewarning.notification.AlarmScheduler
@@ -2522,7 +2812,7 @@ open class BlackoutWidgetReceiver : GlanceAppWidgetReceiver() {
 
     override fun onEnabled(context: Context) {
         super.onEnabled(context)
-        fetchAndRefreshWidgetImmediately(context, forceNetwork = true)
+        refreshAndRedraw(context, forceNetwork = true)
     }
 
     override fun onUpdate(
@@ -2531,36 +2821,64 @@ open class BlackoutWidgetReceiver : GlanceAppWidgetReceiver() {
         appWidgetIds: IntArray
     ) {
         super.onUpdate(context, appWidgetManager, appWidgetIds)
-        fetchAndRefreshWidgetImmediately(context, forceNetwork = false)
+        refreshAndRedraw(context, forceNetwork = false)
     }
 
-    private fun fetchAndRefreshWidgetImmediately(context: Context, forceNetwork: Boolean) {
+    override fun onDeleted(context: Context, appWidgetIds: IntArray) {
+        super.onDeleted(context, appWidgetIds)
+        WidgetBindings.unbind(context, appWidgetIds)
+    }
+
+    override fun onDisabled(context: Context) {
+        super.onDisabled(context)
+        // The last widget is gone: re-plan so the widget transition alarms are cancelled
+        refreshAndRedraw(context, forceNetwork = false, fetch = false)
+    }
+
+    /**
+     * Refreshes through [OutageRepository] when the cache is missing or older than the refresh interval
+     * (always when [forceNetwork]), then re-plans alarms (which schedule or cancel the widget transition
+     * redraws) and redraws. A failed fetch keeps the previous data and still redraws.
+     */
+    private fun refreshAndRedraw(context: Context, forceNetwork: Boolean, fetch: Boolean = true) {
         val pendingResult = goAsync()
         val appContext = context.applicationContext
         CoroutineScope(Dispatchers.IO).launch {
             try {
-                val settings = SettingsRepository(appContext).getSettings()
-                val scheduleRepo = ScheduleRepository(appContext)
-                val cacheFresh = scheduleRepo.hasValidTodayCache(settings.queue) &&
-                    scheduleRepo.isCacheFresh(settings.refreshIntervalMinutes)
-
-                if (forceNetwork || !cacheFresh) {
-                    val res = ZtoeParser.fetchFullSchedule(settings.cityUrl, settings.queue, appContext)
-                    if (res.status == ua.blackout.prewarning.data.parser.FetchStatus.SUCCESS) {
-                        scheduleRepo.saveSchedule(settings.queue, res.todaySlots, res.tomorrowSlots)
+                if (fetch) {
+                    try {
+                        val settings = SettingsRepository(appContext).getSettings()
+                        val hasSource = settings.queue.isNotBlank() || settings.selectedAddressQuery != null
+                        if (hasSource) {
+                            val scheduleRepo = ScheduleRepository(appContext)
+                            val cacheFresh = scheduleRepo.hasValidTodayCache(settings.queue) &&
+                                scheduleRepo.isCacheFresh(settings.refreshIntervalMinutes)
+                            if (forceNetwork || !cacheFresh) {
+                                OutageRepository(appContext).refresh(settings, forceNetwork)
+                            }
+                        }
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (_: Exception) {
                     }
                 }
-                AlarmScheduler.syncAlarms(appContext)
-                BlackoutGlanceWidget.syncAllWidgets(appContext)
-            } catch (_: Exception) {
                 try {
                     AlarmScheduler.syncAlarms(appContext)
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (_: Exception) {
+                }
+                try {
                     BlackoutGlanceWidget.syncAllWidgets(appContext)
-                } catch (_: Exception) {}
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (_: Exception) {
+                }
             } finally {
                 try {
                     pendingResult.finish()
-                } catch (_: Exception) {}
+                } catch (_: Exception) {
+                }
             }
         }
     }
@@ -2568,7 +2886,12 @@ open class BlackoutWidgetReceiver : GlanceAppWidgetReceiver() {
 
 class BlackoutBigWidgetReceiver : BlackoutWidgetReceiver() {
     override val glanceAppWidget: GlanceAppWidget = BlackoutBigGlanceWidget()
-}`
+}
+
+class BlackoutStripWidgetReceiver : BlackoutWidgetReceiver() {
+    override val glanceAppWidget: GlanceAppWidget = BlackoutStripGlanceWidget()
+}
+`
   },
   {
     path: 'app/src/main/java/ua/blackout/prewarning/MainActivity.kt',
@@ -2577,6 +2900,7 @@ class BlackoutBigWidgetReceiver : BlackoutWidgetReceiver() {
     content: `package ua.blackout.prewarning
 
 import android.Manifest
+import android.content.Intent
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -2600,6 +2924,15 @@ class MainActivity : ComponentActivity() {
             // Notification permission granted or denied
         }
 
+    /** Subscription id from the notification the app was opened with; the main screen shows it once. */
+    private var openSubscriptionId by mutableStateOf<String?>(null)
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        intent.getStringExtra(NotificationHelper.EXTRA_SUBSCRIPTION_ID)?.let { openSubscriptionId = it }
+    }
+
     override fun onResume() {
         super.onResume()
         RouletteSoundEngine.setAppInForeground(true, this)
@@ -2617,6 +2950,8 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // a recreated activity (rotation) must not jump back to the notification's address
+        if (savedInstanceState == null) openSubscriptionId = intent?.getStringExtra(NotificationHelper.EXTRA_SUBSCRIPTION_ID)
 
         // Initialize Notification Channels
         NotificationHelper.createNotificationChannels(this)
@@ -2636,7 +2971,9 @@ class MainActivity : ComponentActivity() {
                     color = MaterialTheme.colorScheme.background
                 ) {
                     BlackoutAppNavigation(
-                        onThemeChanged = { isDarkMode = it }
+                        onThemeChanged = { isDarkMode = it },
+                        openSubscriptionId = openSubscriptionId,
+                        onOpenSubscriptionHandled = { openSubscriptionId = null }
                     )
                 }
             }
@@ -2652,50 +2989,97 @@ class MainActivity : ComponentActivity() {
 
 import android.content.Intent
 import android.net.Uri
-import androidx.compose.animation.core.*
+import android.provider.Settings
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Alarm
+import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.NotificationsOff
 import androidx.compose.material.icons.filled.OpenInNew
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Schedule
+import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
+import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.scale
-import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import ua.blackout.prewarning.R
+import ua.blackout.prewarning.core.IntervalStatus
+import ua.blackout.prewarning.core.Outage
+import ua.blackout.prewarning.core.OutageKind
+import ua.blackout.prewarning.core.Subscription
+import ua.blackout.prewarning.core.Subscriptions
+import ua.blackout.prewarning.data.KYIV_ZONE
 import ua.blackout.prewarning.data.model.BlackoutSlot
 import ua.blackout.prewarning.data.model.SlotStatus
-import ua.blackout.prewarning.data.parser.ZtoeAddressLookup
-import ua.blackout.prewarning.data.repository.ScheduleRepository
+import ua.blackout.prewarning.data.repository.OutageSnapshot
+import ua.blackout.prewarning.data.repository.ScheduleStatusInfo
 import ua.blackout.prewarning.ui.AppStrings
+import ua.blackout.prewarning.ui.components.spinWhile
+import ua.blackout.prewarning.ui.components.GlassCard
+import ua.blackout.prewarning.ui.components.OutageRowFormat
+import ua.blackout.prewarning.ui.components.SiteNoticeCard
+import ua.blackout.prewarning.ui.components.SiteStatusBanner
+import ua.blackout.prewarning.ui.components.SiteStatusChipRow
+import ua.blackout.prewarning.ui.components.SiteStatusModel
 import ua.blackout.prewarning.ui.components.TimelineBar
-import ua.blackout.prewarning.ui.components.floatingShadow
+import ua.blackout.prewarning.ui.theme.ZtColors
+import ua.blackout.prewarning.ui.theme.ZtMinTouch
+import ua.blackout.prewarning.ui.theme.ZtShapes
+import ua.blackout.prewarning.ui.theme.ZtType
+import java.time.LocalDateTime
 import java.time.LocalTime
 import java.time.format.DateTimeFormatter
-import ua.blackout.prewarning.data.KYIV_ZONE
+
+// Small text sits on a translucent card: the secondary and tertiary text alphas are raised from the
+// 0xB3 / 0x99 tokens so the contrast stays above 4.5:1 on bright backgrounds (docs/review/UI_PROPOSALS.md 4.9, #2).
+private val TextSecondary = Color(0xE6BAE6FD)
+private val TextTertiary = Color(0xCCBAE6FD)
+private val InkOnAccent = Color(0xFF0B0B0A)
+private val TabIdle = Color(0xCCBAE6FD)
+
+private const val TAB_TODAY = "today"
+private const val TAB_TOMORROW = "tomorrow"
 
 private fun formatAddressAfterCity(address: String?): String? {
     if (address.isNullOrBlank()) return null
@@ -2711,37 +3095,108 @@ private fun formatAddressAfterCity(address: String?): String? {
     return trimmed
 }
 
+/** Limits the font scale of the content (the 44 sp countdown must not char-wrap); other text keeps the user's scale. */
+@Composable
+private fun CappedFontScale(max: Float, content: @Composable () -> Unit) {
+    val density = LocalDensity.current
+    CompositionLocalProvider(
+        LocalDensity provides Density(density.density, minOf(density.fontScale, max)),
+        content = content
+    )
+}
+
+/** False when the user turned system animations off (ANIMATOR_DURATION_SCALE == 0): decorative motion is skipped. */
+@Composable
+private fun rememberAnimationsEnabled(): Boolean {
+    val context = LocalContext.current
+    return remember {
+        try {
+            Settings.Global.getFloat(context.contentResolver, Settings.Global.ANIMATOR_DURATION_SCALE, 1f) != 0f
+        } catch (_: Exception) {
+            true
+        }
+    }
+}
+
+/** Status dot of the hero. The pulse is read inside graphicsLayer, so only this node redraws, never the screen. */
+@Composable
+private fun StatusDot(color: Color, pulsing: Boolean) {
+    val animate = pulsing && rememberAnimationsEnabled()
+    val scale: State<Float>? = if (animate) {
+        rememberInfiniteTransition(label = "pulse").animateFloat(
+            initialValue = 0.85f,
+            targetValue = 1.25f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(900, easing = FastOutSlowInEasing),
+                repeatMode = RepeatMode.Reverse
+            ),
+            label = "pulseScale"
+        )
+    } else {
+        null
+    }
+    Box(
+        modifier = Modifier
+            .size(10.dp)
+            .graphicsLayer {
+                val s = scale?.value ?: 1f
+                scaleX = s
+                scaleY = s
+            }
+            .clip(CircleShape)
+            .background(color)
+    )
+}
+
 @Composable
 fun MainScreen(
     queue: String = "",
     customQueueStatusText: String? = null,
     selectedAddress: String? = null,
-    emergencyOutageStartTime: String? = null,
-    emergencyOutageRestoreTime: String? = null,
-    emergencyOutageType: String? = null,
-    isBlackoutNow: Boolean = false,
-    countdownText: String = "01:35:12",
-    slotTimeText: String = "14:00 – 18:00",
-    slots: List<BlackoutSlot> = emptyList(),
-    tomorrowSlots: List<BlackoutSlot>? = null,
-    hasTomorrowSchedule: Boolean = false,
+    snapshot: OutageSnapshot,
+    statusInfo: ScheduleStatusInfo,
+    isRefreshing: Boolean = false,
+    exactAlarmMissing: Boolean = false,
+    onOpenExactAlarmSettings: () -> Unit = {},
     notificationsEnabled: Boolean = true,
     lastUpdated: String = "19:27",
     nextUpdated: String = "19:57",
-    currentTime: LocalTime = LocalTime.now(KYIV_ZONE),
+    @Suppress("UNUSED_PARAMETER") currentTime: LocalTime = LocalTime.now(KYIV_ZONE),
     lang: String = "uk",
     selectedLanguage: String = "SYSTEM",
     onToggleNotifications: () -> Unit = {},
     onRefresh: () -> Unit = {},
     onOpenQueueSelection: () -> Unit = {},
-    onChangeLanguage: (String) -> Unit = {}
+    onChangeLanguage: (String) -> Unit = {},
+    // Address switcher (spec/SUBSCRIPTIONS.md 9): empty with fewer than 2 addresses, then Main looks as in 1.4.0
+    addresses: List<Subscription> = emptyList(),
+    primaryAddressId: String? = null,
+    shownAddressId: String? = null,
+    onSelectAddress: (String) -> Unit = {},
+    showNoAlertsCaption: Boolean = false,
+    onOpenSettings: () -> Unit = {}
 ) {
     val context = LocalContext.current
-    val scheduleRepo = remember { ScheduleRepository(context.applicationContext) }
-    var selectedDayTab by remember { mutableStateOf("today") }
 
-    val hasEmergencyOutage = ZtoeAddressLookup.isValidOutageTimestamp(emergencyOutageStartTime) &&
-        ZtoeAddressLookup.isValidOutageTimestamp(emergencyOutageRestoreTime)
+    // Everything below is derived from one outage snapshot (see OutageRepository)
+    val isBlackoutNow = statusInfo.isBlackoutNow
+    val countdownText = statusInfo.countdownText
+    val slotTimeText = statusInfo.nextSlotTime
+    val todayDate = snapshot.today
+    val tomorrowDate = todayDate.plusDays(1)
+    val now = snapshot.now
+
+    // Another address starts on Today (spec/SUBSCRIPTIONS.md 9)
+    var selectedDayTab by rememberSaveable(shownAddressId) { mutableStateOf(TAB_TODAY) }
+    val isTomorrowSelected = selectedDayTab == TAB_TOMORROW
+    val activeDate = if (isTomorrowSelected) tomorrowDate else todayDate
+
+    val activeView = remember(snapshot, activeDate) { snapshot.dayView(activeDate) }
+    val featuredEmergency = remember(snapshot) { snapshot.featuredEmergency() }
+    val siteBanner = remember(snapshot, lang) { SiteStatusModel.banner(snapshot, lang) }
+    val siteNotice = remember(snapshot) { SiteStatusModel.notice(snapshot) }
+
+    val hasEmergencyOutage = featuredEmergency != null
     val hasCustomNoQueueStatus = !customQueueStatusText.isNullOrBlank() && !hasEmergencyOutage
     val isQueueUnselected = queue.isBlank() && !hasCustomNoQueueStatus && !hasEmergencyOutage
     val formattedSelectedAddress = remember(selectedAddress) { formatAddressAfterCity(selectedAddress) }
@@ -2765,59 +3220,22 @@ fun MainScreen(
         }
     }
 
-    // Reset to "today" if tomorrow schedule is no longer available
-    LaunchedEffect(hasTomorrowSchedule, tomorrowSlots) {
-        if (!hasTomorrowSchedule || tomorrowSlots == null) {
-            selectedDayTab = "today"
-        }
+    // The ztoe table of the shown day is not known: the drum is grey, known emergency/repair outages are drawn on top
+    val isTodayUnclear = !hasCustomNoQueueStatus && queue.isNotBlank() && !snapshot.plannedKnown
+    val isTomorrowUnclear = !hasCustomNoQueueStatus && queue.isNotBlank() && !snapshot.tomorrowPublished
+    val activeUnclear = if (isTomorrowSelected) isTomorrowUnclear else isTodayUnclear
+
+    val activeSlots: List<BlackoutSlot> = remember(snapshot, activeDate, hasCustomNoQueueStatus) {
+        if (hasCustomNoQueueStatus) lightNoOutageSlots else snapshot.slotsFor(activeDate)
     }
 
-    val isTomorrowSelected = selectedDayTab == "tomorrow" && hasTomorrowSchedule && tomorrowSlots != null
-    val activeSlots = when {
-        hasCustomNoQueueStatus && !hasEmergencyOutage -> lightNoOutageSlots
-        isTomorrowSelected -> tomorrowSlots!!
-        else -> slots
-    }
-    val isUnclear = activeSlots.isEmpty() || isQueueUnselected
-    val isStatusUnclear = (slots.isEmpty() && !hasCustomNoQueueStatus) || isQueueUnselected
-    val activeSlotsSignature = activeSlots.joinToString("") {
-        val statusChar = if (it.status == SlotStatus.POWER_OFF) "1" else "0"
-        val emgChar = if (it.isEmergency) "E" else "S"
-        "$statusChar$emgChar"
-    }
+    val isStatusUnclear = (snapshot.isUnclear && !hasCustomNoQueueStatus) || isQueueUnselected
+    val rows = activeView.rows
+    val showOutageList = !isQueueUnselected && (rows.isNotEmpty() || (!activeUnclear && activeSlots.isNotEmpty()))
 
-    // Compute continuous blackout intervals with exact 30-min resolution using hoisted ScheduleRepository
-    val intervals = remember(queue, selectedDayTab, activeSlotsSignature) {
-        scheduleRepo.getDetailedIntervals(activeSlots)
-    }
-
-    // Pulse animation for status dot — only active during an active blackout to avoid 60fps idle CPU/battery drain
-    val pulseScale = if (!isStatusUnclear && isBlackoutNow) {
-        val infiniteTransition = rememberInfiniteTransition(label = "pulse")
-        val scale by infiniteTransition.animateFloat(
-            initialValue = 0.85f,
-            targetValue = 1.25f,
-            animationSpec = infiniteRepeatable(
-                animation = tween(900, easing = FastOutSlowInEasing),
-                repeatMode = RepeatMode.Reverse
-            ),
-            label = "pulseScale"
-        )
-        scale
-    } else {
-        1f
-    }
-
-    var entryRefreshTick by remember { mutableStateOf(0) }
-    LaunchedEffect(Unit) {
-        entryRefreshTick++
-    }
-
-    val kyivNow = remember(countdownText, currentTime, entryRefreshTick) {
-        LocalTime.now(KYIV_ZONE)
-    }
-    val currentTimeStr = remember(kyivNow.hour, kyivNow.minute) {
-        kyivNow.format(DateTimeFormatter.ofPattern("HH:mm"))
+    val clock = now.toLocalTime()
+    val currentTimeStr = remember(clock.hour, clock.minute) {
+        clock.format(DateTimeFormatter.ofPattern("HH:mm"))
     }
 
     Box(modifier = Modifier.fillMaxSize()) {
@@ -2827,7 +3245,10 @@ fun MainScreen(
                 .statusBarsPadding()
                 .then(
                     if (isQueueUnselected) {
-                        Modifier.alpha(0.15f)
+                        // The overlay below is the only interactive thing: hide this layer from TalkBack too
+                        Modifier
+                            .clearAndSetSemantics {}
+                            .alpha(0.15f)
                     } else {
                         Modifier.verticalScroll(rememberScrollState())
                     }
@@ -2835,173 +3256,94 @@ fun MainScreen(
                 .padding(horizontal = 16.dp, vertical = 12.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            // 1. Top Header: Queue title + Sleek pill toggle switch (NO text)
+            // 1. Top Header: Queue title + sleek pill toggle switch (no text)
             Row(
                 modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 if (isQueueUnselected || hasCustomNoQueueStatus || queue.isBlank()) {
-                    Box(modifier = Modifier.weight(1f).defaultMinSize(minHeight = 44.dp))
+                    Box(modifier = Modifier.weight(1f).defaultMinSize(minHeight = ZtMinTouch))
                 } else {
                     Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
                         Text(
                             text = "\${AppStrings.queue(lang)} $queue",
-                            fontSize = 24.sp,
-                            fontWeight = FontWeight.Bold,
+                            style = ZtType.title,
                             color = Color.White
                         )
                         Text(
-                            text = formattedSelectedAddress ?: "Житомиробленерго (ZTOE)",
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Medium,
-                            color = Color(0xB3BAE6FD),
-                            lineHeight = 16.sp
+                            text = formattedSelectedAddress ?: AppStrings.mainUtilityName(),
+                            style = ZtType.caption,
+                            color = TextSecondary,
+                            maxLines = 3,
+                            overflow = TextOverflow.Ellipsis
                         )
                     }
                 }
 
-                // Enlarged Pill Switch matching emulator exactly
-                Box(
-                    modifier = Modifier
-                        .size(width = 58.dp, height = 34.dp)
-                        .clip(CircleShape)
-                        .background(if (notificationsEnabled) Color(0xFFFF5E3A) else Color(0x26FFFFFF))
-                        .clickable(enabled = !isQueueUnselected) { onToggleNotifications() }
-                        .padding(4.dp),
-                    contentAlignment = if (notificationsEnabled) Alignment.CenterEnd else Alignment.CenterStart
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(26.dp)
-                            .clip(CircleShape)
-                            .background(Color.White),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = if (notificationsEnabled) Icons.Default.Notifications else Icons.Default.NotificationsOff,
-                            contentDescription = null,
-                            tint = if (notificationsEnabled) Color(0xFFFF5E3A) else Color(0xFF6B7280),
-                            modifier = Modifier.size(16.dp)
-                        )
-                    }
+                NotificationPill(
+                    enabled = notificationsEnabled,
+                    interactive = !isQueueUnselected,
+                    lang = lang,
+                    onToggle = onToggleNotifications
+                )
+            }
+
+            // 1'. The master is on but no address has a switch on: say so, with a way to Settings
+            if (!isQueueUnselected && showNoAlertsCaption) {
+                NoAlertsCaption(lang = lang, onOpenSettings = onOpenSettings)
+            }
+
+            val hasSwitcher = addresses.isNotEmpty()
+
+            // 1a. Featured emergency outage (active, overdue or the next upcoming one); finished ones never show here
+            if (!hasSwitcher && !isQueueUnselected && featuredEmergency != null) {
+                EmergencyBanner(outage = featuredEmergency, now = now, lang = lang)
+            }
+
+            // 1b. Exact alarms are not allowed (Android 12+): warnings may arrive late
+            if (!isQueueUnselected && exactAlarmMissing) {
+                ExactAlarmCard(lang = lang, onOpenSettings = onOpenExactAlarmSettings)
+            }
+
+            // 1c. Site is degraded (no table / unreachable / no internet), persistent
+            if (!isQueueUnselected && siteBanner != null) {
+                SiteStatusBanner(siteBanner)
+            }
+
+            // 1c'. ztoe is up but publishes a notice instead of the table: quote it to the user
+            if (siteNotice != null) {
+                SiteNoticeCard(text = siteNotice, lang = lang)
+            }
+
+            // 1c''. Address switcher: under the global banners, above everything of one address
+            if (hasSwitcher) {
+                AddressSwitcher(
+                    addresses = addresses,
+                    primaryId = primaryAddressId,
+                    shownId = shownAddressId,
+                    lang = lang,
+                    onSelect = onSelectAddress
+                )
+                if (!isQueueUnselected && featuredEmergency != null) {
+                    EmergencyBanner(outage = featuredEmergency, now = now, lang = lang)
                 }
             }
 
-            // 1c. Active Emergency Outage ("Аварійне відключення") Banner with Start & Estimated Restore Times — matching Workbench MainView.tsx
-            if (!isQueueUnselected && hasEmergencyOutage) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .floatingShadow(color = Color(0xB3000000), borderRadius = 24.dp, blurRadius = 22.dp, offsetY = 8.dp)
-                        .shadow(10.dp, RoundedCornerShape(24.dp), ambientColor = Color(0x66000000), spotColor = Color(0x80000000))
-                        .clip(RoundedCornerShape(24.dp))
-                        .background(Color(0xBF141A29))
-                        .border(1.dp, Color(0x26FFFFFF), RoundedCornerShape(24.dp))
-                        .padding(16.dp)
-                ) {
-                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Text(
-                            text = if (lang == "uk" && !emergencyOutageType.isNullOrBlank()) {
-                                emergencyOutageType
-                            } else {
-                                AppStrings.emergencyOutageTitle(lang)
-                            },
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Color(0xFFFF5E3A),
-                            lineHeight = 19.sp
-                        )
-                        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text(
-                                    text = AppStrings.emergencyStartLabel(lang),
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.Medium,
-                                    color = Color(0xB3BAE6FD)
-                                )
-                                Text(
-                                    text = emergencyOutageStartTime ?: "--:--",
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    fontFamily = FontFamily.Monospace,
-                                    color = Color.White,
-                                    textAlign = TextAlign.End
-                                )
-                            }
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text(
-                                    text = AppStrings.emergencyRestoreLabel(lang),
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.Medium,
-                                    color = Color(0xB3BAE6FD)
-                                )
-                                Text(
-                                    text = emergencyOutageRestoreTime ?: "--:--",
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    fontFamily = FontFamily.Monospace,
-                                    color = Color.White,
-                                    textAlign = TextAlign.End
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-
-            // 1b. Custom ZTOE Queue/House Status Message Bar — exact same style/color/placement as Workbench MainView.tsx
+            // 1d. Custom ZTOE queue/house status message
             if (!isQueueUnselected && !customQueueStatusText.isNullOrBlank()) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .floatingShadow(color = Color(0xB3000000), borderRadius = 24.dp, blurRadius = 22.dp, offsetY = 8.dp)
-                        .shadow(10.dp, RoundedCornerShape(24.dp), ambientColor = Color(0x66000000), spotColor = Color(0x80000000))
-                        .clip(RoundedCornerShape(24.dp))
-                        .background(Color(0xBF141A29))
-                        .border(1.dp, Color(0x26FFFFFF), RoundedCornerShape(24.dp))
-                        .padding(16.dp)
-                ) {
+                GlassCard(modifier = Modifier.fillMaxWidth()) {
                     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         if (!formattedSelectedAddress.isNullOrBlank()) {
-                            Text(
-                                text = formattedSelectedAddress,
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Medium,
-                                color = Color(0xB3BAE6FD),
-                                lineHeight = 16.sp
-                            )
+                            Text(text = formattedSelectedAddress, style = ZtType.caption, color = TextSecondary)
                         }
-                        Text(
-                            text = customQueueStatusText ?: "",
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Color.White,
-                            lineHeight = 19.sp
-                        )
+                        Text(text = customQueueStatusText, style = ZtType.subhead, color = Color.White)
                     }
                 }
             }
 
-            // 2. Hero Outage Status Card (Translucent Frosted Glass)
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .floatingShadow(color = Color(0xB3000000), borderRadius = 24.dp, blurRadius = 22.dp, offsetY = 8.dp)
-                    .shadow(10.dp, RoundedCornerShape(24.dp), ambientColor = Color(0x66000000), spotColor = Color(0x80000000))
-                    .clip(RoundedCornerShape(24.dp))
-                    .background(Color(0xBF141A29))
-                    .border(1.dp, Color(0x26FFFFFF), RoundedCornerShape(24.dp))
-                    .padding(18.dp)
-            ) {
+            // 2. Hero outage status card
+            GlassCard(modifier = Modifier.fillMaxWidth(), contentPadding = PaddingValues(18.dp)) {
                 if (hasCustomNoQueueStatus && !hasEmergencyOutage) {
                     Box(
                         modifier = Modifier
@@ -3009,38 +3351,37 @@ fun MainScreen(
                             .padding(vertical = 16.dp),
                         contentAlignment = Alignment.Center
                     ) {
-                        Text(
-                            text = "--:--:--",
-                            fontSize = 44.sp,
-                            fontWeight = FontWeight.Black,
-                            fontFamily = FontFamily.Monospace,
-                            color = Color.White
-                        )
+                        CappedFontScale(1.15f) {
+                            Text(
+                                text = "--:--:--",
+                                style = ZtType.display,
+                                color = Color.White,
+                                maxLines = 1,
+                                softWrap = false
+                            )
+                        }
                     }
                 } else {
+                    val off = !isStatusUnclear && isBlackoutNow
                     Column {
-                        // Status Line
+                        // Status line
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Row(
+                                modifier = Modifier.weight(1f).padding(end = 8.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(10.dp)
-                                        .scale(if (!isStatusUnclear && isBlackoutNow) pulseScale else 1f)
-                                        .clip(CircleShape)
-                                        .background(
-                                            when {
-                                                isStatusUnclear -> Color(0xFF9CA3AF)
-                                                isBlackoutNow -> Color(0xFFFF5E3A)
-                                                else -> Color(0xFF34D399)
-                                            }
-                                        )
+                                StatusDot(
+                                    color = when {
+                                        isStatusUnclear -> ZtColors.ChipGreyText
+                                        isBlackoutNow -> ZtColors.Accent
+                                        else -> ZtColors.ChipGreenText
+                                    },
+                                    pulsing = off
                                 )
                                 Text(
                                     text = when {
@@ -3048,9 +3389,10 @@ fun MainScreen(
                                         isBlackoutNow -> AppStrings.powerOff(lang)
                                         else -> AppStrings.powerOn(lang)
                                     },
-                                    fontSize = 13.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = Color.White
+                                    style = ZtType.label.copy(fontWeight = FontWeight.Bold),
+                                    color = Color.White,
+                                    maxLines = 2,
+                                    modifier = Modifier.weight(1f)
                                 )
                             }
 
@@ -3061,72 +3403,73 @@ fun MainScreen(
                                 Icon(
                                     Icons.Default.Schedule,
                                     contentDescription = null,
-                                    tint = Color(0xB3BAE6FD),
+                                    tint = TextSecondary,
                                     modifier = Modifier.size(14.dp)
                                 )
                                 Text(
                                     text = currentTimeStr,
-                                    fontSize = 12.sp,
-                                    fontFamily = FontFamily.Monospace,
-                                    fontWeight = FontWeight.Bold,
-                                    color = Color(0xB3BAE6FD)
+                                    style = ZtType.captionMono,
+                                    color = TextSecondary,
+                                    maxLines = 1,
+                                    softWrap = false
                                 )
                             }
                         }
 
                         Spacer(modifier = Modifier.height(14.dp))
 
-                        // Big Countdown Digits
+                        // Big countdown digits (font scale capped on this node only)
                         Column(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalAlignment = Alignment.CenterHorizontally
                         ) {
                             Text(
-                                text = if (!isStatusUnclear && isBlackoutNow) AppStrings.powerOnIn(lang) else AppStrings.powerOffIn(lang),
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                color = Color(0xB3BAE6FD)
+                                text = if (off) AppStrings.powerOnIn(lang) else AppStrings.powerOffIn(lang),
+                                style = ZtType.caption,
+                                color = TextSecondary,
+                                textAlign = TextAlign.Center
                             )
                             Spacer(modifier = Modifier.height(4.dp))
-                            Text(
-                                text = countdownText,
-                                fontSize = 44.sp,
-                                fontWeight = FontWeight.Black,
-                                fontFamily = FontFamily.Monospace,
-                                color = Color.White
-                            )
+                            CappedFontScale(1.15f) {
+                                Text(
+                                    text = countdownText,
+                                    style = ZtType.display,
+                                    color = Color.White,
+                                    maxLines = 1,
+                                    softWrap = false,
+                                    textAlign = TextAlign.Center
+                                )
+                            }
                         }
 
-                        val effectiveSlotTimeText = when {
-                            isStatusUnclear -> "--:-- - --:--"
-                            else -> slotTimeText
-                        }
+                        val effectiveSlotTimeText = if (isStatusUnclear) "--:-- - --:--" else slotTimeText
                         if (effectiveSlotTimeText.isNotEmpty() && effectiveSlotTimeText != "Відключень немає") {
                             Spacer(modifier = Modifier.height(14.dp))
-                            Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(Color(0x1AFFFFFF)))
+                            Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(ZtColors.Divider))
                             Spacer(modifier = Modifier.height(10.dp))
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Text(
-                                    text = if (!isStatusUnclear && isBlackoutNow) AppStrings.outagePeriod(lang) else AppStrings.nextPeriod(lang),
-                                    fontSize = 13.sp,
-                                    color = Color(0xB3BAE6FD)
+                                    text = if (off) AppStrings.outagePeriod(lang) else AppStrings.nextPeriod(lang),
+                                    style = ZtType.caption,
+                                    color = TextSecondary,
+                                    modifier = Modifier.weight(1f)
                                 )
                                 Box(
                                     modifier = Modifier
-                                        .clip(RoundedCornerShape(10.dp))
+                                        .clip(ZtShapes.Badge)
                                         .background(Color(0x26FFFFFF))
                                         .padding(horizontal = 10.dp, vertical = 4.dp)
                                 ) {
                                     Text(
                                         text = effectiveSlotTimeText,
-                                        fontSize = 14.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        fontFamily = FontFamily.Monospace,
-                                        color = Color.White
+                                        style = ZtType.label.copy(fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold),
+                                        color = Color.White,
+                                        maxLines = 1,
+                                        softWrap = false
                                     )
                                 }
                             }
@@ -3135,198 +3478,66 @@ fun MainScreen(
                 }
             }
 
-            // 3. Day Selector (Today / Tomorrow)
-            if (hasTomorrowSchedule && tomorrowSlots != null && !hasCustomNoQueueStatus) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .floatingShadow(color = Color(0x8C000000), borderRadius = 16.dp, blurRadius = 16.dp, offsetY = 6.dp)
-                        .shadow(8.dp, RoundedCornerShape(16.dp), ambientColor = Color(0x55000000), spotColor = Color(0x66000000))
-                        .clip(RoundedCornerShape(16.dp))
-                        .background(Color(0x80141A29))
-                        .padding(4.dp)
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .weight(1f)
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(if (selectedDayTab == "today") Color(0x33FFFFFF) else Color.Transparent)
-                            .clickable(enabled = !isQueueUnselected) { selectedDayTab = "today" }
-                            .padding(vertical = 10.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            text = AppStrings.today(lang),
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = if (selectedDayTab == "today") Color.White else Color(0x99BAE6FD)
-                        )
-                    }
-                    Box(
-                        modifier = Modifier
-                            .weight(1f)
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(if (selectedDayTab == "tomorrow") Color(0x33FFFFFF) else Color.Transparent)
-                            .clickable(enabled = !isQueueUnselected) { selectedDayTab = "tomorrow" }
-                            .padding(vertical = 10.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            text = AppStrings.tomorrow(lang),
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = if (selectedDayTab == "tomorrow") Color.White else Color(0x99BAE6FD)
-                        )
-                    }
-                }
-            } else {
-                // Centered "Today" button
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth(),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .floatingShadow(color = Color(0x8C000000), borderRadius = 16.dp, blurRadius = 16.dp, offsetY = 6.dp)
-                            .shadow(8.dp, RoundedCornerShape(16.dp), ambientColor = Color(0x55000000), spotColor = Color(0x66000000))
-                            .clip(RoundedCornerShape(16.dp))
-                            .background(Color(0x80141A29))
-                            .padding(horizontal = 24.dp, vertical = 10.dp)
-                    ) {
-                        Text(
-                            text = AppStrings.today(lang),
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Color.White
-                        )
-                    }
+            // 3. Day selector: Tomorrow is always there; before ztoe publishes it, it shows the grey drum plus a notice
+            DayTabs(
+                isTomorrow = isTomorrowSelected,
+                enabled = !isQueueUnselected,
+                lang = lang,
+                onSelect = { selectedDayTab = if (it) TAB_TOMORROW else TAB_TODAY }
+            )
+
+            if (isTomorrowSelected && isTomorrowUnclear && !isQueueUnselected) {
+                GlassCard(modifier = Modifier.fillMaxWidth()) {
+                    Text(
+                        text = AppStrings.tomorrowNotPublished(lang),
+                        style = ZtType.subhead,
+                        color = Color.White
+                    )
                 }
             }
 
-            // 4. Schedule Card with 24h Timeline matching user screenshot
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .floatingShadow(color = Color(0xB3000000), borderRadius = 24.dp, blurRadius = 24.dp, offsetY = 10.dp)
-                    .shadow(10.dp, RoundedCornerShape(24.dp), ambientColor = Color(0x66000000), spotColor = Color(0x80000000))
-                    .clip(RoundedCornerShape(24.dp))
-                    .background(Color(0xBF141A29))
-                    .padding(18.dp)
-            ) {
-                key(queue, selectedDayTab, activeSlotsSignature) {
-                    Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                        // 24-Hour Timeline Bar (automatically refreshed on main screen entry and every minute)
-                        key(kyivNow.hour, kyivNow.minute, entryRefreshTick) {
-                            TimelineBar(
-                                slots = activeSlots,
-                                currentHour = kyivNow.hour,
-                                currentMinute = kyivNow.minute,
-                                showNeedle = selectedDayTab == "today",
-                                lang = lang
+            // 4. Schedule card with the 24 h drum and the list of outages of the shown day
+            GlassCard(modifier = Modifier.fillMaxWidth(), contentPadding = PaddingValues(18.dp)) {
+                Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                    TimelineBar(
+                        slots = activeSlots,
+                        currentHour = clock.hour,
+                        currentMinute = clock.minute,
+                        showNeedle = !isTomorrowSelected,
+                        lang = lang,
+                        unclearBase = activeUnclear
+                    )
+
+                    if (showOutageList) {
+                        Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(ZtColors.Divider))
+
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text(
+                                text = if (isTomorrowSelected) AppStrings.blackoutHoursForTomorrowHeader(lang) else AppStrings.blackoutHoursForDayHeader(lang),
+                                style = ZtType.label,
+                                color = TextSecondary
                             )
-                        }
 
-                        // List of Outage Hours for this day (removed when outages are unclear)
-                        if (!isUnclear) {
-                            Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(Color(0x1AFFFFFF)))
-
-                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                Text(
-                                    text = if (isTomorrowSelected) AppStrings.blackoutHoursForTomorrowHeader(lang) else AppStrings.blackoutHoursForDayHeader(lang),
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = Color(0xB3BAE6FD)
-                                )
-
-                                if (intervals.isNotEmpty()) {
-                                    intervals.forEach { interval ->
-                                        val start = interval.startStr
-                                        val end = interval.endStr
-                                        val dur = interval.durationHours
-                                        val durStr = if (dur % 1.0 == 0.0) "\${dur.toInt()} \${AppStrings.hourShort(lang)}" else "\${String.format(java.util.Locale.US, "%.1f", dur)} \${AppStrings.hourShort(lang)}"
-                                        Row(
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .clip(RoundedCornerShape(14.dp))
-                                                .background(Color(0x14FFFFFF))
-                                                .padding(horizontal = 14.dp, vertical = 10.dp),
-                                            horizontalArrangement = Arrangement.SpaceBetween,
-                                            verticalAlignment = Alignment.CenterVertically
-                                        ) {
-                                            Row(
-                                                verticalAlignment = Alignment.CenterVertically,
-                                                horizontalArrangement = Arrangement.spacedBy(10.dp)
-                                            ) {
-                                                // Fixed 20x20dp leading indicator slot so text start X is 100% identical
-                                                Box(
-                                                    modifier = Modifier.size(20.dp),
-                                                    contentAlignment = Alignment.Center
-                                                ) {
-                                                    if (interval.isEmergency) {
-                                                        Box(
-                                                            modifier = Modifier
-                                                                .size(20.dp)
-                                                                .clip(CircleShape)
-                                                                .background(Color(0xFFFF5E3A)),
-                                                            contentAlignment = Alignment.Center
-                                                        ) {
-                                                            Text(
-                                                                text = "!",
-                                                                fontSize = 12.sp,
-                                                                fontWeight = FontWeight.Black,
-                                                                color = Color.White
-                                                            )
-                                                        }
-                                                    } else {
-                                                        Box(
-                                                            modifier = Modifier
-                                                                .size(10.dp)
-                                                                .clip(CircleShape)
-                                                                .background(Color(0xFFFF5E3A))
-                                                        )
-                                                    }
-                                                }
-                                                Text(
-                                                    text = "$start – $end",
-                                                    fontSize = 15.sp,
-                                                    fontWeight = FontWeight.Bold,
-                                                    fontFamily = FontFamily.Monospace,
-                                                    color = Color.White
-                                                )
-                                            }
-
-                                            Box(
-                                                modifier = Modifier
-                                                    .clip(RoundedCornerShape(8.dp))
-                                                    .background(Color(0x26FF5E3A))
-                                                    .padding(horizontal = 8.dp, vertical = 3.dp)
-                                            ) {
-                                                Text(
-                                                    text = durStr,
-                                                    fontSize = 11.sp,
-                                                    fontWeight = FontWeight.Bold,
-                                                    fontFamily = FontFamily.Monospace,
-                                                    color = Color(0xFFFF5E3A)
-                                                )
-                                            }
-                                        }
+                            if (rows.isNotEmpty()) {
+                                rows.forEachIndexed { index, row ->
+                                    key(index, row.outage.id) {
+                                        OutageRowItem(text = OutageRowFormat.format(lang, row), lang = lang)
                                     }
-                                } else {
-                                    Box(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .clip(RoundedCornerShape(14.dp))
-                                            .background(Color(0x14FFFFFF))
-                                            .padding(14.dp),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Text(
-                                            text = AppStrings.noBlackoutsScheduled(lang),
-                                            fontSize = 13.sp,
-                                            color = Color(0xB3BAE6FD)
-                                        )
-                                    }
+                                }
+                            } else {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(ZtShapes.Row)
+                                        .background(ZtColors.InnerRow)
+                                        .padding(14.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        text = AppStrings.noBlackoutsScheduled(lang),
+                                        style = ZtType.caption,
+                                        color = TextSecondary
+                                    )
                                 }
                             }
                         }
@@ -3334,198 +3545,77 @@ fun MainScreen(
                 }
             }
 
-            // 5. Last Updated & Circular Refresh Button Card
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .floatingShadow(color = Color(0xB3000000), borderRadius = 20.dp, blurRadius = 22.dp, offsetY = 8.dp)
-                    .clip(RoundedCornerShape(20.dp))
-                    .background(Color(0xBF141A29))
-                    .padding(14.dp)
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            Text(AppStrings.lastUpdated(lang), fontSize = 11.sp, color = Color(0x99BAE6FD))
-                            Text(lastUpdated, fontSize = 11.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace, color = Color.White)
-                        }
-                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            Text(AppStrings.nextUpdated(lang), fontSize = 11.sp, color = Color(0x99BAE6FD))
-                            Text(nextUpdated, fontSize = 11.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace, color = Color.White)
-                        }
-                    }
-
-                    // Circular white refresh button with feedback
-                    Box(
-                        modifier = Modifier
-                            .size(42.dp)
-                            .clip(CircleShape)
-                            .background(Color.White)
-                            .clickable(enabled = !isQueueUnselected) {
-                                onRefresh()
-                            },
-                        contentAlignment = Alignment.Center
+            // 5. Last updated, site status chips and the circular refresh button
+            GlassCard(modifier = Modifier.fillMaxWidth(), contentPadding = PaddingValues(14.dp)) {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.Refresh,
-                            contentDescription = "Оновити",
-                            tint = Color.Black,
-                            modifier = Modifier.size(20.dp)
+                        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            LabelledValue(AppStrings.lastUpdated(lang), lastUpdated)
+                            LabelledValue(AppStrings.nextUpdated(lang), nextUpdated)
+                        }
+                        RefreshButton(
+                            enabled = !isQueueUnselected,
+                            isRefreshing = isRefreshing,
+                            lang = lang,
+                            onRefresh = onRefresh
                         )
                     }
+                    SiteStatusChipRow(snapshot = snapshot, lang = lang)
                 }
             }
 
-            // 6. Emergency Outages Info Link (right after refresh block, styled like AboutScreen links with site icon)
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .floatingShadow(color = Color(0xB3000000), borderRadius = 24.dp, blurRadius = 22.dp, offsetY = 8.dp)
-                    .clip(RoundedCornerShape(24.dp))
-                    .background(Color(0xBF141A29))
-                    .padding(14.dp)
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(14.dp))
-                        .background(Color(0x14FFFFFF))
-                        .clickable(enabled = !isQueueUnselected) {
-                            try {
-                                val intent = Intent(Intent.ACTION_VIEW, Uri.parse(AppStrings.EMERGENCY_OUTAGES_URL))
-                                context.startActivity(intent)
-                            } catch (_: Exception) {}
-                        }
-                        .padding(12.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(36.dp)
-                                .clip(RoundedCornerShape(10.dp))
-                                .background(Color(0xFF1877F2)),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            // Facebook vector logo (replaces generic Icons.Default.Language globe)
-                            Icon(
-                                painter = painterResource(id = R.drawable.ic_facebook),
-                                contentDescription = "Facebook",
-                                tint = Color.White,
-                                modifier = Modifier.size(20.dp)
-                            )
-                        }
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = AppStrings.emergencyOutagesLabel(lang),
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Color.White,
-                                softWrap = true
-                            )
-                            Text(
-                                text = AppStrings.EMERGENCY_OUTAGES_URL,
-                                fontSize = 10.sp,
-                                fontFamily = FontFamily.Monospace,
-                                color = Color(0x99BAE6FD),
-                                maxLines = 1,
-                                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
-                            )
-                        }
+            // 6. Emergency outages info link (Facebook)
+            LinkCard(
+                title = AppStrings.emergencyOutagesLabel(lang),
+                url = AppStrings.EMERGENCY_OUTAGES_URL,
+                tileColor = Color(0xFF1877F2),
+                enabled = !isQueueUnselected,
+                onClick = {
+                    try {
+                        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(AppStrings.EMERGENCY_OUTAGES_URL)))
+                    } catch (_: Exception) {
                     }
-                    Icon(
-                        imageVector = Icons.Default.OpenInNew,
-                        contentDescription = null,
-                        tint = Color(0x99BAE6FD),
-                        modifier = Modifier.size(16.dp)
-                    )
                 }
-            }
-
-            // 7. Blackout Schedules on ZTOE Website Link ("Графіки відключень на сайті") at very bottom after Facebook link
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .floatingShadow(color = Color(0xB3000000), borderRadius = 24.dp, blurRadius = 22.dp, offsetY = 8.dp)
-                    .clip(RoundedCornerShape(24.dp))
-                    .background(Color(0xBF141A29))
-                    .padding(14.dp)
             ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(14.dp))
-                        .background(Color(0x14FFFFFF))
-                        .clickable(enabled = !isQueueUnselected) {
-                            try {
-                                val intent = Intent(Intent.ACTION_VIEW, Uri.parse(AppStrings.SITE_SCHEDULES_URL))
-                                context.startActivity(intent)
-                            } catch (_: Exception) {}
-                        }
-                        .padding(12.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(36.dp)
-                                .clip(RoundedCornerShape(10.dp))
-                                .background(Color(0xFFFF5E3A)),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Language,
-                                contentDescription = "Графіки відключень на сайті",
-                                tint = Color.White,
-                                modifier = Modifier.size(20.dp)
-                            )
-                        }
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = AppStrings.siteSchedulesLabel(lang),
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Color.White,
-                                softWrap = true
-                            )
-                            Text(
-                                text = AppStrings.SITE_SCHEDULES_URL,
-                                fontSize = 10.sp,
-                                fontFamily = FontFamily.Monospace,
-                                color = Color(0x99BAE6FD),
-                                maxLines = 1,
-                                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
-                            )
-                        }
-                    }
-                    Icon(
-                        imageVector = Icons.Default.OpenInNew,
-                        contentDescription = null,
-                        tint = Color(0x99BAE6FD),
-                        modifier = Modifier.size(16.dp)
-                    )
-                }
+                // Facebook vector logo
+                Icon(
+                    painter = painterResource(id = R.drawable.ic_facebook),
+                    contentDescription = null,
+                    tint = Color.White,
+                    modifier = Modifier.size(20.dp)
+                )
             }
 
-            // Extra spacing so floating navigation dock does not overlap bottom card
+            // 7. Blackout schedules on the ZTOE website, at the very bottom after the Facebook link
+            LinkCard(
+                title = AppStrings.siteSchedulesLabel(lang),
+                url = AppStrings.SITE_SCHEDULES_URL,
+                tileColor = ZtColors.Accent,
+                enabled = !isQueueUnselected,
+                onClick = {
+                    try {
+                        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(AppStrings.SITE_SCHEDULES_URL)))
+                    } catch (_: Exception) {
+                    }
+                }
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Language,
+                    contentDescription = null,
+                    tint = Color.White,
+                    modifier = Modifier.size(20.dp)
+                )
+            }
+
+            // Extra spacing so the floating navigation dock does not overlap the bottom card
             Spacer(modifier = Modifier.height(96.dp))
         }
 
-        // First-launch / Unselected Queue Overlay: dark dimming + centered #FF5E3A "Виберіть чергу" button with subtitle + 3-segment language switch
+        // First launch / unselected queue overlay: dark dim, centred accent "Виберіть чергу" button, language switch
         if (isQueueUnselected) {
             Box(
                 modifier = Modifier
@@ -3541,11 +3631,11 @@ fun MainScreen(
                 ) {
                     Box(
                         modifier = Modifier
-                            .defaultMinSize(minWidth = 260.dp)
-                            .clip(RoundedCornerShape(24.dp))
-                            .background(Color(0xFFFF5E3A))
-                            .border(1.dp, Color(0x40FFFFFF), RoundedCornerShape(24.dp))
-                            .clickable { onOpenQueueSelection() }
+                            .defaultMinSize(minWidth = 260.dp, minHeight = ZtMinTouch)
+                            .clip(ZtShapes.Card)
+                            .background(ZtColors.Accent)
+                            .border(1.dp, Color(0x40FFFFFF), ZtShapes.Card)
+                            .clickable(role = Role.Button) { onOpenQueueSelection() }
                             .padding(horizontal = 32.dp, vertical = 20.dp),
                         contentAlignment = Alignment.Center
                     ) {
@@ -3553,61 +3643,519 @@ fun MainScreen(
                             horizontalAlignment = Alignment.CenterHorizontally,
                             verticalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
+                            // White label on the accent fill (owner request; 3.0:1, large bold title)
                             Text(
                                 text = AppStrings.selectQueueAction(lang),
-                                fontSize = 24.sp,
-                                fontWeight = FontWeight.ExtraBold,
+                                style = ZtType.title.copy(fontWeight = FontWeight.ExtraBold),
                                 color = Color.White,
                                 textAlign = TextAlign.Center
                             )
                             Text(
-                                text = "Житомиробленерго (ZTOE)",
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                color = Color(0xE6FFFFFF),
+                                text = AppStrings.mainUtilityName(),
+                                style = ZtType.label.copy(fontWeight = FontWeight.Bold),
+                                color = Color.White,
                                 textAlign = TextAlign.Center
                             )
                         }
                     }
 
-                    Row(
+                    LanguageSwitch(
+                        selectedLanguage = selectedLanguage,
+                        lang = lang,
+                        onChangeLanguage = onChangeLanguage
+                    )
+                }
+            }
+        }
+    }
+}
+
+// -------------------------------------------------------------------------------------------------
+// Pieces
+// -------------------------------------------------------------------------------------------------
+
+/** 58 x 34 pill switch for the notifications; the touch target is 48 dp tall without changing the look. */
+@Composable
+private fun NotificationPill(enabled: Boolean, interactive: Boolean, lang: String, onToggle: () -> Unit) {
+    val label = AppStrings.notifications(lang)
+    val stateText = if (enabled) AppStrings.switchOn(lang) else AppStrings.switchOff(lang)
+    Box(
+        modifier = Modifier
+            .minimumInteractiveComponentSize()
+            .size(width = 58.dp, height = 34.dp)
+            .clip(CircleShape)
+            .background(if (enabled) ZtColors.Accent else Color(0x26FFFFFF))
+            .semantics {
+                contentDescription = label
+                stateDescription = stateText
+            }
+            .toggleable(
+                value = enabled,
+                enabled = interactive,
+                role = Role.Switch,
+                onValueChange = { onToggle() }
+            )
+            .padding(4.dp),
+        contentAlignment = if (enabled) Alignment.CenterEnd else Alignment.CenterStart
+    ) {
+        Box(
+            modifier = Modifier
+                .size(26.dp)
+                .clip(CircleShape)
+                .background(Color.White),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                imageVector = if (enabled) Icons.Default.Notifications else Icons.Default.NotificationsOff,
+                contentDescription = null,
+                tint = if (enabled) ZtColors.Accent else Color(0xFF6B7280),
+                modifier = Modifier.size(16.dp)
+            )
+        }
+    }
+}
+
+@Composable
+private fun EmergencyBanner(outage: Outage, now: LocalDateTime, lang: String) {
+    val format = remember { DateTimeFormatter.ofPattern("dd.MM.yyyy HH:mm") }
+    val status = outage.statusAt(now)
+    val title = when {
+        lang == "uk" && !outage.label.isNullOrBlank() -> outage.label
+        status == IntervalStatus.UPCOMING -> AppStrings.emergencyUpcomingTitle(lang)
+        else -> AppStrings.emergencyOutageTitle(lang)
+    }
+    val restoreText = if (outage.overdue || !outage.end.isAfter(outage.start)) "--:--" else outage.end.format(format)
+
+    GlassCard(modifier = Modifier.fillMaxWidth()) {
+        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text(text = title, style = ZtType.subhead, color = ZtColors.Accent)
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                BannerLine(AppStrings.emergencyStartLabel(lang), outage.start.format(format))
+                BannerLine(AppStrings.emergencyRestoreLabel(lang), restoreText)
+                if (status == IntervalStatus.OVERDUE) {
+                    Text(text = AppStrings.rowOverdue(lang), style = ZtType.caption, color = TextSecondary)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun BannerLine(label: String, value: String) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(text = label, style = ZtType.caption, color = TextSecondary, modifier = Modifier.weight(1f))
+        Text(
+            text = value,
+            style = ZtType.captionMono,
+            color = Color.White,
+            maxLines = 1,
+            softWrap = false,
+            textAlign = TextAlign.End
+        )
+    }
+}
+
+/** Exact alarms are off: explains why warnings can be late and opens the system screen where they are allowed. */
+@Composable
+private fun ExactAlarmCard(lang: String, onOpenSettings: () -> Unit) {
+    GlassCard(modifier = Modifier.fillMaxWidth()) {
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.Top) {
+            Box(
+                modifier = Modifier
+                    .size(36.dp)
+                    .clip(CircleShape)
+                    .background(ZtColors.ChipAmber),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Alarm,
+                    contentDescription = null,
+                    tint = ZtColors.ChipAmberText,
+                    modifier = Modifier.size(20.dp)
+                )
+            }
+            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text(text = AppStrings.exactAlarmTitle(lang), style = ZtType.subhead, color = ZtColors.ChipAmberText)
+                Text(text = AppStrings.exactAlarmBody(lang), style = ZtType.body, color = TextSecondary)
+                Spacer(modifier = Modifier.height(2.dp))
+                Box(
+                    modifier = Modifier
+                        .defaultMinSize(minHeight = ZtMinTouch)
+                        .clip(ZtShapes.Control)
+                        .background(ZtColors.Accent)
+                        .clickable(role = Role.Button, onClick = onOpenSettings)
+                        .padding(horizontal = 20.dp, vertical = 10.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    // Dark label on the accent fill (6.9:1)
+                    Text(
+                        text = AppStrings.exactAlarmButton(lang),
+                        style = ZtType.label.copy(fontWeight = FontWeight.Bold),
+                        color = InkOnAccent,
+                        textAlign = TextAlign.Center
+                    )
+                }
+            }
+        }
+    }
+}
+
+/** "No address has alerts turned on" under the header bell, with a link to Settings (spec/SUBSCRIPTIONS.md 9). */
+@Composable
+private fun NoAlertsCaption(lang: String, onOpenSettings: () -> Unit) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Text(
+            text = AppStrings.noAddressAlerts(lang),
+            style = ZtType.caption,
+            color = ZtColors.Accent,
+            modifier = Modifier.weight(1f)
+        )
+        Box(
+            modifier = Modifier
+                .heightIn(min = ZtMinTouch)
+                .clip(ZtShapes.Chip)
+                .clickable(role = Role.Button, onClick = onOpenSettings)
+                .padding(horizontal = 8.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                text = AppStrings.settingsTitle(lang),
+                style = ZtType.label.copy(fontWeight = FontWeight.Bold),
+                color = Color.White
+            )
+        }
+    }
+}
+
+/** One chip per address, the primary with a star; scrolls sideways when the labels do not fit. */
+@Composable
+private fun AddressSwitcher(
+    addresses: List<Subscription>,
+    primaryId: String?,
+    shownId: String?,
+    lang: String,
+    onSelect: (String) -> Unit
+) {
+    val selectedText = AppStrings.tabSelected(lang)
+    val primaryText = AppStrings.primaryBadge(lang)
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .horizontalScroll(rememberScrollState())
+            .selectableGroup(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        for (item in addresses) {
+            val selected = item.id == shownId
+            val isPrimary = item.id == primaryId
+            val label = Subscriptions.displayLabel(item)
+            Row(
+                modifier = Modifier
+                    .heightIn(min = ZtMinTouch)
+                    .clip(ZtShapes.Chip)
+                    .background(if (selected) Color(0x33FFFFFF) else Color(0x80141A29))
+                    .border(1.dp, if (selected) Color(0x66FFFFFF) else Color(0x1FFFFFFF), ZtShapes.Chip)
+                    .semantics { if (selected) stateDescription = selectedText }
+                    .selectable(selected = selected, role = Role.Tab, onClick = { onSelect(item.id) })
+                    .padding(horizontal = 14.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                if (isPrimary) {
+                    Icon(Icons.Default.Star, contentDescription = primaryText, tint = ZtColors.Accent, modifier = Modifier.size(16.dp))
+                }
+                Text(
+                    text = label,
+                    style = ZtType.label.copy(fontWeight = FontWeight.Bold),
+                    color = if (selected) Color.White else TabIdle,
+                    maxLines = 1,
+                    softWrap = false
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun DayTabs(isTomorrow: Boolean, enabled: Boolean, lang: String, onSelect: (Boolean) -> Unit) {
+    GlassCard(
+        modifier = Modifier.fillMaxWidth(),
+        shape = ZtShapes.Control,
+        cornerRadius = 16.dp,
+        background = Color(0x80141A29),
+        borderColor = null,
+        contentPadding = PaddingValues(4.dp)
+    ) {
+        Row(modifier = Modifier.fillMaxWidth().selectableGroup()) {
+            DayTab(AppStrings.today(lang), selected = !isTomorrow, enabled = enabled, lang = lang, modifier = Modifier.weight(1f)) {
+                onSelect(false)
+            }
+            DayTab(AppStrings.tomorrow(lang), selected = isTomorrow, enabled = enabled, lang = lang, modifier = Modifier.weight(1f)) {
+                onSelect(true)
+            }
+        }
+    }
+}
+
+@Composable
+private fun DayTab(text: String, selected: Boolean, enabled: Boolean, lang: String, modifier: Modifier, onClick: () -> Unit) {
+    val selectedText = AppStrings.tabSelected(lang)
+    Box(
+        modifier = modifier
+            .heightIn(min = ZtMinTouch)
+            .clip(ZtShapes.Chip)
+            .background(if (selected) Color(0x33FFFFFF) else Color.Transparent)
+            .semantics { if (selected) stateDescription = selectedText }
+            .selectable(selected = selected, enabled = enabled, role = Role.Tab, onClick = onClick)
+            .padding(horizontal = 8.dp, vertical = 8.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text = text,
+            style = ZtType.label.copy(fontWeight = FontWeight.Bold),
+            color = if (selected) Color.White else TabIdle,
+            maxLines = 1,
+            textAlign = TextAlign.Center
+        )
+    }
+}
+
+/** One outage of the day: marker, full span, tags and the full duration chip. Finished rows are dimmed to 55 %. */
+@Composable
+private fun OutageRowItem(text: OutageRowFormat.RowText, lang: String) {
+    val tags = listOfNotNull(text.kindTag, text.originTag, text.statusTag, text.continueTag).joinToString(" · ")
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .alpha(if (text.isFinished) 0.55f else 1f)
+            .clip(ZtShapes.Row)
+            .background(ZtColors.InnerRow)
+            .clearAndSetSemantics { contentDescription = text.contentDescription }
+            .padding(horizontal = 14.dp, vertical = 10.dp),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        // Fixed 20x20dp leading indicator slot so the text start X is identical in every row
+        Box(modifier = Modifier.size(20.dp), contentAlignment = Alignment.Center) {
+            when {
+                text.isEmergency -> {
+                    Box(
                         modifier = Modifier
-                            .width(260.dp)
-                            .clip(RoundedCornerShape(16.dp))
-                            .background(Color(0xE6141A29))
-                            .border(1.dp, Color(0x33FFFFFF), RoundedCornerShape(16.dp))
-                            .padding(6.dp),
-                        horizontalArrangement = Arrangement.spacedBy(4.dp),
-                        verticalAlignment = Alignment.CenterVertically
+                            .size(20.dp)
+                            .clip(CircleShape)
+                            .background(ZtColors.Accent),
+                        contentAlignment = Alignment.Center
                     ) {
-                        val langOptions = listOf(
-                            "SYSTEM" to "Auto",
-                            "en" to "English",
-                            "uk" to "Українська"
-                        )
-                        langOptions.forEach { (code, label) ->
-                            val isActive = selectedLanguage.equals(code, ignoreCase = true)
-                            Box(
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .clip(RoundedCornerShape(12.dp))
-                                    .background(if (isActive) Color.White else Color.Transparent)
-                                    .clickable { onChangeLanguage(code) }
-                                    .padding(horizontal = 8.dp, vertical = 8.dp),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Text(
-                                    text = label,
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = if (isActive) Color.Black else Color(0xCCBAE6FD),
-                                    maxLines = 1
-                                )
-                            }
+                        // The glyph does not scale with the font size: the circle is fixed at 20 dp
+                        CappedFontScale(1f) {
+                            Text(
+                                text = "!",
+                                style = ZtType.overline.copy(fontWeight = FontWeight.Black, letterSpacing = androidx.compose.ui.unit.TextUnit.Unspecified),
+                                color = Color.White
+                            )
                         }
                     }
                 }
+                text.isRepair -> Icon(
+                    imageVector = Icons.Default.Build,
+                    contentDescription = null,
+                    tint = ZtColors.Accent,
+                    modifier = Modifier.size(18.dp)
+                )
+                else -> Box(
+                    modifier = Modifier
+                        .size(10.dp)
+                        .clip(CircleShape)
+                        .background(ZtColors.Accent)
+                )
             }
+        }
+
+        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(text = text.timeText, style = ZtType.timeMono, color = Color.White, maxLines = 2)
+            if (tags.isNotEmpty()) {
+                Text(
+                    text = tags,
+                    style = ZtType.caption,
+                    color = if (text.isEmergency && !text.isFinished) ZtColors.Accent else TextSecondary
+                )
+            }
+        }
+
+        if (text.durationText != null) {
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(Color(0x26FF5E3A))
+                    .padding(horizontal = 8.dp, vertical = 3.dp)
+            ) {
+                Text(
+                    text = text.durationText,
+                    style = ZtType.captionMono,
+                    color = ZtColors.Accent,
+                    maxLines = 1,
+                    softWrap = false
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun LabelledValue(label: String, value: String) {
+    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text(
+            text = label,
+            style = ZtType.caption,
+            color = TextTertiary,
+            modifier = Modifier.weight(1f, fill = false)
+        )
+        Text(
+            text = value,
+            style = ZtType.captionMono,
+            color = Color.White,
+            maxLines = 1,
+            softWrap = false
+        )
+    }
+}
+
+/** 42 dp white refresh disc; 48 dp touch target; the arrow rotates while a refresh runs. */
+@Composable
+private fun RefreshButton(enabled: Boolean, isRefreshing: Boolean, lang: String, onRefresh: () -> Unit) {
+    val label = AppStrings.refreshBtn(lang)
+    val busyText = AppStrings.refreshing(lang)
+    Box(
+        modifier = Modifier
+            .minimumInteractiveComponentSize()
+            .size(42.dp)
+            .clip(CircleShape)
+            .background(Color.White)
+            .semantics {
+                contentDescription = label
+                if (isRefreshing) stateDescription = busyText
+            }
+            .clickable(enabled = enabled && !isRefreshing, role = Role.Button) { onRefresh() },
+        contentAlignment = Alignment.Center
+    ) {
+        Icon(
+            imageVector = Icons.Default.Refresh,
+            contentDescription = null,
+            tint = Color.Black,
+            modifier = Modifier.size(20.dp).spinWhile(isRefreshing)
+        )
+    }
+}
+
+/** Card with one tappable link row: icon tile, title and the full URL (wraps to two lines instead of a dead ellipsis). */
+@Composable
+private fun LinkCard(
+    title: String,
+    url: String,
+    tileColor: Color,
+    enabled: Boolean,
+    onClick: () -> Unit,
+    icon: @Composable () -> Unit
+) {
+    GlassCard(modifier = Modifier.fillMaxWidth(), contentPadding = PaddingValues(14.dp)) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(ZtShapes.Row)
+                .background(ZtColors.InnerRow)
+                .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
+                .padding(12.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(36.dp)
+                    .clip(ZtShapes.Badge)
+                    .background(tileColor),
+                contentAlignment = Alignment.Center
+            ) {
+                icon()
+            }
+            Column(modifier = Modifier.weight(1f)) {
+                Text(text = title, style = ZtType.label.copy(fontWeight = FontWeight.Bold), color = Color.White)
+                Text(
+                    text = url,
+                    style = ZtType.captionMono.copy(fontWeight = FontWeight.Normal),
+                    color = TextTertiary,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+            Icon(
+                imageVector = Icons.Default.OpenInNew,
+                contentDescription = null,
+                tint = TextTertiary,
+                modifier = Modifier.size(16.dp)
+            )
+        }
+    }
+}
+
+/** 3-segment language switch of the first-launch overlay; stacks vertically at large font scales instead of clipping. */
+@Composable
+private fun LanguageSwitch(selectedLanguage: String, lang: String, onChangeLanguage: (String) -> Unit) {
+    val options = listOf(
+        "SYSTEM" to AppStrings.mainLangAuto(lang),
+        "en" to "English",
+        "uk" to "Українська"
+    )
+    val stacked = LocalDensity.current.fontScale > 1.15f
+
+    @Composable
+    fun Segment(code: String, label: String, modifier: Modifier) {
+        val isActive = selectedLanguage.equals(code, ignoreCase = true)
+        Box(
+            modifier = modifier
+                .heightIn(min = ZtMinTouch)
+                .clip(ZtShapes.Chip)
+                .background(if (isActive) Color.White else Color.Transparent)
+                .selectable(selected = isActive, role = Role.RadioButton) { onChangeLanguage(code) }
+                .padding(horizontal = 8.dp, vertical = 8.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                text = label,
+                style = ZtType.label.copy(fontWeight = FontWeight.Bold),
+                color = if (isActive) Color.Black else Color(0xE6BAE6FD),
+                maxLines = 1,
+                textAlign = TextAlign.Center
+            )
+        }
+    }
+
+    val containerModifier = Modifier
+        .fillMaxWidth(0.9f)
+        .clip(ZtShapes.Control)
+        .background(Color(0xE6141A29))
+        .border(1.dp, Color(0x33FFFFFF), ZtShapes.Control)
+        .padding(6.dp)
+        .selectableGroup()
+
+    if (stacked) {
+        Column(modifier = containerModifier, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            options.forEach { (code, label) -> Segment(code, label, Modifier.fillMaxWidth()) }
+        }
+    } else {
+        Row(
+            modifier = containerModifier,
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            options.forEach { (code, label) -> Segment(code, label, Modifier.weight(1f)) }
         }
     }
 }
@@ -3622,51 +4170,164 @@ fun MainScreen(
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.IntrinsicSize
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.defaultMinSize
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.*
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Bolt
+import androidx.compose.material.icons.filled.Schedule
+import androidx.compose.material.icons.filled.AlarmOff
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.ErrorOutline
+import androidx.compose.material.icons.filled.HelpOutline
+import androidx.compose.material.icons.filled.Language
+import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Send
+import androidx.compose.material.icons.filled.Star
+import androidx.compose.material.icons.filled.Tune
+import androidx.compose.material.icons.filled.Vibration
+import androidx.compose.material.icons.filled.VolumeUp
+import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.DropdownMenuItem
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.ExposedDropdownMenuBox
+import androidx.compose.material3.ExposedDropdownMenuDefaults
+import androidx.compose.material3.Icon
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Switch
+import androidx.compose.material3.SwitchDefaults
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.zIndex
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.material.icons.filled.DragIndicator
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.CustomAccessibilityAction
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.customActions
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.text.LinkAnnotation
 import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.TextLinkStyles
 import androidx.compose.ui.text.buildAnnotatedString
-import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.text.withLink
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import ua.blackout.prewarning.data.model.EmergencyOutageInfo
+import ua.blackout.prewarning.core.Subscription
+import ua.blackout.prewarning.core.SubscriptionStore
+import ua.blackout.prewarning.core.Subscriptions
 import ua.blackout.prewarning.data.model.SelectedAddressQuery
 import ua.blackout.prewarning.data.parser.AddressLookupResult
 import ua.blackout.prewarning.data.parser.FetchStatus
 import ua.blackout.prewarning.data.parser.ZtoeAddressLookup
 import ua.blackout.prewarning.data.parser.ZtoeParser
+import ua.blackout.prewarning.data.parser.ZtoeHouseLookupResult
+import ua.blackout.prewarning.data.parser.ZtoeRemOption
+import ua.blackout.prewarning.data.parser.ZtoeSettlementOption
+import ua.blackout.prewarning.data.parser.ZtoeStreetOption
 import ua.blackout.prewarning.ui.AppStrings
-import ua.blackout.prewarning.ui.components.floatingShadow
+import ua.blackout.prewarning.ui.components.spinWhile
+import ua.blackout.prewarning.ui.components.GlassCard
+import ua.blackout.prewarning.ui.components.PickerItem
+import ua.blackout.prewarning.ui.components.PickerSearch
+import ua.blackout.prewarning.ui.components.SearchablePickerField
+import ua.blackout.prewarning.ui.components.glassFieldColors
+import ua.blackout.prewarning.ui.theme.ZtColors
+import ua.blackout.prewarning.ui.theme.ZtMinTouch
+import ua.blackout.prewarning.ui.theme.ZtShapes
+import ua.blackout.prewarning.ui.theme.ZtType
 
+/** Presets for "warn me N minutes before". 5 and 10 work: alarms are exact, only the site refresh is bounded by WorkManager. */
+private val ADVANCE_PRESETS = listOf(5, 10, 15, 20, 30, 45, 60, 90, 120, 180, 240)
+
+/** Presets for the site check. WorkManager never runs periodic work more often than every 15 minutes. */
+private val REFRESH_PRESETS = listOf(15, 30, 60, 120, 180, 240)
+
+private val QUEUES = listOf(
+    "1.1", "1.2", "2.1", "2.2", "3.1", "3.2",
+    "4.1", "4.2", "5.1", "5.2", "6.1", "6.2"
+)
+
+private const val ZTOE_SEARCH_URL = "https://www.ztoe.com.ua/unhooking-search.php"
+
+/**
+ * Settings page.
+ *
+ * @param exactAlarmMissing show the card that explains the "Alarms & reminders" permission
+ * @param onOpenExactAlarmSettings opens that system screen
+ * @param isVisible false while the pager keeps this page composed off screen; the site check waits
+ *   until the page is shown so launch does not run a second full schedule fetch
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(
     currentQueue: String = "",
-    customQueueStatusText: String? = null,
+    subscriptions: SubscriptionStore = SubscriptionStore.EMPTY,
+    alertsMaster: Boolean = true,
     selectedAddressQuery: SelectedAddressQuery? = null,
-    activeEmergencyOutage: EmergencyOutageInfo? = null,
-    siteUrl: String = "https://www.ztoe.com.ua/unhooking-search.php",
+    siteUrl: String = ZTOE_SEARCH_URL,
     // CRITICAL CONSTANTS — Default values: advanceMinutes = 15, refreshMinutes = 30. Never modify on your own.
     advanceMinutes: Int = 15,
     refreshMinutes: Int = 30,
@@ -3678,54 +4339,46 @@ fun SettingsScreen(
     lang: String = "uk",
     autoOpenQueueHelp: Boolean = false,
     onAutoOpenQueueHelpHandled: () -> Unit = {},
-    onQueueSelected: (String) -> Unit = {},
-    onAddressQueueResolved: (
+    onAddAddress: (
         queue: String,
         statusText: String?,
         addressLabel: String,
-        emergencyOutage: EmergencyOutageInfo?,
         query: SelectedAddressQuery
-    ) -> Unit = { _, _, _, _, _ -> },
+    ) -> Unit = { _, _, _, _ -> },
+    onAddQueueOnly: (String) -> Unit = {},
+    onRemoveSubscription: (String) -> Unit = {},
+    onMakePrimary: (String) -> Unit = {},
+    onSetPlanned: (id: String, on: Boolean) -> Unit = { _, _ -> },
+    onSetEmergency: (id: String, on: Boolean) -> Unit = { _, _ -> },
+    onRenameSubscription: (id: String, label: String) -> Unit = { _, _ -> },
+    /** Moves an address to a new list position (spec/SUBSCRIPTIONS.md section 4, \`move\`). */
+    onMoveSubscription: (id: String, toIndex: Int) -> Unit = { _, _ -> },
+    onToggleMaster: (Boolean) -> Unit = {},
     onSiteUrlChanged: (String) -> Unit = {},
     onAdvanceMinutesChanged: (Int) -> Unit = {},
     onRefreshMinutesChanged: (Int) -> Unit = {},
-    onToggleNotifications: (Boolean) -> Unit = {},
-    onToggleEmergencyNotifications: (Boolean) -> Unit = {},
     onToggleSound: (Boolean) -> Unit = {},
     onToggleVibration: (Boolean) -> Unit = {},
+    emergencyEtaAlerts: Boolean = true,
+    emergencyEndAlerts: Boolean = true,
+    onToggleEmergencyEtaAlerts: (Boolean) -> Unit = {},
+    onToggleEmergencyEndAlerts: (Boolean) -> Unit = {},
     onLanguageSelected: (String) -> Unit = {},
     onSendTestAlert: () -> Unit = {},
     onForceRefresh: () -> Unit = {},
+    /** A refresh is running: the refresh button's icon rotates and taps are ignored. */
+    isRefreshing: Boolean = false,
     onResetDefaults: () -> Unit = {},
-    onShowAppBanner: (String) -> Unit = {}
+    onShowAppBanner: (String) -> Unit = {},
+    exactAlarmMissing: Boolean = false,
+    onOpenExactAlarmSettings: () -> Unit = {},
+    isVisible: Boolean = true
 ) {
     val context = LocalContext.current
-    val coroutineScope = rememberCoroutineScope()
     var showQueueHelpDialog by remember { mutableStateOf(false) }
     var showResetConfirmDialog by remember { mutableStateOf(false) }
-    var queueDropdownExpanded by remember { mutableStateOf(false) }
-    var advanceDropdownExpanded by remember { mutableStateOf(false) }
-    var refreshDropdownExpanded by remember { mutableStateOf(false) }
-
-    // Interactive Address Lookup state inside "?" modal
-    var selectedRemId by remember(selectedAddressQuery) {
-        mutableStateOf(selectedAddressQuery?.remId?.ifBlank { "zhytomyr" } ?: "zhytomyr")
-    }
-    var selectedSettlementId by remember(selectedAddressQuery) {
-        mutableStateOf(selectedAddressQuery?.settlementId?.ifBlank { "zt_city" } ?: "zt_city")
-    }
-    var selectedStreetId by remember(selectedAddressQuery) {
-        mutableStateOf(selectedAddressQuery?.streetId ?: "")
-    }
-    var selectedHouse by remember(selectedAddressQuery) {
-        mutableStateOf(selectedAddressQuery?.house ?: "")
-    }
-    var remDropdownExpanded by remember { mutableStateOf(false) }
-    var settlementDropdownExpanded by remember { mutableStateOf(false) }
-    var streetDropdownExpanded by remember { mutableStateOf(false) }
-    var houseDropdownExpanded by remember { mutableStateOf(false) }
-    var isCheckingAddressOnSite by remember { mutableStateOf(false) }
-    var addressLookupResult by remember { mutableStateOf<AddressLookupResult?>(null) }
+    var removeCandidate by remember { mutableStateOf<Subscription?>(null) }
+    var renameCandidate by remember { mutableStateOf<Subscription?>(null) }
 
     LaunchedEffect(autoOpenQueueHelp) {
         if (autoOpenQueueHelp) {
@@ -3734,20 +4387,17 @@ fun SettingsScreen(
         }
     }
 
-    val queues = listOf(
-        "1.1", "1.2", "2.1", "2.2", "3.1", "3.2",
-        "4.1", "4.2", "5.1", "5.2", "6.1", "6.2"
-    )
-    val timerOptions = listOf(5, 10, 15, 20, 30, 45, 60, 90, 120, 180, 240)
-
     val isUrlInValidList = remember(siteUrl) { ZtoeParser.isValidUrl(siteUrl, context) }
     var urlFetchStatus by remember { mutableStateOf(FetchStatus.SUCCESS) }
     var isVerifyingUrl by remember { mutableStateOf(false) }
+    var urlChecked by remember { mutableStateOf(false) }
 
-    // Live URL verification against valid-urls.json + actual table with current date & queues on site
-    LaunchedEffect(siteUrl, currentQueue) {
+    // Live URL verification against valid-urls.json + the real table; waits until the page is on screen
+    LaunchedEffect(siteUrl, currentQueue, isVisible) {
+        if (!isVisible) return@LaunchedEffect
         if (!ZtoeParser.isValidUrl(siteUrl, context)) {
             urlFetchStatus = FetchStatus.NO_QUEUES_FOUND
+            urlChecked = true
             return@LaunchedEffect
         }
         isVerifyingUrl = true
@@ -3757,17 +4407,13 @@ fun SettingsScreen(
         }
         urlFetchStatus = res.status
         isVerifyingUrl = false
+        urlChecked = true
     }
 
+    val isChecking = isVerifyingUrl || !urlChecked
     val isSiteVerifiedSuccess = isUrlInValidList && urlFetchStatus == FetchStatus.SUCCESS
 
-    val queueFieldDisplay = when {
-        !customQueueStatusText.isNullOrBlank() ->
-            if (lang == "uk") "Черга відсутня (не вимикається)" else "No queue (not disconnected)"
-        currentQueue.isBlank() ->
-            if (lang == "uk") "Виберіть чергу" else "Select queue"
-        else -> "\${AppStrings.queue(lang)} $currentQueue"
-    }
+    val minShort = AppStrings.minShort(lang)
 
     Column(
         modifier = Modifier
@@ -3783,553 +4429,290 @@ fun SettingsScreen(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            Icon(
-                Icons.Default.Tune,
-                contentDescription = null,
-                tint = Color(0xFFFF5E3A),
-                modifier = Modifier.size(24.dp)
-            )
+            Icon(Icons.Default.Tune, contentDescription = null, tint = ZtColors.Accent, modifier = Modifier.size(24.dp))
             Text(
                 text = AppStrings.settingsTitle(lang),
-                fontSize = 22.sp,
-                fontWeight = FontWeight.Bold,
-                color = Color.White
+                style = ZtType.heading,
+                color = Color.White,
+                modifier = Modifier.weight(1f)
             )
         }
 
-        // 1. Queue Selection Card (Frosted Glass)
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .floatingShadow(color = Color(0xB3000000), borderRadius = 24.dp, blurRadius = 24.dp, offsetY = 10.dp)
-                .shadow(10.dp, RoundedCornerShape(24.dp), ambientColor = Color(0x66000000), spotColor = Color(0x80000000))
-                .clip(RoundedCornerShape(24.dp))
-                .background(Color(0xBF141A29))
-                .padding(18.dp)
-        ) {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column(
-                        modifier = Modifier
-                            .weight(1f)
-                            .padding(end = 12.dp),
-                        verticalArrangement = Arrangement.spacedBy(2.dp)
+        // Exact-alarm permission (Android 12+): plain instruction and a button to the right system screen
+        if (exactAlarmMissing) {
+            GlassCard(
+                modifier = Modifier.fillMaxWidth(),
+                borderColor = Color(0x59FF5E3A),
+                contentPadding = PaddingValues18
+            ) {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
+                        Icon(Icons.Default.AlarmOff, contentDescription = null, tint = ZtColors.Accent, modifier = Modifier.size(24.dp))
                         Text(
-                            text = AppStrings.queueTitle(lang),
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Color.White
-                        )
-                        Text(
-                            text = AppStrings.queueDesc(lang),
-                            fontSize = 11.sp,
-                            color = Color(0xB3BAE6FD)
+                            text = AppStrings.exactAlarmTitle(lang),
+                            style = ZtType.subhead,
+                            color = Color.White,
+                            modifier = Modifier.weight(1f)
                         )
                     }
-                    // Prominent "?" button on the right matching Workbench size (40x40dp), color (#FF5E3A), and rounded-2xl (16.dp) shape
-                    Box(
-                        modifier = Modifier
-                            .size(40.dp)
-                            .clip(RoundedCornerShape(16.dp))
-                            .background(Color(0xFFFF5E3A))
-                            .border(1.dp, Color(0x40FFFFFF), RoundedCornerShape(16.dp))
-                            .clickable { showQueueHelpDialog = true },
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.HelpOutline,
-                            contentDescription = AppStrings.queueHelpTitle(lang),
-                            tint = Color.White,
-                            modifier = Modifier.size(20.dp)
-                        )
-                    }
-                }
-
-                // Clean Native Exposed Dropdown Menu
-                ExposedDropdownMenuBox(
-                    expanded = queueDropdownExpanded,
-                    onExpandedChange = { queueDropdownExpanded = it }
-                ) {
-                    OutlinedTextField(
-                        value = queueFieldDisplay,
-                        onValueChange = {},
-                        readOnly = true,
-                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = queueDropdownExpanded) },
-                        modifier = Modifier.menuAnchor().fillMaxWidth(),
-                        shape = RoundedCornerShape(16.dp),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedTextColor = Color.White,
-                            unfocusedTextColor = Color.White,
-                            focusedBorderColor = Color(0xFFFF5E3A),
-                            unfocusedBorderColor = Color(0x33FFFFFF),
-                            focusedContainerColor = Color(0x1AFFFFFF),
-                            unfocusedContainerColor = Color(0x14FFFFFF)
-                        )
+                    Text(text = AppStrings.exactAlarmBody(lang), style = ZtType.body, color = ZtColors.TextSecondary)
+                    ActionButton(
+                        text = AppStrings.exactAlarmButton(lang),
+                        icon = null,
+                        filled = true,
+                        onClick = onOpenExactAlarmSettings,
+                        modifier = Modifier.fillMaxWidth()
                     )
-                    ExposedDropdownMenu(
-                        expanded = queueDropdownExpanded,
-                        onDismissRequest = { queueDropdownExpanded = false },
-                        modifier = Modifier.background(Color(0xFF141A29))
-                    ) {
-                        queues.forEach { q ->
-                            DropdownMenuItem(
-                                text = { Text("\${AppStrings.queue(lang)} $q", fontWeight = FontWeight.Bold, color = Color.White) },
-                                onClick = {
-                                    onQueueSelected(q)
-                                    queueDropdownExpanded = false
-                                }
-                            )
-                        }
-                    }
                 }
             }
         }
 
-        // 2. Site Address with Strict Verification Glyph against /valid-urls.json & live table check
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .floatingShadow(color = Color(0xB3000000), borderRadius = 24.dp, blurRadius = 24.dp, offsetY = 10.dp)
-                .shadow(10.dp, RoundedCornerShape(24.dp), ambientColor = Color(0x66000000), spotColor = Color(0x80000000))
-                .clip(RoundedCornerShape(24.dp))
-                .background(Color(0xBF141A29))
-                .padding(18.dp)
-        ) {
+        // 1. My addresses: up to 5 addresses (or queues), each with its own planned / emergency switches
+        MyAddressesCard(
+            store = subscriptions,
+            alertsMaster = alertsMaster,
+            advanceMinutes = advanceMinutes,
+            lang = lang,
+            onHelp = { showQueueHelpDialog = true },
+            onAddQueueOnly = onAddQueueOnly,
+            onMove = onMoveSubscription,
+            onRemove = { removeCandidate = it },
+            onRename = { renameCandidate = it },
+            onMakePrimary = onMakePrimary,
+            onSetPlanned = onSetPlanned,
+            onSetEmergency = onSetEmergency
+        )
+
+        // 2. Site address with a strict check against valid-urls.json and the live table
+        GlassCard(modifier = Modifier.fillMaxWidth(), contentPadding = PaddingValues18) {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Row(
+                @OptIn(ExperimentalLayoutApi::class)
+                FlowRow(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
                     Text(
                         text = AppStrings.siteAddressTitle(lang),
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = Color.White
+                        style = ZtType.overline,
+                        color = Color.White,
+                        modifier = Modifier.padding(vertical = 6.dp)
                     )
-
-                    // Verification Glyph
-                    val statusBadgeText = when {
-                        isSiteVerifiedSuccess -> AppStrings.siteReachable(lang)
-                        urlFetchStatus == FetchStatus.NO_INTERNET -> AppStrings.errorNoInternet(lang)
-                        else -> AppStrings.errorNoQueuesFound(lang)
-                    }
-                    Box(
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(if (isSiteVerifiedSuccess) Color(0x3310B981) else Color(0x33EF4444))
-                            .padding(horizontal = 8.dp, vertical = 3.dp)
-                    ) {
-                        Text(
-                            text = statusBadgeText,
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = if (isSiteVerifiedSuccess) Color(0xFF34D399) else Color(0xFFF87171)
+                    when {
+                        isChecking -> StatusChip(
+                            text = AppStrings.siteStateChecking(lang),
+                            background = ZtColors.ChipGrey,
+                            foreground = ZtColors.ChipGreyText,
+                            icon = null
+                        )
+                        isSiteVerifiedSuccess -> StatusChip(
+                            text = AppStrings.siteReachable(lang),
+                            background = ZtColors.ChipGreen,
+                            foreground = ZtColors.ChipGreenText,
+                            icon = null
+                        )
+                        else -> StatusChip(
+                            text = if (urlFetchStatus == FetchStatus.NO_INTERNET) {
+                                AppStrings.errorNoInternet(lang)
+                            } else {
+                                AppStrings.errorNoQueuesFound(lang)
+                            },
+                            background = ZtColors.ChipRed,
+                            foreground = ZtColors.ChipRedText,
+                            icon = Icons.Default.ErrorOutline
                         )
                     }
                 }
 
-                Text(
-                    text = AppStrings.siteAddressDesc(lang),
-                    fontSize = 11.sp,
-                    color = Color(0xB3BAE6FD)
-                )
+                Text(text = AppStrings.siteAddressDesc(lang), style = ZtType.caption, color = ZtColors.TextSecondary)
 
+                val urlBad = !isChecking && !isSiteVerifiedSuccess
                 OutlinedTextField(
                     value = siteUrl,
                     onValueChange = { onSiteUrlChanged(it) },
                     singleLine = true,
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(16.dp),
-                    colors = OutlinedTextFieldDefaults.colors(
-                        focusedTextColor = Color.White,
-                        unfocusedTextColor = Color.White,
-                        focusedBorderColor = if (isSiteVerifiedSuccess) Color(0xFFFF5E3A) else Color(0xFFEF4444),
-                        unfocusedBorderColor = if (isSiteVerifiedSuccess) Color(0x33FFFFFF) else Color(0x66EF4444),
-                        focusedContainerColor = Color(0x1AFFFFFF),
-                        unfocusedContainerColor = Color(0x14FFFFFF)
+                    textStyle = ZtType.body,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp),
+                    shape = ZtShapes.Control,
+                    colors = glassFieldColors(
+                        focusedBorder = if (urlBad) Color(0xFFEF4444) else ZtColors.Accent,
+                        unfocusedBorder = if (urlBad) Color(0x66EF4444) else ZtColors.InputBorder
                     )
                 )
-
-                if (!isSiteVerifiedSuccess && !isVerifyingUrl) {
-                    val errText = if (urlFetchStatus == FetchStatus.NO_INTERNET) {
-                        AppStrings.errorNoInternet(lang)
-                    } else {
-                        AppStrings.errorNoQueuesFound(lang)
-                    }
-                    Text(
-                        text = errText,
-                        fontSize = 10.sp,
-                        color = Color(0xFFF87171)
-                    )
-                }
             }
         }
 
-        // 3. Timers: Native Android Spinners restricted to 1..240 (No Edit Boxes!)
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .floatingShadow(color = Color(0xB3000000), borderRadius = 24.dp, blurRadius = 24.dp, offsetY = 10.dp)
-                .shadow(10.dp, RoundedCornerShape(24.dp), ambientColor = Color(0x66000000), spotColor = Color(0x80000000))
-                .clip(RoundedCornerShape(24.dp))
-                .background(Color(0xBF141A29))
-                .padding(18.dp)
-        ) {
+        // 3. Timers: presets only (no free text), ranges match what really works
+        GlassCard(modifier = Modifier.fillMaxWidth(), contentPadding = PaddingValues18) {
             Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                // Spinner 1: Advance Warning Notice
                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
+                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Text(text = AppStrings.advanceNoticeTitle(lang), style = ZtType.overline, color = Color.White)
                         Text(
-                            text = AppStrings.advanceNoticeTitle(lang),
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Color.White
-                        )
-                        Text(
-                            text = "1–240 \${AppStrings.minShort(lang)}",
-                            fontSize = 10.sp,
-                            color = Color(0x99BAE6FD)
+                            text = "\${AppStrings.advanceNoticeHint(lang)} · \${AppStrings.rangeMinutes(lang, ADVANCE_PRESETS.first(), ADVANCE_PRESETS.last())}",
+                            style = ZtType.caption,
+                            color = ZtColors.TextTertiary
                         )
                     }
-
-                    ExposedDropdownMenuBox(
-                        expanded = advanceDropdownExpanded,
-                        onExpandedChange = { advanceDropdownExpanded = it }
-                    ) {
-                        OutlinedTextField(
-                            value = "$advanceMinutes \${AppStrings.minShort(lang)}",
-                            onValueChange = {},
-                            readOnly = true,
-                            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = advanceDropdownExpanded) },
-                            modifier = Modifier.menuAnchor().fillMaxWidth(),
-                            shape = RoundedCornerShape(16.dp),
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedTextColor = Color.White,
-                                unfocusedTextColor = Color.White,
-                                focusedBorderColor = Color(0xFFFF5E3A),
-                                unfocusedBorderColor = Color(0x33FFFFFF),
-                                focusedContainerColor = Color(0x1AFFFFFF),
-                                unfocusedContainerColor = Color(0x14FFFFFF)
-                            )
-                        )
-                        ExposedDropdownMenu(
-                            expanded = advanceDropdownExpanded,
-                            onDismissRequest = { advanceDropdownExpanded = false },
-                            modifier = Modifier.background(Color(0xFF141A29))
-                        ) {
-                            timerOptions.forEach { mins ->
-                                DropdownMenuItem(
-                                    text = { Text("$mins \${AppStrings.minShort(lang)}", fontWeight = FontWeight.Bold, color = Color.White) },
-                                    onClick = {
-                                        onAdvanceMinutesChanged(mins)
-                                        advanceDropdownExpanded = false
-                                    }
-                                )
-                            }
-                        }
-                    }
-                }
-
-                Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(Color(0x1AFFFFFF)))
-
-                // Spinner 2: Site Refresh Interval
-                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = AppStrings.refreshIntervalTitle(lang),
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Color.White
-                        )
-                        Text(
-                            text = "1–240 \${AppStrings.minShort(lang)}",
-                            fontSize = 10.sp,
-                            color = Color(0x99BAE6FD)
-                        )
-                    }
-
-                    ExposedDropdownMenuBox(
-                        expanded = refreshDropdownExpanded,
-                        onExpandedChange = { refreshDropdownExpanded = it }
-                    ) {
-                        OutlinedTextField(
-                            value = "$refreshMinutes \${AppStrings.minShort(lang)}",
-                            onValueChange = {},
-                            readOnly = true,
-                            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = refreshDropdownExpanded) },
-                            modifier = Modifier.menuAnchor().fillMaxWidth(),
-                            shape = RoundedCornerShape(16.dp),
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedTextColor = Color.White,
-                                unfocusedTextColor = Color.White,
-                                focusedBorderColor = Color(0xFFFF5E3A),
-                                unfocusedBorderColor = Color(0x33FFFFFF),
-                                focusedContainerColor = Color(0x1AFFFFFF),
-                                unfocusedContainerColor = Color(0x14FFFFFF)
-                            )
-                        )
-                        ExposedDropdownMenu(
-                            expanded = refreshDropdownExpanded,
-                            onDismissRequest = { refreshDropdownExpanded = false },
-                            modifier = Modifier.background(Color(0xFF141A29))
-                        ) {
-                            timerOptions.forEach { mins ->
-                                DropdownMenuItem(
-                                    text = { Text("$mins \${AppStrings.minShort(lang)}", fontWeight = FontWeight.Bold, color = Color.White) },
-                                    onClick = {
-                                        onRefreshMinutesChanged(mins)
-                                        refreshDropdownExpanded = false
-                                    }
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        // 4. Notification Toggles (Sound & Vibration shared by Notifications and Emergency Power Outages)
-        val anyAlertsEnabled = notificationsEnabled || emergencyNotificationsEnabled
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .floatingShadow(color = Color(0xB3000000), borderRadius = 24.dp, blurRadius = 24.dp, offsetY = 10.dp)
-                .shadow(10.dp, RoundedCornerShape(24.dp), ambientColor = Color(0x66000000), spotColor = Color(0x80000000))
-                .clip(RoundedCornerShape(24.dp))
-                .background(Color(0xBF141A29))
-                .border(1.dp, Color(0x26FFFFFF), RoundedCornerShape(24.dp))
-                .padding(18.dp)
-        ) {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Notifications,
-                            contentDescription = null,
-                            tint = Color.White,
-                            modifier = Modifier.size(16.dp)
-                        )
-                        Text(AppStrings.notifications(lang), fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.White)
-                    }
-                    Switch(
-                        checked = notificationsEnabled,
-                        onCheckedChange = onToggleNotifications,
-                        colors = SwitchDefaults.colors(
-                            checkedThumbColor = Color.White,
-                            checkedTrackColor = Color(0xFFFF5E3A),
-                            uncheckedThumbColor = Color.LightGray,
-                            uncheckedTrackColor = Color(0x33FFFFFF)
-                        )
+                    GlassDropdown(
+                        value = "$advanceMinutes $minShort",
+                        options = ADVANCE_PRESETS.map { "$it $minShort" },
+                        onSelect = { onAdvanceMinutesChanged(ADVANCE_PRESETS[it]) }
                     )
                 }
 
-                Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(Color(0x1AFFFFFF)))
+                Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(ZtColors.Divider))
 
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.VolumeUp,
-                            contentDescription = null,
-                            tint = if (anyAlertsEnabled) Color(0xB3BAE6FD) else Color(0x4DBAE6FD),
-                            modifier = Modifier.size(16.dp)
-                        )
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                        Text(text = AppStrings.refreshIntervalTitle(lang), style = ZtType.overline, color = Color.White)
                         Text(
-                            text = AppStrings.sound(lang),
-                            fontSize = 12.sp,
-                            color = if (anyAlertsEnabled) Color.White else Color(0x66FFFFFF)
+                            text = "\${AppStrings.rangeMinutes(lang, REFRESH_PRESETS.first(), REFRESH_PRESETS.last())} · \${AppStrings.refreshFloorHint(lang)}",
+                            style = ZtType.caption,
+                            color = ZtColors.TextTertiary
                         )
                     }
-                    Switch(
-                        checked = anyAlertsEnabled && soundEnabled,
-                        onCheckedChange = onToggleSound,
-                        enabled = anyAlertsEnabled,
-                        colors = SwitchDefaults.colors(
-                            checkedThumbColor = Color.White,
-                            checkedTrackColor = Color(0xFFFF5E3A),
-                            uncheckedThumbColor = Color.LightGray,
-                            uncheckedTrackColor = Color(0x33FFFFFF),
-                            disabledCheckedTrackColor = Color(0x33FF5E3A),
-                            disabledUncheckedTrackColor = Color(0x1AFFFFFF),
-                            disabledUncheckedThumbColor = Color(0x4DFFFFFF)
-                        )
-                    )
-                }
-
-                Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(Color(0x1AFFFFFF)))
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Vibration,
-                            contentDescription = null,
-                            tint = if (anyAlertsEnabled) Color(0xB3BAE6FD) else Color(0x4DBAE6FD),
-                            modifier = Modifier.size(16.dp)
-                        )
-                        Text(
-                            text = AppStrings.vibration(lang),
-                            fontSize = 12.sp,
-                            color = if (anyAlertsEnabled) Color.White else Color(0x66FFFFFF)
-                        )
-                    }
-                    Switch(
-                        checked = anyAlertsEnabled && vibrationEnabled,
-                        onCheckedChange = onToggleVibration,
-                        enabled = anyAlertsEnabled,
-                        colors = SwitchDefaults.colors(
-                            checkedThumbColor = Color.White,
-                            checkedTrackColor = Color(0xFFFF5E3A),
-                            uncheckedThumbColor = Color.LightGray,
-                            uncheckedTrackColor = Color(0x33FFFFFF),
-                            disabledCheckedTrackColor = Color(0x33FF5E3A),
-                            disabledUncheckedTrackColor = Color(0x1AFFFFFF),
-                            disabledUncheckedThumbColor = Color(0x4DFFFFFF)
-                        )
+                    GlassDropdown(
+                        value = "$refreshMinutes $minShort",
+                        options = REFRESH_PRESETS.map { "$it $minShort" },
+                        onSelect = { onRefreshMinutesChanged(REFRESH_PRESETS[it]) }
                     )
                 }
             }
         }
 
-        // 4b. Emergency Power Outages Switch (Separate block below Notifications block; always visible even when no outages detected; ON by default)
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .floatingShadow(color = Color(0xB3000000), borderRadius = 24.dp, blurRadius = 24.dp, offsetY = 10.dp)
-                .shadow(10.dp, RoundedCornerShape(24.dp), ambientColor = Color(0x66000000), spotColor = Color(0x80000000))
-                .clip(RoundedCornerShape(24.dp))
-                .background(Color(0xBF141A29))
-                .border(1.dp, Color(0x26FFFFFF), RoundedCornerShape(24.dp))
-                .padding(18.dp)
-        ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Row(
-                    modifier = Modifier
-                        .weight(1f)
-                        .padding(end = 12.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Warning,
-                        contentDescription = null,
-                        tint = Color(0xFFFF5E3A),
-                        modifier = Modifier.size(16.dp)
-                    )
-                    Text(
-                        text = AppStrings.emergencyNotifications(lang),
-                        fontSize = 12.sp,
-                        lineHeight = 16.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = Color.White
-                    )
+        // 4. Alerts: the master switch for all addresses (owner decision 1), then sound and vibration.
+        // Sound and vibration follow the master switch (spec/SUBSCRIPTIONS.md section 7).
+        val anyAlertsEnabled = alertsMaster
+        val noAddressAlerts = Subscriptions.noAlertsCaption(alertsMaster, subscriptions)
+        GlassCard(modifier = Modifier.fillMaxWidth(), contentPadding = PaddingValues18) {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                SwitchRow(
+                    icon = Icons.Default.Notifications,
+                    iconTint = Color.White,
+                    title = AppStrings.notifications(lang),
+                    hint = AppStrings.masterHint(lang),
+                    checked = alertsMaster,
+                    onCheckedChange = onToggleMaster,
+                    lang = lang
+                )
+                if (noAddressAlerts) {
+                    Text(text = AppStrings.noAddressAlerts(lang), style = ZtType.caption, color = ZtColors.Accent)
                 }
-                Switch(
-                    checked = emergencyNotificationsEnabled,
-                    onCheckedChange = onToggleEmergencyNotifications,
-                    enabled = true,
-                    colors = SwitchDefaults.colors(
-                        checkedThumbColor = Color.White,
-                        checkedTrackColor = Color(0xFFFF5E3A),
-                        uncheckedThumbColor = Color.LightGray,
-                        uncheckedTrackColor = Color(0x33FFFFFF)
-                    )
+                Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(ZtColors.Divider))
+                SwitchRow(
+                    icon = Icons.Default.VolumeUp,
+                    iconTint = if (anyAlertsEnabled) Color(0xB3BAE6FD) else Color(0x4DBAE6FD),
+                    title = AppStrings.sound(lang),
+                    hint = null,
+                    checked = anyAlertsEnabled && soundEnabled,
+                    onCheckedChange = onToggleSound,
+                    lang = lang,
+                    enabled = anyAlertsEnabled
+                )
+                Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(ZtColors.Divider))
+                SwitchRow(
+                    icon = Icons.Default.Vibration,
+                    iconTint = if (anyAlertsEnabled) Color(0xB3BAE6FD) else Color(0x4DBAE6FD),
+                    title = AppStrings.vibration(lang),
+                    hint = null,
+                    checked = anyAlertsEnabled && vibrationEnabled,
+                    onCheckedChange = onToggleVibration,
+                    lang = lang,
+                    enabled = anyAlertsEnabled
+                )
+                Text(
+                    text = AppStrings.soundVibrationHint(lang),
+                    style = ZtType.caption,
+                    color = ZtColors.TextTertiary,
+                    modifier = Modifier.padding(top = 2.dp)
                 )
             }
         }
 
-        // 5. Language Selection Card (Dynamic Localization!)
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .floatingShadow(color = Color(0xB3000000), borderRadius = 24.dp, blurRadius = 24.dp, offsetY = 10.dp)
-                .shadow(10.dp, RoundedCornerShape(24.dp), ambientColor = Color(0x66000000), spotColor = Color(0x80000000))
-                .clip(RoundedCornerShape(24.dp))
-                .background(Color(0xBF141A29))
-                .border(1.dp, Color(0x26FFFFFF), RoundedCornerShape(24.dp))
-                .padding(18.dp)
-        ) {
+        // 4b. Emergency follow-ups for all addresses: restoration time changes and restoration. The start is
+        // always announced (spec/NOTIFICATIONS.md 2.4). Locked and shown off while the master is off.
+        GlassCard(modifier = Modifier.fillMaxWidth(), contentPadding = PaddingValues18) {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(text = AppStrings.emergencyAlertsTitle(lang), style = ZtType.overline, color = Color.White)
+                Text(text = AppStrings.emergencyAlertsDesc(lang), style = ZtType.caption, color = ZtColors.TextSecondary)
+                SwitchRow(
+                    icon = Icons.Default.Schedule,
+                    iconTint = if (alertsMaster) ZtColors.EmergencyAmberStart else Color(0x4DBAE6FD),
+                    title = AppStrings.emergencyEtaAlertsTitle(lang),
+                    hint = AppStrings.emergencyEtaAlertsHint(lang),
+                    checked = alertsMaster && emergencyEtaAlerts,
+                    onCheckedChange = onToggleEmergencyEtaAlerts,
+                    lang = lang,
+                    enabled = alertsMaster
+                )
+                Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(ZtColors.Divider))
+                SwitchRow(
+                    icon = Icons.Default.Bolt,
+                    iconTint = if (alertsMaster) ZtColors.ChipGreenText else Color(0x4DBAE6FD),
+                    title = AppStrings.emergencyEndAlertsTitle(lang),
+                    hint = AppStrings.emergencyEndAlertsHint(lang),
+                    checked = alertsMaster && emergencyEndAlerts,
+                    onCheckedChange = onToggleEmergencyEndAlerts,
+                    lang = lang,
+                    enabled = alertsMaster
+                )
+            }
+        }
+
+        // 5. Language
+        GlassCard(modifier = Modifier.fillMaxWidth(), contentPadding = PaddingValues18) {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.Language,
-                        contentDescription = null,
-                        tint = Color(0xFFFF5E3A),
-                        modifier = Modifier.size(14.dp)
-                    )
+                    Icon(Icons.Default.Language, contentDescription = null, tint = ZtColors.Accent, modifier = Modifier.size(18.dp))
                     Text(
                         text = AppStrings.languageTitle(lang),
-                        fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = Color.White
+                        style = ZtType.overline,
+                        color = Color.White,
+                        modifier = Modifier.weight(1f)
                     )
                 }
 
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
+                        .selectableGroup()
                         .clip(RoundedCornerShape(12.dp))
                         .background(Color(0x59000000))
                         .border(1.dp, Color(0x1AFFFFFF), RoundedCornerShape(12.dp))
                         .padding(4.dp),
                     horizontalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
-                    listOf("SYSTEM" to (if (lang == "uk") "Системна" else "System"), "uk" to "Українська", "en" to "English").forEach { (code, label) ->
+                    listOf(
+                        "SYSTEM" to AppStrings.langSystem(lang),
+                        "uk" to "Українська",
+                        "en" to "English"
+                    ).forEach { (code, label) ->
                         val isSelected = currentLanguage.equals(code, ignoreCase = true)
                         Box(
                             modifier = Modifier
                                 .weight(1f)
+                                .heightIn(min = ZtMinTouch - 8.dp)
                                 .clip(RoundedCornerShape(9.dp))
                                 .background(if (isSelected) Color.White else Color.Transparent)
-                                .clickable { onLanguageSelected(code) }
-                                .padding(vertical = 8.dp, horizontal = 8.dp),
+                                .selectable(selected = isSelected, role = Role.RadioButton) { onLanguageSelected(code) }
+                                .padding(vertical = 8.dp, horizontal = 6.dp),
                             contentAlignment = Alignment.Center
                         ) {
                             Text(
                                 text = label,
-                                fontSize = 11.sp,
+                                style = ZtType.label,
                                 fontWeight = if (isSelected) FontWeight.Bold else FontWeight.SemiBold,
-                                color = if (isSelected) Color.Black else Color(0xBFE0F2FE)
+                                color = if (isSelected) Color.Black else Color(0xBFE0F2FE),
+                                textAlign = TextAlign.Center,
+                                maxLines = 2
                             )
                         }
                     }
@@ -4337,198 +4720,815 @@ fun SettingsScreen(
             }
         }
 
-        // 6. Diagnostics & Actions Card
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .floatingShadow(color = Color(0xB3000000), borderRadius = 24.dp, blurRadius = 24.dp, offsetY = 10.dp)
-                .shadow(10.dp, RoundedCornerShape(24.dp), ambientColor = Color(0x66000000), spotColor = Color(0x80000000))
-                .clip(RoundedCornerShape(24.dp))
-                .background(Color(0xBF141A29))
-                .border(1.dp, Color(0x26FFFFFF), RoundedCornerShape(24.dp))
-                .padding(18.dp)
-        ) {
+        // 6. Diagnostics and actions
+        GlassCard(modifier = Modifier.fillMaxWidth(), contentPadding = PaddingValues18) {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    // Send Test Alert Button (Respects Sound & Vibration)
-                    Box(
-                        modifier = Modifier
-                            .weight(1f)
-                            .clip(RoundedCornerShape(16.dp))
-                            .background(Color(0xFFFF5E3A))
-                            .clickable {
-                                onSendTestAlert()
-                                onShowAppBanner(if (lang == "uk") "Тестове сповіщення надіслано" else "Test alert dispatched")
-                            }
-                            .padding(vertical = 12.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
-                        ) {
-                            Icon(Icons.Default.Send, contentDescription = null, tint = Color.White, modifier = Modifier.size(14.dp))
-                            Text(AppStrings.testAlertBtn(lang), fontSize = 12.sp, fontWeight = FontWeight.Bold, color = Color.White)
-                        }
-                    }
-
-                    // Refresh Button with In-App Application Icon Notification Banner
-                    Box(
-                        modifier = Modifier
-                            .weight(1f)
-                            .clip(RoundedCornerShape(16.dp))
-                            .background(Color(0x1AFFFFFF))
-                            .border(1.dp, Color(0x26FFFFFF), RoundedCornerShape(16.dp))
-                            .clickable {
-                                onForceRefresh()
-                            }
-                            .padding(vertical = 12.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
-                        ) {
-                            Icon(Icons.Default.Language, contentDescription = null, tint = Color.White, modifier = Modifier.size(14.dp))
-                            Text(AppStrings.refreshBtn(lang), fontSize = 12.sp, fontWeight = FontWeight.SemiBold, color = Color.White)
-                        }
+                val stackButtons = LocalDensity.current.fontScale >= 1.3f
+                val testButton: @Composable (Modifier) -> Unit = { m ->
+                    ActionButton(
+                        text = AppStrings.testAlertBtn(lang),
+                        icon = Icons.Default.Send,
+                        filled = true,
+                        onClick = {
+                            onSendTestAlert()
+                            onShowAppBanner(AppStrings.testAlertSent(lang))
+                        },
+                        modifier = m
+                    )
+                }
+                val refreshButton: @Composable (Modifier) -> Unit = { m ->
+                    ActionButton(
+                        text = AppStrings.refreshBtn(lang),
+                        icon = Icons.Default.Refresh,
+                        filled = false,
+                        onClick = onForceRefresh,
+                        modifier = m,
+                        busy = isRefreshing,
+                        busyText = AppStrings.refreshing(lang)
+                    )
+                }
+                if (stackButtons) {
+                    testButton(Modifier.fillMaxWidth())
+                    refreshButton(Modifier.fillMaxWidth())
+                } else {
+                    // Same height even when only one label wraps to two lines
+                    Row(modifier = Modifier.fillMaxWidth().height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        testButton(Modifier.weight(1f).fillMaxHeight())
+                        refreshButton(Modifier.weight(1f).fillMaxHeight())
                     }
                 }
 
-                // Reset to Defaults
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(16.dp))
-                        .border(1.dp, Color(0x1AFFFFFF), RoundedCornerShape(16.dp))
-                        .clickable { showResetConfirmDialog = true }
-                        .padding(vertical = 10.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                    ) {
-                        Icon(Icons.Default.Refresh, contentDescription = null, tint = Color(0xB3BAE6FD), modifier = Modifier.size(14.dp))
-                        Text(AppStrings.resetDefaultsBtn(lang), fontSize = 12.sp, fontWeight = FontWeight.Medium, color = Color(0xB3BAE6FD))
-                    }
-                }
+                ActionButton(
+                    text = AppStrings.resetDefaultsBtn(lang),
+                    icon = Icons.Default.Refresh,
+                    filled = false,
+                    subdued = true,
+                    onClick = { showResetConfirmDialog = true },
+                    modifier = Modifier.fillMaxWidth()
+                )
             }
         }
 
         Spacer(modifier = Modifier.height(96.dp))
     }
 
-    // =========================================================================================
-    // Full-Screen Queue Help & Interactive ZTOE Address Lookup Dialog ("?" Button)
-    // =========================================================================================
     if (showQueueHelpDialog) {
-        var allRems by remember {
-            mutableStateOf(ZtoeAddressLookup.getRems())
-        }
-        val currentRem = allRems.find { it.id == selectedRemId } ?: allRems.first()
+        AddressLookupDialog(
+            siteUrl = siteUrl,
+            lang = lang,
+            saved = selectedAddressQuery,
+            onDismiss = { showQueueHelpDialog = false },
+            onApply = { queue, statusText, addressLabel, query ->
+                onAddAddress(queue, statusText, addressLabel, query)
+                showQueueHelpDialog = false
+            },
+            onShowAppBanner = onShowAppBanner
+        )
+    }
 
-        var settlementsList by remember(selectedRemId) {
-            mutableStateOf(ZtoeAddressLookup.getSettlementsForRem(selectedRemId))
-        }
-        var streetsList by remember(selectedSettlementId) {
-            mutableStateOf(
-                if (selectedSettlementId.isNotBlank()) {
-                    ZtoeAddressLookup.getStreetsForSettlement(selectedSettlementId)
-                } else {
-                    emptyList()
+    removeCandidate?.let { item ->
+        AlertDialog(
+            onDismissRequest = { removeCandidate = null },
+            title = { Text(AppStrings.removeConfirmTitle(lang), style = ZtType.heading, color = Color.White) },
+            text = {
+                Text(
+                    AppStrings.removeConfirmBody(lang, Subscriptions.displayLabel(item)),
+                    style = ZtType.body,
+                    color = ZtColors.TextSecondary
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        onRemoveSubscription(item.id)
+                        removeCandidate = null
+                    },
+                    modifier = Modifier.heightIn(min = ZtMinTouch)
+                ) {
+                    Text(AppStrings.removeAddress(lang), style = ZtType.label, color = ZtColors.Accent, fontWeight = FontWeight.Bold)
                 }
-            )
-        }
-        var housesList by remember(selectedStreetId) {
-            mutableStateOf(
-                if (selectedStreetId.isNotBlank()) {
-                    ZtoeAddressLookup.getHousesForStreet(selectedStreetId)
-                } else {
-                    emptyList()
+            },
+            dismissButton = {
+                TextButton(onClick = { removeCandidate = null }, modifier = Modifier.heightIn(min = ZtMinTouch)) {
+                    Text(AppStrings.cancel(lang), style = ZtType.label, color = Color.White)
                 }
-            )
-        }
+            },
+            containerColor = ZtColors.CardSolid
+        )
+    }
 
-        // Refresh the list of all REMs, Cities, Streets and Houses whenever User enters the "?" screen
-        LaunchedEffect(siteUrl) {
-            val fetchedRems = withContext(Dispatchers.IO) {
-                ZtoeAddressLookup.fetchRemsFromZtoe(siteUrl, forceRefresh = true)
-            }
-            if (fetchedRems.isNotEmpty()) {
-                allRems = fetchedRems
-            }
-        }
-
-        // Dynamically load full settlement list for selected REM from ZTOE (refreshed when entering "?" screen)
-        LaunchedEffect(selectedRemId, siteUrl) {
-            val fetched = withContext(Dispatchers.IO) {
-                ZtoeAddressLookup.fetchSettlementsForRem(selectedRemId, siteUrl, forceRefresh = true)
-            }
-            if (fetched.isNotEmpty()) {
-                settlementsList = fetched
-                if (selectedSettlementId.isBlank() || fetched.none { it.id == selectedSettlementId }) {
-                    selectedSettlementId = fetched.first().id
+    renameCandidate?.let { item ->
+        var text by remember(item.id) { mutableStateOf(item.label) }
+        AlertDialog(
+            onDismissRequest = { renameCandidate = null },
+            title = { Text(AppStrings.renameAddress(lang), style = ZtType.heading, color = Color.White) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(
+                        value = text,
+                        onValueChange = { text = it.take(Subscriptions.MAX_LABEL_LENGTH) },
+                        singleLine = true,
+                        textStyle = ZtType.body,
+                        placeholder = { Text(Subscriptions.defaultLabel(item), style = ZtType.body, color = ZtColors.TextTertiary) },
+                        modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp),
+                        shape = ZtShapes.Control,
+                        colors = glassFieldColors()
+                    )
+                    Text(AppStrings.renameHint(lang), style = ZtType.caption, color = ZtColors.TextTertiary)
                 }
-            }
-        }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        onRenameSubscription(item.id, text)
+                        renameCandidate = null
+                    },
+                    modifier = Modifier.heightIn(min = ZtMinTouch)
+                ) {
+                    Text(AppStrings.save(lang), style = ZtType.label, color = ZtColors.Accent, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { renameCandidate = null }, modifier = Modifier.heightIn(min = ZtMinTouch)) {
+                    Text(AppStrings.cancel(lang), style = ZtType.label, color = Color.White)
+                }
+            },
+            containerColor = ZtColors.CardSolid
+        )
+    }
 
-        // Dynamically load full street list (and bulk-index all houses for every street in the settlement) from ZTOE
-        LaunchedEffect(selectedRemId, selectedSettlementId, siteUrl) {
-            if (selectedSettlementId.isBlank()) {
-                streetsList = emptyList()
-                return@LaunchedEffect
-            }
-            val fetched = withContext(Dispatchers.IO) {
-                ZtoeAddressLookup.fetchStreetsForSettlement(selectedRemId, selectedSettlementId, siteUrl, forceRefresh = true)
-            }
-            if (fetched.isNotEmpty()) {
-                streetsList = fetched
-                allRems = ZtoeAddressLookup.getRems()
-                settlementsList = ZtoeAddressLookup.getSettlementsForRem(selectedRemId)
-                if (selectedStreetId.isNotBlank()) {
-                    val bulkIndexed = ZtoeAddressLookup.getHousesForStreet(selectedStreetId)
-                    if (bulkIndexed.isNotEmpty()) {
-                        housesList = bulkIndexed
+    if (showResetConfirmDialog) {
+        AlertDialog(
+            onDismissRequest = { showResetConfirmDialog = false },
+            title = { Text(AppStrings.resetConfirmTitle(lang), style = ZtType.heading, color = Color.White) },
+            text = { Text(AppStrings.resetConfirmDesc(lang), style = ZtType.body, color = ZtColors.TextSecondary) },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        onResetDefaults()
+                        showResetConfirmDialog = false
+                        onShowAppBanner(AppStrings.settingsReset(lang))
+                    },
+                    modifier = Modifier.heightIn(min = ZtMinTouch)
+                ) {
+                    Text(AppStrings.resetYes(lang), style = ZtType.label, color = ZtColors.Accent, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showResetConfirmDialog = false }, modifier = Modifier.heightIn(min = ZtMinTouch)) {
+                    Text(AppStrings.cancel(lang), style = ZtType.label, color = Color.White)
+                }
+            },
+            containerColor = ZtColors.CardSolid
+        )
+    }
+}
+
+private val PaddingValues18 = PaddingValues(18.dp)
+
+// =============================================================================================
+// "Мої адреси" card (multi-address step 2, spec/SUBSCRIPTIONS.md, mockup frame 1)
+// =============================================================================================
+
+@Composable
+private fun MyAddressesCard(
+    store: SubscriptionStore,
+    /** Master off: every address's switches show off and are locked; their own values are kept. */
+    alertsMaster: Boolean,
+    advanceMinutes: Int,
+    lang: String,
+    onHelp: () -> Unit,
+    onAddQueueOnly: (String) -> Unit,
+    onMove: (String, Int) -> Unit,
+    onRemove: (Subscription) -> Unit,
+    onRename: (Subscription) -> Unit,
+    onMakePrimary: (String) -> Unit,
+    onSetPlanned: (String, Boolean) -> Unit,
+    onSetEmergency: (String, Boolean) -> Unit
+) {
+    val count = store.items.size
+    val canAdd = count < Subscriptions.MAX_ITEMS
+    GlassCard(modifier = Modifier.fillMaxWidth(), contentPadding = PaddingValues18) {
+        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(text = AppStrings.myAddressesTitle(lang), style = ZtType.overline, color = Color.White)
+                    Text(text = AppStrings.myAddressesDesc(lang), style = ZtType.caption, color = ZtColors.TextSecondary)
+                }
+                if (count > 0) {
+                    StatusChip(
+                        text = AppStrings.addressesCount(lang, count, Subscriptions.MAX_ITEMS),
+                        background = ZtColors.ChipGrey,
+                        foreground = ZtColors.ChipGreyText,
+                        icon = null
+                    )
+                }
+                // 48 dp touch target around the 40 dp "?" tile; opens the address lookup
+                Box(
+                    modifier = Modifier
+                        .size(ZtMinTouch)
+                        .clickable(role = Role.Button, onClickLabel = AppStrings.queueHelpTitle(lang), onClick = onHelp)
+                        .semantics { contentDescription = AppStrings.queueHelpTitle(lang) },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(40.dp)
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(ZtColors.Accent)
+                            .border(1.dp, Color(0x40FFFFFF), RoundedCornerShape(16.dp)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(Icons.Default.HelpOutline, contentDescription = null, tint = Color.White, modifier = Modifier.size(20.dp))
                     }
                 }
             }
+
+            if (!alertsMaster && store.items.isNotEmpty()) {
+                Text(text = AppStrings.masterOffCaption(lang), style = ZtType.caption, color = ZtColors.ChipAmberText)
+            }
+            // Drag the handle to reorder: a local order follows the finger, the store is written on release
+            val ids = store.items.map { it.id }
+            var order by remember { mutableStateOf(ids) }
+            var draggingId by remember { mutableStateOf<String?>(null) }
+            var dragOffset by remember { mutableFloatStateOf(0f) }
+            val heights = remember { mutableStateMapOf<String, Int>() }
+            val gapPx = with(LocalDensity.current) { 12.dp.toPx() }
+            val currentOnMove by rememberUpdatedState(onMove)
+            // the drag gesture outlives recompositions: read the newest store order through this
+            val currentIds by rememberUpdatedState(ids)
+            if (draggingId == null && order != ids) order = ids
+            val byId = store.items.associateBy { it.id }
+
+            fun dragBy(id: String, dy: Float) {
+                dragOffset += dy
+                val i = order.indexOf(id)
+                if (i < 0) return
+                if (dragOffset > 0f && i < order.lastIndex) {
+                    val step = (heights[order[i + 1]] ?: 0) + gapPx
+                    if (dragOffset > step / 2f) {
+                        order = order.toMutableList().apply { add(i + 1, removeAt(i)) }
+                        dragOffset -= step
+                    }
+                } else if (dragOffset < 0f && i > 0) {
+                    val step = (heights[order[i - 1]] ?: 0) + gapPx
+                    if (-dragOffset > step / 2f) {
+                        order = order.toMutableList().apply { add(i - 1, removeAt(i)) }
+                        dragOffset += step
+                    }
+                }
+            }
+
+            fun dropped(id: String) {
+                val to = order.indexOf(id)
+                draggingId = null
+                dragOffset = 0f
+                if (to >= 0 && to != currentIds.indexOf(id)) currentOnMove(id, to)
+            }
+
+            order.mapNotNull { byId[it] }.forEachIndexed { index, item ->
+              // key: when the order changes the block keeps its own composition, so the drag gesture in
+              // progress is not handed to another block and cancelled (the card then "hung" mid-drag)
+              key(item.id) {
+                val label = Subscriptions.displayLabel(item)
+                val isDragging = draggingId == item.id
+                val handle = if (store.items.size < 2) null else Modifier
+                    .pointerInput(item.id) {
+                        detectDragGestures(
+                            onDragStart = {
+                                draggingId = item.id
+                                dragOffset = 0f
+                            },
+                            onDragEnd = { dropped(item.id) },
+                            onDragCancel = { dropped(item.id) },
+                            onDrag = { change, amount ->
+                                change.consume()
+                                dragBy(item.id, amount.y)
+                            }
+                        )
+                    }
+                    .semantics {
+                        contentDescription = "\${AppStrings.reorderHandle(lang)}: $label"
+                        customActions = buildList {
+                            if (index > 0) add(CustomAccessibilityAction(AppStrings.moveUp(lang)) { currentOnMove(item.id, index - 1); true })
+                            if (index < store.items.lastIndex) add(CustomAccessibilityAction(AppStrings.moveDown(lang)) { currentOnMove(item.id, index + 1); true })
+                        }
+                    }
+                SubscriptionBlock(
+                    item = item,
+                    alertsMaster = alertsMaster,
+                    isPrimary = item.id == store.primaryId,
+                    advanceMinutes = advanceMinutes,
+                    lang = lang,
+                    onRemove = { onRemove(item) },
+                    onRename = { onRename(item) },
+                    onMakePrimary = { onMakePrimary(item.id) },
+                    onSetPlanned = { onSetPlanned(item.id, it) },
+                    onSetEmergency = { onSetEmergency(item.id, it) },
+                    dragHandle = handle,
+                    modifier = Modifier
+                        .onSizeChanged { heights[item.id] = it.height }
+                        .zIndex(if (isDragging) 1f else 0f)
+                        .graphicsLayer {
+                            translationY = if (isDragging) dragOffset else 0f
+                            scaleX = if (isDragging) 1.02f else 1f
+                            scaleY = if (isDragging) 1.02f else 1f
+                        }
+                        .then(if (isDragging) Modifier.shadow(10.dp, RoundedCornerShape(16.dp)) else Modifier)
+                )
+              }
+            }
+
+            if (canAdd) {
+                ActionButton(
+                    text = AppStrings.addAddress(lang),
+                    icon = Icons.Default.Add,
+                    filled = true,
+                    onClick = onHelp,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                val used = store.items.mapNotNull { if (it.address == null) it.queue else null }.toSet()
+                val free = QUEUES.filter { it !in used }
+                GlassDropdown(
+                    value = AppStrings.addQueueOnly(lang),
+                    options = free.map { "\${AppStrings.queue(lang)} $it" },
+                    onSelect = { onAddQueueOnly(free[it]) }
+                )
+                if (count > 0) {
+                    Text(
+                        text = AppStrings.addressesLeft(lang, Subscriptions.MAX_ITEMS - count),
+                        style = ZtType.caption,
+                        color = ZtColors.TextTertiary
+                    )
+                }
+            } else {
+                Text(
+                    text = AppStrings.addressLimitReached(lang, Subscriptions.MAX_ITEMS),
+                    style = ZtType.caption,
+                    color = ZtColors.TextSecondary
+                )
+            }
         }
+    }
+}
 
-        // Dynamically load full house list for selected street from ZTOE (served in 0ms when already bulk-indexed)
-        LaunchedEffect(selectedRemId, selectedSettlementId, selectedStreetId, siteUrl) {
-            if (selectedStreetId.isBlank()) {
-                housesList = emptyList()
-                return@LaunchedEffect
+@Composable
+private fun SubscriptionBlock(
+    item: Subscription,
+    alertsMaster: Boolean,
+    isPrimary: Boolean,
+    advanceMinutes: Int,
+    lang: String,
+    onRemove: () -> Unit,
+    onRename: () -> Unit,
+    onMakePrimary: () -> Unit,
+    onSetPlanned: (Boolean) -> Unit,
+    onSetEmergency: (Boolean) -> Unit,
+    /** Gesture and accessibility actions of the reorder handle; null hides it (one address). */
+    dragHandle: Modifier? = null,
+    modifier: Modifier = Modifier
+) {
+    val shape = RoundedCornerShape(16.dp)
+    val label = Subscriptions.displayLabel(item)
+    Column(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(shape)
+            .background(Color(0x14FFFFFF))
+            .border(1.dp, if (isPrimary) Color(0x59FF5E3A) else Color(0x1AFFFFFF), shape)
+            .padding(horizontal = 14.dp, vertical = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            if (dragHandle != null) {
+                // 48 dp grip: press and drag up or down; TalkBack offers "move up" / "move down"
+                Box(modifier = Modifier.size(ZtMinTouch).then(dragHandle), contentAlignment = Alignment.Center) {
+                    Icon(Icons.Default.DragIndicator, contentDescription = null, tint = ZtColors.TextSecondary, modifier = Modifier.size(22.dp))
+                }
             }
-            housesList = ZtoeAddressLookup.getHousesForStreet(selectedStreetId)
-            val fetched = withContext(Dispatchers.IO) {
-                ZtoeAddressLookup.fetchHousesForStreet(selectedRemId, selectedSettlementId, selectedStreetId, siteUrl, forceRefresh = true)
+            @OptIn(ExperimentalLayoutApi::class)
+            FlowRow(
+                modifier = Modifier.weight(1f),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                // a queue-only item already says "Черга X" in its label
+                if (item.address != null) {
+                    StatusChip(
+                        text = when {
+                            item.queue != null -> "\${AppStrings.queue(lang)} \${item.queue}"
+                            !item.queueStatusText.isNullOrBlank() -> AppStrings.noQueueNotDisconnected(lang)
+                            else -> AppStrings.selectQueueAction(lang)
+                        },
+                        background = ZtColors.ChipGrey,
+                        foreground = ZtColors.ChipGreyText,
+                        icon = null
+                    )
+                }
+                if (isPrimary) {
+                    StatusChip(
+                        text = AppStrings.primaryBadge(lang),
+                        background = ZtColors.ChipGrey,
+                        foreground = Color.White,
+                        icon = Icons.Default.Star
+                    )
+                }
             }
-            if (fetched.isNotEmpty()) {
-                housesList = fetched
+            IconTile(icon = Icons.Default.Edit, description = "\${AppStrings.renameAddress(lang)}: $label", onClick = onRename)
+            IconTile(icon = Icons.Default.Delete, description = "\${AppStrings.removeAddress(lang)}: $label", onClick = onRemove, danger = true)
+        }
+        Text(text = label, style = ZtType.subhead, color = Color.White)
+        val caption = item.address?.text?.takeIf { it.isNotBlank() } ?: if (item.address == null) AppStrings.queueOnlyCaption(lang) else null
+        if (caption != null) {
+            Text(text = caption, style = ZtType.caption, color = ZtColors.TextSecondary)
+        }
+        SwitchRow(
+            icon = Icons.Default.Notifications,
+            iconTint = Color.White,
+            title = AppStrings.plannedShort(lang),
+            hint = AppStrings.plannedDesc(lang, advanceMinutes),
+            checked = alertsMaster && item.plannedAlerts,
+            onCheckedChange = onSetPlanned,
+            lang = lang,
+            enabled = alertsMaster && item.queue != null
+        )
+        SwitchRow(
+            icon = Icons.Default.Warning,
+            iconTint = ZtColors.Accent,
+            title = AppStrings.emergencyShort(lang),
+            hint = if (item.address != null) AppStrings.emergencyDesc(lang) else AppStrings.emergencyNeedsAddress(lang),
+            checked = alertsMaster && item.emergencyAlerts && item.address != null,
+            onCheckedChange = onSetEmergency,
+            lang = lang,
+            enabled = alertsMaster && item.address != null
+        )
+        if (!isPrimary) {
+            ActionButton(
+                text = AppStrings.makePrimary(lang),
+                icon = Icons.Default.Star,
+                filled = false,
+                onClick = onMakePrimary,
+                modifier = Modifier.fillMaxWidth()
+            )
+        }
+    }
+}
+
+/** 48 dp touch target around a 36 dp icon tile. */
+@Composable
+private fun IconTile(icon: ImageVector, description: String, onClick: () -> Unit, danger: Boolean = false) {
+    Box(
+        modifier = Modifier
+            .size(ZtMinTouch)
+            .clickable(role = Role.Button, onClick = onClick)
+            .semantics { contentDescription = description },
+        contentAlignment = Alignment.Center
+    ) {
+        Box(
+            modifier = Modifier
+                .size(36.dp)
+                .clip(RoundedCornerShape(12.dp))
+                .background(if (danger) Color(0x33EF4444) else Color(0x1AFFFFFF)),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(icon, contentDescription = null, tint = if (danger) Color(0xFFFCA5A5) else Color.White, modifier = Modifier.size(18.dp))
+        }
+    }
+}
+
+// =============================================================================================
+// Small building blocks
+// =============================================================================================
+
+@Composable
+private fun StatusChip(text: String, background: Color, foreground: Color, icon: ImageVector?) {
+    Row(
+        modifier = Modifier
+            .clip(ZtShapes.Chip)
+            .background(background)
+            .padding(horizontal = 10.dp, vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        if (icon != null) Icon(icon, contentDescription = null, tint = foreground, modifier = Modifier.size(16.dp))
+        Text(text = text, style = ZtType.label, color = foreground)
+    }
+}
+
+@Composable
+private fun switchColors(): androidx.compose.material3.SwitchColors = SwitchDefaults.colors(
+    checkedThumbColor = Color.White,
+    checkedTrackColor = ZtColors.Accent,
+    uncheckedThumbColor = Color.LightGray,
+    uncheckedTrackColor = Color(0x33FFFFFF),
+    disabledCheckedTrackColor = Color(0x33FF5E3A),
+    disabledUncheckedTrackColor = Color(0x1AFFFFFF),
+    disabledUncheckedThumbColor = Color(0x4DFFFFFF)
+)
+
+/**
+ * A labelled switch row. The whole row is the toggle target (role Switch, localized On/Off state), so
+ * TalkBack reads "title, hint, On" once; the [Switch] itself is only drawn.
+ */
+@Composable
+private fun SwitchRow(
+    icon: ImageVector,
+    iconTint: Color,
+    title: String,
+    hint: String?,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+    lang: String,
+    enabled: Boolean = true
+) {
+    val stateText = if (checked) AppStrings.switchOn(lang) else AppStrings.switchOff(lang)
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = ZtMinTouch)
+            .toggleable(value = checked, enabled = enabled, role = Role.Switch, onValueChange = onCheckedChange)
+            .semantics { stateDescription = stateText },
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+        Icon(icon, contentDescription = null, tint = iconTint, modifier = Modifier.size(20.dp))
+        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(
+                text = title,
+                style = ZtType.subhead,
+                color = if (enabled) Color.White else Color(0x80FFFFFF)
+            )
+            if (hint != null) {
+                Text(
+                    text = hint,
+                    style = ZtType.caption,
+                    color = if (enabled) ZtColors.TextSecondary else ZtColors.TextTertiary
+                )
             }
         }
+        Switch(checked = checked, onCheckedChange = null, enabled = enabled, colors = switchColors())
+    }
+}
 
-        val currentSettlement = settlementsList.find { it.id == selectedSettlementId }
-            ?: ZtoeAddressLookup.findSettlementById(selectedSettlementId)
-            ?: settlementsList.firstOrNull()
-        val currentStreet = streetsList.find { it.id == selectedStreetId }
-            ?: ZtoeAddressLookup.findStreetById(selectedStreetId)
-        val currentHouseRecord = housesList.find { it.house.equals(selectedHouse, ignoreCase = true) }
-
-        // Automatically query ZTOE when a valid street and house are selected (do NOT close or apply until user clicks button)
-        LaunchedEffect(selectedRemId, selectedSettlementId, selectedStreetId, selectedHouse) {
-            addressLookupResult = null
-            if (selectedStreetId.isBlank() || selectedHouse.isBlank()) {
-                isCheckingAddressOnSite = false
-                return@LaunchedEffect
+/** Read-only dropdown for short preset lists (queues, minutes). Long searchable lists use SearchablePickerField. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun GlassDropdown(value: String, options: List<String>, onSelect: (Int) -> Unit) {
+    var expanded by remember { mutableStateOf(false) }
+    ExposedDropdownMenuBox(expanded = expanded, onExpandedChange = { expanded = it }) {
+        OutlinedTextField(
+            value = value,
+            onValueChange = {},
+            readOnly = true,
+            singleLine = true,
+            textStyle = ZtType.body,
+            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded) },
+            modifier = Modifier.menuAnchor().fillMaxWidth().heightIn(min = 56.dp),
+            shape = ZtShapes.Control,
+            colors = glassFieldColors()
+        )
+        ExposedDropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false },
+            modifier = Modifier.background(ZtColors.CardSolid)
+        ) {
+            options.forEachIndexed { index, text ->
+                DropdownMenuItem(
+                    text = { Text(text, style = ZtType.subhead, color = Color.White) },
+                    onClick = {
+                        onSelect(index)
+                        expanded = false
+                    }
+                )
             }
-            isCheckingAddressOnSite = true
-            val res = withContext(Dispatchers.IO) {
+        }
+    }
+}
+
+/** Button with a 48 dp minimum height. [filled] is the accent button, [subdued] the quiet outlined one. */
+@Composable
+private fun ActionButton(
+    text: String,
+    icon: ImageVector?,
+    filled: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    subdued: Boolean = false,
+    /** Work is running: the icon rotates, taps are ignored and [busyText] is announced. */
+    busy: Boolean = false,
+    busyText: String? = null
+) {
+    val shape = ZtShapes.Control
+    val contentColor = if (subdued) ZtColors.TextSecondary else Color.White
+    Box(
+        modifier = modifier
+            .heightIn(min = ZtMinTouch)
+            .clip(shape)
+            .then(
+                when {
+                    filled -> Modifier.background(ZtColors.Accent)
+                    subdued -> Modifier.border(1.dp, Color(0x1AFFFFFF), shape)
+                    else -> Modifier.background(Color(0x1AFFFFFF)).border(1.dp, ZtColors.CardBorder, shape)
+                }
+            )
+            .semantics { if (busy && busyText != null) stateDescription = busyText }
+            .clickable(enabled = !busy, role = Role.Button, onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 10.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally)
+        ) {
+            if (icon != null) Icon(icon, contentDescription = null, tint = contentColor, modifier = Modifier.size(16.dp).spinWhile(busy))
+            Text(
+                text = text,
+                style = ZtType.label,
+                fontWeight = if (filled) FontWeight.Bold else FontWeight.SemiBold,
+                color = contentColor,
+                textAlign = TextAlign.Center
+            )
+        }
+    }
+}
+
+private fun ZtoeRemOption.displayName(lang: String) = if (lang == "uk") nameUk else nameEn
+private fun ZtoeSettlementOption.displayName(lang: String) = if (lang == "uk") nameUk else nameEn
+private fun ZtoeStreetOption.displayName(lang: String) = if (lang == "uk") nameUk else nameEn
+
+/** Loading flags of one level of the REM, city, street, house cascade; [retry] re-runs its fetch with forceRefresh. */
+private class LevelState {
+    var loading by mutableStateOf(false)
+    var failed by mutableStateOf(false)
+    var retry by mutableIntStateOf(0)
+}
+
+// =============================================================================================
+// Full-screen queue help and address lookup dialog ("?" button)
+// =============================================================================================
+
+@Composable
+private fun AddressLookupDialog(
+    siteUrl: String,
+    lang: String,
+    saved: SelectedAddressQuery?,
+    onDismiss: () -> Unit,
+    onApply: (queue: String, statusText: String?, addressLabel: String, query: SelectedAddressQuery) -> Unit,
+    onShowAppBanner: (String) -> Unit
+) {
+    // The cascade starts from the saved address, or from Zhytomyr city on a first launch. After that a REM
+    // never picks a city for the user: choosing another REM clears city, street and house.
+    var selectedRemId by remember { mutableStateOf(saved?.remId?.ifBlank { "zhytomyr" } ?: "zhytomyr") }
+    var selectedSettlementId by remember { mutableStateOf(saved?.settlementId?.ifBlank { "zt_city" } ?: "zt_city") }
+    var selectedStreetId by remember { mutableStateOf(saved?.streetId ?: "") }
+    var selectedHouse by remember { mutableStateOf(saved?.house ?: "") }
+
+    var allRems by remember { mutableStateOf(ZtoeAddressLookup.getRems()) }
+    var settlementsList by remember { mutableStateOf(ZtoeAddressLookup.getSettlementsForRem(selectedRemId)) }
+    var streetsList by remember {
+        mutableStateOf(
+            if (selectedSettlementId.isNotBlank()) ZtoeAddressLookup.getStreetsForSettlement(selectedSettlementId) else emptyList()
+        )
+    }
+    var housesList by remember {
+        mutableStateOf(
+            if (selectedStreetId.isNotBlank()) ZtoeAddressLookup.getHousesForStreet(selectedStreetId) else emptyList()
+        )
+    }
+    val remsState = remember { LevelState() }
+    val settlementsState = remember { LevelState() }
+    val streetsState = remember { LevelState() }
+    val housesState = remember { LevelState() }
+
+    var isCheckingAddressOnSite by remember { mutableStateOf(false) }
+    var addressCheckFailed by remember { mutableStateOf(false) }
+    var addressLookupResult by remember { mutableStateOf<AddressLookupResult?>(null) }
+
+    fun clearBelowRem() {
+        selectedSettlementId = ""
+        selectedStreetId = ""
+        selectedHouse = ""
+        streetsList = emptyList()
+        housesList = emptyList()
+        addressLookupResult = null
+    }
+
+    fun clearBelowSettlement() {
+        selectedStreetId = ""
+        selectedHouse = ""
+        housesList = emptyList()
+        addressLookupResult = null
+    }
+
+    // REM list. A retry forces a fresh fetch; otherwise the in-memory cache is used.
+    LaunchedEffect(siteUrl, remsState.retry) {
+        remsState.loading = true
+        remsState.failed = false
+        val fetched = withContext(Dispatchers.IO) {
+            runCatching { ZtoeAddressLookup.fetchRemsFromZtoe(siteUrl, forceRefresh = remsState.retry > 0) }.getOrNull()
+        }
+        if (!fetched.isNullOrEmpty()) allRems = fetched
+        remsState.failed = allRems.isEmpty()
+        remsState.loading = false
+    }
+
+    // City list of the chosen REM. Never selects a city by itself; only drops a choice that no longer exists.
+    LaunchedEffect(selectedRemId, siteUrl, settlementsState.retry) {
+        settlementsList = ZtoeAddressLookup.getSettlementsForRem(selectedRemId)
+        settlementsState.loading = true
+        settlementsState.failed = false
+        val fetched = withContext(Dispatchers.IO) {
+            runCatching {
+                ZtoeAddressLookup.fetchSettlementsForRem(selectedRemId, siteUrl, forceRefresh = settlementsState.retry > 0)
+            }.getOrDefault(emptyList())
+        }
+        if (fetched.isNotEmpty()) settlementsList = fetched
+        settlementsState.failed = settlementsList.isEmpty()
+        settlementsState.loading = false
+        if (selectedSettlementId.isNotBlank() && settlementsList.isNotEmpty() && settlementsList.none { it.id == selectedSettlementId }) {
+            selectedSettlementId = ""
+            clearBelowSettlement()
+        }
+    }
+
+    // Street list (the fetch also bulk-indexes the houses of the whole settlement)
+    LaunchedEffect(selectedRemId, selectedSettlementId, siteUrl, streetsState.retry) {
+        if (selectedSettlementId.isBlank()) {
+            streetsList = emptyList()
+            streetsState.loading = false
+            streetsState.failed = false
+            return@LaunchedEffect
+        }
+        streetsList = ZtoeAddressLookup.getStreetsForSettlement(selectedSettlementId)
+        streetsState.loading = true
+        streetsState.failed = false
+        val fetched = withContext(Dispatchers.IO) {
+            runCatching {
+                ZtoeAddressLookup.fetchStreetsForSettlement(
+                    selectedRemId, selectedSettlementId, siteUrl, forceRefresh = streetsState.retry > 0
+                )
+            }.getOrDefault(emptyList())
+        }
+        if (fetched.isNotEmpty()) {
+            streetsList = fetched
+            allRems = ZtoeAddressLookup.getRems()
+            settlementsList = ZtoeAddressLookup.getSettlementsForRem(selectedRemId)
+            if (selectedStreetId.isNotBlank()) {
+                val bulkIndexed = ZtoeAddressLookup.getHousesForStreet(selectedStreetId)
+                if (bulkIndexed.isNotEmpty()) housesList = bulkIndexed
+            }
+        }
+        streetsState.failed = streetsList.isEmpty()
+        streetsState.loading = false
+    }
+
+    // House list of the chosen street (served from the bulk index when it is already there)
+    LaunchedEffect(selectedRemId, selectedSettlementId, selectedStreetId, siteUrl, housesState.retry) {
+        if (selectedStreetId.isBlank()) {
+            housesList = emptyList()
+            housesState.loading = false
+            housesState.failed = false
+            return@LaunchedEffect
+        }
+        housesList = ZtoeAddressLookup.getHousesForStreet(selectedStreetId)
+        housesState.loading = true
+        housesState.failed = false
+        val fetched = withContext(Dispatchers.IO) {
+            runCatching {
+                ZtoeAddressLookup.fetchHousesForStreet(
+                    selectedRemId, selectedSettlementId, selectedStreetId, siteUrl, forceRefresh = housesState.retry > 0
+                )
+            }.getOrDefault(emptyList())
+        }
+        if (fetched.isNotEmpty()) housesList = fetched
+        housesState.failed = housesList.isEmpty()
+        housesState.loading = false
+    }
+
+    val currentRem = allRems.firstOrNull { it.id == selectedRemId }
+    val currentSettlement = if (selectedSettlementId.isBlank()) null else {
+        settlementsList.find { it.id == selectedSettlementId } ?: ZtoeAddressLookup.findSettlementById(selectedSettlementId)
+    }
+    val currentStreet = if (selectedStreetId.isBlank()) null else {
+        streetsList.find { it.id == selectedStreetId } ?: ZtoeAddressLookup.findStreetById(selectedStreetId)
+    }
+    val currentHouseRecord = housesList.find { it.house.equals(selectedHouse, ignoreCase = true) }
+
+    // Queries the site when street and house are chosen. Nothing closes or applies until the user presses the button.
+    LaunchedEffect(selectedRemId, selectedSettlementId, selectedStreetId, selectedHouse, siteUrl) {
+        addressLookupResult = null
+        addressCheckFailed = false
+        if (selectedStreetId.isBlank() || selectedHouse.isBlank()) {
+            isCheckingAddressOnSite = false
+            return@LaunchedEffect
+        }
+        isCheckingAddressOnSite = true
+        val res = withContext(Dispatchers.IO) {
+            runCatching {
                 ZtoeAddressLookup.checkAddressOnZtoeWebsite(
                     remId = selectedRemId,
                     settlementId = selectedSettlementId,
@@ -4536,707 +5536,470 @@ fun SettingsScreen(
                     house = selectedHouse,
                     siteUrl = siteUrl
                 )
-            }
-            isCheckingAddressOnSite = false
-            addressLookupResult = res
-            if (res != null) {
-                val exists = housesList.any { it.house.equals(res.house, ignoreCase = true) }
-                housesList = if (!exists) {
-                    housesList + res
-                } else {
-                    housesList.map { h ->
-                        if (h.house.equals(res.house, ignoreCase = true)) {
-                            h.copy(
-                                queue = res.queue.ifEmpty { h.queue },
-                                statusText = res.statusText ?: h.statusText,
-                                emergencyOutage = res.emergencyOutage ?: h.emergencyOutage,
-                                addressLabel = res.addressLabel.ifEmpty { h.addressLabel }
-                            )
-                        } else h
-                    }
-                }
-            }
+            }.getOrNull()
         }
-
-        val selectedAddressStr = if (currentStreet != null && selectedHouse.isNotBlank()) {
-            val remName = if (lang == "uk") currentRem.nameUk else currentRem.nameEn
-            val settlementName = if (currentSettlement != null) {
-                if (lang == "uk") currentSettlement.nameUk else currentSettlement.nameEn
-            } else ""
-            val streetName = if (lang == "uk") currentStreet.nameUk else currentStreet.nameEn
-            val housePrefix = if (lang == "uk") "буд." else "bldg."
-            "$remName, $settlementName,\\n$streetName, $housePrefix $selectedHouse"
-        } else {
-            ""
-        }
-
-        Dialog(
-            onDismissRequest = { showQueueHelpDialog = false },
-            properties = DialogProperties(usePlatformDefaultWidth = false)
-        ) {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(Color(0xFF141A29))
-                    .statusBarsPadding()
-                    .navigationBarsPadding()
-            ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .verticalScroll(rememberScrollState())
-                        .padding(horizontal = 14.dp, vertical = 16.dp),
-                    verticalArrangement = Arrangement.spacedBy(20.dp)
-                ) {
-                    // Modal Header matching Workbench
-                    Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 4.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                                modifier = Modifier.weight(1f)
-                            ) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(40.dp)
-                                        .clip(RoundedCornerShape(12.dp))
-                                        .background(Color(0xFFFF5E3A)),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Text(
-                                        text = "?",
-                                        fontSize = 20.sp,
-                                        fontWeight = FontWeight.Black,
-                                        color = Color.White
-                                    )
-                                }
-                                Text(
-                                    text = AppStrings.queueHelpTitle(lang),
-                                    fontSize = 20.sp,
-                                    fontWeight = FontWeight.ExtraBold,
-                                    color = Color.White
-                                )
-                            }
-                            Box(
-                                modifier = Modifier
-                                    .size(40.dp)
-                                    .clip(CircleShape)
-                                    .background(Color(0x1AFFFFFF))
-                                    .border(1.dp, Color(0x26FFFFFF), CircleShape)
-                                    .clickable { showQueueHelpDialog = false },
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(
-                                    Icons.Default.Close,
-                                    contentDescription = "Close",
-                                    tint = Color.White,
-                                    modifier = Modifier.size(20.dp)
-                                )
-                            }
-                        }
-                        Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(Color(0x33FFFFFF)))
-                    }
-
-                    // 1) Interactive Search by Address Card matching Workbench
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(24.dp))
-                            .background(Color(0x0DFFFFFF))
-                            .border(2.dp, Color.White.copy(alpha = 0.25f), RoundedCornerShape(24.dp))
-                            .padding(20.dp)
-                    ) {
-                        Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                Text(
-                                    text = (if (lang == "uk") "Пошук черги за адресою" else "Find Queue by Address").uppercase(),
-                                    fontSize = 14.sp,
-                                    fontWeight = FontWeight.ExtraBold,
-                                    color = Color.White,
-                                    letterSpacing = 0.8.sp
-                                )
-                                Text(
-                                    text = AppStrings.queueHelpAddressSubtitle(lang),
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.Medium,
-                                    color = Color(0xCCBAE6FD)
-                                )
-                            }
-
-                            // 1. РЕМ Dropdown
-                            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                Text(
-                                    text = if (lang == "uk") "РЕМ" else "District (РЕМ)",
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = Color(0xE6BAE6FD)
-                                )
-                                ExposedDropdownMenuBox(
-                                    expanded = remDropdownExpanded,
-                                    onExpandedChange = { remDropdownExpanded = it }
-                                ) {
-                                    OutlinedTextField(
-                                        value = if (lang == "uk") currentRem.nameUk else currentRem.nameEn,
-                                        onValueChange = {},
-                                        readOnly = true,
-                                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = remDropdownExpanded) },
-                                        modifier = Modifier.menuAnchor().fillMaxWidth(),
-                                        shape = RoundedCornerShape(16.dp),
-                                        colors = OutlinedTextFieldDefaults.colors(
-                                            focusedTextColor = Color.White,
-                                            unfocusedTextColor = Color.White,
-                                            focusedBorderColor = Color(0xFFFF5E3A),
-                                            unfocusedBorderColor = Color(0x33FFFFFF),
-                                            focusedContainerColor = Color(0x14FFFFFF),
-                                            unfocusedContainerColor = Color(0x14FFFFFF)
-                                        )
-                                    )
-                                    ExposedDropdownMenu(
-                                        expanded = remDropdownExpanded,
-                                        onDismissRequest = { remDropdownExpanded = false },
-                                        modifier = Modifier
-                                            .background(Color(0xFF141A29))
-                                            .heightIn(max = 320.dp)
-                                    ) {
-                                        allRems.forEach { rem ->
-                                            DropdownMenuItem(
-                                                text = {
-                                                    Text(
-                                                        if (lang == "uk") rem.nameUk else rem.nameEn,
-                                                        fontWeight = FontWeight.Bold,
-                                                        color = Color.White
-                                                    )
-                                                },
-                                                onClick = {
-                                                    selectedRemId = rem.id
-                                                    val nextSettlements = ZtoeAddressLookup.getSettlementsForRem(rem.id)
-                                                    settlementsList = nextSettlements
-                                                    val nextSettlementId = nextSettlements.firstOrNull()?.id ?: ""
-                                                    selectedSettlementId = nextSettlementId
-                                                    streetsList = if (nextSettlementId.isNotBlank()) {
-                                                        ZtoeAddressLookup.getStreetsForSettlement(nextSettlementId)
-                                                    } else {
-                                                        emptyList()
-                                                    }
-                                                    selectedStreetId = ""
-                                                    housesList = emptyList()
-                                                    selectedHouse = ""
-                                                    addressLookupResult = null
-                                                    remDropdownExpanded = false
-                                                }
-                                            )
-                                        }
-                                    }
-                                }
-                            }
-
-                            // 2. Населений пункт Dropdown
-                            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                Text(
-                                    text = if (lang == "uk") "Населений пункт" else "City / Settlement",
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = Color(0xE6BAE6FD)
-                                )
-                                ExposedDropdownMenuBox(
-                                    expanded = settlementDropdownExpanded,
-                                    onExpandedChange = { settlementDropdownExpanded = it }
-                                ) {
-                                    val settlementDisplay = if (currentSettlement != null) {
-                                        if (lang == "uk") currentSettlement.nameUk else currentSettlement.nameEn
-                                    } else {
-                                        if (lang == "uk") "Оберіть населений пункт" else "Select settlement"
-                                    }
-                                    OutlinedTextField(
-                                        value = settlementDisplay,
-                                        onValueChange = {},
-                                        readOnly = true,
-                                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = settlementDropdownExpanded) },
-                                        modifier = Modifier.menuAnchor().fillMaxWidth(),
-                                        shape = RoundedCornerShape(16.dp),
-                                        colors = OutlinedTextFieldDefaults.colors(
-                                            focusedTextColor = Color.White,
-                                            unfocusedTextColor = Color.White,
-                                            focusedBorderColor = Color(0xFFFF5E3A),
-                                            unfocusedBorderColor = Color(0x33FFFFFF),
-                                            focusedContainerColor = Color(0x14FFFFFF),
-                                            unfocusedContainerColor = Color(0x14FFFFFF)
-                                        )
-                                    )
-                                    ExposedDropdownMenu(
-                                        expanded = settlementDropdownExpanded,
-                                        onDismissRequest = { settlementDropdownExpanded = false },
-                                        modifier = Modifier
-                                            .background(Color(0xFF141A29))
-                                            .heightIn(max = 320.dp)
-                                    ) {
-                                        settlementsList.forEach { settlement ->
-                                            DropdownMenuItem(
-                                                text = {
-                                                    Text(
-                                                        if (lang == "uk") settlement.nameUk else settlement.nameEn,
-                                                        fontWeight = FontWeight.Bold,
-                                                        color = Color.White
-                                                    )
-                                                },
-                                                onClick = {
-                                                    selectedSettlementId = settlement.id
-                                                    streetsList = ZtoeAddressLookup.getStreetsForSettlement(settlement.id)
-                                                    selectedStreetId = ""
-                                                    housesList = emptyList()
-                                                    selectedHouse = ""
-                                                    addressLookupResult = null
-                                                    settlementDropdownExpanded = false
-                                                }
-                                            )
-                                        }
-                                    }
-                                }
-                            }
-
-                            // 3. Вулиця Dropdown (unselected by default on first launch)
-                            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                Text(
-                                    text = if (lang == "uk") "Вулиця" else "Street",
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = Color(0xE6BAE6FD)
-                                )
-                                ExposedDropdownMenuBox(
-                                    expanded = streetDropdownExpanded,
-                                    onExpandedChange = { streetDropdownExpanded = it }
-                                ) {
-                                    val streetDisplay = when {
-                                        currentStreet == null -> if (lang == "uk") "Оберіть вулицю" else "Select street"
-                                        lang == "uk" -> currentStreet.nameUk
-                                        else -> currentStreet.nameEn
-                                    }
-                                    OutlinedTextField(
-                                        value = streetDisplay,
-                                        onValueChange = {},
-                                        readOnly = true,
-                                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = streetDropdownExpanded) },
-                                        modifier = Modifier.menuAnchor().fillMaxWidth(),
-                                        shape = RoundedCornerShape(16.dp),
-                                        colors = OutlinedTextFieldDefaults.colors(
-                                            focusedTextColor = Color.White,
-                                            unfocusedTextColor = Color.White,
-                                            focusedBorderColor = Color(0xFFFF5E3A),
-                                            unfocusedBorderColor = Color(0x33FFFFFF),
-                                            focusedContainerColor = Color(0x14FFFFFF),
-                                            unfocusedContainerColor = Color(0x14FFFFFF)
-                                        )
-                                    )
-                                    ExposedDropdownMenu(
-                                        expanded = streetDropdownExpanded,
-                                        onDismissRequest = { streetDropdownExpanded = false },
-                                        modifier = Modifier
-                                            .background(Color(0xFF141A29))
-                                            .heightIn(max = 320.dp)
-                                    ) {
-                                        streetsList.forEach { street ->
-                                            DropdownMenuItem(
-                                                text = {
-                                                    Text(
-                                                        if (lang == "uk") street.nameUk else street.nameEn,
-                                                        fontWeight = FontWeight.Bold,
-                                                        color = Color.White
-                                                    )
-                                                },
-                                                onClick = {
-                                                    selectedStreetId = street.id
-                                                    housesList = ZtoeAddressLookup.getHousesForStreet(street.id)
-                                                    selectedHouse = ""
-                                                    addressLookupResult = null
-                                                    streetDropdownExpanded = false
-                                                }
-                                            )
-                                        }
-                                    }
-                                }
-                            }
-
-                            // 4. Будинок Dropdown (unselected by default on first launch)
-                            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                Text(
-                                    text = if (lang == "uk") "Будинок" else "House Number",
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = Color(0xE6BAE6FD)
-                                )
-                                ExposedDropdownMenuBox(
-                                    expanded = houseDropdownExpanded,
-                                    onExpandedChange = {
-                                        if (currentStreet != null) {
-                                            houseDropdownExpanded = it
-                                        }
-                                    }
-                                ) {
-                                    val houseDisplay = when {
-                                        selectedHouse.isBlank() -> if (lang == "uk") "Оберіть будинок" else "Select house"
-                                        else -> selectedHouse
-                                    }
-                                    OutlinedTextField(
-                                        value = houseDisplay,
-                                        onValueChange = {},
-                                        readOnly = true,
-                                        enabled = currentStreet != null,
-                                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = houseDropdownExpanded) },
-                                        modifier = Modifier.menuAnchor().fillMaxWidth(),
-                                        shape = RoundedCornerShape(16.dp),
-                                        colors = OutlinedTextFieldDefaults.colors(
-                                            focusedTextColor = Color.White,
-                                            unfocusedTextColor = Color.White,
-                                            disabledTextColor = Color(0x80FFFFFF),
-                                            focusedBorderColor = Color(0xFFFF5E3A),
-                                            unfocusedBorderColor = Color(0x33FFFFFF),
-                                            disabledBorderColor = Color(0x1AFFFFFF),
-                                            focusedContainerColor = Color(0x14FFFFFF),
-                                            unfocusedContainerColor = Color(0x14FFFFFF),
-                                            disabledContainerColor = Color(0x0DFFFFFF)
-                                        )
-                                    )
-                                    ExposedDropdownMenu(
-                                        expanded = houseDropdownExpanded,
-                                        onDismissRequest = { houseDropdownExpanded = false },
-                                        modifier = Modifier
-                                            .background(Color(0xFF141A29))
-                                            .heightIn(max = 320.dp)
-                                    ) {
-                                        housesList.forEach { h ->
-                                            DropdownMenuItem(
-                                                text = {
-                                                    Text(
-                                                        h.house,
-                                                        fontWeight = FontWeight.Bold,
-                                                        color = Color.White
-                                                    )
-                                                },
-                                                onClick = {
-                                                    selectedHouse = h.house
-                                                    addressLookupResult = null
-                                                    houseDropdownExpanded = false
-                                                }
-                                            )
-                                        }
-                                    }
-                                }
-                            }
-
-                            // Result Card matching Workbench (shown when a house is selected)
-                            val validLookupResult = addressLookupResult?.takeIf {
-                                it.house.equals(selectedHouse, ignoreCase = true)
-                            }
-                            val matchedRecord = when {
-                                validLookupResult != null && currentHouseRecord != null -> validLookupResult.copy(
-                                    queue = validLookupResult.queue.ifEmpty { currentHouseRecord.queue },
-                                    statusText = validLookupResult.statusText ?: currentHouseRecord.statusText,
-                                    emergencyOutage = validLookupResult.emergencyOutage ?: currentHouseRecord.emergencyOutage
-                                )
-                                validLookupResult != null -> validLookupResult
-                                currentHouseRecord != null -> currentHouseRecord
-                                selectedHouse.isNotBlank() -> AddressLookupResult(
-                                    house = selectedHouse,
-                                    queue = "",
-                                    addressLabel = selectedAddressStr
-                                )
-                                else -> null
-                            }
-                            if (selectedHouse.isNotBlank() && matchedRecord != null) {
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(top = 6.dp)
-                                        .clip(RoundedCornerShape(16.dp))
-                                        .background(Color(0xD9141A29))
-                                        .border(2.dp, Color.White.copy(alpha = 0.25f), RoundedCornerShape(16.dp))
-                                        .padding(16.dp)
-                                ) {
-                                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                                        if (selectedAddressStr.isNotBlank()) {
-                                            Text(
-                                                text = selectedAddressStr,
-                                                fontSize = 14.sp,
-                                                fontWeight = FontWeight.SemiBold,
-                                                color = Color(0xE6BAE6FD),
-                                                lineHeight = 19.sp
-                                            )
-                                        }
-
-                                        if (matchedRecord.queue.isNotBlank()) {
-                                            Row(
-                                                modifier = Modifier.fillMaxWidth(),
-                                                horizontalArrangement = Arrangement.SpaceBetween,
-                                                verticalAlignment = Alignment.CenterVertically
-                                            ) {
-                                                Text(
-                                                    text = if (lang == "uk") "Знайдена черга:" else "Found Queue:",
-                                                    fontSize = 14.sp,
-                                                    fontWeight = FontWeight.Medium,
-                                                    color = Color(0xCCBAE6FD)
-                                                )
-                                                Text(
-                                                    text = "\${AppStrings.queue(lang)} \${matchedRecord.queue}",
-                                                    fontSize = 16.sp,
-                                                    fontWeight = FontWeight.ExtraBold,
-                                                    fontFamily = FontFamily.Monospace,
-                                                    color = Color.White
-                                                )
-                                            }
-                                        }
-
-                                        if (!matchedRecord.statusText.isNullOrBlank()) {
-                                            Box(
-                                                modifier = Modifier
-                                                    .fillMaxWidth()
-                                                    .clip(RoundedCornerShape(16.dp))
-                                                    .background(Color(0x0FFFFFFF))
-                                                    .border(2.dp, Color(0x33FFFFFF), RoundedCornerShape(16.dp))
-                                                    .padding(horizontal = 16.dp, vertical = 12.dp)
-                                            ) {
-                                                Text(
-                                                    text = matchedRecord.statusText,
-                                                    fontSize = 14.sp,
-                                                    fontWeight = FontWeight.Bold,
-                                                    color = Color.White,
-                                                    lineHeight = 19.sp
-                                                )
-                                            }
-                                        }
-
-                                        val emerg = matchedRecord.emergencyOutage
-                                        if (emerg != null) {
-                                            Box(
-                                                modifier = Modifier
-                                                    .fillMaxWidth()
-                                                    .clip(RoundedCornerShape(16.dp))
-                                                    .background(Color(0x1AFF5E3A))
-                                                    .border(2.dp, Color(0x59FF5E3A), RoundedCornerShape(16.dp))
-                                                    .padding(horizontal = 16.dp, vertical = 12.dp)
-                                            ) {
-                                                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                                    Text(
-                                                        text = if (lang == "uk") {
-                                                            emerg.outageType.ifBlank { "Аварійне відключення" }
-                                                        } else {
-                                                            "Emergency Outage"
-                                                        },
-                                                        fontSize = 14.sp,
-                                                        fontWeight = FontWeight.Bold,
-                                                        color = Color(0xFFFF5E3A)
-                                                    )
-                                                    Text(
-                                                        text = if (lang == "uk") {
-                                                            "Початок: \${emerg.startTime} · Відновлення: \${emerg.estimatedRestoreTime}"
-                                                        } else {
-                                                            "Start: \${emerg.startTime} · Restore: \${emerg.estimatedRestoreTime}"
-                                                        },
-                                                        fontSize = 12.sp,
-                                                        fontFamily = FontFamily.Monospace,
-                                                        color = Color.White
-                                                    )
-                                                }
-                                            }
-                                        }
-
-                                        // Full-width "Обрати чергу X.Y" / "Apply Queue X.Y" button UNDER address matching Workbench
-                                        Box(
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .clip(RoundedCornerShape(16.dp))
-                                                .background(Color(0xFFFF5E3A))
-                                                .clickable {
-                                                    val query = SelectedAddressQuery(
-                                                        remId = selectedRemId,
-                                                        settlementId = selectedSettlementId,
-                                                        streetId = selectedStreetId,
-                                                        house = selectedHouse
-                                                    )
-                                                    val addressToSave = selectedAddressStr.ifBlank { matchedRecord.addressLabel }
-                                                    if (matchedRecord.queue.isNotBlank()) {
-                                                        onAddressQueueResolved(
-                                                            matchedRecord.queue,
-                                                            null,
-                                                            addressToSave,
-                                                            matchedRecord.emergencyOutage,
-                                                            query
-                                                        )
-                                                        showQueueHelpDialog = false
-                                                        onShowAppBanner("\${AppStrings.queue(lang)} \${matchedRecord.queue}")
-                                                    } else {
-                                                        onAddressQueueResolved(
-                                                            "",
-                                                            matchedRecord.statusText,
-                                                            addressToSave,
-                                                            matchedRecord.emergencyOutage,
-                                                            query
-                                                        )
-                                                        showQueueHelpDialog = false
-                                                        onShowAppBanner(
-                                                            matchedRecord.statusText
-                                                                ?: if (lang == "uk") "Адресу збережено" else "Address saved"
-                                                        )
-                                                    }
-                                                }
-                                                .padding(vertical = 14.dp, horizontal = 16.dp),
-                                            contentAlignment = Alignment.Center
-                                        ) {
-                                            Text(
-                                                text = if (matchedRecord.queue.isNotBlank()) {
-                                                    if (lang == "uk") "Обрати чергу \${matchedRecord.queue}" else "Apply Queue \${matchedRecord.queue}"
-                                                } else {
-                                                    if (lang == "uk") "Підтвердити вибір" else "Confirm selection"
-                                                },
-                                                fontSize = 16.sp,
-                                                fontWeight = FontWeight.ExtraBold,
-                                                color = Color.White
-                                            )
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    // 2) "Пошук вручну" / "Manual search" Heading matching Workbench
-                    Text(
-                        text = AppStrings.queueHelpManualSearchTitle(lang).uppercase(),
-                        fontSize = 14.sp,
-                        fontWeight = FontWeight.ExtraBold,
-                        color = Color.White,
-                        letterSpacing = 0.8.sp,
-                        modifier = Modifier.padding(top = 4.dp, start = 4.dp)
-                    )
-
-                    // 3) Numbered instructions 1-4 inside cards matching Workbench
-                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                        AppStrings.queueHelpSteps(lang).forEachIndexed { idx, step ->
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clip(RoundedCornerShape(16.dp))
-                                    .background(Color(0x0AFFFFFF))
-                                    .border(2.dp, Color(0x26FFFFFF), RoundedCornerShape(16.dp))
-                                    .padding(16.dp)
-                            ) {
-                                Row(
-                                    verticalAlignment = Alignment.Top,
-                                    horizontalArrangement = Arrangement.spacedBy(14.dp)
-                                ) {
-                                    Box(
-                                        modifier = Modifier
-                                            .padding(top = 2.dp)
-                                            .size(24.dp)
-                                            .clip(CircleShape)
-                                            .background(Color(0x26FFFFFF)),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Text(
-                                            text = "\${idx + 1}",
-                                            fontSize = 12.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            fontFamily = FontFamily.Monospace,
-                                            color = Color.White
-                                        )
-                                    }
-                                    val targetUrl = "https://www.ztoe.com.ua/unhooking-search.php"
-                                    val urlStart = step.indexOf(targetUrl)
-                                    if (urlStart >= 0) {
-                                        val urlEnd = urlStart + targetUrl.length
-                                        val annotatedStep = buildAnnotatedString {
-                                            append(step)
-                                            addStyle(
-                                                style = SpanStyle(
-                                                    color = Color(0xFFFF5E3A),
-                                                    fontWeight = FontWeight.SemiBold,
-                                                    textDecoration = TextDecoration.Underline
-                                                ),
-                                                start = urlStart,
-                                                end = urlEnd
-                                            )
-                                        }
-                                        Text(
-                                            text = annotatedStep,
-                                            color = Color(0xFFF4F4F5),
-                                            fontSize = 14.sp,
-                                            lineHeight = 20.sp,
-                                            modifier = Modifier
-                                                .weight(1f)
-                                                .clickable {
-                                                    try {
-                                                        val intent = android.content.Intent(
-                                                            android.content.Intent.ACTION_VIEW,
-                                                            android.net.Uri.parse(targetUrl)
-                                                        )
-                                                        context.startActivity(intent)
-                                                    } catch (_: Exception) {}
-                                                }
-                                        )
-                                    } else {
-                                        Text(
-                                            text = step,
-                                            color = Color(0xFFF4F4F5),
-                                            fontSize = 14.sp,
-                                            lineHeight = 20.sp,
-                                            modifier = Modifier.weight(1f)
-                                        )
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    // Bottom "Зрозуміло" / "Got it" button matching Workbench (white bg, black text)
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(top = 4.dp)
-                            .clip(RoundedCornerShape(16.dp))
-                            .background(Color.White)
-                            .clickable { showQueueHelpDialog = false }
-                            .padding(vertical = 14.dp, horizontal = 20.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            text = AppStrings.queueHelpGotIt(lang),
-                            color = Color.Black,
-                            fontSize = 16.sp,
-                            fontWeight = FontWeight.ExtraBold
+        isCheckingAddressOnSite = false
+        addressLookupResult = res
+        addressCheckFailed = res == null
+        if (res != null) {
+            val exists = housesList.any { it.house.equals(res.house, ignoreCase = true) }
+            housesList = if (!exists) {
+                housesList + res
+            } else {
+                housesList.map { h ->
+                    if (h.house.equals(res.house, ignoreCase = true)) {
+                        h.copy(
+                            queue = res.queue.ifEmpty { h.queue },
+                            statusText = res.statusText ?: h.statusText,
+                            addressLabel = res.addressLabel.ifEmpty { h.addressLabel }
                         )
-                    }
+                    } else h
                 }
             }
         }
     }
 
-    // Reset Confirm Dialog
-    if (showResetConfirmDialog) {
-        AlertDialog(
-            onDismissRequest = { showResetConfirmDialog = false },
-            title = { Text(AppStrings.resetConfirmTitle(lang), fontWeight = FontWeight.Bold, color = Color.White) },
-            text = { Text(AppStrings.resetConfirmDesc(lang), color = Color.LightGray) },
-            confirmButton = {
-                TextButton(onClick = {
-                    onResetDefaults()
-                    showResetConfirmDialog = false
-                    onShowAppBanner(if (lang == "uk") "Налаштування скинуто" else "Settings reset")
-                }) {
-                    Text(AppStrings.resetYes(lang), color = Color(0xFFFF5E3A), fontWeight = FontWeight.Bold)
+    val selectedAddressStr = if (currentStreet != null && selectedHouse.isNotBlank()) {
+        val remName = currentRem?.displayName(lang).orEmpty()
+        val settlementName = currentSettlement?.displayName(lang).orEmpty()
+        val streetName = currentStreet.displayName(lang)
+        "$remName, $settlementName,\\n$streetName, \${AppStrings.addrHousePrefix(lang)} $selectedHouse"
+    } else {
+        ""
+    }
+
+    val remItems = remember(allRems, lang) { allRems.map { PickerItem(it.id, it.displayName(lang)) } }
+    val settlementItems = remember(settlementsList, lang) { settlementsList.map { PickerItem(it.id, it.displayName(lang)) } }
+    val streetItems = remember(streetsList, lang) { streetsList.map { PickerItem(it.id, it.displayName(lang)) } }
+    val houseItems = remember(housesList) { housesList.map { PickerItem(it.house, it.house) } }
+
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(ZtColors.CardSolid)
+                .statusBarsPadding()
+                .navigationBarsPadding()
+                .imePadding()
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = 14.dp, vertical = 16.dp),
+                verticalArrangement = Arrangement.spacedBy(20.dp)
+            ) {
+                // Modal header
+                Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(40.dp)
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(ZtColors.Accent),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(text = "?", style = ZtType.heading, fontWeight = FontWeight.Black, color = Color.White, maxLines = 1)
+                            }
+                            Text(
+                                text = AppStrings.queueHelpTitle(lang),
+                                style = ZtType.heading,
+                                color = Color.White,
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
+                        Box(
+                            modifier = Modifier
+                                .size(ZtMinTouch)
+                                .clickable(role = Role.Button, onClickLabel = AppStrings.pickerClose(lang), onClick = onDismiss)
+                                .semantics { contentDescription = AppStrings.pickerClose(lang) },
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(40.dp)
+                                    .clip(CircleShape)
+                                    .background(Color(0x1AFFFFFF))
+                                    .border(1.dp, ZtColors.CardBorder, CircleShape),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(Icons.Default.Close, contentDescription = null, tint = Color.White, modifier = Modifier.size(20.dp))
+                            }
+                        }
+                    }
+                    Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(ZtColors.InputBorder))
                 }
-            },
-            dismissButton = {
-                TextButton(onClick = { showResetConfirmDialog = false }) {
-                    Text(AppStrings.cancel(lang), color = Color.White)
+
+                // 1) Interactive search by address
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clip(RoundedCornerShape(24.dp))
+                        .background(Color(0x0DFFFFFF))
+                        .border(2.dp, Color.White.copy(alpha = 0.25f), RoundedCornerShape(24.dp))
+                        .padding(20.dp)
+                ) {
+                    Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text(
+                                text = AppStrings.addrFindTitle(lang).uppercase(),
+                                style = ZtType.label,
+                                fontWeight = FontWeight.ExtraBold,
+                                letterSpacing = 0.7.sp,
+                                color = Color.White
+                            )
+                            Text(
+                                text = AppStrings.queueHelpAddressSubtitle(lang),
+                                style = ZtType.caption,
+                                color = Color(0xCCBAE6FD)
+                            )
+                        }
+
+                        SearchablePickerField(
+                            label = AppStrings.addrRemLabel(lang),
+                            value = currentRem?.displayName(lang),
+                            placeholder = AppStrings.addrRemPlaceholder(lang),
+                            items = remItems,
+                            selectedId = selectedRemId,
+                            onSelect = { item ->
+                                if (item.id != selectedRemId) {
+                                    selectedRemId = item.id
+                                    clearBelowRem()
+                                }
+                            },
+                            lang = lang,
+                            loading = remsState.loading,
+                            loadFailed = remsState.failed,
+                            onRetry = { remsState.retry++ }
+                        )
+
+                        SearchablePickerField(
+                            label = AppStrings.addrCityLabel(lang),
+                            value = currentSettlement?.displayName(lang),
+                            placeholder = AppStrings.addrCityPlaceholder(lang),
+                            items = settlementItems,
+                            selectedId = selectedSettlementId.ifBlank { null },
+                            onSelect = { item ->
+                                if (item.id != selectedSettlementId) {
+                                    selectedSettlementId = item.id
+                                    clearBelowSettlement()
+                                }
+                            },
+                            lang = lang,
+                            loading = settlementsState.loading,
+                            loadFailed = settlementsState.failed,
+                            onRetry = { settlementsState.retry++ }
+                        )
+
+                        SearchablePickerField(
+                            label = AppStrings.addrStreetLabel(lang),
+                            value = currentStreet?.displayName(lang),
+                            placeholder = AppStrings.addrStreetPlaceholder(lang),
+                            items = streetItems,
+                            selectedId = selectedStreetId.ifBlank { null },
+                            onSelect = { item ->
+                                if (item.id != selectedStreetId) {
+                                    selectedStreetId = item.id
+                                    selectedHouse = ""
+                                    housesList = ZtoeAddressLookup.getHousesForStreet(item.id)
+                                    addressLookupResult = null
+                                }
+                            },
+                            lang = lang,
+                            enabled = selectedSettlementId.isNotBlank(),
+                            disabledHint = AppStrings.pickerChooseFirst(lang),
+                            loading = streetsState.loading,
+                            loadFailed = streetsState.failed && selectedSettlementId.isNotBlank(),
+                            onRetry = { streetsState.retry++ }
+                        )
+
+                        SearchablePickerField(
+                            label = AppStrings.addrHouseLabel(lang),
+                            value = selectedHouse,
+                            placeholder = AppStrings.addrHousePlaceholder(lang),
+                            items = houseItems,
+                            selectedId = selectedHouse.ifBlank { null },
+                            onSelect = { item ->
+                                selectedHouse = item.id
+                                addressLookupResult = null
+                            },
+                            lang = lang,
+                            enabled = currentStreet != null,
+                            disabledHint = AppStrings.pickerChooseFirst(lang),
+                            loading = housesState.loading,
+                            loadFailed = housesState.failed && currentStreet != null,
+                            onRetry = { housesState.retry++ },
+                            kind = PickerSearch.Kind.HOUSE
+                        )
+
+                        // Result card (shown when a house is selected)
+                        val validLookupResult = addressLookupResult?.takeIf {
+                            it.house.equals(selectedHouse, ignoreCase = true)
+                        }
+                        val matchedRecord: ZtoeHouseLookupResult? = when {
+                            validLookupResult != null && currentHouseRecord != null -> validLookupResult.copy(
+                                queue = validLookupResult.queue.ifEmpty { currentHouseRecord.queue },
+                                statusText = validLookupResult.statusText ?: currentHouseRecord.statusText
+                            )
+                            validLookupResult != null -> validLookupResult
+                            currentHouseRecord != null -> currentHouseRecord
+                            selectedHouse.isNotBlank() -> AddressLookupResult(
+                                house = selectedHouse,
+                                queue = "",
+                                addressLabel = selectedAddressStr
+                            )
+                            else -> null
+                        }
+                        if (selectedHouse.isNotBlank() && matchedRecord != null) {
+                            // while the site answers, an address without a known queue cannot be confirmed yet
+                            val canApply = !(isCheckingAddressOnSite && matchedRecord.queue.isBlank())
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(top = 6.dp)
+                                    .clip(RoundedCornerShape(16.dp))
+                                    .background(Color(0xD9141A29))
+                                    .border(2.dp, Color.White.copy(alpha = 0.25f), RoundedCornerShape(16.dp))
+                                    .padding(16.dp)
+                            ) {
+                                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                                    if (selectedAddressStr.isNotBlank()) {
+                                        Text(
+                                            text = selectedAddressStr,
+                                            style = ZtType.label,
+                                            color = Color(0xE6BAE6FD)
+                                        )
+                                    }
+
+                                    if (isCheckingAddressOnSite) {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                        ) {
+                                            CircularProgressIndicator(
+                                                modifier = Modifier.size(20.dp),
+                                                strokeWidth = 2.dp,
+                                                color = ZtColors.Accent
+                                            )
+                                            Text(
+                                                text = AppStrings.addrChecking(lang),
+                                                style = ZtType.caption,
+                                                color = ZtColors.TextSecondary,
+                                                modifier = Modifier.weight(1f)
+                                            )
+                                        }
+                                    } else if (addressCheckFailed) {
+                                        Row(
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                        ) {
+                                            Icon(
+                                                Icons.Default.ErrorOutline,
+                                                contentDescription = null,
+                                                tint = ZtColors.ChipAmberText,
+                                                modifier = Modifier.size(20.dp)
+                                            )
+                                            Text(
+                                                text = AppStrings.addrCheckFailed(lang),
+                                                style = ZtType.caption,
+                                                color = ZtColors.ChipAmberText,
+                                                modifier = Modifier.weight(1f)
+                                            )
+                                        }
+                                    }
+
+                                    if (matchedRecord.queue.isNotBlank()) {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Text(
+                                                text = if (lang == "uk") "Знайдена черга:" else "Found Queue:",
+                                                style = ZtType.label,
+                                                color = Color(0xCCBAE6FD),
+                                                modifier = Modifier.weight(1f)
+                                            )
+                                            Text(
+                                                text = "\${AppStrings.queue(lang)} \${matchedRecord.queue}",
+                                                style = ZtType.timeMono,
+                                                fontWeight = FontWeight.ExtraBold,
+                                                color = Color.White,
+                                                softWrap = false
+                                            )
+                                        }
+                                    }
+
+                                    if (!matchedRecord.statusText.isNullOrBlank()) {
+                                        Box(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .clip(RoundedCornerShape(16.dp))
+                                                .background(Color(0x0FFFFFFF))
+                                                .border(2.dp, Color(0x33FFFFFF), RoundedCornerShape(16.dp))
+                                                .padding(horizontal = 16.dp, vertical = 12.dp)
+                                        ) {
+                                            Text(
+                                                text = matchedRecord.statusText,
+                                                style = ZtType.label,
+                                                fontWeight = FontWeight.Bold,
+                                                color = Color.White
+                                            )
+                                        }
+                                    }
+
+                                    // Full-width "Обрати чергу X.Y" / "Apply Queue X.Y" button under the address
+                                    Box(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .heightIn(min = ZtMinTouch)
+                                            .clip(RoundedCornerShape(16.dp))
+                                            .background(if (canApply) ZtColors.Accent else Color(0x66FF5E3A))
+                                            .clickable(enabled = canApply, role = Role.Button) {
+                                                val query = SelectedAddressQuery(
+                                                    remId = selectedRemId,
+                                                    settlementId = selectedSettlementId,
+                                                    streetId = selectedStreetId,
+                                                    house = selectedHouse
+                                                )
+                                                val addressToSave = selectedAddressStr.ifBlank { matchedRecord.addressLabel }
+                                                if (matchedRecord.queue.isNotBlank()) {
+                                                    onApply(matchedRecord.queue, null, addressToSave, query)
+                                                    onShowAppBanner("\${AppStrings.queue(lang)} \${matchedRecord.queue}")
+                                                } else {
+                                                    onApply("", matchedRecord.statusText, addressToSave, query)
+                                                    onShowAppBanner(matchedRecord.statusText ?: AppStrings.addrSaved(lang))
+                                                }
+                                            }
+                                            .padding(vertical = 12.dp, horizontal = 16.dp),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text(
+                                            text = if (matchedRecord.queue.isNotBlank()) {
+                                                if (lang == "uk") "Обрати чергу \${matchedRecord.queue}" else "Apply Queue \${matchedRecord.queue}"
+                                            } else {
+                                                AppStrings.addrConfirm(lang)
+                                            },
+                                            style = ZtType.subhead,
+                                            fontWeight = FontWeight.ExtraBold,
+                                            color = Color.White,
+                                            textAlign = TextAlign.Center
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
-            },
-            containerColor = Color(0xFF141A29)
-        )
+
+                // 2) "Пошук вручну" / "Manual search"
+                Text(
+                    text = AppStrings.queueHelpManualSearchTitle(lang).uppercase(),
+                    style = ZtType.label,
+                    fontWeight = FontWeight.ExtraBold,
+                    letterSpacing = 0.7.sp,
+                    color = Color.White,
+                    modifier = Modifier.padding(top = 4.dp, start = 4.dp)
+                )
+
+                // 3) Numbered instructions 1-4 (text comes unchanged from AppStrings.queueHelpSteps)
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    AppStrings.queueHelpSteps(lang).forEachIndexed { idx, step ->
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(16.dp))
+                                .background(Color(0x0AFFFFFF))
+                                .border(2.dp, Color(0x26FFFFFF), RoundedCornerShape(16.dp))
+                                .padding(16.dp)
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.Top,
+                                horizontalArrangement = Arrangement.spacedBy(14.dp)
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .padding(top = 2.dp)
+                                        .defaultMinSize(minWidth = 24.dp, minHeight = 24.dp)
+                                        .clip(CircleShape)
+                                        .background(Color(0x26FFFFFF)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        text = "\${idx + 1}",
+                                        style = ZtType.captionMono,
+                                        color = Color.White,
+                                        modifier = Modifier.padding(horizontal = 6.dp)
+                                    )
+                                }
+                                val urlStart = step.indexOf(ZTOE_SEARCH_URL)
+                                // only the address itself is a link, not the whole step
+                                val annotatedStep = buildAnnotatedString {
+                                    if (urlStart >= 0) {
+                                        append(step.substring(0, urlStart))
+                                        withLink(
+                                            LinkAnnotation.Url(
+                                                ZTOE_SEARCH_URL,
+                                                TextLinkStyles(
+                                                    SpanStyle(
+                                                        color = ZtColors.Accent,
+                                                        fontWeight = FontWeight.SemiBold,
+                                                        textDecoration = TextDecoration.Underline
+                                                    )
+                                                )
+                                            )
+                                        ) {
+                                            append(ZTOE_SEARCH_URL)
+                                        }
+                                        append(step.substring(urlStart + ZTOE_SEARCH_URL.length))
+                                    } else {
+                                        append(step)
+                                    }
+                                }
+                                Text(
+                                    text = annotatedStep,
+                                    style = ZtType.body,
+                                    color = Color(0xFFF4F4F5),
+                                    modifier = Modifier.weight(1f)
+                                )
+                            }
+                        }
+                    }
+                }
+
+                // Bottom "Зрозуміло" / "Got it" button (white bg, black text)
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 4.dp)
+                        .heightIn(min = ZtMinTouch)
+                        .clip(RoundedCornerShape(16.dp))
+                        .background(Color.White)
+                        .clickable(role = Role.Button, onClick = onDismiss)
+                        .padding(vertical = 12.dp, horizontal = 20.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = AppStrings.queueHelpGotIt(lang),
+                        color = Color.Black,
+                        style = ZtType.subhead,
+                        fontWeight = FontWeight.ExtraBold
+                    )
+                }
+            }
+        }
     }
 }
 `
@@ -5247,15 +6010,23 @@ fun SettingsScreen(
     description: 'ZTOE Address Queue Lookup & Emergency Outage Parser',
     content: `package ua.blackout.prewarning.data.parser
 
-import org.jsoup.Jsoup
-import ua.blackout.prewarning.data.KYIV_ZONE
+import org.json.JSONArray
+import org.json.JSONObject
+import ua.blackout.prewarning.core.HouseKey
+import ua.blackout.prewarning.core.StreetKey
+import ua.blackout.prewarning.core.TextNorm
 import ua.blackout.prewarning.data.model.EmergencyOutageInfo
 import ua.blackout.prewarning.data.model.SelectedAddressQuery
 import java.io.OutputStreamWriter
 import java.net.HttpURLConnection
 import java.net.URL
+import java.nio.CharBuffer
 import java.nio.charset.Charset
-import java.time.LocalDate
+import java.util.concurrent.CompletableFuture
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 
 typealias AddressLookupResult = ZtoeHouseLookupResult
 
@@ -5282,18 +6053,28 @@ data class ZtoeSettlementOption(
         get() = ZtoeAddressLookup.getStreetsForSettlement(id)
 }
 
+/**
+ * One street of one settlement. ztoe and PowerOn list the same street under several ids (apostrophe,
+ * case or spacing differences), so an option holds every id that [StreetKey] puts into one group:
+ * [allIds] (option ids), [ztoeVulicaIds] and [poweronStreetIds]. [id], [ztoeVulicaId] and
+ * [poweronStreetId] are the canonical ones.
+ */
 data class ZtoeStreetOption(
     val id: String,
     val settlementId: String,
     val ztoeVulicaId: Int,
     val nameUk: String,
     val nameEn: String,
-    val poweronStreetId: Int? = null
+    val poweronStreetId: Int? = null,
+    val allIds: List<String> = listOf(id),
+    val ztoeVulicaIds: List<Int> = listOf(ztoeVulicaId),
+    val poweronStreetIds: List<Int> = listOfNotNull(poweronStreetId)
 ) {
     val houses: List<ZtoeHouseLookupResult>
         get() = ZtoeAddressLookup.getHousesForStreet(id)
 }
 
+/** [emergencyOutage] is kept for source compatibility only; emergencies come from PowerOnClient and are always null here. */
 data class ZtoeHouseLookupResult(
     val house: String,
     val queue: String,
@@ -5303,20 +6084,24 @@ data class ZtoeHouseLookupResult(
 )
 
 object ZtoeAddressLookup {
-    private val ISO_TIMESTAMP_REGEX = Regex("""^(\\d{4})-(\\d{2})-(\\d{2})T(\\d{2}):(\\d{2})""")
-    private val PW_ACCIDENTS_PARSE_REGEX = Regex("""pw_accidents\\s*=\\s*JSON\\.parse\\(\\s*'((?:\\\\'|[^'])*)'\\s*\\)""", RegexOption.IGNORE_CASE)
-    private val PW_ACCIDENTS_ARRAY_REGEX = Regex("""pw_accidents\\s*=\\s*(\\[\\s*\\{[\\s\\S]*?\\}\\s*\\])\\s*;""")
-    private val CITY_PREFIX_REGEX = Regex("""^(м\\.|місто|с\\.|село|смт|селище)\\s*""", RegexOption.IGNORE_CASE)
-    private val STREET_PREFIX_REGEX = Regex("""^(вул\\.|вулиця|пров\\.|провулок|просп\\.|проспект|майдан|бульвар|б-р|шосе)\\s*""", RegexOption.IGNORE_CASE)
-    private val HOUSE_PREFIX_REGEX = Regex("""^(буд\\.|будинок)\\s*""", RegexOption.IGNORE_CASE)
+    const val DEFAULT_SITE_URL = "https://www.ztoe.com.ua/unhooking-search.php"
 
-    private val VALID_OUTAGE_TIMESTAMP_REGEX = Regex("""(?:\\b\\d{1,2}\\.\\d{1,2}(?:\\.\\d{2,4})?\\b|\\b\\d{4}-\\d{2}-\\d{2}\\b)?[\\sT]*\\b([01]?\\d|2[0-3]):[0-5]\\d\\b""")
-
+    /** Bumped to 2 when merged street ids were introduced; caches of other versions are discarded. */
+    /** 3: drops street house lists that were cut to ztoe's first page of 10 records (per-street request without all=1). */
+    internal const val CACHE_VERSION = 3
     private const val PREFS_NAME = "zt_address_index_cache_v1"
     private const val KEY_INDEX_JSON = "address_index_json_v1"
     private const val MAX_PERSISTED_HOUSE_STREETS = 50
     private const val FRESH_HOUSE_CACHE_TTL_MS = 120_000L
 
+    /** The bulk page for a whole settlement (all=1) is large; it is fetched at most once per TTL. */
+    internal const val BULK_TTL_MS = 6L * 60 * 60 * 1000
+    private const val FORCE_REFRESH_MIN_INTERVAL_MS = 10L * 60 * 1000
+    private const val IN_FLIGHT_WAIT_SECONDS = 45L
+
+    private const val SCHEDULE_MARKER = "Графіки погодинних відключень"
+
+    private val VALID_OUTAGE_TIMESTAMP_REGEX = Regex("""(?:\\b\\d{1,2}\\.\\d{1,2}(?:\\.\\d{2,4})?\\b|\\b\\d{4}-\\d{2}-\\d{2}\\b)?[\\sT]*\\b([01]?\\d|2[0-3]):[0-5]\\d\\b""")
     private val SELECT_REM_REGEX = Regex("""<select[^>]*name=["']?rem_id["']?[^>]*>([\\s\\S]*?)</select>""", RegexOption.IGNORE_CASE)
     private val SELECT_NASPUNKT_REGEX = Regex("""<select[^>]*name=["']?naspunkt_id["']?[^>]*>([\\s\\S]*?)</select>""", RegexOption.IGNORE_CASE)
     private val SELECT_VULICA_REGEX = Regex("""<select[^>]*name=["']?vulica_id["']?[^>]*>([\\s\\S]*?)</select>""", RegexOption.IGNORE_CASE)
@@ -5324,535 +6109,105 @@ object ZtoeAddressLookup {
     private val TR_TAG_REGEX = Regex("""<tr\\b[^>]*>([\\s\\S]*?)</tr>""", RegexOption.IGNORE_CASE)
     private val TD_TH_TAG_REGEX = Regex("""<(?:td|th)\\b[^>]*>([\\s\\S]*?)</(?:td|th)>""", RegexOption.IGNORE_CASE)
     private val HTML_TAG_STRIP_REGEX = Regex("""<[^>]*>""")
-    private val WHITESPACE_COLLAPSE_REGEX = Regex("""\\s+""")
+    private val WHITESPACE_REGEX = Regex("""\\s+""")
+    private val HOUSE_SPLIT_REGEX = Regex("[,;]")
+    private val NON_DIGIT_REGEX = Regex("[^0-9]")
+    private val PARENS_REGEX = Regex("""\\([^)]*\\)""")
+    private val CITY_PREFIX_REGEX = Regex("""^(?:(?:м|с|смт)\\.\\s*|(?:місто|село|смт|селище)\\s+)""")
+    private val CITY_PUNCT_REGEX = Regex("""[.,"«»]""")
+    private val LABEL_VILLAGE_REGEX = Regex("^село\\\\s+", RegexOption.IGNORE_CASE)
+    private val LABEL_TOWN_REGEX = Regex("^місто\\\\s+", RegexOption.IGNORE_CASE)
+
+    /** Canonical street type tokens as they appear in a [StreetKey] (after the Latin look-alike skeleton). */
+    private val STREET_TYPE_KEY_TOKENS: Set<String> = listOf(
+        "вул", "пров", "просп", "б-р", "пл", "пр-д", "узв", "туп", "наб", "шосе", "майдан"
+    ).map { TextNorm.skeleton(it) }.toSet()
 
     @Volatile
     private var appContext: android.content.Context? = null
 
     @Volatile
     private var diskCacheHydrated: Boolean = false
+    private val hydrateAttempted = AtomicBoolean(false)
 
     @Volatile
     private var cachedRems: List<ZtoeRemOption>? = null
-    private val cachedSettlementsByRem = java.util.concurrent.ConcurrentHashMap<String, List<ZtoeSettlementOption>>()
-    private val cachedStreetsBySettlement = java.util.concurrent.ConcurrentHashMap<String, List<ZtoeStreetOption>>()
-    private val cachedHousesByStreet = java.util.concurrent.ConcurrentHashMap<String, List<ZtoeHouseLookupResult>>()
-    private val houseCacheUpdatedAtByStreet = java.util.concurrent.ConcurrentHashMap<String, Long>()
-    private val settlementFetchLocks = java.util.concurrent.ConcurrentHashMap<String, Any>()
-    private val recentHouseStreetOrder = java.util.concurrent.CopyOnWriteArrayList<String>()
-    private const val ACCIDENTS_CACHE_TTL_MS = 60_000L
-    private val accidentsCacheByScope = java.util.concurrent.ConcurrentHashMap<String, Pair<Long, String>>()
-    private val diskPersistExecutor = java.util.concurrent.Executors.newSingleThreadExecutor { r ->
+    private val cachedSettlementsByRem = ConcurrentHashMap<String, List<ZtoeSettlementOption>>()
+
+    /** Merged street lists per settlement; every list written here already went through [mergeStreets]. */
+    private val cachedStreetsBySettlement = ConcurrentHashMap<String, List<ZtoeStreetOption>>()
+
+    /** Any street option id (canonical or merged duplicate) to its option. */
+    private val streetByAnyId = ConcurrentHashMap<String, ZtoeStreetOption>()
+
+    /** Houses by canonical street id. */
+    private val cachedHousesByStreet = ConcurrentHashMap<String, List<ZtoeHouseLookupResult>>()
+    private val houseCacheUpdatedAtByStreet = ConcurrentHashMap<String, Long>()
+    private val bulkFetchedAtBySettlement = ConcurrentHashMap<String, Long>()
+    private val inFlight = ConcurrentHashMap<String, CompletableFuture<Any?>>()
+
+    private val recentLock = Any()
+    private val recentHouseStreets = ArrayList<String>()
+
+    private val persistPending = AtomicBoolean(false)
+    private val diskPersistExecutor = Executors.newSingleThreadExecutor { r ->
         Thread(r, "ZtoeDiskCachePersist").apply {
             isDaemon = true
             priority = Thread.MIN_PRIORITY
         }
     }
 
-    private val APOS_ENTITY_REGEX = Regex("""&#0*39;|&#x0*27;|&apos;|&#8217;|&#0*146;""", RegexOption.IGNORE_CASE)
-    private val QUOT_ENTITY_REGEX = Regex("""&quot;|&#0*34;""", RegexOption.IGNORE_CASE)
-    private val NBSP_ENTITY_REGEX = Regex("""&nbsp;|&#0*160;""", RegexOption.IGNORE_CASE)
+    // ---------------------------------------------------------------------------------------------
+    // Static fallback directory
+    // ---------------------------------------------------------------------------------------------
 
-    private fun stripHtmlFast(raw: String): String {
-        return raw
-            .replace(HTML_TAG_STRIP_REGEX, " ")
-            .replace("&amp;", "&", ignoreCase = true)
-            .replace(NBSP_ENTITY_REGEX, " ")
-            .replace("\\u00A0", " ")
-            .replace(APOS_ENTITY_REGEX, "'")
-            .replace(QUOT_ENTITY_REGEX, "\\"")
-            .replace(WHITESPACE_COLLAPSE_REGEX, " ")
-            .trim()
+    val ZTOE_REM_OPTIONS: List<ZtoeRemOption> = ZtoeStaticDirectory.REMS
+    val ZTOE_SETTLEMENTS: List<ZtoeSettlementOption> = ZtoeStaticDirectory.SETTLEMENTS
+
+    /** Static streets, already merged by [StreetKey]. */
+    val ZTOE_STREETS: List<ZtoeStreetOption> by lazy { mergeStreets(ZtoeStaticDirectory.STREETS_RAW) }
+
+    private val staticStreetByAnyId: Map<String, ZtoeStreetOption> by lazy {
+        HashMap<String, ZtoeStreetOption>().also { m -> for (s in ZTOE_STREETS) for (id in s.allIds) m[id] = s }
     }
-
-    private fun recordRecentHouseStreet(streetId: String) {
-        if (streetId.isBlank()) return
-        recentHouseStreetOrder.remove(streetId)
-        recentHouseStreetOrder.add(0, streetId)
-        while (recentHouseStreetOrder.size > MAX_PERSISTED_HOUSE_STREETS) {
-            recentHouseStreetOrder.removeAt(recentHouseStreetOrder.size - 1)
-        }
+    private val staticStreetByVulica: Map<Int, ZtoeStreetOption> by lazy {
+        HashMap<Int, ZtoeStreetOption>().also { m -> for (s in ZTOE_STREETS) for (v in s.ztoeVulicaIds) m.putIfAbsent(v, s) }
     }
-
-    private fun escapeJsonStr(value: String): String {
-        return value
-            .replace("\\\\", "\\\\\\\\")
-            .replace("\\"", "\\\\\\"")
-            .replace("\\n", "\\\\n")
-            .replace("\\r", "\\\\r")
-    }
-
-    fun serializeCacheToJson(): String {
-        return buildString {
-            append("{")
-            append("\\"version\\":1,")
-            append("\\"rems\\":[")
-            val remsToSave = cachedRems ?: emptyList()
-            remsToSave.forEachIndexed { idx, r ->
-                if (idx > 0) append(",")
-                append("{")
-                append("\\"id\\":\\"\${escapeJsonStr(r.id)}\\",")
-                append("\\"ztoeRemId\\":\${r.ztoeRemId},")
-                if (r.ztoeOtgId != null) {
-                    append("\\"ztoeOtgId\\":\${r.ztoeOtgId},")
-                }
-                append("\\"nameUk\\":\\"\${escapeJsonStr(r.nameUk)}\\",")
-                append("\\"nameEn\\":\\"\${escapeJsonStr(r.nameEn)}\\"")
-                append("}")
-            }
-            append("],")
-
-            append("\\"settlements\\":[")
-            var sFirst = true
-            for (list in cachedSettlementsByRem.values) {
-                for (s in list) {
-                    if (!sFirst) append(",")
-                    sFirst = false
-                    append("{")
-                    append("\\"id\\":\\"\${escapeJsonStr(s.id)}\\",")
-                    append("\\"remId\\":\\"\${escapeJsonStr(s.remId)}\\",")
-                    append("\\"ztoeNaspunktId\\":\${s.ztoeNaspunktId},")
-                    if (s.poweronCityId != null) {
-                        append("\\"poweronCityId\\":\${s.poweronCityId},")
-                    }
-                    append("\\"nameUk\\":\\"\${escapeJsonStr(s.nameUk)}\\",")
-                    append("\\"nameEn\\":\\"\${escapeJsonStr(s.nameEn)}\\"")
-                    append("}")
-                }
-            }
-            append("],")
-
-            append("\\"streets\\":[")
-            var stFirst = true
-            for (list in cachedStreetsBySettlement.values) {
-                for (st in list) {
-                    if (!stFirst) append(",")
-                    stFirst = false
-                    append("{")
-                    append("\\"id\\":\\"\${escapeJsonStr(st.id)}\\",")
-                    append("\\"settlementId\\":\\"\${escapeJsonStr(st.settlementId)}\\",")
-                    append("\\"ztoeVulicaId\\":\${st.ztoeVulicaId},")
-                    if (st.poweronStreetId != null) {
-                        append("\\"poweronStreetId\\":\${st.poweronStreetId},")
-                    }
-                    append("\\"nameUk\\":\\"\${escapeJsonStr(st.nameUk)}\\",")
-                    append("\\"nameEn\\":\\"\${escapeJsonStr(st.nameEn)}\\"")
-                    append("}")
-                }
-            }
-            append("],")
-
-            append("\\"houses\\":[")
-            var hFirst = true
-            val orderedStreets = (recentHouseStreetOrder.toList() + cachedHousesByStreet.keys().toList())
-                .distinct()
-                .take(MAX_PERSISTED_HOUSE_STREETS)
-
-            for (streetId in orderedStreets) {
-                val hList = cachedHousesByStreet[streetId] ?: continue
-                for (h in hList) {
-                    if (!hFirst) append(",")
-                    hFirst = false
-                    append("{")
-                    append("\\"streetId\\":\\"\${escapeJsonStr(streetId)}\\",")
-                    append("\\"house\\":\\"\${escapeJsonStr(h.house)}\\",")
-                    append("\\"queue\\":\\"\${escapeJsonStr(h.queue)}\\"")
-                    if (!h.statusText.isNullOrBlank()) {
-                        append(",\\"statusText\\":\\"\${escapeJsonStr(h.statusText)}\\"")
-                    }
-                    append("}")
-                }
-            }
-            append("]}")
-        }
-    }
-
-    fun hydrateCacheFromJson(jsonStr: String): Boolean {
-        if (jsonStr.isBlank()) return false
-        return try {
-            val remsArrStr = extractJsonArrayField(jsonStr, "rems")
-            if (remsArrStr != null) {
-                val parsedRems = mutableListOf<ZtoeRemOption>()
-                for (objStr in extractTopLevelJsonObjects(remsArrStr)) {
-                    val id = extractJsonStringField(objStr, "id") ?: continue
-                    val ztoeRemId = extractJsonIntField(objStr, "ztoeRemId") ?: continue
-                    val nameUk = stripHtmlFast(extractJsonStringField(objStr, "nameUk") ?: continue)
-                    val nameEn = stripHtmlFast(extractJsonStringField(objStr, "nameEn") ?: nameUk)
-                    val staticRem = ZTOE_REM_OPTIONS.firstOrNull { it.id == id || it.ztoeRemId == ztoeRemId }
-                    val ztoeOtgId = extractJsonIntField(objStr, "ztoeOtgId") ?: staticRem?.ztoeOtgId
-                    parsedRems.add(ZtoeRemOption(id, ztoeRemId, nameUk, nameEn, ztoeOtgId))
-                }
-                if (parsedRems.isNotEmpty()) {
-                    cachedRems = parsedRems
-                }
-            }
-
-            val settlementsArrStr = extractJsonArrayField(jsonStr, "settlements")
-            if (settlementsArrStr != null) {
-                val grouped = LinkedHashMap<String, MutableList<ZtoeSettlementOption>>()
-                for (objStr in extractTopLevelJsonObjects(settlementsArrStr)) {
-                    val id = extractJsonStringField(objStr, "id") ?: continue
-                    val remId = extractJsonStringField(objStr, "remId") ?: continue
-                    val npId = extractJsonIntField(objStr, "ztoeNaspunktId") ?: continue
-                    val nameUk = stripHtmlFast(extractJsonStringField(objStr, "nameUk") ?: continue)
-                    val nameEn = stripHtmlFast(extractJsonStringField(objStr, "nameEn") ?: nameUk)
-                    val staticSettlement = ZTOE_SETTLEMENTS.firstOrNull { it.id == id || it.ztoeNaspunktId == npId }
-                    val poweronCityId = extractJsonIntField(objStr, "poweronCityId") ?: staticSettlement?.poweronCityId
-                    grouped.getOrPut(remId) { mutableListOf() }.add(
-                        ZtoeSettlementOption(id, remId, npId, nameUk, nameEn, poweronCityId)
-                    )
-                }
-                for ((remId, list) in grouped) {
-                    if (list.isNotEmpty()) {
-                        cachedSettlementsByRem[remId] = list
-                    }
-                }
-            }
-
-            val streetsArrStr = extractJsonArrayField(jsonStr, "streets")
-            if (streetsArrStr != null) {
-                val grouped = LinkedHashMap<String, MutableList<ZtoeStreetOption>>()
-                for (objStr in extractTopLevelJsonObjects(streetsArrStr)) {
-                    val id = extractJsonStringField(objStr, "id") ?: continue
-                    val settlementId = extractJsonStringField(objStr, "settlementId") ?: continue
-                    val vulId = extractJsonIntField(objStr, "ztoeVulicaId") ?: continue
-                    val nameUk = stripHtmlFast(extractJsonStringField(objStr, "nameUk") ?: continue)
-                    val nameEn = stripHtmlFast(extractJsonStringField(objStr, "nameEn") ?: nameUk)
-                    val staticStreet = ZTOE_STREETS.firstOrNull { it.id == id || it.ztoeVulicaId == vulId }
-                    val poweronStreetId = extractJsonIntField(objStr, "poweronStreetId") ?: staticStreet?.poweronStreetId
-                    grouped.getOrPut(settlementId) { mutableListOf() }.add(
-                        ZtoeStreetOption(id, settlementId, vulId, nameUk, nameEn, poweronStreetId)
-                    )
-                }
-                for ((settlementId, list) in grouped) {
-                    if (list.isNotEmpty()) {
-                        cachedStreetsBySettlement[settlementId] = list
-                    }
-                }
-            }
-
-            val housesArrStr = extractJsonArrayField(jsonStr, "houses")
-            if (housesArrStr != null) {
-                val grouped = LinkedHashMap<String, MutableList<ZtoeHouseLookupResult>>()
-                var loadedStreets = 0
-                for (objStr in extractTopLevelJsonObjects(housesArrStr)) {
-                    val streetId = extractJsonStringField(objStr, "streetId") ?: continue
-                    if (!grouped.containsKey(streetId)) {
-                        if (loadedStreets >= MAX_PERSISTED_HOUSE_STREETS) continue
-                        loadedStreets++
-                    }
-                    val house = extractJsonStringField(objStr, "house") ?: continue
-                    val queue = extractJsonStringField(objStr, "queue") ?: ""
-                    val statusText = extractJsonStringField(objStr, "statusText")
-                    grouped.getOrPut(streetId) { mutableListOf() }.add(
-                        ZtoeHouseLookupResult(house = house, queue = queue, statusText = statusText)
-                    )
-                }
-                for ((streetId, list) in grouped) {
-                    if (list.isNotEmpty()) {
-                        cachedHousesByStreet[streetId] = list
-                    }
-                }
-            }
-            diskCacheHydrated = true
-            true
-        } catch (_: Exception) {
-            false
-        }
-    }
-
-    fun initDiskCache(context: android.content.Context): Boolean {
-        appContext = context.applicationContext
-        if (diskCacheHydrated && cachedRems != null) return true
-        return try {
-            val prefs = context.applicationContext.getSharedPreferences(PREFS_NAME, android.content.Context.MODE_PRIVATE)
-            val rawJson = prefs.getString(KEY_INDEX_JSON, null) ?: return false
-            hydrateCacheFromJson(rawJson)
-        } catch (_: Exception) {
-            false
-        }
-    }
-
-    fun persistToDiskCache() {
-        val ctx = appContext ?: return
-        diskPersistExecutor.execute {
-            try {
-                val json = serializeCacheToJson()
-                ctx.getSharedPreferences(PREFS_NAME, android.content.Context.MODE_PRIVATE)
-                    .edit()
-                    .putString(KEY_INDEX_JSON, json)
-                    .apply()
-            } catch (_: Exception) {
-            }
-        }
-    }
-
-    fun clearCacheForTesting() {
-        diskCacheHydrated = false
-        cachedRems = null
-        cachedSettlementsByRem.clear()
-        cachedStreetsBySettlement.clear()
-        cachedHousesByStreet.clear()
-        houseCacheUpdatedAtByStreet.clear()
-        settlementFetchLocks.clear()
-        recentHouseStreetOrder.clear()
-        accidentsCacheByScope.clear()
-    }
-
-    val ZTOE_REM_OPTIONS: List<ZtoeRemOption> = listOf(
-        ZtoeRemOption("zhytomyr", 7, "Житомирський РЕМ", "Zhytomyr REM", 6),
-        ZtoeRemOption("berdychiv", 3, "Бердичівський РЕМ", "Berdychiv REM", 3),
-        ZtoeRemOption("korosten", 9, "Коростенський РЕМ", "Korosten REM", 7),
-        ZtoeRemOption("zviahel", 16, "Звягельський РЕМ", "Zviahel REM", 11),
-        ZtoeRemOption("malyn", 14, "Малинський РЕМ", "Malyn REM", 10),
-        ZtoeRemOption("radomyshl", 20, "Радомишльський РЕМ", "Radomyshl REM", 15),
-        ZtoeRemOption("andrushivka", 1, "Андрушівський РЕМ", "Andrushivka REM", 1),
-        ZtoeRemOption("baranivka", 2, "Баранівський РЕМ", "Baranivka REM", 2),
-        ZtoeRemOption("brusyliv", 4, "Брусилівський РЕМ", "Brusyliv REM", 4),
-        ZtoeRemOption("korostyshiv", 11, "Коростишівський РЕМ", "Korostyshiv REM", 8),
-        ZtoeRemOption("liubar", 13, "Любарський РЕМ", "Liubar REM", 9),
-        ZtoeRemOption("ovruch", 17, "Овруцький РЕМ", "Ovruch REM", 12),
-        ZtoeRemOption("olevsk", 18, "Олевський РЕМ", "Olevsk REM", 13),
-        ZtoeRemOption("popilnia", 19, "Попільнянський РЕМ", "Popilnia REM", 14),
-        ZtoeRemOption("pulyny", 23, "Пулинський РЕМ", "Pulyny REM", 17),
-        ZtoeRemOption("romaniv", 21, "Романівський РЕМ", "Romaniv REM", 16),
-        ZtoeRemOption("khoroshiv", 5, "Хорошівський РЕМ", "Khoroshiv REM", 5),
-        ZtoeRemOption("cherniakhiv", 24, "Черняхівський РЕМ", "Cherniakhiv REM", 18),
-        ZtoeRemOption("chudniv", 25, "Чуднівський РЕМ", "Chudniv REM", 19)
-    )
-
-    fun getRems(): List<ZtoeRemOption> = cachedRems ?: ZTOE_REM_OPTIONS
 
     val DIRECTORY: List<ZtoeRemOption>
         get() = getRems()
 
-    val ZTOE_SETTLEMENTS: List<ZtoeSettlementOption> = listOf(
-        ZtoeSettlementOption("zt_city", "zhytomyr", 16657, "м. Житомир", "Zhytomyr", 333),
-        ZtoeSettlementOption("zt_zarichany", "zhytomyr", 16670, "с. Зарічани", "Zarichany"),
-        ZtoeSettlementOption("zt_oliivka", "zhytomyr", 16700, "с. Оліївка", "Oliivka"),
-        ZtoeSettlementOption("zt_глибочиця", "zhytomyr", 16667, "с. Глибочиця", "Hlybochytsia"),
-        ZtoeSettlementOption("zt_stanishivka", "zhytomyr", 16680, "с. Станишівка", "Stanyshivka"),
-        ZtoeSettlementOption("bd_city", "berdychiv", 16758, "м. Бердичів", "Berdychiv"),
-        ZtoeSettlementOption("bd_hryshkivtsi", "berdychiv", 16760, "смт Гришківці", "Hryshkivtsi"),
-        ZtoeSettlementOption("kr_city", "korosten", 17062, "м. Коростень", "Korosten"),
-        ZtoeSettlementOption("zv_city", "zviahel", 16823, "м. Звягель", "Zviahel"),
-        ZtoeSettlementOption("ml_city", "malyn", 17634, "м. Малин", "Malyn"),
-        ZtoeSettlementOption("rd_city", "radomyshl", 17899, "м. Радомишль", "Radomyshl"),
-        ZtoeSettlementOption("an_city", "andrushivka", 17694, "м. Андрушівка", "Andrushivka"),
-        ZtoeSettlementOption("br_city", "baranivka", 15417, "м. Баранівка", "Baranivka"),
-        ZtoeSettlementOption("bs_city", "brusyliv", 16202, "селище Брусилів", "Brusyliv"),
-        ZtoeSettlementOption("ks_city", "korostyshiv", 15747, "м. Коростишів", "Korostyshiv"),
-        ZtoeSettlementOption("lb_city", "liubar", 17742, "селище Любар", "Liubar"),
-        ZtoeSettlementOption("ov_city", "ovruch", 17197, "м. Овруч", "Ovruch"),
-        ZtoeSettlementOption("ol_city", "olevsk", 17823, "м. Олевськ", "Olevsk"),
-        ZtoeSettlementOption("pp_city", "popilnia", 17555, "селище Попільня", "Popilnia"),
-        ZtoeSettlementOption("pl_city", "pulyny", 16602, "селище Пулини", "Pulyny"),
-        ZtoeSettlementOption("rm_city", "romaniv", 17968, "селище Романів", "Romaniv"),
-        ZtoeSettlementOption("kh_city", "khoroshiv", 16281, "селище Хорошів", "Khoroshiv"),
-        ZtoeSettlementOption("ch_city", "cherniakhiv", 16063, "селище Черняхів", "Cherniakhiv"),
-        ZtoeSettlementOption("cd_city", "chudniv", 18001, "м. Чуднів", "Chudniv")
-    )
-
-    val ZTOE_STREETS: List<ZtoeStreetOption> = listOf(
-        ZtoeStreetOption("zt_kyivska", "zt_city", 173934, "вул. Київська", "Kyivska St.", 4757),
-        ZtoeStreetOption("zt_velyka_berdychivska", "zt_city", 174574, "вул. Велика Бердичівська", "Velyka Berdychivska St.", 4550),
-        ZtoeStreetOption("zt_peremohy", "zt_city", 173948, "вул. Перемоги", "Peremohy St.", 4552),
-        ZtoeStreetOption("zt_pokrovska", "zt_city", 173949, "вул. Покровська", "Pokrovska St.", 4789),
-        ZtoeStreetOption("zt_chudnivska", "zt_city", 174543, "вул. Чуднівська", "Chudnivska St.", 4645),
-        ZtoeStreetOption("zt_mykhailivska", "zt_city", 174152, "вул. Михайлівська", "Mykhailivska St.", 33622),
-        ZtoeStreetOption("zt_vitruka", "zt_city", 174457, "вул. Вітрука", "Vitruka St.", 4620),
-        ZtoeStreetOption("zt_bandery", "zt_city", 173952, "вул. Степана Бандери", "Stepana Bandery St.", 33488),
-        ZtoeStreetOption("st_173952", "zt_city", 173952, "вул. Степана Бандери", "Stepana Bandery St.", 33488),
-        ZtoeStreetOption("zt_shevchenka", "zt_city", 174478, "вул. Шевченка", "Shevchenka St.", 4625),
-        ZtoeStreetOption("zt_dovzhenka", "zt_city", 174495, "вул. Довженка", "Dovzhenka St.", 4631),
-        ZtoeStreetOption("zt_lesi", "zt_city", 173937, "вул. Лесі Українки", "Lesi Ukrainky St.", 4788),
-        ZtoeStreetOption("zt_zhytomyrska_zar", "zt_zarichany", 41001, "вул. Житомирська", "Zhytomyrska St."),
-        ZtoeStreetOption("zt_lisova_zar", "zt_zarichany", 41002, "вул. Лісова", "Lisova St."),
-        ZtoeStreetOption("zt_centralna_ol", "zt_oliivka", 42001, "вул. Центральна", "Tsentralna St."),
-        ZtoeStreetOption("zt_kyivska_hl", "zt_глибочиця", 43001, "вул. Київське шосе", "Kyivske Hwy"),
-        ZtoeStreetOption("zt_centralna_st", "zt_stanishivka", 44001, "вул. Центральна", "Tsentralna St."),
-        ZtoeStreetOption("bd_ievropeiska", "bd_city", 51001, "вул. Європейська", "Yevropeiska St."),
-        ZtoeStreetOption("bd_zhytomyrska", "bd_city", 51002, "вул. Житомирська", "Zhytomyrska St."),
-        ZtoeStreetOption("bd_soborna", "bd_hryshkivtsi", 52001, "вул. Соборна", "Soborna St."),
-        ZtoeStreetOption("kr_hrushevskoho", "kr_city", 61001, "вул. Грушевського", "Hrushevskoho St."),
-        ZtoeStreetOption("kr_kyivska", "kr_city", 61002, "вул. Київська", "Kyivska St."),
-        ZtoeStreetOption("zv_shevchenka", "zv_city", 71001, "вул. Шевченка", "Shevchenka St."),
-        ZtoeStreetOption("zv_soborna", "zv_city", 71002, "вул. Соборності", "Sobornosti St."),
-        ZtoeStreetOption("ml_hrushevskoho", "ml_city", 81001, "вул. Грушевського", "Hrushevskoho St."),
-        ZtoeStreetOption("rd_velyka_zhytomyrska", "rd_city", 91001, "вул. Велика Житомирська", "Velyka Zhytomyrska St."),
-        ZtoeStreetOption("an_soborna", "an_city", 101001, "вул. Соборна", "Soborna St."),
-        ZtoeStreetOption("br_soborna", "br_city", 102001, "вул. Соборна", "Soborna St."),
-        ZtoeStreetOption("bs_soborna", "bs_city", 103001, "вул. Соборна", "Soborna St."),
-        ZtoeStreetOption("ks_soborna", "ks_city", 104001, "вул. Соборна", "Soborna St."),
-        ZtoeStreetOption("lb_soborna", "lb_city", 105001, "вул. Незалежності", "Nezalezhnosti St."),
-        ZtoeStreetOption("ov_soborna", "ov_city", 106001, "вул. Соборна", "Soborna St."),
-        ZtoeStreetOption("ol_soborna", "ol_city", 107001, "вул. Свято-Миколаївська", "Sviato-Mykolaivska St."),
-        ZtoeStreetOption("pp_soborna", "pp_city", 108001, "вул. Богдана Хмельницького", "Bohdana Khmelnytskoho St."),
-        ZtoeStreetOption("pl_soborna", "pl_city", 109001, "вул. Незалежності", "Nezalezhnosti St."),
-        ZtoeStreetOption("rm_soborna", "rm_city", 110001, "вул. Небесної Сотні", "Nebesnoi Sotni St."),
-        ZtoeStreetOption("kh_soborna", "kh_city", 111001, "вул. Незалежності", "Nezalezhnosti St."),
-        ZtoeStreetOption("ch_soborna", "ch_city", 112001, "вул. Володимирська", "Volodymyrska St."),
-        ZtoeStreetOption("cd_soborna", "cd_city", 113001, "вул. Соборна", "Soborna St.")
-    )
-
-    fun getKyivska37DemoEmergencyOutage(today: LocalDate? = null): EmergencyOutageInfo {
-        if (today == null) {
-            return EmergencyOutageInfo(
-                id = "pw_accident_391476673",
-                remName = "Житомирський РЕМ",
-                settlementName = "Житомир",
-                streetName = "вул. Київська",
-                house = "37",
-                outageType = "Аварійне відключення",
-                startTime = "06.04 19:21",
-                estimatedRestoreTime = "07.04 20:00"
-            )
-        }
-        val ddMmYyyy = String.format("%02d.%02d.%04d", today.dayOfMonth, today.monthValue, today.year)
-        return EmergencyOutageInfo(
-            id = "pw_accident_391476673",
-            remName = "Житомирський РЕМ",
-            settlementName = "Житомир",
-            streetName = "вул. Київська",
-            house = "37",
-            outageType = "Аварійне відключення",
-            startTime = "$ddMmYyyy 22:00",
-            estimatedRestoreTime = "$ddMmYyyy 23:59"
-        )
-    }
+    fun getRems(): List<ZtoeRemOption> = cachedRems ?: ZTOE_REM_OPTIONS
 
     fun getSettlementsForRem(remId: String): List<ZtoeSettlementOption> {
         return cachedSettlementsByRem[remId] ?: ZTOE_SETTLEMENTS.filter { it.remId == remId }
     }
 
     fun getStreetsForSettlement(settlementId: String): List<ZtoeStreetOption> {
-        return cachedStreetsBySettlement[settlementId] ?: ZTOE_STREETS.filter { it.settlementId == settlementId }
+        val sid = canonicalSettlementId(settlementId)
+        return cachedStreetsBySettlement[sid] ?: ZTOE_STREETS.filter { it.settlementId == sid }
     }
 
-    fun getDefaultHousesForStreet(streetId: String): List<ZtoeHouseLookupResult> {
-        return when (streetId) {
-            "zt_kyivska" -> listOf(
-                ZtoeHouseLookupResult("1", "1.1"),
-                ZtoeHouseLookupResult("3", "1.1"),
-                ZtoeHouseLookupResult("5", "1.2"),
-                ZtoeHouseLookupResult("7", "1.2"),
-                ZtoeHouseLookupResult("9", "2.1"),
-                ZtoeHouseLookupResult("10", "5.2"),
-                ZtoeHouseLookupResult("12", "2.1"),
-                ZtoeHouseLookupResult("15", "2.2"),
-                ZtoeHouseLookupResult("18", "3.1"),
-                ZtoeHouseLookupResult("20", "3.1"),
-                ZtoeHouseLookupResult("24", "3.2"),
-                ZtoeHouseLookupResult("37", "2.2", emergencyOutage = getKyivska37DemoEmergencyOutage(LocalDate.now(KYIV_ZONE))),
-                ZtoeHouseLookupResult("45", "4.1"),
-                ZtoeHouseLookupResult("59", "4.2"),
-                ZtoeHouseLookupResult("74", "", statusText = "В цей час не вимикається, за винятком випадків аварійних відключень"),
-                ZtoeHouseLookupResult("77", "5.2"),
-                ZtoeHouseLookupResult("81", "5.1"),
-                ZtoeHouseLookupResult("96", "6.1"),
-                ZtoeHouseLookupResult("102", "6.2"),
-                ZtoeHouseLookupResult("104", "", statusText = "В цей час не вимикається, за винятком випадків аварійних відключень"),
-                ZtoeHouseLookupResult("106", "", statusText = "В цей час не вимикається, за винятком випадків аварійних відключень")
-            )
-            "zt_velyka_berdychivska", "zt_berdy" -> listOf(
-                ZtoeHouseLookupResult("2", "1.1"),
-                ZtoeHouseLookupResult("6", "2.1"),
-                ZtoeHouseLookupResult("8", "2.1"),
-                ZtoeHouseLookupResult("10", "2.1"),
-                ZtoeHouseLookupResult("12", "2.1"),
-                ZtoeHouseLookupResult("14", "2.1"),
-                ZtoeHouseLookupResult("15", "2.2"),
-                ZtoeHouseLookupResult("22", "", statusText = "В цей час не вимикається, за винятком випадків аварійних відключень"),
-                ZtoeHouseLookupResult("28", "3.1"),
-                ZtoeHouseLookupResult("32", "4.1"),
-                ZtoeHouseLookupResult("35", "4.2"),
-                ZtoeHouseLookupResult("52", "5.1"),
-                ZtoeHouseLookupResult("67", "5.1"),
-                ZtoeHouseLookupResult("70", "", statusText = "В цей час не вимикається, за винятком випадків аварійних відключень"),
-                ZtoeHouseLookupResult("71", "", statusText = "В цей час не вимикається, за винятком випадків аварійних відключень")
-            )
-            "zt_peremohy" -> listOf(
-                ZtoeHouseLookupResult("1", "1.2"),
-                ZtoeHouseLookupResult("10", "2.2"),
-                ZtoeHouseLookupResult("25", "3.2"),
-                ZtoeHouseLookupResult("48", "4.1"),
-                ZtoeHouseLookupResult("54", "5.2"),
-                ZtoeHouseLookupResult("72", "6.2"),
-                ZtoeHouseLookupResult("99", "", statusText = "В цей час не вимикається, за винятком випадків аварійних відключень")
-            )
-            "zt_pokrovska" -> listOf(
-                ZtoeHouseLookupResult("4", "2.1"),
-                ZtoeHouseLookupResult("16", "3.1"),
-                ZtoeHouseLookupResult("32", "4.2"),
-                ZtoeHouseLookupResult("63", "5.1"),
-                ZtoeHouseLookupResult("88", "6.1"),
-                ZtoeHouseLookupResult("120", "", statusText = "В цей час не вимикається, за винятком випадків аварійних відключень")
-            )
-            "zt_chudnivska" -> listOf(
-                ZtoeHouseLookupResult("8", "1.1"),
-                ZtoeHouseLookupResult("22", "2.2"),
-                ZtoeHouseLookupResult("44", "3.2"),
-                ZtoeHouseLookupResult("66", "4.1"),
-                ZtoeHouseLookupResult("92", "5.2"),
-                ZtoeHouseLookupResult("104", "6.2"),
-                ZtoeHouseLookupResult("112", "", statusText = "В цей час не вимикається, за винятком випадків аварійних відключень")
-            )
-            "zt_bandery", "st_173952" -> listOf(
-                ZtoeHouseLookupResult("2", "1.2"),
-                ZtoeHouseLookupResult("3", "1.2"),
-                ZtoeHouseLookupResult("4", "1.2"),
-                ZtoeHouseLookupResult("4А", "1.2"),
-                ZtoeHouseLookupResult("5", "4.1"),
-                ZtoeHouseLookupResult("6", "1.2"),
-                ZtoeHouseLookupResult("7", "4.1"),
-                ZtoeHouseLookupResult("8", "4.1"),
-                ZtoeHouseLookupResult("9", "4.1"),
-                ZtoeHouseLookupResult("10", "1.2"),
-                ZtoeHouseLookupResult("10А", "4.1"),
-                ZtoeHouseLookupResult("11", "4.1"),
-                ZtoeHouseLookupResult("12", "4.1"),
-                ZtoeHouseLookupResult("13", "4.1"),
-                ZtoeHouseLookupResult("14", "4.1"),
-                ZtoeHouseLookupResult("15", "4.1"),
-                ZtoeHouseLookupResult("16", "4.1"),
-                ZtoeHouseLookupResult("16/63", "4.1"),
-                ZtoeHouseLookupResult("16а", "4.1"),
-                ZtoeHouseLookupResult("18", "1.2"),
-                ZtoeHouseLookupResult("32", "1.2")
-            )
-            else -> listOf(
-                ZtoeHouseLookupResult("1", "1.1"),
-                ZtoeHouseLookupResult("2", "1.2"),
-                ZtoeHouseLookupResult("5", "2.1"),
-                ZtoeHouseLookupResult("10", "3.1"),
-                ZtoeHouseLookupResult("15", "4.2"),
-                ZtoeHouseLookupResult("20", "5.2"),
-                ZtoeHouseLookupResult("25", "6.1"),
-                ZtoeHouseLookupResult("30", "", statusText = "В цей час не вимикається, за винятком випадків аварійних відключень")
-            )
-        }
-    }
-
+    /** Houses of the street (any of its merged ids). Empty until the live index loaded them; there are no fake defaults. */
     fun getHousesForStreet(streetId: String): List<ZtoeHouseLookupResult> {
         cachedHousesByStreet[streetId]?.let { return it }
-        if (streetId == "zt_berdy") {
-            cachedHousesByStreet["zt_velyka_berdychivska"]?.let { return it }
-        } else if (streetId == "zt_velyka_berdychivska") {
-            cachedHousesByStreet["zt_berdy"]?.let { return it }
-        }
-        return getDefaultHousesForStreet(streetId)
+        val canonical = findStreetById(streetId)?.id ?: return emptyList()
+        return cachedHousesByStreet[canonical] ?: emptyList()
     }
 
+    private fun canonicalSettlementId(id: String): String = ZtoeStaticDirectory.LEGACY_SETTLEMENT_IDS[id] ?: id
+
     fun findSettlementById(settlementId: String): ZtoeSettlementOption? {
+        val id = canonicalSettlementId(settlementId)
         for (list in cachedSettlementsByRem.values) {
-            list.firstOrNull { it.id == settlementId }?.let { found ->
+            list.firstOrNull { it.id == id }?.let { found ->
                 if (found.poweronCityId != null) return found
                 val staticMatch = ZTOE_SETTLEMENTS.firstOrNull { it.id == found.id || it.ztoeNaspunktId == found.ztoeNaspunktId }
                 return if (staticMatch?.poweronCityId != null) found.copy(poweronCityId = staticMatch.poweronCityId) else found
             }
         }
-        ZTOE_SETTLEMENTS.firstOrNull { it.id == settlementId }?.let { return it }
-        val npId = settlementId.removePrefix("np_").toIntOrNull()
+        ZTOE_SETTLEMENTS.firstOrNull { it.id == id }?.let { return it }
+        val npId = id.removePrefix("np_").toIntOrNull()
         if (npId != null) {
             for (list in cachedSettlementsByRem.values) {
                 list.firstOrNull { it.ztoeNaspunktId == npId }?.let { return it }
@@ -5863,26 +6218,443 @@ object ZtoeAddressLookup {
         return null
     }
 
+    /** Resolves the canonical option id or any merged duplicate id, plus the legacy ids of earlier versions. */
     fun findStreetById(streetId: String): ZtoeStreetOption? {
-        val canonicalId = if (streetId == "zt_berdy") "zt_velyka_berdychivska" else streetId
-        for (list in cachedStreetsBySettlement.values) {
-            list.firstOrNull { it.id == streetId || it.id == canonicalId }?.let { found ->
-                if (found.poweronStreetId != null) return found
-                val staticMatch = ZTOE_STREETS.firstOrNull { it.id == found.id || it.ztoeVulicaId == found.ztoeVulicaId }
-                return if (staticMatch?.poweronStreetId != null) found.copy(poweronStreetId = staticMatch.poweronStreetId) else found
-            }
-        }
-        ZTOE_STREETS.firstOrNull { it.id == streetId || it.id == canonicalId }?.let { return it }
-        val vulId = streetId.removePrefix("st_").toIntOrNull()
-        if (vulId != null) {
-            for (list in cachedStreetsBySettlement.values) {
-                list.firstOrNull { it.ztoeVulicaId == vulId }?.let { return it }
-            }
-            ZTOE_STREETS.firstOrNull { it.ztoeVulicaId == vulId }?.let { return it }
-            return ZtoeStreetOption(streetId, "", vulId, "", "")
-        }
-        return null
+        if (streetId.isBlank()) return null
+        val id = ZtoeStaticDirectory.LEGACY_STREET_IDS[streetId] ?: streetId
+        streetByAnyId[id]?.let { return it }
+        staticStreetByAnyId[id]?.let { return it }
+        val vulId = id.removePrefix("st_").toIntOrNull() ?: return null
+        streetByAnyId.values.firstOrNull { vulId in it.ztoeVulicaIds }?.let { return it }
+        staticStreetByVulica[vulId]?.let { return it }
+        return ZtoeStreetOption(streetId, "", vulId, "", "")
     }
+
+    // ---------------------------------------------------------------------------------------------
+    // Street merge (spec/ADDRESS_KEY.md section 5)
+    // ---------------------------------------------------------------------------------------------
+
+    /**
+     * Groups streets of one settlement by [StreetKey.of] and returns one option per group that holds
+     * all ids. Display name: first name seen. Canonical id: a static (non "st_") id when there is one,
+     * otherwise the member with the lowest ztoe id. Idempotent, so it is safe to apply to data that
+     * is already merged (cache hydration, read).
+     */
+    internal fun mergeStreets(streets: List<ZtoeStreetOption>): List<ZtoeStreetOption> {
+        if (streets.isEmpty()) return streets
+        val groups = LinkedHashMap<String, MutableList<ZtoeStreetOption>>(streets.size * 2)
+        var anonymous = 0
+        for (s in streets) {
+            val key = StreetKey.of(s.nameUk)
+            val groupKey = if (key.isEmpty()) "#\${anonymous++}" else "\${s.settlementId}|$key"
+            groups.getOrPut(groupKey) { ArrayList(1) }.add(s)
+        }
+        val out = ArrayList<ZtoeStreetOption>(groups.size)
+        for (g in groups.values) out.add(mergeGroup(g))
+        return out
+    }
+
+    private fun mergeGroup(group: List<ZtoeStreetOption>): ZtoeStreetOption {
+        val first = group[0]
+        val canonical = group.firstOrNull { !it.id.startsWith("st_") }
+            ?: group.minByOrNull { it.ztoeVulicaId }
+            ?: first
+        val ordered = listOf(canonical) + group.filter { it !== canonical }
+        val allIds = (listOf(canonical.id) + ordered.flatMap { it.allIds + it.id }).distinct()
+        val vulicaIds = (listOf(canonical.ztoeVulicaId) + ordered.flatMap { it.ztoeVulicaIds + it.ztoeVulicaId }).distinct()
+        val poweronIds = ordered.flatMap { it.poweronStreetIds + listOfNotNull(it.poweronStreetId) }.distinct()
+        return canonical.copy(
+            nameUk = first.nameUk,
+            nameEn = first.nameEn,
+            poweronStreetId = canonical.poweronStreetId ?: poweronIds.firstOrNull(),
+            allIds = allIds,
+            ztoeVulicaIds = vulicaIds,
+            poweronStreetIds = poweronIds
+        )
+    }
+
+    /** Publishes a merged street list and re-keys houses cached under an id that stopped being canonical. */
+    private fun registerStreets(settlementId: String, merged: List<ZtoeStreetOption>) {
+        cachedStreetsBySettlement[settlementId] = merged
+        for (st in merged) {
+            for (id in st.allIds) {
+                val prev = streetByAnyId.put(id, st)
+                if (prev != null && prev.id != st.id) {
+                    cachedHousesByStreet.remove(prev.id)?.let { old ->
+                        cachedHousesByStreet.merge(st.id, old) { a, b -> unionHouses(a, b) }
+                    }
+                    houseCacheUpdatedAtByStreet.remove(prev.id)
+                }
+            }
+        }
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // House helpers
+    // ---------------------------------------------------------------------------------------------
+
+    private class HouseSortEntry(val house: ZtoeHouseLookupResult) {
+        val number: Int
+        val text: String = house.house.trim().lowercase()
+
+        init {
+            var end = 0
+            while (end < text.length && text[end] in '0'..'9') end++
+            number = if (end == 0) Int.MAX_VALUE else text.substring(0, end).toIntOrNull() ?: Int.MAX_VALUE
+        }
+    }
+
+    private fun sortHouses(houses: Collection<ZtoeHouseLookupResult>): List<ZtoeHouseLookupResult> {
+        return houses.map { HouseSortEntry(it) }
+            .sortedWith(compareBy<HouseSortEntry> { it.number }.thenBy { it.text })
+            .map { it.house }
+    }
+
+    /** First display form wins, except that a row with a queue replaces a row without one. */
+    private fun putHouse(map: MutableMap<String, ZtoeHouseLookupResult>, h: ZtoeHouseLookupResult) {
+        val key = HouseKey.of(h.house)
+        if (key.isEmpty()) return
+        val existing = map[key]
+        if (existing == null || (existing.queue.isEmpty() && h.queue.isNotEmpty())) {
+            map[key] = h
+        }
+    }
+
+    internal fun unionHouses(a: List<ZtoeHouseLookupResult>, b: List<ZtoeHouseLookupResult>): List<ZtoeHouseLookupResult> {
+        val map = LinkedHashMap<String, ZtoeHouseLookupResult>()
+        for (h in a) putHouse(map, h)
+        for (h in b) putHouse(map, h)
+        return sortHouses(map.values)
+    }
+
+    private fun storeStreetHouses(canonicalStreetId: String, houses: List<ZtoeHouseLookupResult>) {
+        cachedHousesByStreet[canonicalStreetId] = houses
+        houseCacheUpdatedAtByStreet[canonicalStreetId] = System.currentTimeMillis()
+        recordRecentHouseStreet(canonicalStreetId)
+    }
+
+    private fun recordRecentHouseStreet(streetId: String) {
+        if (streetId.isBlank()) return
+        synchronized(recentLock) {
+            recentHouseStreets.remove(streetId)
+            recentHouseStreets.add(0, streetId)
+            while (recentHouseStreets.size > MAX_PERSISTED_HOUSE_STREETS) {
+                recentHouseStreets.removeAt(recentHouseStreets.lastIndex)
+            }
+        }
+    }
+
+    private fun recentSnapshot(): List<String> = synchronized(recentLock) { ArrayList(recentHouseStreets) }
+
+    // ---------------------------------------------------------------------------------------------
+    // Text helpers
+    // ---------------------------------------------------------------------------------------------
+
+    private fun stripHtmlFast(raw: String): String {
+        val noTags = HTML_TAG_STRIP_REGEX.replace(raw, " ")
+        val decoded = TextNorm.decodeEntities(noTags).replace(' ', ' ')
+        return WHITESPACE_REGEX.replace(decoded, " ").trim()
+    }
+
+    /** Exact-match key for settlement names: no prefix, no parentheses, no apostrophes; never a substring test. */
+    internal fun cityKey(raw: String): String {
+        var s = TextNorm.decodeEntities(raw).lowercase()
+        s = PARENS_REGEX.replace(s, "")
+        s = CITY_PREFIX_REGEX.replace(s.trim(), "")
+        s = s.filter { TextNorm.APOSTROPHES.indexOf(it) < 0 }
+        s = CITY_PUNCT_REGEX.replace(s, " ").replace("бердичив", "бердичів")
+        return WHITESPACE_REGEX.replace(s, " ").trim()
+    }
+
+    private fun formatSettlementLabelUk(rawLabel: String): String {
+        return rawLabel
+            .replace(LABEL_VILLAGE_REGEX, "с. ")
+            .replace(LABEL_TOWN_REGEX, "м. ")
+            .trim()
+    }
+
+    private fun splitHouses(field: String): List<String> {
+        return field.split(HOUSE_SPLIT_REGEX)
+            .map { it.trim() }
+            .filter { it.isNotEmpty() && !it.equals("будинки", ignoreCase = true) }
+    }
+
+    /** The part of the page before the schedule section, without copying the string. */
+    private fun addressSection(html: String): CharSequence {
+        val idx = html.indexOf(SCHEDULE_MARKER)
+        return if (idx >= 0) CharBuffer.wrap(html, 0, idx) else html
+    }
+
+    private fun bareStreetKey(key: String): String {
+        val space = key.indexOf(' ')
+        if (space < 0) return if (key in STREET_TYPE_KEY_TOKENS) "" else key
+        return if (key.substring(0, space) in STREET_TYPE_KEY_TOKENS) key.substring(space + 1) else key
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // Disk cache (org.json)
+    // ---------------------------------------------------------------------------------------------
+
+    private fun JSONObject.str(name: String): String? = if (has(name) && !isNull(name)) optString(name) else null
+    private fun JSONObject.int(name: String): Int? = if (has(name) && !isNull(name)) optInt(name) else null
+
+    private fun JSONObject.strList(name: String): List<String> {
+        val arr = optJSONArray(name) ?: return emptyList()
+        return (0 until arr.length()).mapNotNull { i -> arr.optString(i).takeIf { it.isNotEmpty() } }
+    }
+
+    private fun JSONObject.intList(name: String): List<Int> {
+        val arr = optJSONArray(name) ?: return emptyList()
+        return (0 until arr.length()).map { i -> arr.optInt(i) }
+    }
+
+    fun serializeCacheToJson(): String {
+        val root = JSONObject()
+        root.put("version", CACHE_VERSION)
+
+        val rems = JSONArray()
+        for (r in cachedRems ?: emptyList()) {
+            rems.put(JSONObject().apply {
+                put("id", r.id)
+                put("ztoeRemId", r.ztoeRemId)
+                r.ztoeOtgId?.let { put("ztoeOtgId", it) }
+                put("nameUk", r.nameUk)
+                put("nameEn", r.nameEn)
+            })
+        }
+        root.put("rems", rems)
+
+        val settlements = JSONArray()
+        for (list in cachedSettlementsByRem.values) {
+            for (s in list) {
+                settlements.put(JSONObject().apply {
+                    put("id", s.id)
+                    put("remId", s.remId)
+                    put("ztoeNaspunktId", s.ztoeNaspunktId)
+                    s.poweronCityId?.let { put("poweronCityId", it) }
+                    put("nameUk", s.nameUk)
+                    put("nameEn", s.nameEn)
+                })
+            }
+        }
+        root.put("settlements", settlements)
+
+        val streets = JSONArray()
+        for (list in cachedStreetsBySettlement.values) {
+            for (st in list) {
+                streets.put(JSONObject().apply {
+                    put("id", st.id)
+                    put("settlementId", st.settlementId)
+                    put("ztoeVulicaId", st.ztoeVulicaId)
+                    st.poweronStreetId?.let { put("poweronStreetId", it) }
+                    put("nameUk", st.nameUk)
+                    put("nameEn", st.nameEn)
+                    put("allIds", JSONArray(st.allIds))
+                    put("ztoeVulicaIds", JSONArray(st.ztoeVulicaIds))
+                    put("poweronStreetIds", JSONArray(st.poweronStreetIds))
+                })
+            }
+        }
+        root.put("streets", streets)
+
+        val houses = JSONArray()
+        val recent = recentSnapshot()
+        val orderedStreets = (recent + cachedHousesByStreet.keys.toList()).distinct().take(MAX_PERSISTED_HOUSE_STREETS)
+        for (streetId in orderedStreets) {
+            val list = cachedHousesByStreet[streetId] ?: continue
+            for (h in list) {
+                houses.put(JSONObject().apply {
+                    put("streetId", streetId)
+                    put("house", h.house)
+                    put("queue", h.queue)
+                    if (!h.statusText.isNullOrBlank()) put("statusText", h.statusText)
+                })
+            }
+        }
+        root.put("houses", houses)
+        root.put("recent", JSONArray(recent))
+
+        val bulk = JSONObject()
+        for ((sid, at) in bulkFetchedAtBySettlement) bulk.put(sid, at)
+        root.put("bulkAt", bulk)
+        return root.toString()
+    }
+
+    /**
+     * Loads a stored index. A cache of another [CACHE_VERSION] is rejected. Street lists are merged
+     * again (an old cache with duplicates heals on read) and in-memory data that is already present
+     * is not overwritten by older stored data.
+     */
+    fun hydrateCacheFromJson(jsonStr: String): Boolean {
+        if (jsonStr.isBlank()) return false
+        return try {
+            val root = JSONObject(jsonStr)
+            if (root.optInt("version", -1) != CACHE_VERSION) return false
+
+            root.optJSONArray("rems")?.let { arr ->
+                val parsed = mutableListOf<ZtoeRemOption>()
+                for (i in 0 until arr.length()) {
+                    val o = arr.optJSONObject(i) ?: continue
+                    val id = o.str("id") ?: continue
+                    val ztoeRemId = o.int("ztoeRemId") ?: continue
+                    val nameUk = stripHtmlFast(o.str("nameUk") ?: continue)
+                    val nameEn = stripHtmlFast(o.str("nameEn") ?: nameUk)
+                    val staticRem = ZTOE_REM_OPTIONS.firstOrNull { it.id == id || it.ztoeRemId == ztoeRemId }
+                    parsed.add(ZtoeRemOption(id, ztoeRemId, nameUk, nameEn, o.int("ztoeOtgId") ?: staticRem?.ztoeOtgId))
+                }
+                if (parsed.isNotEmpty() && cachedRems == null) cachedRems = parsed
+            }
+
+            root.optJSONArray("settlements")?.let { arr ->
+                val grouped = LinkedHashMap<String, MutableList<ZtoeSettlementOption>>()
+                for (i in 0 until arr.length()) {
+                    val o = arr.optJSONObject(i) ?: continue
+                    val id = o.str("id") ?: continue
+                    val remId = o.str("remId") ?: continue
+                    val npId = o.int("ztoeNaspunktId") ?: continue
+                    val nameUk = stripHtmlFast(o.str("nameUk") ?: continue)
+                    val nameEn = stripHtmlFast(o.str("nameEn") ?: nameUk)
+                    val staticSettlement = ZTOE_SETTLEMENTS.firstOrNull { it.id == id || it.ztoeNaspunktId == npId }
+                    val cityId = o.int("poweronCityId") ?: staticSettlement?.poweronCityId
+                    grouped.getOrPut(remId) { mutableListOf() }.add(ZtoeSettlementOption(id, remId, npId, nameUk, nameEn, cityId))
+                }
+                for ((remId, list) in grouped) {
+                    if (list.isNotEmpty()) cachedSettlementsByRem.putIfAbsent(remId, list)
+                }
+            }
+
+            root.optJSONArray("streets")?.let { arr ->
+                val grouped = LinkedHashMap<String, MutableList<ZtoeStreetOption>>()
+                for (i in 0 until arr.length()) {
+                    val o = arr.optJSONObject(i) ?: continue
+                    val id = o.str("id") ?: continue
+                    val settlementId = o.str("settlementId") ?: continue
+                    val vulId = o.int("ztoeVulicaId") ?: continue
+                    val nameUk = stripHtmlFast(o.str("nameUk") ?: continue)
+                    val nameEn = stripHtmlFast(o.str("nameEn") ?: nameUk)
+                    val static = staticStreetByAnyId[id] ?: staticStreetByVulica[vulId]
+                    val poweronIds = (o.intList("poweronStreetIds") + (static?.poweronStreetIds ?: emptyList())).distinct()
+                    grouped.getOrPut(settlementId) { mutableListOf() }.add(
+                        ZtoeStreetOption(
+                            id = id,
+                            settlementId = settlementId,
+                            ztoeVulicaId = vulId,
+                            nameUk = nameUk,
+                            nameEn = nameEn,
+                            poweronStreetId = o.int("poweronStreetId") ?: static?.poweronStreetId,
+                            allIds = (listOf(id) + o.strList("allIds")).distinct(),
+                            ztoeVulicaIds = (listOf(vulId) + o.intList("ztoeVulicaIds")).distinct(),
+                            poweronStreetIds = poweronIds
+                        )
+                    )
+                }
+                for ((settlementId, list) in grouped) {
+                    if (list.isNotEmpty() && !cachedStreetsBySettlement.containsKey(settlementId)) {
+                        registerStreets(settlementId, mergeStreets(list))
+                    }
+                }
+            }
+
+            root.optJSONArray("houses")?.let { arr ->
+                val grouped = LinkedHashMap<String, MutableList<ZtoeHouseLookupResult>>()
+                val accepted = HashSet<String>()
+                for (i in 0 until arr.length()) {
+                    val o = arr.optJSONObject(i) ?: continue
+                    val streetId = o.str("streetId") ?: continue
+                    if (streetId !in accepted) {
+                        if (accepted.size >= MAX_PERSISTED_HOUSE_STREETS) continue
+                        accepted.add(streetId)
+                    }
+                    val house = o.str("house") ?: continue
+                    val canonical = findStreetById(streetId)?.id ?: streetId
+                    grouped.getOrPut(canonical) { mutableListOf() }.add(
+                        ZtoeHouseLookupResult(house = house, queue = o.str("queue") ?: "", statusText = o.str("statusText"))
+                    )
+                }
+                for ((canonical, list) in grouped) {
+                    if (list.isNotEmpty()) cachedHousesByStreet.putIfAbsent(canonical, unionHouses(list, emptyList()))
+                }
+            }
+
+            root.optJSONArray("recent")?.let { arr ->
+                synchronized(recentLock) {
+                    if (recentHouseStreets.isEmpty()) {
+                        for (i in 0 until arr.length()) {
+                            val id = arr.optString(i)
+                            if (id.isNotEmpty() && recentHouseStreets.size < MAX_PERSISTED_HOUSE_STREETS && id !in recentHouseStreets) {
+                                recentHouseStreets.add(id)
+                            }
+                        }
+                    }
+                }
+            }
+
+            root.optJSONObject("bulkAt")?.let { bulk ->
+                for (sid in bulk.keys()) {
+                    val at = bulk.optLong(sid, 0L)
+                    if (at > 0L) bulkFetchedAtBySettlement.putIfAbsent(sid, at)
+                }
+            }
+            diskCacheHydrated = true
+            true
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    /** Hydrates once per process from SharedPreferences; a stale or unreadable cache is removed. */
+    fun initDiskCache(context: android.content.Context): Boolean {
+        appContext = context.applicationContext
+        if (hydrateAttempted.getAndSet(true)) return diskCacheHydrated
+        return try {
+            val prefs = context.applicationContext.getSharedPreferences(PREFS_NAME, android.content.Context.MODE_PRIVATE)
+            val rawJson = prefs.getString(KEY_INDEX_JSON, null) ?: return false
+            val ok = hydrateCacheFromJson(rawJson)
+            if (!ok) prefs.edit().remove(KEY_INDEX_JSON).apply()
+            ok
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    /** Writes are coalesced: calls made while a write is queued share that write. */
+    fun persistToDiskCache() {
+        val ctx = appContext ?: return
+        if (!persistPending.compareAndSet(false, true)) return
+        try {
+            diskPersistExecutor.execute {
+                persistPending.set(false)
+                try {
+                    val json = serializeCacheToJson()
+                    ctx.getSharedPreferences(PREFS_NAME, android.content.Context.MODE_PRIVATE)
+                        .edit()
+                        .putString(KEY_INDEX_JSON, json)
+                        .apply()
+                } catch (_: Exception) {
+                }
+            }
+        } catch (_: Exception) {
+            persistPending.set(false)
+        }
+    }
+
+    fun clearCacheForTesting() {
+        diskCacheHydrated = false
+        hydrateAttempted.set(false)
+        cachedRems = null
+        cachedSettlementsByRem.clear()
+        cachedStreetsBySettlement.clear()
+        streetByAnyId.clear()
+        cachedHousesByStreet.clear()
+        houseCacheUpdatedAtByStreet.clear()
+        bulkFetchedAtBySettlement.clear()
+        inFlight.clear()
+        synchronized(recentLock) { recentHouseStreets.clear() }
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // Network
+    // ---------------------------------------------------------------------------------------------
 
     private fun postZtoeForm(formBody: String, siteUrl: String): String? {
         if (!ZtoeParser.isValidUrl(siteUrl)) return null
@@ -5918,6 +6690,50 @@ object ZtoeAddressLookup {
         }
     }
 
+    /**
+     * Runs [block] once per [key]; concurrent callers wait (outside any monitor) for the first
+     * caller's result and get [fallback] if it failed or took too long.
+     */
+    @Suppress("UNCHECKED_CAST")
+    private fun <T> singleFlight(key: String, fallback: () -> T, block: () -> T): T {
+        val mine = CompletableFuture<Any?>()
+        val running = inFlight.putIfAbsent(key, mine)
+        if (running != null) {
+            return try {
+                running.get(IN_FLIGHT_WAIT_SECONDS, TimeUnit.SECONDS) as T
+            } catch (e: InterruptedException) {
+                Thread.currentThread().interrupt()
+                fallback()
+            } catch (_: Exception) {
+                fallback()
+            }
+        }
+        try {
+            val value = block()
+            mine.complete(value)
+            return value
+        } catch (t: Throwable) {
+            mine.completeExceptionally(t)
+            throw t
+        } finally {
+            inFlight.remove(key, mine)
+        }
+    }
+
+    private fun awaitInFlight(key: String) {
+        val running = inFlight[key] ?: return
+        try {
+            running.get(IN_FLIGHT_WAIT_SECONDS, TimeUnit.SECONDS)
+        } catch (e: InterruptedException) {
+            Thread.currentThread().interrupt()
+        } catch (_: Exception) {
+        }
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // Directory parsing (rem, settlement, street selects)
+    // ---------------------------------------------------------------------------------------------
+
     fun parseZtoeRemOptionsHtml(html: String): List<ZtoeRemOption> {
         val selectInner = SELECT_REM_REGEX.find(html)?.groupValues?.get(1) ?: return emptyList()
         val parsed = mutableListOf<ZtoeRemOption>()
@@ -5952,36 +6768,10 @@ object ZtoeAddressLookup {
         return parsed
     }
 
-    fun fetchRemsFromZtoe(
-        siteUrl: String = "https://www.ztoe.com.ua/unhooking-search.php",
-        forceRefresh: Boolean = false
-    ): List<ZtoeRemOption> {
-        val currentCached = cachedRems
-        if (!forceRefresh && currentCached != null && currentCached.isNotEmpty()) {
-            return currentCached
-        }
-        val html = postZtoeForm("", siteUrl)
-        if (!html.isNullOrBlank()) {
-            val liveRems = parseZtoeRemOptionsHtml(html)
-            if (liveRems.isNotEmpty()) {
-                cachedRems = liveRems
-                persistToDiskCache()
-                return liveRems
-            }
-        }
-        return getRems()
-    }
-
-    private fun formatSettlementLabelUk(rawLabel: String): String {
-        return rawLabel
-            .replace(Regex("^село\\\\s+", RegexOption.IGNORE_CASE), "с. ")
-            .replace(Regex("^місто\\\\s+", RegexOption.IGNORE_CASE), "м. ")
-            .trim()
-    }
-
     fun parseZtoeSettlementOptionsHtml(remId: String, html: String): List<ZtoeSettlementOption> {
         val selectInner = SELECT_NASPUNKT_REGEX.find(html)?.groupValues?.get(1) ?: return emptyList()
         val existingForRem = ZTOE_SETTLEMENTS.filter { it.remId == remId }
+        val existingKeys = existingForRem.map { cityKey(it.nameUk) }
         val parsed = mutableListOf<ZtoeSettlementOption>()
         val seenIds = HashSet<String>()
         for (m in OPTION_TAG_REGEX.findAll(selectInner)) {
@@ -5989,12 +6779,10 @@ object ZtoeAddressLookup {
             if (npId <= 0) continue
             val label = formatSettlementLabelUk(stripHtmlFast(m.groupValues[2]))
             if (label.isEmpty() || label.contains("Оберіть", ignoreCase = true)) continue
-            val candidateExisting = existingForRem.firstOrNull {
-                normalizeUkText(it.nameUk) == normalizeUkText(label)
-            } ?: existingForRem.firstOrNull { it.ztoeNaspunktId == npId }
-            val matchedExisting = if (candidateExisting != null && !seenIds.contains(candidateExisting.id)) {
-                candidateExisting
-            } else null
+            val labelKey = cityKey(label)
+            val byName = existingKeys.indexOf(labelKey).takeIf { it >= 0 }?.let { existingForRem[it] }
+            val candidate = byName ?: existingForRem.firstOrNull { it.ztoeNaspunktId == npId }
+            val matchedExisting = candidate?.takeIf { !seenIds.contains(it.id) }
 
             if (matchedExisting != null) {
                 seenIds.add(matchedExisting.id)
@@ -6017,98 +6805,91 @@ object ZtoeAddressLookup {
         return parsed
     }
 
+    /** Parses the street select and returns the list already merged by [StreetKey]. */
     fun parseZtoeStreetOptionsHtml(settlementId: String, html: String): List<ZtoeStreetOption> {
         val selectInner = SELECT_VULICA_REGEX.find(html)?.groupValues?.get(1) ?: return emptyList()
-        val existingForSettlement = ZTOE_STREETS.filter { it.settlementId == settlementId }
-        val parsed = mutableListOf<ZtoeStreetOption>()
-        val seenIds = HashSet<String>()
+        val staticForSettlement = ZTOE_STREETS.filter { it.settlementId == settlementId }
+        val staticByKey = HashMap<String, ZtoeStreetOption>()
+        for (s in staticForSettlement) staticByKey.putIfAbsent(StreetKey.of(s.nameUk), s)
+        val usedStatic = HashSet<String>()
+        val parsed = ArrayList<ZtoeStreetOption>()
         for (m in OPTION_TAG_REGEX.findAll(selectInner)) {
             val vulId = m.groupValues[1].trim().toIntOrNull() ?: continue
             if (vulId <= 0) continue
             val label = stripHtmlFast(m.groupValues[2])
             if (label.isEmpty() || label.contains("Оберіть", ignoreCase = true)) continue
-            val candidateExisting = existingForSettlement.firstOrNull {
-                normalizeUkText(it.nameUk) == normalizeUkText(label)
-            } ?: existingForSettlement.firstOrNull { it.ztoeVulicaId == vulId }
-            val matchedExisting = if (candidateExisting != null && !seenIds.contains(candidateExisting.id)) {
-                candidateExisting
-            } else null
-
-            if (matchedExisting != null) {
-                seenIds.add(matchedExisting.id)
-                parsed.add(matchedExisting.copy(ztoeVulicaId = vulId))
-            } else {
-                val id = "st_$vulId"
-                if (seenIds.add(id)) {
-                    parsed.add(
-                        ZtoeStreetOption(
-                            id = id,
-                            settlementId = settlementId,
-                            ztoeVulicaId = vulId,
-                            nameUk = label,
-                            nameEn = label
-                        )
+            val candidate = staticByKey[StreetKey.of(label)]
+                ?: staticStreetByVulica[vulId]?.takeIf { it.settlementId == settlementId }
+            val matchedStatic = candidate?.takeIf { usedStatic.add(it.id) }
+            if (matchedStatic != null) {
+                parsed.add(
+                    matchedStatic.copy(
+                        ztoeVulicaId = vulId,
+                        ztoeVulicaIds = listOf(vulId),
+                        allIds = listOf(matchedStatic.id)
                     )
-                }
+                )
+            } else {
+                parsed.add(ZtoeStreetOption(id = "st_$vulId", settlementId = settlementId, ztoeVulicaId = vulId, nameUk = label, nameEn = label))
             }
         }
-        return parsed
+        return mergeStreets(parsed)
     }
 
-    private fun houseSortKey(house: String): Pair<Int, String> {
-        val trimmed = house.trim()
-        val numMatch = Regex("^(\\\\d+)").find(trimmed)
-        val leadingNum = numMatch?.groupValues?.get(1)?.toIntOrNull() ?: Int.MAX_VALUE
-        return leadingNum to trimmed.lowercase()
-    }
-
-    private fun applyCanonicalStreetOverrides(
-        streetId: String,
-        mergedMap: LinkedHashMap<String, ZtoeHouseLookupResult>
-    ) {
-        if (streetId == "zt_kyivska") {
-            for (localH in getDefaultHousesForStreet("zt_kyivska")) {
-                val k = normalizeHouseNumber(localH.house)
-                if (localH.house == "74" || localH.house == "77" || localH.house == "37" || localH.house == "104" || localH.house == "106" || !mergedMap.containsKey(k)) {
-                    mergedMap[k] = localH
-                }
-            }
-        }
-    }
+    // ---------------------------------------------------------------------------------------------
+    // House table parsing
+    // ---------------------------------------------------------------------------------------------
 
     /**
-     * Parses a settlement-wide ZTOE response (\`rem_id=X&naspunkt_id=Y&all=1\`) and indexes
-     * ALL houses for EVERY street in that settlement in a single fast pass without Jsoup DOM overhead.
+     * Parses a settlement-wide ZTOE response (\`rem_id=X&naspunkt_id=Y&all=1\`) and indexes the houses of
+     * EVERY street of the settlement in one pass. A row is assigned to a street only when the
+     * [StreetKey] of its name equals the key of the street (or, when exactly one street fits and one
+     * side has no street type, the bare names are equal). Never by substring.
      */
     fun parseZtoeSettlementHousesTableHtml(
         settlementId: String,
         streets: List<ZtoeStreetOption>,
-        html: String
+        html: String,
+        /** False for a one-street page: the caller unites the rows of all ids of the street first. */
+        cache: Boolean = true
     ): Map<String, List<ZtoeHouseLookupResult>> {
         if (html.isBlank() || streets.isEmpty()) return emptyMap()
 
-        val streetIdsByNormName = HashMap<String, MutableList<String>>(streets.size * 2)
-        fun addStreetMapping(normKey: String, streetId: String) {
-            if (normKey.isEmpty()) return
-            val list = streetIdsByNormName.getOrPut(normKey) { mutableListOf() }
-            if (!list.contains(streetId)) {
-                list.add(streetId)
+        val merged = mergeStreets(streets)
+        val idByKey = HashMap<String, String>(merged.size * 2)
+        val keyById = HashMap<String, String>(merged.size * 2)
+        val idsByBare = HashMap<String, MutableList<String>>(merged.size * 2)
+        for (st in merged) {
+            val key = StreetKey.of(st.nameUk)
+            if (key.isEmpty()) continue
+            idByKey.putIfAbsent(key, st.id)
+            keyById[st.id] = key
+            val bare = bareStreetKey(key)
+            if (bare.isNotEmpty()) idsByBare.getOrPut(bare) { mutableListOf() }.add(st.id)
+        }
+
+        val rowMatchCache = HashMap<String, String?>()
+        fun matchStreet(rawName: String): String? {
+            if (rowMatchCache.containsKey(rawName)) return rowMatchCache[rawName]
+            val key = StreetKey.of(rawName)
+            var found = idByKey[key]
+            if (found == null && key.isNotEmpty()) {
+                val bare = bareStreetKey(key)
+                val candidates = if (bare.isEmpty()) null else idsByBare[bare]
+                if (candidates != null && candidates.size == 1) {
+                    // at least one side must have no street type, otherwise "вул. X" would match "пров. X"
+                    val candidateKey = keyById[candidates[0]].orEmpty()
+                    if (key == bare || candidateKey == bare) {
+                        found = candidates[0]
+                    }
+                }
             }
-        }
-        for (st in streets) {
-            addStreetMapping(st.nameUk.trim().lowercase(), st.id)
-            addStreetMapping(normalizeUkText(st.nameUk), st.id)
-        }
-        for (st in ZTOE_STREETS.filter { it.settlementId == settlementId }) {
-            addStreetMapping(st.nameUk.trim().lowercase(), st.id)
-            addStreetMapping(normalizeUkText(st.nameUk), st.id)
+            rowMatchCache[rawName] = found
+            return found
         }
 
-        val scheduleIdx = html.indexOf("Графіки погодинних відключень")
-        val addressSectionHtml = if (scheduleIdx >= 0) html.substring(0, scheduleIdx) else html
-
-        val mergedMapsByStreet = HashMap<String, LinkedHashMap<String, ZtoeHouseLookupResult>>()
-        for (trMatch in TR_TAG_REGEX.findAll(addressSectionHtml)) {
+        val houseMaps = HashMap<String, LinkedHashMap<String, ZtoeHouseLookupResult>>()
+        for (trMatch in TR_TAG_REGEX.findAll(addressSection(html))) {
             val rowHtml = trMatch.groupValues[1]
             if (rowHtml.contains("<select", ignoreCase = true) || rowHtml.contains("<input", ignoreCase = true)) {
                 continue
@@ -6119,8 +6900,7 @@ object ZtoeAddressLookup {
             }
             if (cells.size < 5) continue
 
-            val firstLower = cells[0].lowercase()
-            if (firstLower == "рем" || cells[2].lowercase().contains("назва вулиці")) {
+            if (cells[0].lowercase() == "рем" || cells[2].lowercase().contains("назва вулиці")) {
                 continue
             }
 
@@ -6128,15 +6908,11 @@ object ZtoeAddressLookup {
             val houseField = cells[3].trim()
             if (streetNameRaw.isEmpty() || houseField.isEmpty()) continue
 
-            val matchedStreetIds = streetIdsByNormName[streetNameRaw.lowercase()]
-                ?: streetIdsByNormName[normalizeUkText(streetNameRaw)]
-                ?: continue
+            val streetId = matchStreet(streetNameRaw) ?: continue
 
             val col4 = cells[4].trim()
             val col5 = if (cells.size >= 6) cells[5].trim() else ""
-            val qNum = col4.replace(Regex("[^0-9]"), "")
-            val subNum = col5.replace(Regex("[^0-9]"), "")
-            val candidateQueue = "$qNum.$subNum"
+            val candidateQueue = "\${NON_DIGIT_REGEX.replace(col4, "")}.\${NON_DIGIT_REGEX.replace(col5, "")}"
 
             val resolvedQueue: String
             val resolvedStatusText: String?
@@ -6150,58 +6926,154 @@ object ZtoeAddressLookup {
                 continue
             }
 
-            val houseTokens = houseField.split(Regex("[,;]"))
-            for (streetId in matchedStreetIds) {
-                val streetMap = mergedMapsByStreet.getOrPut(streetId) { LinkedHashMap() }
-                for (rawToken in houseTokens) {
-                    val h = rawToken.trim()
-                    if (h.isEmpty() || h.equals("будинки", ignoreCase = true)) continue
-                    val key = normalizeHouseNumber(h)
-                    if (key.isEmpty()) continue
-                    val existing = streetMap[key]
-                    if (existing == null || (existing.queue.isEmpty() && resolvedQueue.isNotEmpty())) {
-                        streetMap[key] = ZtoeHouseLookupResult(
-                            house = h,
-                            queue = resolvedQueue,
-                            statusText = resolvedStatusText
-                        )
-                    }
-                }
+            val streetMap = houseMaps.getOrPut(streetId) { LinkedHashMap() }
+            for (h in splitHouses(houseField)) {
+                putHouse(streetMap, ZtoeHouseLookupResult(house = h, queue = resolvedQueue, statusText = resolvedStatusText))
             }
         }
 
-        val now = System.currentTimeMillis()
-        val result = HashMap<String, List<ZtoeHouseLookupResult>>(mergedMapsByStreet.size)
-        for ((streetId, mergedMap) in mergedMapsByStreet) {
-            val prevHouses = cachedHousesByStreet[streetId]
-            if (prevHouses != null) {
-                for (prevH in prevHouses) {
-                    if (prevH.emergencyOutage != null && isValidEmergencyOutage(prevH.emergencyOutage)) {
-                        val k = normalizeHouseNumber(prevH.house)
-                        val cur = mergedMap[k]
-                        if (cur != null && cur.emergencyOutage == null) {
-                            mergedMap[k] = cur.copy(emergencyOutage = prevH.emergencyOutage)
-                        }
-                    }
-                }
-            }
-            applyCanonicalStreetOverrides(streetId, mergedMap)
-            val sortedList = mergedMap.values.sortedWith(
-                compareBy<ZtoeHouseLookupResult> { houseSortKey(it.house).first }
-                    .thenBy { houseSortKey(it.house).second }
-            )
-            if (sortedList.isNotEmpty()) {
-                result[streetId] = sortedList
-                cachedHousesByStreet[streetId] = sortedList
-                houseCacheUpdatedAtByStreet[streetId] = now
+        val result = HashMap<String, List<ZtoeHouseLookupResult>>(houseMaps.size)
+        for ((streetId, map) in houseMaps) {
+            if (map.isEmpty()) continue
+            val sorted = sortHouses(map.values)
+            result[streetId] = sorted
+            if (cache) {
+                cachedHousesByStreet[streetId] = sorted
+                houseCacheUpdatedAtByStreet[streetId] = System.currentTimeMillis()
             }
         }
         return result
     }
 
+    /**
+     * Parses HTML table rows from ZTOE unhooking-search.php address lookup results.
+     * Supports 7-column real ZTOE tables, 3-column [Queue, Subqueue, Houses] or [House, Queue, Subqueue] tables,
+     * and colspan status messages using fast regex/string scanning without Jsoup DOM allocation overhead.
+     */
+    fun parseZtoeAddressLookupTableHtml(html: String): List<ZtoeHouseLookupResult> {
+        val results = mutableListOf<ZtoeHouseLookupResult>()
+
+        for (trMatch in TR_TAG_REGEX.findAll(addressSection(html))) {
+            val rowHtml = trMatch.groupValues[1]
+            if (rowHtml.contains("<select", ignoreCase = true) || rowHtml.contains("<input", ignoreCase = true)) continue
+            val cells = TD_TH_TAG_REGEX.findAll(rowHtml).map { stripHtmlFast(it.groupValues[1]) }.toList()
+            if (cells.size < 2) continue
+
+            val joinedLower = cells.joinToString(" ").lowercase()
+            if (joinedLower.contains("населений пункт") ||
+                joinedLower.contains("назва вулиці") ||
+                (cells[0].lowercase().contains("черга") && cells[1].lowercase().contains("підчерга"))
+            ) {
+                continue
+            }
+
+            // Format A: Real ZTOE 5+ column address lookup table:
+            // [0] REM, [1] settlement, [2] street, [3] houses, [4] queue (or colspan="3" status message), [5] subqueue
+            if (cells.size >= 5) {
+                val col4 = cells[4].trim()
+                val col5 = if (cells.size >= 6) cells[5].trim() else ""
+                val houses = splitHouses(cells[3])
+
+                if (houses.isNotEmpty()) {
+                    val candidateQueue = "\${NON_DIGIT_REGEX.replace(col4, "")}.\${NON_DIGIT_REGEX.replace(col5, "")}"
+
+                    if (ZtoeParser.ALL_QUEUES.contains(candidateQueue)) {
+                        for (h in houses) {
+                            results.add(ZtoeHouseLookupResult(house = h, queue = candidateQueue))
+                        }
+                        continue
+                    } else if (col4.length > 3) {
+                        for (h in houses) {
+                            results.add(ZtoeHouseLookupResult(house = h, queue = "", statusText = col4))
+                        }
+                        continue
+                    }
+                }
+            }
+
+            // Format B1: 3-column table [Queue, Subqueue, Houses]
+            if (cells.size >= 3) {
+                val candidateQueue01 = "\${NON_DIGIT_REGEX.replace(cells[0], "")}.\${NON_DIGIT_REGEX.replace(cells[1], "")}"
+                if (ZtoeParser.ALL_QUEUES.contains(candidateQueue01)) {
+                    for (h in splitHouses(cells[cells.size - 1])) {
+                        results.add(ZtoeHouseLookupResult(house = h, queue = candidateQueue01))
+                    }
+                    continue
+                }
+
+                // Format B2: 3-column table [Houses, Queue, Subqueue]
+                val candidateQueue12 = "\${NON_DIGIT_REGEX.replace(cells[1], "")}.\${NON_DIGIT_REGEX.replace(cells[2], "")}"
+                if (ZtoeParser.ALL_QUEUES.contains(candidateQueue12)) {
+                    for (h in splitHouses(cells[0])) {
+                        results.add(ZtoeHouseLookupResult(house = h, queue = candidateQueue12))
+                    }
+                    continue
+                }
+            }
+
+            // Format C: 2-column or colspan status message row ([Houses, StatusMessage] or [StatusMessage, Houses])
+            val firstCell = cells.first()
+            val lastCell = cells.last()
+            if (lastCell.length > 12 && firstCell.length <= 12) {
+                for (h in splitHouses(firstCell)) {
+                    results.add(ZtoeHouseLookupResult(house = h, queue = "", statusText = lastCell))
+                }
+            } else {
+                val statusMessage = cells.dropLast(1).joinToString(" ").trim()
+                if (statusMessage.isNotEmpty()) {
+                    for (h in splitHouses(lastCell)) {
+                        results.add(ZtoeHouseLookupResult(house = h, queue = "", statusText = statusMessage))
+                    }
+                }
+            }
+        }
+        return results
+    }
+
+    /** Returns Pair(queueOrNull, statusTextOrNull) for a specific house number (compared by [HouseKey]). */
+    fun parseZtoeAddressLookupTableHtml(html: String, targetHouse: String): Pair<String?, String?>? {
+        val target = HouseKey.of(targetHouse)
+        if (target.isEmpty()) return null
+        val matching = parseZtoeAddressLookupTableHtml(html).filter { HouseKey.of(it.house) == target }
+        if (matching.isEmpty()) return null
+        val withQueue = matching.firstOrNull { it.queue.isNotEmpty() }
+        if (withQueue != null) {
+            return withQueue.queue to null
+        }
+        val withStatus = matching.firstOrNull { !it.statusText.isNullOrBlank() }
+        if (withStatus != null) {
+            return null to withStatus.statusText
+        }
+        return null
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // Fetching
+    // ---------------------------------------------------------------------------------------------
+
+    fun fetchRemsFromZtoe(
+        siteUrl: String = DEFAULT_SITE_URL,
+        forceRefresh: Boolean = false
+    ): List<ZtoeRemOption> {
+        val currentCached = cachedRems
+        if (!forceRefresh && currentCached != null && currentCached.isNotEmpty()) {
+            return currentCached
+        }
+        val html = postZtoeForm("", siteUrl)
+        if (!html.isNullOrBlank()) {
+            val liveRems = parseZtoeRemOptionsHtml(html)
+            if (liveRems.isNotEmpty()) {
+                cachedRems = liveRems
+                persistToDiskCache()
+                return liveRems
+            }
+        }
+        return getRems()
+    }
+
     fun fetchSettlementsForRem(
         remId: String,
-        siteUrl: String = "https://www.ztoe.com.ua/unhooking-search.php",
+        siteUrl: String = DEFAULT_SITE_URL,
         forceRefresh: Boolean = false
     ): List<ZtoeSettlementOption> {
         val cached = cachedSettlementsByRem[remId]
@@ -6226,158 +7098,149 @@ object ZtoeAddressLookup {
         return getSettlementsForRem(remId)
     }
 
+    private fun bulkRefreshDue(settlementId: String, forceRefresh: Boolean): Boolean {
+        val at = bulkFetchedAtBySettlement[settlementId] ?: return true
+        val age = System.currentTimeMillis() - at
+        if (age < 0L || age >= BULK_TTL_MS) return true
+        return forceRefresh && age >= FORCE_REFRESH_MIN_INTERVAL_MS
+    }
+
+    /**
+     * Streets (merged) and, from the same single response, all houses of the settlement. The bulk
+     * page is requested at most once per [BULK_TTL_MS] per settlement; a force refresh is honoured only
+     * after [FORCE_REFRESH_MIN_INTERVAL_MS]. Concurrent callers share one request.
+     */
     fun fetchStreetsForSettlement(
         remId: String,
         settlementId: String,
-        siteUrl: String = "https://www.ztoe.com.ua/unhooking-search.php",
+        siteUrl: String = DEFAULT_SITE_URL,
         forceRefresh: Boolean = false
     ): List<ZtoeStreetOption> {
-        val cached = cachedStreetsBySettlement[settlementId]
-        val hasBulkIndexedHouses = cached != null &&
-            cached.size > 15 &&
-            cached.any { it.id != "zt_kyivska" && (cachedHousesByStreet[it.id]?.isNotEmpty() == true) }
-
-        if (!forceRefresh && hasBulkIndexedHouses && cached != null) {
-            fetchPwAccidentsForScope(remId, settlementId)
-            return cached
+        val sid = canonicalSettlementId(settlementId)
+        val cached = cachedStreetsBySettlement[sid]
+        if (cached != null && !bulkRefreshDue(sid, forceRefresh)) return cached
+        return singleFlight(
+            key = "bulk::$sid",
+            fallback = { getStreetsForSettlement(sid) }
+        ) {
+            loadSettlementBulk(remId, sid, siteUrl)
         }
+    }
 
-        val lock = settlementFetchLocks.getOrPut("$remId::$settlementId") { Any() }
-        synchronized(lock) {
-            val rechecked = cachedStreetsBySettlement[settlementId]
-            val recheckedBulk = rechecked != null &&
-                rechecked.size > 15 &&
-                rechecked.any { it.id != "zt_kyivska" && (cachedHousesByStreet[it.id]?.isNotEmpty() == true) }
-            if (!forceRefresh && recheckedBulk && rechecked != null) {
-                fetchPwAccidentsForScope(remId, settlementId)
-                return rechecked
+    private fun loadSettlementBulk(remId: String, settlementId: String, siteUrl: String): List<ZtoeStreetOption> {
+        val rem = getRems().firstOrNull { it.id == remId }
+            ?: ZTOE_REM_OPTIONS.firstOrNull { it.id == remId }
+            ?: return getStreetsForSettlement(settlementId)
+        val settlement = findSettlementById(settlementId) ?: return getStreetsForSettlement(settlementId)
+
+        val html = postZtoeForm("rem_id=\${rem.ztoeRemId}&naspunkt_id=\${settlement.ztoeNaspunktId}&all=1", siteUrl)
+        if (!html.isNullOrBlank()) {
+            val liveRems = parseZtoeRemOptionsHtml(html)
+            if (liveRems.isNotEmpty()) {
+                cachedRems = liveRems
             }
-
-            val rem = getRems().firstOrNull { it.id == remId }
-                ?: ZTOE_REM_OPTIONS.firstOrNull { it.id == remId }
-                ?: return getStreetsForSettlement(settlementId)
-            val settlement = findSettlementById(settlementId)
-                ?: return getStreetsForSettlement(settlementId)
-
-            val html = postZtoeForm(
-                "rem_id=\${rem.ztoeRemId}&naspunkt_id=\${settlement.ztoeNaspunktId}&all=1",
-                siteUrl
-            )
-            if (!html.isNullOrBlank()) {
-                val liveRems = parseZtoeRemOptionsHtml(html)
-                if (liveRems.isNotEmpty()) {
-                    cachedRems = liveRems
-                }
-                val liveSettlements = parseZtoeSettlementOptionsHtml(remId, html)
-                if (liveSettlements.isNotEmpty()) {
-                    cachedSettlementsByRem[remId] = liveSettlements
-                }
-                val liveList = parseZtoeStreetOptionsHtml(settlementId, html)
-                if (liveList.isNotEmpty()) {
-                    cachedStreetsBySettlement[settlementId] = liveList
-                    parseZtoeSettlementHousesTableHtml(settlementId, liveList, html)
-                    fetchPwAccidentsForScope(remId, settlementId)
-                    persistToDiskCache()
-                    return liveList
-                }
+            val liveSettlements = parseZtoeSettlementOptionsHtml(remId, html)
+            if (liveSettlements.isNotEmpty()) {
+                cachedSettlementsByRem[remId] = liveSettlements
             }
-            fetchPwAccidentsForScope(remId, settlementId)
-            return getStreetsForSettlement(settlementId)
+            val liveStreets = parseZtoeStreetOptionsHtml(settlementId, html)
+            if (liveStreets.isNotEmpty()) {
+                registerStreets(settlementId, liveStreets)
+                parseZtoeSettlementHousesTableHtml(settlementId, liveStreets, html)
+                bulkFetchedAtBySettlement[settlementId] = System.currentTimeMillis()
+                persistToDiskCache()
+                return liveStreets
+            }
         }
+        return getStreetsForSettlement(settlementId)
+    }
+
+    /**
+     * Houses of one (merged) street straight from the site: one request per ztoe id of the street,
+     * results united and de-duplicated by [HouseKey]. Null when no request succeeded.
+     *
+     * The request carries \`all=1\`: without it ztoe lists only the first 10 records of the street and a
+     * "показати ще N записів" button (vul. Київська in Zhytomyr: 21 of 127 houses). Rows are kept only
+     * when their street name has the street's [StreetKey], so a page that ignored \`vulica_id\` cannot
+     * add other streets. Only when no row carries the name (an unusual spelling) the first page is
+     * used unfiltered, as before.
+     */
+    private fun fetchStreetHouseRows(
+        rem: ZtoeRemOption,
+        settlement: ZtoeSettlementOption,
+        street: ZtoeStreetOption,
+        siteUrl: String
+    ): List<ZtoeHouseLookupResult>? {
+        var anyResponse = false
+        val map = LinkedHashMap<String, ZtoeHouseLookupResult>()
+        for (vulicaId in street.ztoeVulicaIds) {
+            val form = "rem_id=\${rem.ztoeRemId}&naspunkt_id=\${settlement.ztoeNaspunktId}&vulica_id=$vulicaId"
+            val html = postZtoeForm("$form&all=1", siteUrl)
+            if (html.isNullOrBlank()) continue
+            anyResponse = true
+            val rows = parseZtoeSettlementHousesTableHtml(settlement.id, listOf(street), html, cache = false).values.flatten()
+            if (rows.isNotEmpty()) {
+                for (row in rows) putHouse(map, row)
+                continue
+            }
+            val firstPage = postZtoeForm(form, siteUrl) ?: continue
+            for (row in parseZtoeAddressLookupTableHtml(firstPage)) putHouse(map, row)
+        }
+        return if (anyResponse) sortHouses(map.values) else null
     }
 
     fun fetchHousesForStreet(
         remId: String,
         settlementId: String,
         streetId: String,
-        siteUrl: String = "https://www.ztoe.com.ua/unhooking-search.php",
+        siteUrl: String = DEFAULT_SITE_URL,
         forceRefresh: Boolean = false
     ): List<ZtoeHouseLookupResult> {
         if (streetId.isBlank()) return emptyList()
 
-        val cached = cachedHousesByStreet[streetId]
-        val updatedAt = houseCacheUpdatedAtByStreet[streetId] ?: 0L
-        if (cached != null && cached.isNotEmpty() && (!forceRefresh || System.currentTimeMillis() - updatedAt < FRESH_HOUSE_CACHE_TTL_MS)) {
-            recordRecentHouseStreet(streetId)
-            fetchPwAccidentsForScope(remId, settlementId)
-            return cachedHousesByStreet[streetId] ?: cached
-        }
-
-        val lock = settlementFetchLocks["$remId::$settlementId"]
-        if (lock != null) {
-            synchronized(lock) {
-                val afterSettlementSync = cachedHousesByStreet[streetId]
-                if (afterSettlementSync != null && afterSettlementSync.isNotEmpty()) {
-                    recordRecentHouseStreet(streetId)
-                    fetchPwAccidentsForScope(remId, settlementId)
-                    return cachedHousesByStreet[streetId] ?: afterSettlementSync
-                }
-            }
-        }
-
-        val rem = getRems().firstOrNull { it.id == remId }
-            ?: ZTOE_REM_OPTIONS.firstOrNull { it.id == remId }
-        val settlement = findSettlementById(settlementId)
         val street = findStreetById(streetId)
+        val canonical = street?.id ?: streetId
+        val sid = canonicalSettlementId(settlementId)
 
+        fun fresh(): List<ZtoeHouseLookupResult>? {
+            val cached = cachedHousesByStreet[canonical]
+            if (cached.isNullOrEmpty()) return null
+            val updatedAt = houseCacheUpdatedAtByStreet[canonical] ?: 0L
+            val age = System.currentTimeMillis() - updatedAt
+            return if (!forceRefresh || age in 0 until FRESH_HOUSE_CACHE_TTL_MS) cached else null
+        }
+
+        fresh()?.let {
+            recordRecentHouseStreet(canonical)
+            return it
+        }
+        // A bulk fetch of the settlement may be filling this street right now.
+        awaitInFlight("bulk::$sid")
+        fresh()?.let {
+            recordRecentHouseStreet(canonical)
+            return it
+        }
+
+        val rem = getRems().firstOrNull { it.id == remId } ?: ZTOE_REM_OPTIONS.firstOrNull { it.id == remId }
+        val settlement = findSettlementById(sid)
         if (rem != null && settlement != null && street != null) {
-            // Note: Do NOT pass all=1 when vulica_id is specified, because all=1 causes ZTOE
-            // to ignore vulica_id and return all streets in the settlement instead of the selected street.
-            val html = postZtoeForm(
-                "rem_id=\${rem.ztoeRemId}&naspunkt_id=\${settlement.ztoeNaspunktId}&vulica_id=\${street.ztoeVulicaId}",
-                siteUrl
-            )
-            if (!html.isNullOrBlank()) {
-                val parsedRows = parseZtoeAddressLookupTableHtml(html)
-                if (parsedRows.isNotEmpty()) {
-                    val prevHouses = cachedHousesByStreet[streetId]
-                    val mergedMap = LinkedHashMap<String, ZtoeHouseLookupResult>()
-                    for (row in parsedRows) {
-                        val key = normalizeHouseNumber(row.house)
-                        if (key.isEmpty()) continue
-                        val existing = mergedMap[key]
-                        if (existing == null || (existing.queue.isEmpty() && row.queue.isNotEmpty())) {
-                            mergedMap[key] = row
-                        }
-                    }
-                    if (prevHouses != null) {
-                        for (prevH in prevHouses) {
-                            val prevEmerg = prevH.emergencyOutage
-                            if (prevEmerg != null && isValidEmergencyOutage(prevEmerg)) {
-                                val k = normalizeHouseNumber(prevH.house)
-                                val cur = mergedMap[k]
-                                if (cur != null && cur.emergencyOutage == null) {
-                                    mergedMap[k] = cur.copy(emergencyOutage = prevEmerg)
-                                }
-                            }
-                        }
-                    }
-                    applyCanonicalStreetOverrides(streetId, mergedMap)
-                    val sortedList = mergedMap.values.sortedWith(
-                        compareBy<ZtoeHouseLookupResult> { houseSortKey(it.house).first }
-                            .thenBy { houseSortKey(it.house).second }
-                    )
-                    cachedHousesByStreet[streetId] = sortedList
-                    houseCacheUpdatedAtByStreet[streetId] = System.currentTimeMillis()
-                    recordRecentHouseStreet(streetId)
-                    fetchPwAccidentsForScope(remId, settlementId)
-                    persistToDiskCache()
-                    return cachedHousesByStreet[streetId] ?: sortedList
-                }
+            val rows = fetchStreetHouseRows(rem, settlement, street, siteUrl)
+            if (!rows.isNullOrEmpty()) {
+                storeStreetHouses(canonical, rows)
+                persistToDiskCache()
+                return rows
             }
         }
-        fetchPwAccidentsForScope(remId, settlementId)
-        return cachedHousesByStreet[streetId] ?: getDefaultHousesForStreet(streetId)
+        return cachedHousesByStreet[canonical] ?: emptyList()
     }
 
     /**
-     * Prefetches and indexes all REMs, cities/settlements across all REMs, active/default city streets,
-     * and ALL houses for every street in the active/default city in the background on app launch,
-     * persisting the index to disk cache so dropdown lists in the "?" Address Lookup window open with zero delay.
+     * Loads the REM list, the settlements of all REMs, the streets of the active and default city
+     * and the houses of the saved street in the background, so the "?" lookup opens without delay.
      */
     fun prefetchAddressIndexInBackground(
         context: android.content.Context? = null,
-        siteUrl: String = "https://www.ztoe.com.ua/unhooking-search.php",
+        siteUrl: String = DEFAULT_SITE_URL,
         savedQuery: SelectedAddressQuery? = null,
         forceRefresh: Boolean = false
     ) {
@@ -6388,8 +7251,7 @@ object ZtoeAddressLookup {
         val activeRemId = savedQuery?.remId?.ifBlank { "zhytomyr" } ?: "zhytomyr"
         val activeSettlementId = savedQuery?.settlementId?.ifBlank { "zt_city" } ?: "zt_city"
 
-        // Priority 1: Single-request bulk fetch for 'zt_city' (with all=1), indexing all 19 REMs,
-        // all 103 Zhytomyr REM settlements, all 966 Zhytomyr city streets, and all 20,488 houses
+        // One bulk request indexes the REM list, the settlements of the REM, all streets and all houses of the city.
         fetchStreetsForSettlement("zhytomyr", "zt_city", siteUrl, forceRefresh)
 
         if (activeRemId != "zhytomyr") {
@@ -6406,13 +7268,13 @@ object ZtoeAddressLookup {
         val allRems = fetchRemsFromZtoe(siteUrl, false)
         val priorityRems = listOf("zhytomyr", activeRemId).distinct()
 
-        // Priority 2: Bounded low-priority background prefetch (2 daemon workers) for remaining REMs' settlements + primary city streets
+        // Bounded low-priority prefetch (2 daemon workers) of the remaining REMs' settlements and primary city streets.
         val remainingRems = java.util.concurrent.ConcurrentLinkedQueue(
             allRems.filter { it.id !in priorityRems }
         )
         if (remainingRems.isNotEmpty()) {
             val workerCount = minOf(2, remainingRems.size)
-            val executor = java.util.concurrent.Executors.newFixedThreadPool(workerCount) { r ->
+            val executor = Executors.newFixedThreadPool(workerCount) { r ->
                 Thread(r, "ZtoeBgPrefetch").apply {
                     isDaemon = true
                     priority = Thread.MIN_PRIORITY
@@ -6445,19 +7307,9 @@ object ZtoeAddressLookup {
         persistToDiskCache()
     }
 
-    fun formatZtoeOutageTimestamp(raw: String): String {
-        val trimmed = raw.trim()
-        val match = ISO_TIMESTAMP_REGEX.find(trimmed)
-        if (match != null) {
-            val year = match.groupValues[1]
-            val month = match.groupValues[2]
-            val day = match.groupValues[3]
-            val hour = match.groupValues[4]
-            val minute = match.groupValues[5]
-            return "$day.$month.$year $hour:$minute"
-        }
-        return trimmed
-    }
+    // ---------------------------------------------------------------------------------------------
+    // Timestamp validation (used by settings and the main screen)
+    // ---------------------------------------------------------------------------------------------
 
     fun isValidOutageTimestamp(value: String?): Boolean {
         if (value.isNullOrBlank()) return false
@@ -6486,915 +7338,16 @@ object ZtoeAddressLookup {
             isValidOutageTimestamp(info.estimatedRestoreTime)
     }
 
-    /**
-     * Parses HTML table rows from ZTOE unhooking-search.php address lookup results.
-     * Supports 7-column real ZTOE tables, 3-column [Queue, Subqueue, Houses] or [House, Queue, Subqueue] tables,
-     * and colspan status messages using fast regex/string scanning without Jsoup DOM allocation overhead.
-     */
-    fun parseZtoeAddressLookupTableHtml(html: String): List<ZtoeHouseLookupResult> {
-        val results = mutableListOf<ZtoeHouseLookupResult>()
-        val scheduleIdx = html.indexOf("Графіки погодинних відключень")
-        val addressSectionHtml = if (scheduleIdx >= 0) html.substring(0, scheduleIdx) else html
-
-        for (trMatch in TR_TAG_REGEX.findAll(addressSectionHtml)) {
-            val rowHtml = trMatch.groupValues[1]
-            if (rowHtml.contains("<select", ignoreCase = true) || rowHtml.contains("<input", ignoreCase = true)) continue
-            val cells = TD_TH_TAG_REGEX.findAll(rowHtml).map { stripHtmlFast(it.groupValues[1]) }.toList()
-            if (cells.size < 2) continue
-
-            val joinedLower = cells.joinToString(" ").lowercase()
-            if (joinedLower.contains("населений пункт") ||
-                joinedLower.contains("назва вулиці") ||
-                (cells[0].lowercase().contains("черга") && cells[1].lowercase().contains("підчерга"))
-            ) {
-                continue
-            }
-
-            // Format A: Real ZTOE 5+ column address lookup table:
-            // [0] РЕМ, [1] Населений пункт, [2] Назва вулиці, [3] Будинки, [4] Черга (or colspan="3" status message), [5] Підчерга
-            if (cells.size >= 5) {
-                val houseField = cells[3]
-                val col4 = cells[4].trim()
-                val col5 = if (cells.size >= 6) cells[5].trim() else ""
-                val houses = houseField.split(Regex("[,;]"))
-                    .map { it.trim() }
-                    .filter { it.isNotEmpty() && !it.equals("будинки", ignoreCase = true) }
-
-                if (houses.isNotEmpty()) {
-                    val qNum = col4.replace(Regex("[^0-9]"), "")
-                    val subNum = col5.replace(Regex("[^0-9]"), "")
-                    val candidateQueue = "$qNum.$subNum"
-
-                    if (ZtoeParser.ALL_QUEUES.contains(candidateQueue)) {
-                        for (h in houses) {
-                            results.add(ZtoeHouseLookupResult(house = h, queue = candidateQueue))
-                        }
-                        continue
-                    } else if (col4.length > 3) {
-                        for (h in houses) {
-                            results.add(ZtoeHouseLookupResult(house = h, queue = "", statusText = col4))
-                        }
-                        continue
-                    }
-                }
-            }
-
-            // Format B1: 3-column table [Queue, Subqueue, Houses]
-            if (cells.size >= 3) {
-                val qNum0 = cells[0].replace(Regex("[^0-9]"), "")
-                val subNum1 = cells[1].replace(Regex("[^0-9]"), "")
-                val candidateQueue01 = "$qNum0.$subNum1"
-                if (ZtoeParser.ALL_QUEUES.contains(candidateQueue01)) {
-                    val houses = cells[cells.size - 1].split(Regex("[,;]")).map { it.trim() }.filter { it.isNotEmpty() }
-                    for (h in houses) {
-                        results.add(ZtoeHouseLookupResult(house = h, queue = candidateQueue01))
-                    }
-                    continue
-                }
-
-                // Format B2: 3-column table [Houses, Queue, Subqueue]
-                val qNum1 = cells[1].replace(Regex("[^0-9]"), "")
-                val subNum2 = cells[2].replace(Regex("[^0-9]"), "")
-                val candidateQueue12 = "$qNum1.$subNum2"
-                if (ZtoeParser.ALL_QUEUES.contains(candidateQueue12)) {
-                    val houses = cells[0].split(Regex("[,;]")).map { it.trim() }.filter { it.isNotEmpty() }
-                    for (h in houses) {
-                        results.add(ZtoeHouseLookupResult(house = h, queue = candidateQueue12))
-                    }
-                    continue
-                }
-            }
-
-            // Format C: 2-column or colspan status message row ([Houses, StatusMessage] or [StatusMessage, Houses])
-            val firstCell = cells.first()
-            val lastCell = cells.last()
-            if (lastCell.length > 12 && firstCell.length <= 12) {
-                val houses = firstCell.split(Regex("[,;]")).map { it.trim() }.filter { it.isNotEmpty() }
-                for (h in houses) {
-                    results.add(ZtoeHouseLookupResult(house = h, queue = "", statusText = lastCell))
-                }
-            } else {
-                val houses = lastCell.split(Regex("[,;]")).map { it.trim() }.filter { it.isNotEmpty() }
-                val statusMessage = cells.dropLast(1).joinToString(" ").trim()
-                if (statusMessage.isNotEmpty()) {
-                    for (h in houses) {
-                        results.add(ZtoeHouseLookupResult(house = h, queue = "", statusText = statusMessage))
-                    }
-                }
-            }
-        }
-        return results
-    }
-
-    /**
-     * Convenience overload returning Pair(queueOrNull, statusTextOrNull) for a specific house number.
-     */
-    fun parseZtoeAddressLookupTableHtml(html: String, targetHouse: String): Pair<String?, String?>? {
-        val parsed = parseZtoeAddressLookupTableHtml(html)
-        val normTarget = normalizeHouseNumber(targetHouse)
-        val matching = parsed.filter { normalizeHouseNumber(it.house) == normTarget }
-        if (matching.isEmpty()) return null
-        val withQueue = matching.firstOrNull { it.queue.isNotEmpty() }
-        if (withQueue != null) {
-            return withQueue.queue to null
-        }
-        val withStatus = matching.firstOrNull { !it.statusText.isNullOrBlank() }
-        if (withStatus != null) {
-            return null to withStatus.statusText
-        }
-        return null
-    }
-
-    fun parseZtoeEmergencyOutagesTableHtml(html: String): List<EmergencyOutageInfo> {
-        val results = mutableListOf<EmergencyOutageInfo>()
-        val doc = Jsoup.parse(html)
-        val rows = doc.select("tr")
-
-        for ((rowIdx, row) in rows.withIndex()) {
-            val cells = row.select("td, th").map { it.text().replace("\\u00A0", " ").trim() }
-            if (cells.size < 6) continue
-
-            val joinedLower = cells.joinToString(" ").lowercase()
-            if (joinedLower.contains("тип відключення") ||
-                joinedLower.contains("час відключення") ||
-                joinedLower.contains("очікуваний час")
-            ) {
-                continue
-            }
-
-            val remName = cells[0]
-            val settlementName = cells[1]
-            val streetName = cells[2]
-            val houseField = cells[3]
-            val outageType = cells[4]
-            val startRaw = cells[5]
-            val restoreRaw = cells.getOrNull(6) ?: ""
-
-            if (outageType.isBlank() || startRaw.isBlank()) continue
-            val typeLower = outageType.lowercase()
-            val isEmergencyType = (typeLower.contains("аварійн") || typeLower.contains("emergency")) &&
-                !typeLower.contains("не вимикається") &&
-                !typeLower.contains("за винятком")
-            if (!isEmergencyType) continue
-
-            val formattedStart = formatZtoeOutageTimestamp(startRaw)
-            val formattedRestore = formatZtoeOutageTimestamp(restoreRaw)
-            if (!isValidOutageTimestamp(formattedStart) || !isValidOutageTimestamp(formattedRestore)) continue
-
-            val houses = houseField.split(Regex("[,;]")).map { it.trim() }.filter { it.isNotEmpty() }
-            for (h in houses) {
-                results.add(
-                    EmergencyOutageInfo(
-                        id = "emergency_\${rowIdx}_$h",
-                        remName = remName,
-                        settlementName = settlementName,
-                        streetName = streetName,
-                        house = h,
-                        outageType = outageType,
-                        startTime = formattedStart,
-                        estimatedRestoreTime = formattedRestore
-                    )
-                )
-            }
-        }
-        return results
-    }
-
-    fun parseZtoeEmergencyOutagesTableHtml(html: String, targetHouse: String): EmergencyOutageInfo? {
-        val normTarget = normalizeHouseNumber(targetHouse)
-        return parseZtoeEmergencyOutagesTableHtml(html).firstOrNull {
-            normalizeHouseNumber(it.house ?: "") == normTarget
-        }
-    }
-
-    private fun normalizeUkText(value: String): String {
-        return value.lowercase()
-            .replace(Regex("""\\([^)]*\\)"""), "")
-            .replace(CITY_PREFIX_REGEX, "")
-            .replace(STREET_PREFIX_REGEX, "")
-            .replace(Regex("""^(?:вулиця|вул\\.?|провулок|пров\\.?|пр-к\\.?|пр\\.?|проспект|просп\\.?|пр-т\\.?|майдан|м-н\\.?|площа|пл\\.?|бульвар|бул\\.?|б-р\\.?|шосе|ш\\.?|проїзд|пр-д\\.?|тупик|наб\\.?)\\s+"""), "")
-            .replace(Regex("""[.,'"«»’ʼ\`]"""), " ")
-            .replace("бердичив", "бердичів")
-            .replace(Regex("""\\s+"""), " ")
-            .trim()
-    }
-
-    private fun normalizeHouseNumber(value: String): String {
-        val latinToCyrillic = mapOf(
-            'a' to 'а',
-            'b' to 'б',
-            'v' to 'в',
-            'g' to 'г',
-            'd' to 'д',
-            'e' to 'е',
-            'k' to 'к',
-            'm' to 'м',
-            'i' to 'і'
-        )
-        val cleaned = value.lowercase()
-            .replace(Regex("""^(буд\\.?|будинок|б\\.?|д\\.?)\\s*""", RegexOption.IGNORE_CASE), "")
-            .replace(Regex("""\\.+$"""), "")
-            .replace(Regex("""['"«»’ʼ\`\\s-]+"""), "")
-            .trim()
-        val sb = StringBuilder(cleaned.length)
-        for (ch in cleaned) {
-            sb.append(latinToCyrillic[ch] ?: ch)
-        }
-        return sb.toString()
-    }
-
-    private fun getAccidentPriorityScore(
-        switchSubReason: Int?,
-        typeOff: Int?,
-        koment: String?
-    ): Int {
-        // 1. Genuine unscheduled emergency accident ("Аварійне відключення"): switchSubReason == 0 (or omitted) & typeOff == 1
-        if ((switchSubReason == null || switchSubReason == -1 || switchSubReason == 0) && (typeOff == null || typeOff == 1)) {
-            return 4
-        }
-        // 2. Emergency blackout schedules (ГАВ = 1, СГАВ = 3)
-        if (switchSubReason == 1 || switchSubReason == 3) {
-            return 3
-        }
-        // 3. Explicit emergency keywords in koment (excluding generic "ГПВ")
-        if (!koment.isNullOrBlank() && Regex("""аварі|гав|сгав|(^|\\s)мо(?=\\s|$)""", RegexOption.IGNORE_CASE).containsMatchIn(koment)) {
-            return 3
-        }
-        // 4. Other typeOff == 1 (e.g. switchSubReason == 2 GPV rows)
-        if (typeOff == 1) {
-            return if (switchSubReason == 2) 1 else 2
-        }
-        return 0
-    }
-
-    private fun getAccidentOutageTypeLabel(
-        switchSubReason: Int?,
-        koment: String?
-    ): String {
-        if (switchSubReason == 1) return "Графік аварійних відключень"
-        if (switchSubReason == 3) return "Спеціальний графік аварійних відключень"
-        if (!koment.isNullOrBlank()) {
-            if (koment.contains("сгав", ignoreCase = true)) return "Спеціальний графік аварійних відключень"
-            if (koment.contains("гав", ignoreCase = true)) return "Графік аварійних відключень"
-        }
-        return "Аварійне відключення"
-    }
-
-    private fun extractTopLevelJsonObjects(jsonStr: String): List<String> {
-        val objects = mutableListOf<String>()
-        var depth = 0
-        var objStart = -1
-        var inString = false
-        var escaped = false
-        for (i in jsonStr.indices) {
-            val ch = jsonStr[i]
-            if (escaped) {
-                escaped = false
-                continue
-            }
-            if (ch == '\\\\' && inString) {
-                escaped = true
-                continue
-            }
-            if (ch == '"') {
-                inString = !inString
-                continue
-            }
-            if (!inString) {
-                if (ch == '{') {
-                    if (depth == 0) objStart = i
-                    depth++
-                } else if (ch == '}') {
-                    depth--
-                    if (depth == 0 && objStart != -1) {
-                        objects.add(jsonStr.substring(objStart, i + 1))
-                        objStart = -1
-                    }
-                }
-            }
-        }
-        return objects
-    }
-
-    private fun extractBalancedBracketBlock(src: String, openIdx: Int, openChar: Char, closeChar: Char): String? {
-        if (openIdx < 0 || openIdx >= src.length || src[openIdx] != openChar) return null
-        var depth = 0
-        var inString = false
-        var escaped = false
-        for (i in openIdx until src.length) {
-            val ch = src[i]
-            if (escaped) {
-                escaped = false
-                continue
-            }
-            if (ch == '\\\\' && inString) {
-                escaped = true
-                continue
-            }
-            if (ch == '"') {
-                inString = !inString
-                continue
-            }
-            if (!inString) {
-                if (ch == openChar) {
-                    depth++
-                } else if (ch == closeChar) {
-                    depth--
-                    if (depth == 0) {
-                        return src.substring(openIdx, i + 1)
-                    }
-                }
-            }
-        }
-        return null
-    }
-
-    /**
-     * Finds the value start index for a top-level property \`fieldName\` inside \`objStr\`,
-     * ignoring any nested \`{...}\` or \`[...]\` objects so nested fields (like \`street.city.name\`)
-     * never shadow the parent object's own fields (like \`street.name\`).
-     */
-    private fun findTopLevelJsonFieldValueStart(objStr: String, fieldName: String): Int {
-        val firstNonWs = objStr.indexOfFirst { !it.isWhitespace() }
-        if (firstNonWs < 0) return -1
-        val targetDepth = if (objStr[firstNonWs] == '{') 1 else 0
-        var depth = 0
-        var i = firstNonWs
-        val len = objStr.length
-
-        while (i < len) {
-            val ch = objStr[i]
-            if (ch == '"') {
-                val strStart = i + 1
-                var k = strStart
-                var escaped = false
-                while (k < len) {
-                    val sc = objStr[k]
-                    if (escaped) {
-                        escaped = false
-                    } else if (sc == '\\\\') {
-                        escaped = true
-                    } else if (sc == '"') {
-                        break
-                    }
-                    k++
-                }
-                if (k >= len) return -1
-                val keyCandidate = objStr.substring(strStart, k)
-                i = k + 1
-                if (depth == targetDepth) {
-                    while (i < len && objStr[i].isWhitespace()) i++
-                    if (i < len && objStr[i] == ':') {
-                        i++
-                        while (i < len && objStr[i].isWhitespace()) i++
-                        if (keyCandidate.trim() == fieldName) {
-                            return if (i < len) i else -1
-                        }
-                    }
-                }
-                continue
-            }
-            when (ch) {
-                '{', '[' -> depth++
-                '}', ']' -> depth--
-            }
-            i++
-        }
-        return -1
-    }
-
-    private fun unescapeJsonString(raw: String): String {
-        if (!raw.contains('\\\\')) return raw
-        val sb = StringBuilder(raw.length)
-        var i = 0
-        while (i < raw.length) {
-            val ch = raw[i]
-            if (ch == '\\\\' && i + 1 < raw.length) {
-                val next = raw[i + 1]
-                when (next) {
-                    '"' -> { sb.append('"'); i += 2 }
-                    '\\\\' -> { sb.append('\\\\'); i += 2 }
-                    '/' -> { sb.append('/'); i += 2 }
-                    'n' -> { sb.append('\\n'); i += 2 }
-                    'r' -> { sb.append('\\r'); i += 2 }
-                    't' -> { sb.append('\\t'); i += 2 }
-                    'u' -> {
-                        if (i + 5 < raw.length) {
-                            val hex = raw.substring(i + 2, i + 6)
-                            val code = hex.toIntOrNull(16)
-                            if (code != null) {
-                                sb.append(code.toChar())
-                                i += 6
-                                continue
-                            }
-                        }
-                        sb.append(ch)
-                        i++
-                    }
-                    else -> {
-                        sb.append(next)
-                        i += 2
-                    }
-                }
-            } else {
-                sb.append(ch)
-                i++
-            }
-        }
-        return sb.toString()
-    }
-
-    private fun extractJsonArrayField(objStr: String, fieldName: String): String? {
-        val valIdx = findTopLevelJsonFieldValueStart(objStr, fieldName)
-        if (valIdx >= 0 && objStr[valIdx] == '[') {
-            return extractBalancedBracketBlock(objStr, valIdx, '[', ']')
-        }
-        val keyRegex = Regex(""""\\s*\${Regex.escape(fieldName)}\\s*"\\s*:\\s*\\[""")
-        val m = keyRegex.find(objStr) ?: return null
-        val bracketIdx = objStr.indexOf('[', m.range.first)
-        return extractBalancedBracketBlock(objStr, bracketIdx, '[', ']')
-    }
-
-    private fun extractJsonObjectField(objStr: String, fieldName: String): String? {
-        val valIdx = findTopLevelJsonFieldValueStart(objStr, fieldName)
-        if (valIdx >= 0 && objStr[valIdx] == '{') {
-            return extractBalancedBracketBlock(objStr, valIdx, '{', '}')
-        }
-        return null
-    }
-
-    private fun extractJsonStringField(objStr: String, fieldName: String): String? {
-        val valIdx = findTopLevelJsonFieldValueStart(objStr, fieldName)
-        if (valIdx < 0 || objStr[valIdx] != '"') return null
-        var k = valIdx + 1
-        var escaped = false
-        while (k < objStr.length) {
-            val ch = objStr[k]
-            if (escaped) {
-                escaped = false
-            } else if (ch == '\\\\') {
-                escaped = true
-            } else if (ch == '"') {
-                return unescapeJsonString(objStr.substring(valIdx + 1, k))
-            }
-            k++
-        }
-        return null
-    }
-
-    private fun extractJsonIntField(objStr: String, fieldName: String): Int? {
-        val valIdx = findTopLevelJsonFieldValueStart(objStr, fieldName)
-        if (valIdx < 0) return null
-        var start = valIdx
-        if (objStr[start] == '"') start++
-        var end = start
-        if (end < objStr.length && objStr[end] == '-') end++
-        while (end < objStr.length && objStr[end].isDigit()) end++
-        if (end <= start || (end == start + 1 && objStr[start] == '-')) return null
-        return objStr.substring(start, end).toIntOrNull()
-    }
-
-    private fun applyAccidentsToSettlementHouses(settlementId: String, rawJson: String) {
-        if (settlementId.isBlank() || rawJson.isBlank()) return
-        try {
-            val hydraArr = extractJsonArrayField(rawJson, "hydra:member")
-            val items = extractTopLevelJsonObjects(hydraArr ?: rawJson)
-            if (items.isEmpty()) return
-
-            val settlementObj = findSettlementById(settlementId)
-            val targetCityNorm = settlementObj?.let { normalizeUkText(it.nameUk) } ?: ""
-
-            val streets = getStreetsForSettlement(settlementId)
-            if (streets.isEmpty()) return
-
-            val streetIdsByNormName = HashMap<String, MutableList<String>>(streets.size * 2)
-            val streetIdsByPoweronId = HashMap<Int, MutableList<String>>()
-            fun addNorm(k: String, id: String) {
-                if (k.isEmpty()) return
-                val l = streetIdsByNormName.getOrPut(k) { mutableListOf() }
-                if (!l.contains(id)) l.add(id)
-            }
-            for (st in streets) {
-                addNorm(st.nameUk.trim().lowercase(), st.id)
-                addNorm(normalizeUkText(st.nameUk), st.id)
-                if (st.poweronStreetId != null) {
-                    val l = streetIdsByPoweronId.getOrPut(st.poweronStreetId) { mutableListOf() }
-                    if (!l.contains(st.id)) l.add(st.id)
-                }
-            }
-            for (st in ZTOE_STREETS.filter { it.settlementId == settlementId }) {
-                addNorm(st.nameUk.trim().lowercase(), st.id)
-                addNorm(normalizeUkText(st.nameUk), st.id)
-                if (st.poweronStreetId != null) {
-                    val l = streetIdsByPoweronId.getOrPut(st.poweronStreetId) { mutableListOf() }
-                    if (!l.contains(st.id)) l.add(st.id)
-                }
-            }
-
-            data class ScoredOutage(val score: Int, val rawPlanIn: String, val info: EmergencyOutageInfo)
-            val emergencyByStreetAndHouse = HashMap<String, HashMap<String, ScoredOutage>>()
-
-            for (itemStr in items) {
-                val switchSubReason = extractJsonIntField(itemStr, "switchSubReason")
-                val typeOff = extractJsonIntField(itemStr, "typeOff")
-                val koment = extractJsonStringField(itemStr, "koment")
-                val score = getAccidentPriorityScore(switchSubReason, typeOff, koment)
-                if (score < 3) continue
-
-                val cityObjStr = extractJsonObjectField(itemStr, "city")
-                val cityName = cityObjStr?.let { extractJsonStringField(it, "name") } ?: ""
-                if (targetCityNorm.isNotEmpty() && cityName.isNotBlank()) {
-                    val itemCityNorm = normalizeUkText(cityName)
-                    if (itemCityNorm != targetCityNorm &&
-                        !itemCityNorm.contains(targetCityNorm) &&
-                        !targetCityNorm.contains(itemCityNorm)
-                    ) {
-                        continue
-                    }
-                }
-
-                val streetObjStr = extractJsonObjectField(itemStr, "street")
-                val streetIdNum = streetObjStr?.let { extractJsonIntField(it, "id") }
-                val streetNameRaw = streetObjStr?.let { extractJsonStringField(it, "name") } ?: ""
-                val matchedStreetIds = mutableListOf<String>()
-                if (streetIdNum != null) {
-                    streetIdsByPoweronId[streetIdNum]?.forEach { if (!matchedStreetIds.contains(it)) matchedStreetIds.add(it) }
-                }
-                if (streetNameRaw.isNotBlank()) {
-                    streetIdsByNormName[streetNameRaw.trim().lowercase()]?.forEach { if (!matchedStreetIds.contains(it)) matchedStreetIds.add(it) }
-                    streetIdsByNormName[normalizeUkText(streetNameRaw)]?.forEach { if (!matchedStreetIds.contains(it)) matchedStreetIds.add(it) }
-                }
-                if (matchedStreetIds.isEmpty()) continue
-
-                val buildingNames = extractJsonStringField(itemStr, "buildingNames") ?: ""
-                if (buildingNames.isBlank()) continue
-
-                val startTime = formatZtoeOutageTimestamp(extractJsonStringField(itemStr, "dateEvent") ?: "")
-                val rawPlanIn = extractJsonStringField(itemStr, "datePlanIn") ?: ""
-                val estimatedRestoreTime = formatZtoeOutageTimestamp(rawPlanIn)
-                if (!isValidOutageTimestamp(startTime) || !isValidOutageTimestamp(estimatedRestoreTime)) continue
-
-                val outageType = getAccidentOutageTypeLabel(switchSubReason, koment)
-                val otgName = extractJsonObjectField(itemStr, "otg")?.let { extractJsonStringField(it, "name") }
-                val explicitId = extractJsonIntField(itemStr, "id")?.toString()
-                    ?: extractJsonStringField(itemStr, "id")
-
-                val houseTokens = buildingNames.split(Regex("[,;]")).map { it.trim() }.filter { it.isNotEmpty() }
-                for (streetId in matchedStreetIds) {
-                    val streetEmergMap = emergencyByStreetAndHouse.getOrPut(streetId) { HashMap() }
-                    for (hToken in houseTokens) {
-                        val normH = normalizeHouseNumber(hToken)
-                        if (normH.isEmpty()) continue
-                        val existing = streetEmergMap[normH]
-                        if (existing == null || score > existing.score || (score == existing.score && rawPlanIn > existing.rawPlanIn)) {
-                            val outageId = if (!explicitId.isNullOrBlank()) {
-                                "pw_accident_$explicitId"
-                            } else {
-                                "pw_accident_\${streetId}_\${normH}_$startTime"
-                            }
-                            streetEmergMap[normH] = ScoredOutage(
-                                score = score,
-                                rawPlanIn = rawPlanIn,
-                                info = EmergencyOutageInfo(
-                                    id = outageId,
-                                    remName = otgName,
-                                    settlementName = cityName.ifBlank { settlementObj?.nameUk },
-                                    streetName = streetNameRaw,
-                                    house = hToken,
-                                    outageType = outageType,
-                                    startTime = startTime,
-                                    estimatedRestoreTime = estimatedRestoreTime
-                                )
-                            )
-                        }
-                    }
-                }
-            }
-
-            for ((streetId, streetEmergMap) in emergencyByStreetAndHouse) {
-                val baseHouses = cachedHousesByStreet[streetId] ?: getDefaultHousesForStreet(streetId)
-                val updatedHouses = baseHouses.map { h ->
-                    val matched = streetEmergMap[normalizeHouseNumber(h.house)]
-                    if (matched != null) h.copy(emergencyOutage = matched.info) else h
-                }.toMutableList()
-                val existingHouseNorms = updatedHouses.map { normalizeHouseNumber(it.house) }.toHashSet()
-                for ((normH, entry) in streetEmergMap) {
-                    val hVal = entry.info.house
-                    if (!existingHouseNorms.contains(normH) && !hVal.isNullOrBlank()) {
-                        updatedHouses.add(
-                            ZtoeHouseLookupResult(
-                                house = hVal,
-                                queue = "",
-                                emergencyOutage = entry.info
-                            )
-                        )
-                        existingHouseNorms.add(normH)
-                    }
-                }
-                if (updatedHouses.isNotEmpty()) {
-                    cachedHousesByStreet[streetId] = updatedHouses.sortedWith(
-                        compareBy<ZtoeHouseLookupResult> { houseSortKey(it.house).first }
-                            .thenBy { houseSortKey(it.house).second }
-                    )
-                }
-            }
-        } catch (_: Exception) {
-        }
-    }
-
-    private fun applyAccidentsToRemHouses(remId: String, rawJson: String, fallbackSettlementId: String? = null) {
-        if (rawJson.isBlank()) return
-        val settlements = getSettlementsForRem(remId)
-        val visited = HashSet<String>()
-        for (s in settlements) {
-            if (visited.add(s.id)) {
-                applyAccidentsToSettlementHouses(s.id, rawJson)
-            }
-        }
-        if (!fallbackSettlementId.isNullOrBlank() && visited.add(fallbackSettlementId)) {
-            applyAccidentsToSettlementHouses(fallbackSettlementId, rawJson)
-        }
-    }
-
-    fun fetchPwAccidentsForScope(
-        remId: String,
-        settlementId: String? = null
-    ): String? {
-        val remObj = getRems().firstOrNull { it.id == remId }
-            ?: ZTOE_REM_OPTIONS.firstOrNull { it.id == remId }
-        val canonicalRemObj = ZTOE_REM_OPTIONS.firstOrNull { it.id == remId }
-        val settlementObj = settlementId?.let { findSettlementById(it) }
-        val otgId = remObj?.ztoeOtgId ?: canonicalRemObj?.ztoeOtgId
-        val cityId = settlementObj?.poweronCityId
-
-        val scopeParam = when {
-            otgId != null -> "otg.id=$otgId"
-            cityId != null -> "city.id=$cityId"
-            else -> ""
-        }
-        val cacheKey = scopeParam.ifEmpty { "$remId::\${settlementId ?: ""}" }
-        val cached = accidentsCacheByScope[cacheKey]
-        if (cached != null && System.currentTimeMillis() - cached.first < ACCIDENTS_CACHE_TTL_MS) {
-            applyAccidentsToRemHouses(remId, cached.second, settlementId)
-            return cached.second
-        }
-
-        val queryParams = buildString {
-            append("switchSubReason[]=0&switchSubReason[]=1&switchSubReason[]=3")
-            if (scopeParam.isNotEmpty()) {
-                append("&").append(scopeParam)
-            }
-            append("&pagination=false")
-        }
-        val targetEndpoint = "https://api-ztoe-poweron.inneti.net/api/pw_accidents?$queryParams"
-        var conn: HttpURLConnection? = null
-        return try {
-            conn = (URL(targetEndpoint).openConnection() as HttpURLConnection).apply {
-                requestMethod = "GET"
-                connectTimeout = 5000
-                readTimeout = 5000
-                setRequestProperty("Accept", "application/ld+json, application/json")
-                setRequestProperty("User-Agent", "Mozilla/5.0 (Android; ZTBlackoutPreWarning)")
-            }
-            if (conn.responseCode in 200..299) {
-                val text = conn.inputStream.use { String(it.readBytes(), Charsets.UTF_8) }
-                if (text.contains("hydra:member") || text.trim().startsWith("[")) {
-                    accidentsCacheByScope[cacheKey] = System.currentTimeMillis() to text
-                    applyAccidentsToRemHouses(remId, text, settlementId)
-                    return text
-                }
-            }
-            null
-        } catch (_: Exception) {
-            null
-        } finally {
-            conn?.disconnect()
-        }
-    }
-
-    fun matchEmergencyOutageFromAccidentsJson(
-        accidentsJsonStr: String,
-        query: SelectedAddressQuery
-    ): EmergencyOutageInfo? {
-        val settlementObj = findSettlementById(query.settlementId)
-        val streetObj = findStreetById(query.streetId)
-        val remObj = ZTOE_REM_OPTIONS.firstOrNull { it.id == query.remId }
-        return matchEmergencyOutageFromAccidentsJson(
-            htmlOrJson = accidentsJsonStr,
-            remName = remObj?.nameUk ?: "",
-            settlementName = settlementObj?.nameUk ?: "",
-            streetName = streetObj?.nameUk ?: "",
-            house = query.house,
-            poweronStreetId = streetObj?.poweronStreetId,
-            poweronCityId = settlementObj?.poweronCityId
-        )
-    }
-
-    fun matchEmergencyOutageFromAccidentsJson(
-        htmlOrJson: String,
-        remName: String,
-        settlementName: String,
-        streetName: String,
-        house: String,
-        poweronStreetId: Int? = null,
-        poweronCityId: Int? = null
-    ): EmergencyOutageInfo? {
-        val targetCityNorm = normalizeUkText(settlementName)
-        val targetStreetNorm = normalizeUkText(streetName)
-        val targetHouseNorm = normalizeHouseNumber(house)
-        if (targetHouseNorm.isEmpty()) return null
-
-        val extractedJson = run {
-            val parseMatch = PW_ACCIDENTS_PARSE_REGEX.find(htmlOrJson)
-            val arrayMatch = if (parseMatch == null) PW_ACCIDENTS_ARRAY_REGEX.find(htmlOrJson) else null
-            when {
-                parseMatch != null -> parseMatch.groupValues[1].replace("\\\\'", "'").replace("\\\\\\\\", "\\\\")
-                arrayMatch != null -> arrayMatch.groupValues[1]
-                else -> htmlOrJson.trim()
-            }
-        }
-
-        return try {
-            val hydraArr = extractJsonArrayField(extractedJson, "hydra:member")
-            val items = extractTopLevelJsonObjects(hydraArr ?: extractedJson)
-            var bestMatch: EmergencyOutageInfo? = null
-            var bestScore = -1
-            var bestRawPlanIn = ""
-
-            for (itemStr in items) {
-                // Support Nested Schema: {"rem_name": ..., " date_begin": ..., "date_plan": ..., "naspunkt": [{"name": ..., "streets": [{"name": "вул. Київська, 37"}]}]}
-                val naspunktArrStr = extractJsonArrayField(itemStr, "naspunkt")
-                if (naspunktArrStr != null) {
-                    val startRaw = (extractJsonStringField(itemStr, "date_begin") ?: "").trim()
-                    val restoreRaw = (extractJsonStringField(itemStr, "date_plan") ?: "").trim()
-                    val outageType = (extractJsonStringField(itemStr, "Otkl_Type_Name") ?: "Аварійне відключення")
-                        .ifBlank { "Аварійне відключення" }
-                    val itemRemName = extractJsonStringField(itemStr, "rem_name") ?: ""
-                    val itemId = extractJsonIntField(itemStr, "id")?.toString()
-                        ?: extractJsonStringField(itemStr, "id")
-                        ?: "\${targetStreetNorm}_$targetHouseNorm"
-
-                    val npObjects = extractTopLevelJsonObjects(naspunktArrStr)
-                    for (npObjStr in npObjects) {
-                        val npName = extractJsonStringField(npObjStr, "name") ?: ""
-                        if (targetCityNorm.isNotEmpty() && npName.isNotBlank()) {
-                            val itemCityNorm = normalizeUkText(npName)
-                            if (!itemCityNorm.contains(targetCityNorm) && !targetCityNorm.contains(itemCityNorm)) {
-                                continue
-                            }
-                        }
-                        val streetsArrStr = extractJsonArrayField(npObjStr, "streets") ?: continue
-                        val stObjects = extractTopLevelJsonObjects(streetsArrStr)
-                        for (stObjStr in stObjects) {
-                            val stRaw = extractJsonStringField(stObjStr, "name") ?: ""
-                            val stNorm = normalizeUkText(stRaw)
-                            if (targetStreetNorm.isNotEmpty() && !stNorm.contains(targetStreetNorm) && !targetStreetNorm.contains(stNorm)) {
-                                continue
-                            }
-                            val tokens = stRaw.split(Regex("[,;]")).map { normalizeHouseNumber(it) }
-                            if (tokens.contains(targetHouseNorm)) {
-                                return EmergencyOutageInfo(
-                                    id = "pw_accident_$itemId",
-                                    remName = remName.ifBlank { itemRemName },
-                                    settlementName = settlementName.ifBlank { npName },
-                                    streetName = streetName.ifBlank { stRaw },
-                                    house = house,
-                                    outageType = outageType,
-                                    startTime = formatZtoeOutageTimestamp(startRaw),
-                                    estimatedRestoreTime = formatZtoeOutageTimestamp(restoreRaw)
-                                )
-                            }
-                        }
-                    }
-                    continue
-                }
-
-                // Support Flat / Hydra Schema: {"id": 391476673, "city": {"name": "Житомир"}, "street": {"name": "вул. Київська"}, "buildingNames": "18, 37", "dateEvent": "...", "datePlanIn": "..."}
-                val switchSubReason = extractJsonIntField(itemStr, "switchSubReason")
-                val typeOff = extractJsonIntField(itemStr, "typeOff")
-                val koment = extractJsonStringField(itemStr, "koment")
-                val score = getAccidentPriorityScore(switchSubReason, typeOff, koment)
-                if (score < 3) continue
-
-                val cityObjStr = extractJsonObjectField(itemStr, "city")
-                val cityIdNum = cityObjStr?.let { extractJsonIntField(it, "id") }
-                val cityName = cityObjStr?.let { extractJsonStringField(it, "name") } ?: ""
-
-                val cityMatches = when {
-                    poweronCityId != null && cityIdNum != null && poweronCityId == cityIdNum -> true
-                    targetCityNorm.isEmpty() || cityName.isBlank() -> true
-                    else -> {
-                        val itemCityNorm = normalizeUkText(cityName)
-                        itemCityNorm == targetCityNorm ||
-                            itemCityNorm.contains(targetCityNorm) ||
-                            targetCityNorm.contains(itemCityNorm)
-                    }
-                }
-                if (!cityMatches) continue
-
-                val streetObjStr = extractJsonObjectField(itemStr, "street")
-                val streetIdNum = streetObjStr?.let { extractJsonIntField(it, "id") }
-                val itemStreetName = streetObjStr?.let { extractJsonStringField(it, "name") } ?: ""
-
-                val streetMatches = when {
-                    poweronStreetId != null && streetIdNum != null && poweronStreetId == streetIdNum -> true
-                    targetStreetNorm.isEmpty() || itemStreetName.isBlank() -> true
-                    else -> {
-                        val itemStreetNorm = normalizeUkText(itemStreetName)
-                        itemStreetNorm == targetStreetNorm ||
-                            itemStreetNorm.contains(targetStreetNorm) ||
-                            targetStreetNorm.contains(itemStreetNorm)
-                    }
-                }
-                if (!streetMatches) continue
-
-                val buildingNames = extractJsonStringField(itemStr, "buildingNames") ?: ""
-                val houses = buildingNames.split(Regex("[,;]"))
-                    .map { normalizeHouseNumber(it) }
-                    .filter { it.isNotEmpty() }
-
-                if (houses.contains(targetHouseNorm)) {
-                    val idVal = extractJsonIntField(itemStr, "id")?.toString()
-                        ?: extractJsonStringField(itemStr, "id")
-                        ?: "\${targetStreetNorm}_$targetHouseNorm"
-                    val dateEvent = extractJsonStringField(itemStr, "dateEvent") ?: ""
-                    val datePlanIn = extractJsonStringField(itemStr, "datePlanIn") ?: ""
-                    val otgName = extractJsonObjectField(itemStr, "otg")?.let { extractJsonStringField(it, "name") }
-                    val candidate = EmergencyOutageInfo(
-                        id = "pw_accident_$idVal",
-                        remName = otgName ?: remName.ifBlank { null },
-                        settlementName = cityName.ifBlank { settlementName },
-                        streetName = itemStreetName.ifBlank { streetName },
-                        house = house,
-                        outageType = getAccidentOutageTypeLabel(switchSubReason, koment),
-                        startTime = formatZtoeOutageTimestamp(dateEvent),
-                        estimatedRestoreTime = formatZtoeOutageTimestamp(datePlanIn)
-                    )
-                    if (isValidEmergencyOutage(candidate)) {
-                        if (score > bestScore || (score == bestScore && datePlanIn > bestRawPlanIn)) {
-                            bestScore = score
-                            bestRawPlanIn = datePlanIn
-                            bestMatch = candidate
-                        }
-                    }
-                }
-            }
-            bestMatch
-        } catch (_: Exception) {
-            null
-        }
-    }
-
-    fun checkEmergencyOutageOnZtoe(
-        query: SelectedAddressQuery,
-        pageHtml: String? = null
-    ): EmergencyOutageInfo? {
-        val settlementObj = findSettlementById(query.settlementId)
-        val streetObj = findStreetById(query.streetId)
-        val targetCityNorm = settlementObj?.let { normalizeUkText(it.nameUk) } ?: ""
-        val targetStreetNorm = streetObj?.let { normalizeUkText(it.nameUk) } ?: ""
-        val targetHouseNorm = normalizeHouseNumber(query.house)
-
-        if (!pageHtml.isNullOrBlank()) {
-            val parsedRows = parseZtoeEmergencyOutagesTableHtml(pageHtml)
-            val matchedRow = parsedRows.firstOrNull { r ->
-                val houseMatches = normalizeHouseNumber(r.house ?: "") == targetHouseNorm
-                val rowStreetNorm = normalizeUkText(r.streetName.orEmpty())
-                val streetMatches = targetStreetNorm.isEmpty() ||
-                    rowStreetNorm.isEmpty() ||
-                    rowStreetNorm.contains(targetStreetNorm) ||
-                    targetStreetNorm.contains(rowStreetNorm)
-                val rowCityNorm = normalizeUkText(r.settlementName.orEmpty())
-                val cityMatches = targetCityNorm.isEmpty() ||
-                    rowCityNorm.isEmpty() ||
-                    rowCityNorm.contains(targetCityNorm) ||
-                    targetCityNorm.contains(rowCityNorm)
-                houseMatches && streetMatches && cityMatches
-            }
-            if (matchedRow != null && isValidEmergencyOutage(matchedRow)) return matchedRow
-
-            matchEmergencyOutageFromAccidentsJson(pageHtml, query)?.takeIf { isValidEmergencyOutage(it) }?.let { return it }
-        }
-
-        // Query live ZTOE PowerOn API (https://api-ztoe-poweron.inneti.net/api/pw_accidents)
-        val liveAccidentsJson = fetchPwAccidentsForScope(query.remId, query.settlementId)
-        if (!liveAccidentsJson.isNullOrBlank()) {
-            matchEmergencyOutageFromAccidentsJson(liveAccidentsJson, query)
-                ?.takeIf { isValidEmergencyOutage(it) }
-                ?.let { return it }
-        }
-
-        val localMatch = getHousesForStreet(query.streetId)
-            .firstOrNull { normalizeHouseNumber(it.house) == targetHouseNorm }
-        return localMatch?.emergencyOutage?.takeIf { isValidEmergencyOutage(it) }
-    }
+    // ---------------------------------------------------------------------------------------------
+    // Queue lookup for the selected address
+    // ---------------------------------------------------------------------------------------------
 
     fun checkAddressOnZtoeWebsite(
         remId: String,
         settlementId: String,
         streetId: String,
         house: String,
-        siteUrl: String = "https://www.ztoe.com.ua/unhooking-search.php"
+        siteUrl: String = DEFAULT_SITE_URL
     ): ZtoeHouseLookupResult? {
         return checkAddressOnZtoeWebsite(
             query = SelectedAddressQuery(
@@ -7408,136 +7361,46 @@ object ZtoeAddressLookup {
     }
 
     /**
-     * Queries the ZTOE website (or falls back to local directory) for the selected address.
-     * Preserves already-assigned queues (e.g. 5.2 for вул. Київська, буд. 77) so live HTML never overwrites them,
-     * while updating houses that previously had no queue ("") and always refreshing emergency outages.
+     * Resolves the queue (or the "does not switch off" status) of the selected house from the ztoe
+     * site. The live row is authoritative (A-H1: upstream queue changes propagate); the cached row is
+     * used only when the site is unreachable or does not list the house. Emergencies are not looked up
+     * here: [OutageRepository] asks PowerOnClient. The result's \`emergencyOutage\` is always null.
      */
     fun checkAddressOnZtoeWebsite(
         query: SelectedAddressQuery,
-        siteUrl: String = "https://www.ztoe.com.ua/unhooking-search.php"
+        siteUrl: String = DEFAULT_SITE_URL
     ): ZtoeHouseLookupResult? {
-        val localHouses = getHousesForStreet(query.streetId)
-        val targetHouseNorm = normalizeHouseNumber(query.house)
-        val localMatch = localHouses.firstOrNull {
-            normalizeHouseNumber(it.house) == targetHouseNorm
-        }
-        var resolvedResult: ZtoeHouseLookupResult? = localMatch?.copy()
+        val targetKey = HouseKey.of(query.house)
+        if (targetKey.isEmpty()) return null
 
         val rem = getRems().firstOrNull { it.id == query.remId }
             ?: ZTOE_REM_OPTIONS.firstOrNull { it.id == query.remId }
         var settlement = findSettlementById(query.settlementId)
         var street = findStreetById(query.streetId)
 
-        var fetchedHtml: String? = null
-        if (rem != null && settlement != null && street != null && ZtoeParser.isValidUrl(siteUrl)) {
-            var conn: HttpURLConnection? = null
-            try {
-                // Note: Do NOT pass all=1 when vulica_id is specified
-                val formBody = "rem_id=\${rem.ztoeRemId}&naspunkt_id=\${settlement.ztoeNaspunktId}&vulica_id=\${street.ztoeVulicaId}"
-                conn = (URL(siteUrl).openConnection() as HttpURLConnection).apply {
-                    requestMethod = "POST"
-                    doOutput = true
-                    connectTimeout = 7000
-                    readTimeout = 7000
-                    setRequestProperty("Content-Type", "application/x-www-form-urlencoded")
-                    setRequestProperty("User-Agent", "Mozilla/5.0 (Android; ZTBlackoutPreWarning)")
-                }
-                OutputStreamWriter(conn.outputStream, Charsets.UTF_8).use { writer ->
-                    writer.write(formBody)
-                    writer.flush()
-                }
-                if (conn.responseCode in 200..299) {
-                    val bytes = conn.inputStream.use { it.readBytes() }
-                    var html = String(bytes, Charset.forName("windows-1251"))
-                    if (!html.contains("Черга") && !html.contains("черга") && !html.contains("Будинки")) {
-                        html = String(bytes, Charsets.UTF_8)
-                    }
-                    fetchedHtml = html
-                    if (settlement.nameUk.isBlank() && query.remId.isNotBlank()) {
-                        val parsedSettlements = parseZtoeSettlementOptionsHtml(query.remId, html)
-                        if (parsedSettlements.isNotEmpty()) {
-                            cachedSettlementsByRem[query.remId] = parsedSettlements
-                            settlement = findSettlementById(query.settlementId) ?: settlement
-                        }
-                    }
-                    if (street.nameUk.isBlank() && query.settlementId.isNotBlank()) {
-                        val parsedStreets = parseZtoeStreetOptionsHtml(query.settlementId, html)
-                        if (parsedStreets.isNotEmpty()) {
-                            cachedStreetsBySettlement[query.settlementId] = parsedStreets
-                            street = findStreetById(query.streetId) ?: street
-                        }
-                    }
-                    val parsedRows = parseZtoeAddressLookupTableHtml(html)
-                    val matchingRows = parsedRows.filter {
-                        normalizeHouseNumber(it.house) == targetHouseNorm
-                    }
-                    // CRITICAL SAFEGUARD: Only allow live HTML table rows to assign/update queue when the house had NO queue locally
-                    if (matchingRows.isNotEmpty() && (localMatch == null || localMatch.queue.isEmpty())) {
-                        val noQueueRow = matchingRows.firstOrNull { it.queue.isEmpty() && !it.statusText.isNullOrBlank() }
-                        resolvedResult = if (noQueueRow != null) {
-                            noQueueRow.copy()
-                        } else {
-                            (matchingRows.firstOrNull { it.queue.isNotEmpty() } ?: matchingRows.first()).copy()
-                        }
-                    }
-                }
-            } catch (_: Exception) {
-                // Offline or unreachable — fall back to localMatch
-            } finally {
-                conn?.disconnect()
+        // After a restore without the index the names are unknown: reload the index once (one bulk request, shared and cached).
+        if (rem != null && settlement != null && (street == null || street.nameUk.isBlank() || settlement.nameUk.isBlank())) {
+            fetchStreetsForSettlement(query.remId, settlement.id, siteUrl, false)
+            settlement = findSettlementById(query.settlementId) ?: settlement
+            street = findStreetById(query.streetId) ?: street
+        }
+
+        val canonical = street?.id ?: query.streetId
+        var resolved = cachedHousesByStreet[canonical]?.firstOrNull { HouseKey.of(it.house) == targetKey }
+
+        if (rem != null && settlement != null && street != null) {
+            val rows = fetchStreetHouseRows(rem, settlement, street, siteUrl)
+            if (!rows.isNullOrEmpty()) {
+                storeStreetHouses(canonical, rows)
+                rows.firstOrNull { HouseKey.of(it.house) == targetKey }?.let { resolved = it }
             }
         }
 
-        val formattedAddressLabel = buildString {
-            append(rem?.nameUk?.ifBlank { "Житомирський РЕМ" } ?: "Житомирський РЕМ")
-            append(", ")
-            append(settlement?.nameUk?.ifBlank { "м. Житомир" } ?: "м. Житомир")
-            append(",\\n")
-            append(street?.nameUk?.ifBlank { "вул. Київська" } ?: "вул. Київська")
-            append(", буд. ")
-            append(query.house.trim())
-        }
-
-        val emergencyOutage = checkEmergencyOutageOnZtoe(query, fetchedHtml)
-        if (resolvedResult != null) {
-            resolvedResult = resolvedResult.copy(
-                emergencyOutage = emergencyOutage,
-                addressLabel = formattedAddressLabel
-            )
-        } else if (emergencyOutage != null) {
-            resolvedResult = ZtoeHouseLookupResult(
-                house = query.house.trim(),
-                queue = "",
-                emergencyOutage = emergencyOutage,
-                addressLabel = formattedAddressLabel
-            )
-        }
-
-        val finalResolved = resolvedResult
-        if (finalResolved != null && query.streetId.isNotBlank()) {
-            val currentList = cachedHousesByStreet[query.streetId] ?: getDefaultHousesForStreet(query.streetId)
-            val exists = currentList.any { normalizeHouseNumber(it.house) == targetHouseNorm }
-            val updatedList = if (exists) {
-                currentList.map { h ->
-                    if (normalizeHouseNumber(h.house) == targetHouseNorm) {
-                        h.copy(
-                            queue = finalResolved.queue.ifEmpty { h.queue },
-                            statusText = finalResolved.statusText ?: h.statusText,
-                            emergencyOutage = finalResolved.emergencyOutage,
-                            addressLabel = finalResolved.addressLabel.ifEmpty { h.addressLabel }
-                        )
-                    } else h
-                }
-            } else {
-                (currentList + finalResolved).sortedWith(
-                    compareBy<ZtoeHouseLookupResult> { houseSortKey(it.house).first }
-                        .thenBy { houseSortKey(it.house).second }
-                )
-            }
-            cachedHousesByStreet[query.streetId] = updatedList
-        }
-
-        return finalResolved
+        val base = resolved ?: return null
+        val head = listOf(rem?.nameUk, settlement?.nameUk).filter { !it.isNullOrBlank() }.joinToString(", ")
+        val streetPart = street?.nameUk?.takeIf { it.isNotBlank() }?.let { "$it, " } ?: ""
+        val label = (if (head.isNotEmpty()) "$head,\\n" else "") + streetPart + "буд. " + query.house.trim()
+        return base.copy(emergencyOutage = null, addressLabel = label)
     }
 }
 `
@@ -7558,6 +7421,8 @@ object ZtoeAddressLookup {
     android:targetCellWidth="4"
     android:targetCellHeight="2"
     android:updatePeriodMillis="900000"
+    android:configure="ua.blackout.prewarning.widget.WidgetConfigActivity"
+    android:widgetFeatures="reconfigurable|configuration_optional"
     android:widgetCategory="home_screen" />
 `
   },
@@ -7769,7 +7634,7 @@ import kotlinx.coroutines.withContext
 import ua.blackout.prewarning.BuildConfig
 import ua.blackout.prewarning.data.repository.DonationsRepository
 import ua.blackout.prewarning.ui.AppStrings
-import ua.blackout.prewarning.ui.components.floatingShadow
+import ua.blackout.prewarning.ui.components.glassSurface
 
 @Composable
 fun AboutScreen(
@@ -7800,7 +7665,7 @@ fun AboutScreen(
         val resolved = when {
             !rawVersion.isNullOrBlank() && rawVersion.matches(semverRegex) -> rawVersion
             buildCfgVersion.matches(semverRegex) -> buildCfgVersion
-            else -> "1.3.5"
+            else -> "1.4.0"
         }
         "v$resolved"
     }
@@ -7834,10 +7699,7 @@ fun AboutScreen(
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .floatingShadow(color = Color(0xB3000000), borderRadius = 24.dp, blurRadius = 24.dp, offsetY = 10.dp)
-                .shadow(10.dp, RoundedCornerShape(24.dp), ambientColor = Color(0x66000000), spotColor = Color(0x80000000))
-                .clip(RoundedCornerShape(24.dp))
-                .background(Color(0xBF141A29))
+                .glassSurface(RoundedCornerShape(24.dp), 24.dp)
                 .padding(20.dp)
         ) {
             Column(
@@ -7904,10 +7766,7 @@ fun AboutScreen(
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .floatingShadow(color = Color(0xB3000000), borderRadius = 24.dp, blurRadius = 24.dp, offsetY = 10.dp)
-                .shadow(10.dp, RoundedCornerShape(24.dp), ambientColor = Color(0x66000000), spotColor = Color(0x80000000))
-                .clip(RoundedCornerShape(24.dp))
-                .background(Color(0xBF141A29))
+                .glassSurface(RoundedCornerShape(24.dp), 24.dp)
                 .padding(18.dp)
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -7945,10 +7804,7 @@ fun AboutScreen(
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .floatingShadow(color = Color(0xB3000000), borderRadius = 24.dp, blurRadius = 24.dp, offsetY = 10.dp)
-                .shadow(10.dp, RoundedCornerShape(24.dp), ambientColor = Color(0x66000000), spotColor = Color(0x80000000))
-                .clip(RoundedCornerShape(24.dp))
-                .background(Color(0xBF141A29))
+                .glassSurface(RoundedCornerShape(24.dp), 24.dp)
                 .padding(18.dp)
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -8070,10 +7926,7 @@ fun AboutScreen(
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .floatingShadow(color = Color(0xB3000000), borderRadius = 24.dp, blurRadius = 24.dp, offsetY = 10.dp)
-                .shadow(10.dp, RoundedCornerShape(24.dp), ambientColor = Color(0x66000000), spotColor = Color(0x80000000))
-                .clip(RoundedCornerShape(24.dp))
-                .background(Color(0xBF141A29))
+                .glassSurface(RoundedCornerShape(24.dp), 24.dp)
                 .padding(18.dp)
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -8151,10 +8004,7 @@ fun AboutScreen(
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .floatingShadow(color = Color(0xB3000000), borderRadius = 24.dp, blurRadius = 24.dp, offsetY = 10.dp)
-                .shadow(10.dp, RoundedCornerShape(24.dp), ambientColor = Color(0x66000000), spotColor = Color(0x80000000))
-                .clip(RoundedCornerShape(24.dp))
-                .background(Color(0xBF141A29))
+                .glassSurface(RoundedCornerShape(24.dp), 24.dp)
                 .clickable {
                     if (onOpenRoulette != null) {
                         onOpenRoulette()
@@ -8184,10 +8034,7 @@ fun AboutScreen(
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .floatingShadow(color = Color(0xB3000000), borderRadius = 24.dp, blurRadius = 24.dp, offsetY = 10.dp)
-                .shadow(10.dp, RoundedCornerShape(24.dp), ambientColor = Color(0x66000000), spotColor = Color(0x80000000))
-                .clip(RoundedCornerShape(24.dp))
-                .background(Color(0xBF141A29))
+                .glassSurface(RoundedCornerShape(24.dp), 24.dp)
                 .padding(18.dp)
         ) {
             Row(
@@ -8233,6 +8080,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.PagerDefaults
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -8244,6 +8092,7 @@ import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -8252,6 +8101,7 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
@@ -8264,22 +8114,32 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
-import ua.blackout.prewarning.data.model.BlackoutSlot
-import ua.blackout.prewarning.data.model.EmergencyOutageInfo
-import ua.blackout.prewarning.data.model.SelectedAddressQuery
-import ua.blackout.prewarning.data.model.SlotStatus
-import ua.blackout.prewarning.data.parser.FetchStatus
+import ua.blackout.prewarning.core.SiteState
 import ua.blackout.prewarning.data.parser.ZtoeAddressLookup
-import ua.blackout.prewarning.data.parser.ZtoeParser
+import ua.blackout.prewarning.data.repository.OutageRepository
+import ua.blackout.prewarning.data.repository.OutageStateStore
+import ua.blackout.prewarning.data.repository.RefreshOutcome
 import ua.blackout.prewarning.data.repository.ScheduleRepository
 import ua.blackout.prewarning.data.repository.SettingsRepository
+import ua.blackout.prewarning.data.repository.SubscriptionSync
+import ua.blackout.prewarning.core.StoreResult
+import ua.blackout.prewarning.core.Subscriptions
+import ua.blackout.prewarning.data.model.UserSettings
+import ua.blackout.prewarning.data.repository.OutageSnapshot
 import ua.blackout.prewarning.notification.AlarmScheduler
+import ua.blackout.prewarning.notification.ExactAlarmGate
 import ua.blackout.prewarning.notification.NotificationHelper
 import ua.blackout.prewarning.ui.AppStrings
-import ua.blackout.prewarning.ui.components.floatingShadow
+import ua.blackout.prewarning.ui.components.glassSurface
+import ua.blackout.prewarning.ui.components.PageGlide
+import ua.blackout.prewarning.ui.components.ambientBreath
+import ua.blackout.prewarning.ui.components.ambientDrift
+import ua.blackout.prewarning.ui.components.reducedMotion
+import ua.blackout.prewarning.ui.components.rememberAmbientSeconds
 import ua.blackout.prewarning.ui.theme.TimeOfDayPalette
 import ua.blackout.prewarning.widget.BlackoutGlanceWidget
-import java.time.LocalDate
+import java.time.Instant
+import java.time.LocalDateTime
 import java.time.LocalTime
 import java.time.format.DateTimeFormatter
 import ua.blackout.prewarning.data.KYIV_ZONE
@@ -8306,27 +8166,12 @@ private fun smoothGaussianRadialBrush(
     )
 }
 
-private fun buildLightNoOutageSlots(): List<BlackoutSlot> {
-    return (0 until 48).map { idx ->
-        val sh = idx / 2
-        val sm = if (idx % 2 == 0) "00" else "30"
-        val eh = (idx + 1) / 2
-        val em = if ((idx + 1) % 2 == 0) "00" else "30"
-        val startStr = "\${sh.toString().padStart(2, '0')}:$sm"
-        val endStr = "\${eh.toString().padStart(2, '0')}:$em"
-        BlackoutSlot(
-            hour = sh,
-            startStr = startStr,
-            endStr = endStr,
-            status = SlotStatus.POWER_ON,
-            label = "$startStr - $endStr"
-        )
-    }
-}
-
 @Composable
 fun BlackoutAppNavigation(
-    onThemeChanged: (Boolean) -> Unit = {}
+    onThemeChanged: (Boolean) -> Unit = {},
+    // Subscription id from a tapped notification: shown once on the main screen (spec/SUBSCRIPTIONS.md 9)
+    openSubscriptionId: String? = null,
+    onOpenSubscriptionHandled: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val appContext = remember { context.applicationContext }
@@ -8334,14 +8179,23 @@ fun BlackoutAppNavigation(
     val coroutineScope = rememberCoroutineScope()
     val settingsRepo = remember { SettingsRepository(appContext) }
     val scheduleRepo = remember { ScheduleRepository(appContext) }
+    val outageRepo = remember { OutageRepository(appContext) }
+    val outageStore = remember { OutageStateStore(appContext) }
     val initialSettings = remember { settingsRepo.getSettings() }
+    // Multi-address store (step 2): Settings edits it, the primary is mirrored into the keys above
+    val subscriptionSync = remember { SubscriptionSync(appContext) }
+    var subscriptions by remember { mutableStateOf(subscriptionSync.ensureReady()) }
+    var alertsMaster by remember { mutableStateOf(subscriptionSync.master()) }
+    // The address the main screen shows (step 4): session state, a cold start shows the primary (decision 5)
+    var shownSubscriptionId by rememberSaveable { mutableStateOf<String?>(null) }
 
+    // Latest persisted settings; kept in sync by the preference listener below
+    var currentSettings by remember { mutableStateOf(initialSettings) }
     var siteUrl by remember { mutableStateOf(initialSettings.cityUrl) }
     var queue by remember { mutableStateOf(initialSettings.queue) }
     var customQueueStatusText by remember { mutableStateOf(initialSettings.customQueueStatusText) }
     var selectedAddress by remember { mutableStateOf(initialSettings.selectedAddress) }
     var selectedAddressQuery by remember { mutableStateOf(initialSettings.selectedAddressQuery) }
-    var activeEmergencyOutage by remember { mutableStateOf(initialSettings.activeEmergencyOutage) }
     var advanceMinutes by remember { mutableStateOf(initialSettings.advanceNoticeMinutes) }
     var refreshMinutes by remember { mutableStateOf(initialSettings.refreshIntervalMinutes.toInt()) }
     var notificationsEnabled by remember { mutableStateOf(initialSettings.notificationsEnabled) }
@@ -8353,7 +8207,8 @@ fun BlackoutAppNavigation(
     var autoOpenQueueHelp by remember { mutableStateOf(false) }
     var currentTime by remember { mutableStateOf(LocalTime.now(KYIV_ZONE)) }
 
-    val isQueueUnselected = queue.isBlank() && customQueueStatusText.isNullOrBlank() && activeEmergencyOutage == null
+    // An address counts as a selection even when it has no queue and no emergency right now
+    val isQueueUnselected = queue.isBlank() && customQueueStatusText.isNullOrBlank() && selectedAddressQuery == null
 
     // Pager for swipe left/right between windows with beyondViewportPageCount = 2 to eliminate swipe jittering
     val pagerState = rememberPagerState(initialPage = 0, pageCount = { 3 })
@@ -8378,167 +8233,147 @@ fun BlackoutAppNavigation(
         AppStrings.resolveLang(currentLanguage)
     }
 
-    // Dynamic Last Updated & Next Update Timers
-    val nowTime = remember { LocalTime.now(KYIV_ZONE) }
-    var lastUpdated by remember {
-        mutableStateOf(nowTime.format(DateTimeFormatter.ofPattern("HH:mm")))
+    // Everything the screens show about outages comes from one snapshot of the stored state
+    val addressKey = remember(selectedAddressQuery) { outageRepo.addressKey(selectedAddressQuery) }
+    // The shown item when it is not the primary; the primary is read through the mirrored settings as in 1.4.0
+    fun otherShownItem() = Subscriptions.viewItem(subscriptions, shownSubscriptionId)?.takeIf { it.id != subscriptions.primaryId }
+    fun shownSnapshot(
+        settings: UserSettings,
+        now: LocalDateTime = LocalDateTime.now(KYIV_ZONE),
+        primaryKey: String? = outageRepo.addressKey(settings.selectedAddressQuery)
+    ): OutageSnapshot = otherShownItem()?.let { outageRepo.snapshotFor(it, now) } ?: outageRepo.snapshot(settings, now, primaryKey)
+
+    var snapshot by remember {
+        mutableStateOf(outageRepo.snapshot(initialSettings, LocalDateTime.now(KYIV_ZONE)))
     }
-    var nextUpdated by remember {
-        mutableStateOf(nowTime.plusMinutes(refreshMinutes.toLong()).format(DateTimeFormatter.ofPattern("HH:mm")))
+    val recomputeSnapshot: () -> Unit = {
+        snapshot = shownSnapshot(currentSettings, LocalDateTime.now(KYIV_ZONE), addressKey)
+    }
+    var statusInfo by remember { mutableStateOf(snapshot.scheduleStatus()) }
+    var isRefreshing by remember { mutableStateOf(false) }
+
+    // "Last updated" is the last successful ztoe fetch; "next" is one refresh interval after the last check
+    val hhmm = remember { DateTimeFormatter.ofPattern("HH:mm") }
+    val lastUpdated = remember(snapshot.site, snapshot.plannedKnown) {
+        val ms = snapshot.site?.lastSuccessMs ?: scheduleRepo.lastSyncMs().takeIf { it > 0L }
+        if (ms == null) "--:--" else Instant.ofEpochMilli(ms).atZone(KYIV_ZONE).format(hhmm)
+    }
+    val nextUpdated = remember(snapshot.site, refreshMinutes) {
+        val ms = snapshot.site?.checkedAtMs?.takeIf { it > 0L } ?: System.currentTimeMillis()
+        Instant.ofEpochMilli(ms).plusSeconds(refreshMinutes * 60L).atZone(KYIV_ZONE).format(hhmm)
     }
 
-    // Base slots for Today and Tomorrow from ScheduleRepository
-    var baseSlots by remember {
-        mutableStateOf(scheduleRepo.getTodaySlots(queue))
-    }
-    var baseTomorrowSlots by remember {
-        mutableStateOf(scheduleRepo.getTomorrowSlots(queue))
-    }
-    var hasTomorrowSchedule by remember {
-        mutableStateOf(scheduleRepo.hasTomorrowSchedule(queue))
-    }
-
-    val todayDateIso = remember(lastUpdated) {
-        LocalDate.now(KYIV_ZONE).format(DateTimeFormatter.ISO_LOCAL_DATE)
-    }
-    val tomorrowDateIso = remember(lastUpdated) {
-        LocalDate.now(KYIV_ZONE).plusDays(1).format(DateTimeFormatter.ISO_LOCAL_DATE)
-    }
-
-    // Effective slots with active emergency outage overlaid across Today and Tomorrow
-    val effectiveSlots = remember(baseSlots, customQueueStatusText, activeEmergencyOutage, todayDateIso) {
-        val raw = if (!customQueueStatusText.isNullOrBlank() && baseSlots.isEmpty()) {
-            buildLightNoOutageSlots()
-        } else {
-            baseSlots
+    // The exact-alarm permission can change while the app is in the background, so it is re-read on every resume
+    var resumeTick by remember { mutableStateOf(0) }
+    DisposableEffect(lifecycleOwner) {
+        val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) resumeTick++
         }
-        ScheduleRepository.applyEmergencyOutageToSlots(raw, todayDateIso, activeEmergencyOutage, queue = queue, isTomorrow = false)
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
-    val effectiveTomorrowSlots = remember(baseTomorrowSlots, activeEmergencyOutage, tomorrowDateIso) {
-        val overlaid = ScheduleRepository.applyEmergencyOutageToSlots(
-            slots = baseTomorrowSlots ?: emptyList(),
-            targetDateIso = tomorrowDateIso,
-            emergencyOutage = activeEmergencyOutage,
-            queue = queue,
-            isTomorrow = true
-        )
-        if (overlaid.isNotEmpty()) overlaid else baseTomorrowSlots
-    }
-    val effectiveHasTomorrowSchedule = hasTomorrowSchedule || (effectiveTomorrowSlots != null && effectiveTomorrowSlots.isNotEmpty())
-
-    // Dynamic real-time countdown info updated every second ONLY while Lifecycle is RESUMED and MainScreen is visible
-    var statusInfo by remember {
-        mutableStateOf(
-            ScheduleRepository.calculateStatusAndCountdown(
-                slots = effectiveSlots,
-                tomorrowSlots = if (effectiveHasTomorrowSchedule) effectiveTomorrowSlots else null,
-                now = LocalTime.now(KYIV_ZONE)
-            )
-        )
+    // Planned warnings of any address need exact alarms (spec/SUBSCRIPTIONS.md 8.1)
+    val anyPlannedActive = subscriptions.items.any { Subscriptions.plannedActive(alertsMaster, it) }
+    val exactAlarmMissing = remember(resumeTick, anyPlannedActive) {
+        anyPlannedActive && !ExactAlarmGate.canScheduleExact(appContext)
     }
 
     val isMainScreenVisible = pagerState.currentPage == 0 && !isRouletteOpen
     val isCountdownScreenActive = isMainScreenVisible && !isQueueUnselected
     var hasCompletedInitialScheduleFetch by remember { mutableStateOf(false) }
 
-    // Automatically refresh timer and drum bar when User enters main screen
+    /**
+     * Re-checks the saved address (a house without a queue may get one), then refreshes both sources
+     * through [OutageRepository] and re-plans alarms and widgets. A failing source keeps its old data.
+     */
+    suspend fun runRefresh(force: Boolean, resolveAddress: Boolean): RefreshOutcome {
+        isRefreshing = true
+        try {
+            val outcome = withContext(Dispatchers.IO) {
+                ZtoeAddressLookup.initDiskCache(appContext)
+                val addrQuery = settingsRepo.getSettings().selectedAddressQuery
+                if (resolveAddress && addrQuery != null && addrQuery.streetId.isNotBlank() && addrQuery.house.isNotBlank()) {
+                    val lookup = try {
+                        ZtoeAddressLookup.checkAddressOnZtoeWebsite(
+                            remId = addrQuery.remId,
+                            settlementId = addrQuery.settlementId,
+                            streetId = addrQuery.streetId,
+                            house = addrQuery.house,
+                            siteUrl = settingsRepo.getSettings().cityUrl
+                        )
+                    } catch (_: Exception) {
+                        null
+                    }
+                    if (lookup != null) {
+                        val current = settingsRepo.getSettings()
+                        val nextQueue = when {
+                            !lookup.queue.isNullOrBlank() -> lookup.queue
+                            !lookup.statusText.isNullOrBlank() -> ""
+                            else -> current.queue
+                        }
+                        val nextStatus = when {
+                            !lookup.queue.isNullOrBlank() -> null
+                            !lookup.statusText.isNullOrBlank() -> lookup.statusText
+                            else -> current.customQueueStatusText
+                        }
+                        val nextLabel = lookup.addressLabel.takeIf { it.isNotBlank() } ?: current.selectedAddress
+                        if (nextQueue != current.queue || nextStatus != current.customQueueStatusText || nextLabel != current.selectedAddress) {
+                            // into the primary subscription, which is mirrored back into these keys
+                            subscriptionSync.assignPrimaryQueue(nextQueue, nextStatus, nextLabel)
+                        }
+                    }
+                }
+                val result = outageRepo.refresh(settingsRepo.getSettings(), forceNetwork = force, shownId = otherShownItem()?.id)
+                try {
+                    AlarmScheduler.syncAlarms(appContext)
+                } catch (_: Exception) {
+                }
+                try {
+                    BlackoutGlanceWidget.syncAllWidgets(appContext)
+                } catch (_: Exception) {
+                }
+                result
+            }
+            snapshot = shownSnapshot(settingsRepo.getSettings())
+            return outcome
+        } finally {
+            isRefreshing = false
+        }
+    }
+
+    // Entering the main screen: show fresh numbers at once, then refresh quietly in the background
     LaunchedEffect(isMainScreenVisible) {
         if (isMainScreenVisible) {
-            val now = LocalTime.now(KYIV_ZONE)
-            currentTime = now
-            if (queue.isNotBlank()) {
-                baseSlots = scheduleRepo.getTodaySlots(queue)
-                baseTomorrowSlots = scheduleRepo.getTomorrowSlots(queue)
-                hasTomorrowSchedule = scheduleRepo.hasTomorrowSchedule(queue)
-            }
-            statusInfo = ScheduleRepository.calculateStatusAndCountdown(
-                slots = effectiveSlots,
-                tomorrowSlots = if (effectiveHasTomorrowSchedule) effectiveTomorrowSlots else null,
-                now = now
-            )
+            currentTime = LocalTime.now(KYIV_ZONE)
+            recomputeSnapshot()
             if (hasCompletedInitialScheduleFetch) {
-                val addrQuery = selectedAddressQuery
-                if (addrQuery != null) {
-                    val latestAddressLookup = withContext(Dispatchers.IO) {
-                        ZtoeAddressLookup.initDiskCache(appContext)
-                        ZtoeAddressLookup.checkAddressOnZtoeWebsite(addrQuery, siteUrl)
-                    }
-                    if (latestAddressLookup != null) {
-                        val currentSettings = settingsRepo.getSettings()
-                        val prevEmergency = activeEmergencyOutage
-                        val nextEmergency = latestAddressLookup.emergencyOutage
-                        val emergencyChanged = (prevEmergency?.id != nextEmergency?.id) ||
-                            (prevEmergency?.startTime != nextEmergency?.startTime) ||
-                            (prevEmergency?.estimatedRestoreTime != nextEmergency?.estimatedRestoreTime)
-                        if (emergencyChanged) {
-                            activeEmergencyOutage = nextEmergency
-                            val updatedSettings = currentSettings.copy(activeEmergencyOutage = nextEmergency)
-                            withContext(Dispatchers.IO) {
-                                settingsRepo.saveSettings(updatedSettings)
-                                NotificationHelper.checkAndTriggerEmergencyOutageAlert(
-                                    context = appContext,
-                                    settings = updatedSettings,
-                                    previousEmergency = prevEmergency,
-                                    currentEmergency = nextEmergency
-                                )
-                            }
-                        }
-                    }
-                }
-                if (queue.isNotBlank()) {
-                    val res = withContext(Dispatchers.IO) {
-                        ZtoeParser.fetchFullSchedule(siteUrl, queue, appContext)
-                    }
-                    if (res.status == FetchStatus.SUCCESS) {
-                        baseSlots = res.todaySlots
-                        baseTomorrowSlots = res.tomorrowSlots
-                        hasTomorrowSchedule = res.hasTomorrowSchedule && res.tomorrowSlots != null
-                        withContext(Dispatchers.IO) {
-                            scheduleRepo.saveSchedule(queue, res.todaySlots, res.tomorrowSlots)
-                        }
-                        val refreshedNow = LocalTime.now(KYIV_ZONE)
-                        currentTime = refreshedNow
-                        lastUpdated = refreshedNow.format(DateTimeFormatter.ofPattern("HH:mm"))
-                        nextUpdated = refreshedNow.plusMinutes(refreshMinutes.toLong()).format(DateTimeFormatter.ofPattern("HH:mm"))
-                    }
-                }
+                runRefresh(force = false, resolveAddress = true)
             }
         }
     }
 
-    LaunchedEffect(
-        lifecycleOwner,
-        effectiveSlots,
-        effectiveTomorrowSlots,
-        effectiveHasTomorrowSchedule,
-        queue,
-        customQueueStatusText,
-        isCountdownScreenActive
-    ) {
+    // Live countdown: once per second while the main screen is visible and the app is resumed (battery friendly)
+    LaunchedEffect(lifecycleOwner, isCountdownScreenActive, currentSettings, addressKey, shownSubscriptionId, subscriptions) {
         if (!isCountdownScreenActive) {
-            val now = LocalTime.now(KYIV_ZONE)
-            currentTime = now
-            statusInfo = ScheduleRepository.calculateStatusAndCountdown(
-                slots = effectiveSlots,
-                tomorrowSlots = if (effectiveHasTomorrowSchedule) effectiveTomorrowSlots else null,
-                now = now
-            )
+            val nowDt = LocalDateTime.now(KYIV_ZONE)
+            currentTime = nowDt.toLocalTime()
+            snapshot = shownSnapshot(currentSettings, nowDt, addressKey)
+            statusInfo = snapshot.scheduleStatus()
             return@LaunchedEffect
         }
         lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
             withContext(Dispatchers.IO) {
                 try {
                     AlarmScheduler.syncAlarms(appContext)
-                } catch (_: Exception) {}
+                } catch (_: Exception) {
+                }
             }
             while (true) {
-                val now = LocalTime.now(KYIV_ZONE)
-                currentTime = now
-                val updatedStatus = ScheduleRepository.calculateStatusAndCountdown(
-                    slots = effectiveSlots,
-                    tomorrowSlots = if (effectiveHasTomorrowSchedule) effectiveTomorrowSlots else null,
-                    now = now
-                )
+                val nowDt = LocalDateTime.now(KYIV_ZONE)
+                currentTime = nowDt.toLocalTime()
+                val fresh = shownSnapshot(currentSettings, nowDt, addressKey)
+                snapshot = fresh
+                val updatedStatus = fresh.scheduleStatus()
                 statusInfo = updatedStatus
                 if (!updatedStatus.isBlackoutNow && updatedStatus.countdownText == "--:--:--" && updatedStatus.nextSlotTime == "Відключень немає") {
                     delay(15_000L)
@@ -8550,15 +8385,14 @@ fun BlackoutAppNavigation(
     }
 
     // Keep strong references to SharedPreferences listeners (Android stores them in a WeakHashMap)
-    val settingsListener = remember(settingsRepo, scheduleRepo) {
+    val settingsListener = remember(settingsRepo) {
         SharedPreferences.OnSharedPreferenceChangeListener { _, _ ->
             val updated = settingsRepo.getSettings()
-            val queueChanged = queue != updated.queue
+            currentSettings = updated
             queue = updated.queue
             customQueueStatusText = updated.customQueueStatusText
             selectedAddress = updated.selectedAddress
             selectedAddressQuery = updated.selectedAddressQuery
-            activeEmergencyOutage = updated.activeEmergencyOutage
             siteUrl = updated.cityUrl
             advanceMinutes = updated.advanceNoticeMinutes
             refreshMinutes = updated.refreshIntervalMinutes.toInt()
@@ -8567,34 +8401,33 @@ fun BlackoutAppNavigation(
             soundEnabled = updated.soundEnabled
             vibrationEnabled = updated.vibrationEnabled
             currentLanguage = updated.language
-            if (queueChanged) {
-                baseSlots = scheduleRepo.getTodaySlots(updated.queue)
-                baseTomorrowSlots = scheduleRepo.getTomorrowSlots(updated.queue)
-                hasTomorrowSchedule = scheduleRepo.hasTomorrowSchedule(updated.queue)
-            }
+            subscriptions = subscriptionSync.store()
+            alertsMaster = subscriptionSync.master()
+            snapshot = shownSnapshot(updated)
         }
     }
 
-    val scheduleListener = remember(settingsRepo, scheduleRepo) {
+    // Schedule cache or outage state changed (worker, widget, refresh): show it
+    val stateListener = remember(settingsRepo, outageRepo) {
         SharedPreferences.OnSharedPreferenceChangeListener { _, _ ->
-            val currentQ = settingsRepo.getSettings().queue
-            baseSlots = scheduleRepo.getTodaySlots(currentQ)
-            baseTomorrowSlots = scheduleRepo.getTomorrowSlots(currentQ)
-            hasTomorrowSchedule = scheduleRepo.hasTomorrowSchedule(currentQ)
+            snapshot = shownSnapshot(settingsRepo.getSettings())
         }
     }
 
     // Listen to SharedPreferences changes from Widget (ToggleAlertsActionCallback / RefreshWidgetActionCallback)
-    DisposableEffect(settingsRepo, scheduleRepo, settingsListener, scheduleListener) {
+    DisposableEffect(settingsRepo, scheduleRepo, outageStore, settingsListener, stateListener) {
         val settingsPrefs = settingsRepo.getSharedPreferences()
         val schedulePrefs = scheduleRepo.getSharedPreferences()
+        val outagePrefs = outageStore.getSharedPreferences()
 
         settingsPrefs.registerOnSharedPreferenceChangeListener(settingsListener)
-        schedulePrefs.registerOnSharedPreferenceChangeListener(scheduleListener)
+        schedulePrefs.registerOnSharedPreferenceChangeListener(stateListener)
+        outagePrefs.registerOnSharedPreferenceChangeListener(stateListener)
 
         onDispose {
             settingsPrefs.unregisterOnSharedPreferenceChangeListener(settingsListener)
-            schedulePrefs.unregisterOnSharedPreferenceChangeListener(scheduleListener)
+            schedulePrefs.unregisterOnSharedPreferenceChangeListener(stateListener)
+            outagePrefs.unregisterOnSharedPreferenceChangeListener(stateListener)
         }
     }
 
@@ -8629,200 +8462,71 @@ fun BlackoutAppNavigation(
         }
     }
 
-    // Fetch schedule and re-check saved address & emergency outages when queue, siteUrl, or selectedAddressQuery changes
+    // Refresh both sources when the queue, site address or selected address changes (and once at launch)
     LaunchedEffect(queue, customQueueStatusText, siteUrl, selectedAddressQuery) {
-        var activeQ = queue
-        val addrQuery = selectedAddressQuery
-        if (addrQuery != null) {
-            val latestAddressLookup = withContext(Dispatchers.IO) {
-                ZtoeAddressLookup.initDiskCache(appContext)
-                ZtoeAddressLookup.checkAddressOnZtoeWebsite(addrQuery, siteUrl)
-            }
-            if (latestAddressLookup != null) {
-                val currentSettings = settingsRepo.getSettings()
-                val prevEmergency = activeEmergencyOutage
-                val nextEmergency = latestAddressLookup.emergencyOutage
-
-                val emergencyChanged = (prevEmergency?.id != nextEmergency?.id) ||
-                    (prevEmergency?.startTime != nextEmergency?.startTime) ||
-                    (prevEmergency?.estimatedRestoreTime != nextEmergency?.estimatedRestoreTime)
-                val hadNoQueue = activeQ.isBlank()
-                val queueAssignedForNoQueueHouse = hadNoQueue &&
-                    (latestAddressLookup.queue != activeQ || latestAddressLookup.statusText != customQueueStatusText)
-
-                if (queueAssignedForNoQueueHouse || emergencyChanged) {
-                    val nextQ = if (queueAssignedForNoQueueHouse) latestAddressLookup.queue else activeQ
-                    val nextStatus = if (queueAssignedForNoQueueHouse) latestAddressLookup.statusText else customQueueStatusText
-                    activeQ = nextQ
-                    queue = nextQ
-                    customQueueStatusText = nextStatus
-                    activeEmergencyOutage = nextEmergency
-                    val updatedSettings = currentSettings.copy(
-                        queue = nextQ,
-                        customQueueStatusText = nextStatus,
-                        activeEmergencyOutage = nextEmergency
-                    )
-                    withContext(Dispatchers.IO) {
-                        settingsRepo.saveSettings(updatedSettings)
-                        NotificationHelper.checkAndTriggerEmergencyOutageAlert(
-                            context = appContext,
-                            settings = updatedSettings,
-                            previousEmergency = prevEmergency,
-                            currentEmergency = nextEmergency
-                        )
-                    }
-                }
-            }
-        }
-
-        if (activeQ.isBlank()) {
-            baseSlots = emptyList()
-            baseTomorrowSlots = null
-            hasTomorrowSchedule = false
+        if (queue.isBlank() && selectedAddressQuery == null) {
             hasCompletedInitialScheduleFetch = true
+            recomputeSnapshot()
             return@LaunchedEffect
         }
-
-        baseSlots = scheduleRepo.getTodaySlots(activeQ)
-        baseTomorrowSlots = scheduleRepo.getTomorrowSlots(activeQ)
-        hasTomorrowSchedule = scheduleRepo.hasTomorrowSchedule(activeQ)
-
-        val res = withContext(Dispatchers.IO) {
-            ZtoeParser.fetchFullSchedule(siteUrl, activeQ, appContext)
-        }
+        runRefresh(force = false, resolveAddress = true)
         hasCompletedInitialScheduleFetch = true
-        if (res.status == FetchStatus.SUCCESS) {
-            baseSlots = res.todaySlots
-            baseTomorrowSlots = res.tomorrowSlots
-            hasTomorrowSchedule = res.hasTomorrowSchedule && res.tomorrowSlots != null
-            withContext(Dispatchers.IO) {
-                scheduleRepo.saveSchedule(activeQ, res.todaySlots, res.tomorrowSlots)
-            }
-        } else {
-            baseSlots = emptyList()
-            baseTomorrowSlots = null
-            hasTomorrowSchedule = false
-            withContext(Dispatchers.IO) {
-                scheduleRepo.clearScheduleCache()
-            }
-        }
-        val now = LocalTime.now(KYIV_ZONE)
-        lastUpdated = now.format(DateTimeFormatter.ofPattern("HH:mm"))
-        nextUpdated = now.plusMinutes(refreshMinutes.toLong()).format(DateTimeFormatter.ofPattern("HH:mm"))
+    }
 
-        withContext(Dispatchers.IO) {
+    // Another address is shown: poll its PowerOn too (its switches gate notifications only)
+    LaunchedEffect(shownSubscriptionId) {
+        if (hasCompletedInitialScheduleFetch && otherShownItem() != null) {
+            runRefresh(force = false, resolveAddress = false)
+        }
+    }
+
+    // A tapped notification shows its address on the main screen
+    LaunchedEffect(openSubscriptionId) {
+        val id = openSubscriptionId ?: return@LaunchedEffect
+        shownSubscriptionId = id
+        isRouletteOpen = false
+        pagerState.scrollToPage(0)
+        onOpenSubscriptionHandled()
+    }
+
+    // Manual refresh: always goes to the network and tells the user what the site answered
+    val performManualRefresh: () -> Unit = {
+        coroutineScope.launch {
+            val outcome = runRefresh(force = true, resolveAddress = true)
+            val message = when (outcome.siteState) {
+                null, SiteState.AVAILABLE_WITH_TABLE -> AppStrings.refreshSuccessToast(resolvedLang)
+                SiteState.AVAILABLE_NO_TABLE -> AppStrings.siteStateNoTable(resolvedLang)
+                SiteState.SITE_UNREACHABLE -> AppStrings.siteStateUnreachable(resolvedLang)
+                SiteState.NO_INTERNET -> AppStrings.siteStateNoInternet(resolvedLang)
+            }
+            showAppBanner(message)
+        }
+    }
+
+    val syncAlarmsAndWidgets: () -> Unit = {
+        coroutineScope.launch(Dispatchers.IO) {
             try {
                 AlarmScheduler.syncAlarms(appContext)
-            } catch (_: Exception) {}
-            try {
                 BlackoutGlanceWidget.syncAllWidgets(appContext)
             } catch (_: Exception) {}
         }
     }
 
-    // Helper for manual refresh with strict verification, address/emergency re-check & error reporting
-    val performManualRefresh: () -> Unit = {
-        coroutineScope.launch {
-            // Re-check selected address on ZTOE for emergency outages and dynamic queue updates
-            val addrQuery = selectedAddressQuery
-            if (addrQuery != null && addrQuery.streetId.isNotBlank() && addrQuery.house.isNotBlank()) {
-                val addrRes = withContext(Dispatchers.IO) {
-                    ZtoeAddressLookup.initDiskCache(appContext)
-                    ZtoeAddressLookup.checkAddressOnZtoeWebsite(
-                        remId = addrQuery.remId,
-                        settlementId = addrQuery.settlementId,
-                        streetId = addrQuery.streetId,
-                        house = addrQuery.house,
-                        siteUrl = siteUrl
-                    )
-                }
-                if (addrRes != null) {
-                    val prevEmergency = activeEmergencyOutage
-                    activeEmergencyOutage = addrRes.emergencyOutage
-                    selectedAddress = addrRes.addressLabel
-                    if (!addrRes.queue.isNullOrBlank()) {
-                        queue = addrRes.queue
-                        customQueueStatusText = null
-                    } else if (!addrRes.statusText.isNullOrBlank()) {
-                        queue = ""
-                        customQueueStatusText = addrRes.statusText
-                    }
-                    val current = settingsRepo.getSettings()
-                    val updatedSettings = current.copy(
-                        queue = queue,
-                        customQueueStatusText = customQueueStatusText,
-                        selectedAddress = selectedAddress,
-                        selectedAddressQuery = addrQuery,
-                        activeEmergencyOutage = activeEmergencyOutage
-                    )
-                    settingsRepo.saveSettings(updatedSettings)
-                    NotificationHelper.checkAndTriggerEmergencyOutageAlert(
-                        context = appContext,
-                        settings = updatedSettings,
-                        previousEmergency = prevEmergency,
-                        currentEmergency = activeEmergencyOutage
-                    )
-                }
+    /** Shows why a store change was refused; on success alarms and widgets follow the new primary mirror. */
+    val onStoreResult: (StoreResult) -> Boolean = { result ->
+        when (result) {
+            is StoreResult.Ok -> {
+                subscriptions = result.store
+                syncAlarmsAndWidgets()
+                true
             }
-
-            if (queue.isBlank() && !customQueueStatusText.isNullOrBlank()) {
-                val now = LocalTime.now(KYIV_ZONE)
-                lastUpdated = now.format(DateTimeFormatter.ofPattern("HH:mm"))
-                nextUpdated = now.plusMinutes(refreshMinutes.toLong()).format(DateTimeFormatter.ofPattern("HH:mm"))
-                withContext(Dispatchers.IO) {
-                    try {
-                        AlarmScheduler.syncAlarms(appContext)
-                        BlackoutGlanceWidget.syncAllWidgets(appContext)
-                    } catch (_: Exception) {}
+            is StoreResult.Error -> {
+                when (result.code) {
+                    Subscriptions.ERR_DUPLICATE -> showAppBanner(AppStrings.addressDuplicate(resolvedLang))
+                    Subscriptions.ERR_LIMIT -> showAppBanner(AppStrings.addressLimitReached(resolvedLang, Subscriptions.MAX_ITEMS))
+                    else -> Unit
                 }
-                showAppBanner(AppStrings.refreshSuccessToast(resolvedLang))
-                return@launch
-            }
-
-            val res = withContext(Dispatchers.IO) {
-                ZtoeParser.fetchFullSchedule(siteUrl, queue, appContext, forceNetwork = true)
-            }
-            when (res.status) {
-                FetchStatus.SUCCESS -> {
-                    val now = LocalTime.now(KYIV_ZONE)
-                    lastUpdated = now.format(DateTimeFormatter.ofPattern("HH:mm"))
-                    nextUpdated = now.plusMinutes(refreshMinutes.toLong()).format(DateTimeFormatter.ofPattern("HH:mm"))
-                    baseSlots = res.todaySlots
-                    baseTomorrowSlots = res.tomorrowSlots
-                    hasTomorrowSchedule = res.hasTomorrowSchedule && res.tomorrowSlots != null
-                    withContext(Dispatchers.IO) {
-                        scheduleRepo.saveSchedule(queue, res.todaySlots, res.tomorrowSlots)
-                        try {
-                            AlarmScheduler.syncAlarms(appContext)
-                        } catch (_: Exception) {}
-                        try {
-                            BlackoutGlanceWidget.syncAllWidgets(appContext)
-                        } catch (_: Exception) {}
-                    }
-                    showAppBanner(AppStrings.refreshSuccessToast(resolvedLang))
-                }
-                FetchStatus.NO_INTERNET, FetchStatus.NO_QUEUES_FOUND -> {
-                    val now = LocalTime.now(KYIV_ZONE)
-                    lastUpdated = now.format(DateTimeFormatter.ofPattern("HH:mm"))
-                    nextUpdated = now.plusMinutes(refreshMinutes.toLong()).format(DateTimeFormatter.ofPattern("HH:mm"))
-                    baseSlots = emptyList()
-                    baseTomorrowSlots = null
-                    hasTomorrowSchedule = false
-                    withContext(Dispatchers.IO) {
-                        scheduleRepo.clearScheduleCache()
-                        try {
-                            AlarmScheduler.syncAlarms(appContext)
-                        } catch (_: Exception) {}
-                        try {
-                            BlackoutGlanceWidget.syncAllWidgets(appContext)
-                        } catch (_: Exception) {}
-                    }
-                    if (res.status == FetchStatus.NO_INTERNET) {
-                        showAppBanner(AppStrings.errorNoInternet(resolvedLang))
-                    } else {
-                        showAppBanner(AppStrings.errorNoQueuesFound(resolvedLang))
-                    }
-                }
+                false
             }
         }
     }
@@ -8836,6 +8540,10 @@ fun BlackoutAppNavigation(
     val bgColors = remember(currentMinuteOfDay) {
         TimeOfDayPalette.getInterpolatedColors(LocalTime.now(KYIV_ZONE))
     }
+    // Very slow warp of the background orbs, and a slight parallax with the pager (read in the draw
+    // phase only, so neither recomposes the screens). Both stop under reduced motion.
+    val ambient = rememberAmbientSeconds()
+    val reduceMotion = remember { reducedMotion(appContext) }
 
     Box(
         modifier = Modifier
@@ -8845,6 +8553,10 @@ fun BlackoutAppNavigation(
                 val w = size.width.coerceAtLeast(1f)
                 val h = size.height.coerceAtLeast(1f)
                 val maxDim = maxOf(w, h)
+                val t = ambient.value
+                // the orbs move a little against the swipe: 3 % of the width per page
+                val parallax = if (reduceMotion) Offset.Zero
+                else Offset(-(pagerState.currentPage + pagerState.currentPageOffsetFraction) * w * 0.03f, 0f)
 
                 // 1. Primary (60%) & Secondary (30%) full-canvas radial atmospheric base matching PhoneSimulator.tsx
                 drawRect(
@@ -8864,8 +8576,8 @@ fun BlackoutAppNavigation(
                     brush = smoothGaussianRadialBrush(
                         color = bgColors.secondary,
                         maxAlpha = 0.68f,
-                        center = Offset(w * 0.88f, h * 0.08f),
-                        radius = w * 0.98f
+                        center = Offset(w * 0.88f, h * 0.08f) + ambientDrift(t, 0, w, h) + parallax,
+                        radius = w * 0.98f * ambientBreath(t, 0)
                     )
                 )
 
@@ -8874,8 +8586,8 @@ fun BlackoutAppNavigation(
                     brush = smoothGaussianRadialBrush(
                         color = bgColors.supporting,
                         maxAlpha = 0.62f,
-                        center = Offset(w * 0.12f, h * 0.06f),
-                        radius = w * 0.92f
+                        center = Offset(w * 0.12f, h * 0.06f) + ambientDrift(t, 1, w, h) + parallax,
+                        radius = w * 0.92f * ambientBreath(t, 1)
                     )
                 )
 
@@ -8884,8 +8596,8 @@ fun BlackoutAppNavigation(
                     brush = smoothGaussianRadialBrush(
                         color = bgColors.secondary,
                         maxAlpha = 0.58f,
-                        center = Offset(w * 0.08f, h * 0.68f),
-                        radius = w * 0.98f
+                        center = Offset(w * 0.08f, h * 0.68f) + ambientDrift(t, 2, w, h) + parallax,
+                        radius = w * 0.98f * ambientBreath(t, 2)
                     )
                 )
 
@@ -8894,8 +8606,8 @@ fun BlackoutAppNavigation(
                     brush = smoothGaussianRadialBrush(
                         color = bgColors.accent,
                         maxAlpha = 0.52f,
-                        center = Offset(w * 0.82f, h * 0.84f),
-                        radius = w * 0.82f
+                        center = Offset(w * 0.82f, h * 0.84f) + ambientDrift(t, 3, w, h) + parallax,
+                        radius = w * 0.82f * ambientBreath(t, 3)
                     )
                 )
 
@@ -8926,40 +8638,63 @@ fun BlackoutAppNavigation(
             state = pagerState,
             beyondViewportPageCount = 2,
             userScrollEnabled = !isRouletteOpen && !isQueueUnselected,
+            flingBehavior = PagerDefaults.flingBehavior(state = pagerState, snapAnimationSpec = PageGlide),
             modifier = Modifier.fillMaxSize()
         ) { page ->
+          // While swiping, the page leaving dims and recedes a little (only fades under reduced motion)
+          Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .graphicsLayer {
+                    val away = kotlin.math.abs((pagerState.currentPage - page) + pagerState.currentPageOffsetFraction).coerceIn(0f, 1f)
+                    alpha = 1f - 0.35f * away
+                    if (!reduceMotion) {
+                        val scale = 1f - 0.05f * away
+                        scaleX = scale
+                        scaleY = scale
+                    }
+                }
+          ) {
             when (page) {
                 0 -> {
+                    val other = otherShownItem()
                     MainScreen(
-                        queue = queue,
-                        customQueueStatusText = customQueueStatusText,
-                        selectedAddress = selectedAddress,
-                        emergencyOutageStartTime = activeEmergencyOutage?.startTime,
-                        emergencyOutageRestoreTime = activeEmergencyOutage?.estimatedRestoreTime,
-                        emergencyOutageType = activeEmergencyOutage?.outageType,
-                        isBlackoutNow = statusInfo.isBlackoutNow,
-                        countdownText = statusInfo.countdownText,
-                        slotTimeText = statusInfo.nextSlotTime,
-                        slots = effectiveSlots,
-                        tomorrowSlots = effectiveTomorrowSlots,
-                        hasTomorrowSchedule = effectiveHasTomorrowSchedule,
-                        notificationsEnabled = notificationsEnabled,
+                        queue = if (other != null) other.queue.orEmpty() else queue,
+                        customQueueStatusText = if (other != null) other.queueStatusText else customQueueStatusText,
+                        selectedAddress = if (other != null) {
+                            other.address?.let { a -> a.text.ifBlank { Subscriptions.displayLabel(other) } }
+                        } else {
+                            selectedAddress
+                        },
+                        addresses = Subscriptions.switcherItems(subscriptions),
+                        primaryAddressId = subscriptions.primaryId,
+                        shownAddressId = Subscriptions.viewItem(subscriptions, shownSubscriptionId)?.id,
+                        onSelectAddress = { shownSubscriptionId = it },
+                        showNoAlertsCaption = Subscriptions.noAlertsCaption(alertsMaster, subscriptions),
+                        onOpenSettings = { coroutineScope.launch { pagerState.animateScrollToPage(1, animationSpec = PageGlide) } },
+                        snapshot = snapshot,
+                        statusInfo = statusInfo,
+                        isRefreshing = isRefreshing,
+                        exactAlarmMissing = exactAlarmMissing,
+                        onOpenExactAlarmSettings = {
+                            ExactAlarmGate.settingsIntent(appContext)?.let {
+                                try {
+                                    appContext.startActivity(it)
+                                } catch (_: Exception) {
+                                }
+                            }
+                        },
+                        // the header bell is the master switch for all addresses (owner decision 4)
+                        notificationsEnabled = alertsMaster,
                         lastUpdated = lastUpdated,
                         nextUpdated = nextUpdated,
                         currentTime = currentTime,
                         lang = resolvedLang,
                         selectedLanguage = currentLanguage,
                         onToggleNotifications = {
-                            val updated = settingsRepo.updateNotificationsEnabled(!notificationsEnabled)
-                            notificationsEnabled = updated.notificationsEnabled
-                            soundEnabled = updated.soundEnabled
-                            vibrationEnabled = updated.vibrationEnabled
-                            coroutineScope.launch(Dispatchers.IO) {
-                                try {
-                                    AlarmScheduler.syncAlarms(appContext)
-                                    BlackoutGlanceWidget.syncAllWidgets(appContext)
-                                } catch (_: Exception) {}
-                            }
+                            subscriptionSync.setMaster(!alertsMaster)
+                            alertsMaster = subscriptionSync.master()
+                            syncAlarmsAndWidgets()
                         },
                         onRefresh = {
                             performManualRefresh()
@@ -8967,7 +8702,7 @@ fun BlackoutAppNavigation(
                         onOpenQueueSelection = {
                             autoOpenQueueHelp = true
                             coroutineScope.launch {
-                                pagerState.animateScrollToPage(1)
+                                pagerState.animateScrollToPage(1, animationSpec = PageGlide)
                             }
                         },
                         onChangeLanguage = { newLang ->
@@ -8985,9 +8720,9 @@ fun BlackoutAppNavigation(
                 1 -> {
                     SettingsScreen(
                         currentQueue = queue,
-                        customQueueStatusText = customQueueStatusText,
+                        subscriptions = subscriptions,
+                        alertsMaster = alertsMaster,
                         selectedAddressQuery = selectedAddressQuery,
-                        activeEmergencyOutage = activeEmergencyOutage,
                         siteUrl = siteUrl,
                         advanceMinutes = advanceMinutes,
                         refreshMinutes = refreshMinutes,
@@ -8999,96 +8734,18 @@ fun BlackoutAppNavigation(
                         lang = resolvedLang,
                         autoOpenQueueHelp = autoOpenQueueHelp,
                         onAutoOpenQueueHelpHandled = { autoOpenQueueHelp = false },
-                        onQueueSelected = { newQueue ->
-                            val wasUnselected = queue.isBlank() && customQueueStatusText.isNullOrBlank()
-                            queue = newQueue
-                            customQueueStatusText = null
-                            selectedAddress = null
-                            selectedAddressQuery = null
-                            activeEmergencyOutage = null
-                            val current = settingsRepo.getSettings()
-                            settingsRepo.saveSettings(
-                                current.copy(
-                                    queue = newQueue,
-                                    customQueueStatusText = null,
-                                    selectedAddress = null,
-                                    selectedAddressQuery = null,
-                                    activeEmergencyOutage = null
-                                )
-                            )
-                            // Immediately update MainScreen chart and status on the Main UI thread
-                            baseSlots = scheduleRepo.getTodaySlots(newQueue)
-                            baseTomorrowSlots = scheduleRepo.getTomorrowSlots(newQueue)
-                            hasTomorrowSchedule = scheduleRepo.hasTomorrowSchedule(newQueue)
-                            if (wasUnselected) {
-                                coroutineScope.launch {
-                                    pagerState.animateScrollToPage(0)
-                                }
-                            }
-                            coroutineScope.launch(Dispatchers.IO) {
-                                try {
-                                    AlarmScheduler.syncAlarms(appContext)
-                                    BlackoutGlanceWidget.syncAllWidgets(appContext)
-                                } catch (_: Exception) {}
-                            }
+                        onAddAddress = { resolvedQueue, statusText, addressLabel, query ->
+                            val ok = onStoreResult(subscriptionSync.addFromLookup(resolvedQueue, statusText, addressLabel, query))
+                            // the user stays in Settings (owner request): the address is added in place
+                            if (ok) showAppBanner(AppStrings.addressAdded(resolvedLang))
                         },
-                        onAddressQueueResolved = { resolvedQueue, statusText, addressLabel, emergencyOutage, query ->
-                            val prevEmergency = activeEmergencyOutage
-                            queue = resolvedQueue
-                            customQueueStatusText = statusText
-                            selectedAddress = addressLabel
-                            selectedAddressQuery = query
-                            activeEmergencyOutage = emergencyOutage
-                            val current = settingsRepo.getSettings()
-                            val updatedSettings = current.copy(
-                                queue = resolvedQueue,
-                                customQueueStatusText = statusText,
-                                selectedAddress = addressLabel,
-                                selectedAddressQuery = query,
-                                activeEmergencyOutage = emergencyOutage
-                            )
-                            settingsRepo.saveSettings(updatedSettings)
-                            NotificationHelper.checkAndTriggerEmergencyOutageAlert(
-                                context = appContext,
-                                settings = updatedSettings,
-                                previousEmergency = prevEmergency,
-                                currentEmergency = emergencyOutage
-                            )
-                            if (resolvedQueue.isNotBlank()) {
-                                baseSlots = scheduleRepo.getTodaySlots(resolvedQueue)
-                                baseTomorrowSlots = scheduleRepo.getTomorrowSlots(resolvedQueue)
-                                hasTomorrowSchedule = scheduleRepo.hasTomorrowSchedule(resolvedQueue)
-                            } else {
-                                baseSlots = emptyList()
-                                baseTomorrowSlots = null
-                                hasTomorrowSchedule = false
-                            }
-                            coroutineScope.launch {
-                                pagerState.animateScrollToPage(0)
-                            }
-                            coroutineScope.launch(Dispatchers.IO) {
-                                try {
-                                    ZtoeAddressLookup.initDiskCache(appContext)
-                                    val verified = ZtoeAddressLookup.checkAddressOnZtoeWebsite(query, siteUrl)
-                                    if (verified != null && verified.emergencyOutage != null && emergencyOutage == null) {
-                                        val latestSettings = settingsRepo.getSettings().copy(
-                                            activeEmergencyOutage = verified.emergencyOutage
-                                        )
-                                        settingsRepo.saveSettings(latestSettings)
-                                        NotificationHelper.checkAndTriggerEmergencyOutageAlert(
-                                            context = appContext,
-                                            settings = latestSettings,
-                                            previousEmergency = null,
-                                            currentEmergency = verified.emergencyOutage
-                                        )
-                                    }
-                                } catch (_: Exception) {}
-                                try {
-                                    AlarmScheduler.syncAlarms(appContext)
-                                    BlackoutGlanceWidget.syncAllWidgets(appContext)
-                                } catch (_: Exception) {}
-                            }
-                        },
+                        onAddQueueOnly = { newQueue -> onStoreResult(subscriptionSync.addQueueOnly(newQueue)) },
+                        onRemoveSubscription = { id -> onStoreResult(subscriptionSync.change { Subscriptions.remove(it, id) }) },
+                        onMakePrimary = { id -> onStoreResult(subscriptionSync.change { Subscriptions.setPrimary(it, id) }) },
+                        onSetPlanned = { id, on -> onStoreResult(subscriptionSync.change { Subscriptions.setPlanned(it, id, on) }) },
+                        onSetEmergency = { id, on -> onStoreResult(subscriptionSync.change { Subscriptions.setEmergency(it, id, on) }) },
+                        onRenameSubscription = { id, label -> onStoreResult(subscriptionSync.change { Subscriptions.rename(it, id, label) }) },
+                        onMoveSubscription = { id, to -> onStoreResult(subscriptionSync.change { Subscriptions.move(it, id, to) }) },
                         onSiteUrlChanged = { newUrl ->
                             siteUrl = newUrl
                             val current = settingsRepo.getSettings()
@@ -9109,8 +8766,6 @@ fun BlackoutAppNavigation(
                             refreshMinutes = it
                             val current = settingsRepo.getSettings()
                             settingsRepo.saveSettings(current.copy(refreshIntervalMinutes = it.toLong()))
-                            val now = LocalTime.now(KYIV_ZONE)
-                            nextUpdated = now.plusMinutes(it.toLong()).format(DateTimeFormatter.ofPattern("HH:mm"))
                             if (intervalChanged) {
                                 ua.blackout.prewarning.worker.ScheduleSyncWorker.schedulePeriodicWork(
                                     appContext,
@@ -9118,23 +8773,10 @@ fun BlackoutAppNavigation(
                                 )
                             }
                         },
-                        onToggleNotifications = { newEnabled ->
-                            val updated = settingsRepo.updateNotificationsEnabled(newEnabled)
-                            notificationsEnabled = updated.notificationsEnabled
-                            soundEnabled = updated.soundEnabled
-                            vibrationEnabled = updated.vibrationEnabled
-                            coroutineScope.launch(Dispatchers.IO) {
-                                try {
-                                    AlarmScheduler.syncAlarms(appContext)
-                                    BlackoutGlanceWidget.syncAllWidgets(appContext)
-                                } catch (_: Exception) {}
-                            }
-                        },
-                        onToggleEmergencyNotifications = { newEmergencyEnabled ->
-                            val updated = settingsRepo.updateEmergencyNotificationsEnabled(newEmergencyEnabled)
-                            emergencyNotificationsEnabled = updated.emergencyNotificationsEnabled
-                            soundEnabled = updated.soundEnabled
-                            vibrationEnabled = updated.vibrationEnabled
+                        onToggleMaster = { on ->
+                            subscriptionSync.setMaster(on)
+                            alertsMaster = subscriptionSync.master()
+                            syncAlarmsAndWidgets()
                         },
                         onToggleSound = {
                             soundEnabled = it
@@ -9145,6 +8787,14 @@ fun BlackoutAppNavigation(
                             vibrationEnabled = it
                             val current = settingsRepo.getSettings()
                             settingsRepo.saveSettings(current.copy(vibrationEnabled = it, prevVibrationEnabled = it))
+                        },
+                        emergencyEtaAlerts = currentSettings.emergencyEtaAlerts,
+                        emergencyEndAlerts = currentSettings.emergencyEndAlerts,
+                        onToggleEmergencyEtaAlerts = { on ->
+                            settingsRepo.saveSettings(settingsRepo.getSettings().copy(emergencyEtaAlerts = on))
+                        },
+                        onToggleEmergencyEndAlerts = { on ->
+                            settingsRepo.saveSettings(settingsRepo.getSettings().copy(emergencyEndAlerts = on))
                         },
                         onLanguageSelected = {
                             currentLanguage = it
@@ -9172,39 +8822,33 @@ fun BlackoutAppNavigation(
                         onForceRefresh = {
                             performManualRefresh()
                         },
+                        isRefreshing = isRefreshing,
                         onResetDefaults = {
                             // CRITICAL CONSTANTS — Default values: advanceMinutes = 15, refreshMinutes = 30
-                            val resetState = settingsRepo.resetAllAppDataToFirstLaunch()
-                            queue = resetState.queue
-                            customQueueStatusText = resetState.customQueueStatusText
-                            selectedAddress = resetState.selectedAddress
-                            selectedAddressQuery = resetState.selectedAddressQuery
-                            activeEmergencyOutage = resetState.activeEmergencyOutage
-                            siteUrl = resetState.cityUrl
-                            advanceMinutes = resetState.advanceNoticeMinutes
-                            refreshMinutes = resetState.refreshIntervalMinutes.toInt()
-                            notificationsEnabled = resetState.notificationsEnabled
-                            emergencyNotificationsEnabled = resetState.emergencyNotificationsEnabled
-                            soundEnabled = resetState.soundEnabled
-                            vibrationEnabled = resetState.vibrationEnabled
-                            currentLanguage = resetState.language
-
-                            baseSlots = emptyList()
-                            baseTomorrowSlots = null
-                            hasTomorrowSchedule = false
-
+                            settingsRepo.resetAllAppDataToFirstLaunch()
                             coroutineScope.launch {
-                                pagerState.animateScrollToPage(0)
+                                pagerState.animateScrollToPage(0, animationSpec = PageGlide)
                             }
                             coroutineScope.launch(Dispatchers.IO) {
                                 try {
                                     scheduleRepo.clearScheduleCache()
+                                    outageStore.clearAll()
                                     AlarmScheduler.syncAlarms(appContext)
                                     BlackoutGlanceWidget.syncAllWidgets(appContext)
                                 } catch (_: Exception) {}
                             }
                         },
-                        onShowAppBanner = showAppBanner
+                        onShowAppBanner = showAppBanner,
+                        exactAlarmMissing = exactAlarmMissing,
+                        onOpenExactAlarmSettings = {
+                            ExactAlarmGate.settingsIntent(appContext)?.let {
+                                try {
+                                    appContext.startActivity(it)
+                                } catch (_: Exception) {
+                                }
+                            }
+                        },
+                        isVisible = pagerState.currentPage == 1
                     )
                 }
                 2 -> {
@@ -9214,6 +8858,7 @@ fun BlackoutAppNavigation(
                     )
                 }
             }
+          }
         }
 
         if (isRouletteOpen) {
@@ -9281,9 +8926,7 @@ fun BlackoutAppNavigation(
             ) {
                 Box(
                     modifier = Modifier
-                        .floatingShadow(color = Color(0xB3000000), borderRadius = 32.dp, blurRadius = 24.dp, offsetY = 8.dp)
-                        .clip(CircleShape)
-                        .background(Color(0xCC141A29))
+                        .glassSurface(CircleShape, 32.dp, background = Color(0xB8141A29))
                         .padding(6.dp)
                 ) {
                     Row(
@@ -9298,7 +8941,7 @@ fun BlackoutAppNavigation(
                                 .clip(CircleShape)
                                 .background(if (isSchedule) Color.White else Color.Transparent)
                                 .clickable(enabled = !isQueueUnselected) {
-                                    coroutineScope.launch { pagerState.animateScrollToPage(0) }
+                                    coroutineScope.launch { pagerState.animateScrollToPage(0, animationSpec = PageGlide) }
                                 },
                             contentAlignment = Alignment.Center
                         ) {
@@ -9318,7 +8961,7 @@ fun BlackoutAppNavigation(
                                 .clip(CircleShape)
                                 .background(if (isSettings) Color.White else Color.Transparent)
                                 .clickable(enabled = !isQueueUnselected) {
-                                    coroutineScope.launch { pagerState.animateScrollToPage(1) }
+                                    coroutineScope.launch { pagerState.animateScrollToPage(1, animationSpec = PageGlide) }
                                 },
                             contentAlignment = Alignment.Center
                         ) {
@@ -9338,7 +8981,7 @@ fun BlackoutAppNavigation(
                                 .clip(CircleShape)
                                 .background(if (isAbout) Color.White else Color.Transparent)
                                 .clickable(enabled = !isQueueUnselected) {
-                                    coroutineScope.launch { pagerState.animateScrollToPage(2) }
+                                    coroutineScope.launch { pagerState.animateScrollToPage(2, animationSpec = PageGlide) }
                                 },
                             contentAlignment = Alignment.Center
                         ) {
@@ -14178,18 +13821,18 @@ import androidx.compose.ui.unit.dp
 
 /**
  * Custom floating shadow modifier that draws a genuine hardware-accelerated
- * multi-step Gaussian drop-shadow behind the composable, matching the Web
- * workbench shadow-[0_16px_44px_rgba(0,0,0,0.55)].
+ * multi-step Gaussian drop-shadow behind the composable. The defaults are the soft glass-card shadow,
+ * matching the web \`.zt-glass\` box-shadow 0 4px 14px rgba(0,0,0,0.25).
  *
  * This renders reliably on all real physical devices and GPUs without depending
  * on unsupported platform mask filters that are ignored by Android HWUI/Skia.
  */
 fun Modifier.floatingShadow(
-    color: Color = Color(0xB3000000),
+    color: Color = Color(0x40000000),
     borderRadius: Dp = 24.dp,
-    blurRadius: Dp = 22.dp,
-    offsetY: Dp = 8.dp,
-    spread: Dp = 2.dp
+    blurRadius: Dp = 14.dp,
+    offsetY: Dp = 4.dp,
+    spread: Dp = 0.dp
 ): Modifier = this.drawBehind {
     val blurPx = blurRadius.toPx()
     val offsetYPx = offsetY.toPx()
@@ -14224,6 +13867,3699 @@ fun Modifier.floatingShadow(
                 cornerRadius = CornerRadius(currentCornerRadius, currentCornerRadius)
             )
         }
+    }
+}
+`
+  },
+  {
+    path: 'app/src/main/java/ua/blackout/prewarning/core/OutageEngine.kt',
+    language: 'kotlin',
+    description: 'Pure outage engine: two-day window, spans merged across midnight, alert plan',
+    content: `package ua.blackout.prewarning.core
+
+import ua.blackout.prewarning.data.KYIV_ZONE
+import java.time.LocalDate
+import java.time.LocalDateTime
+import java.time.LocalTime
+import java.time.ZoneId
+import java.time.temporal.ChronoUnit
+
+/**
+ * The single source of truth for "what is off when". Pure functions over a two-day window
+ * (yesterday tail, today, tomorrow) of absolute Kyiv wall-clock instants, so an outage that
+ * crosses midnight is one block with its real length everywhere: list, drum, countdown, alerts.
+ *
+ * Rules are specified in \`spec/OUTAGE_ENGINE.md\` and verified by the JSON files in \`spec/vectors/\`.
+ */
+object OutageEngine {
+
+    // ---------------------------------------------------------------------------------------------
+    // Building outages
+    // ---------------------------------------------------------------------------------------------
+
+    /** Accepts 48 half-hour cells or 24 hourly cells and returns 48, or null for anything else. */
+    fun normalizeSlots(raw: List<Boolean>?): List<Boolean>? = when (raw?.size) {
+        48 -> raw
+        24 -> raw!!.flatMap { listOf(it, it) }
+        else -> null
+    }
+
+    /**
+     * Turns the ztoe day tables (true = power off) into planned outages. Contiguous off-cells are one
+     * outage even across midnight when both days are known. A block that touches the end of the
+     * last known day, whose next day is unknown, is flagged [Outage.mayContinue].
+     */
+    fun buildPlanned(
+        today: LocalDate,
+        todayOff: List<Boolean>?,
+        tomorrowOff: List<Boolean>?,
+        yesterdayOff: List<Boolean>? = null
+    ): List<Outage> {
+        val days: List<Pair<LocalDate, List<Boolean>>> = listOf(
+            today.minusDays(1) to normalizeSlots(yesterdayOff),
+            today to normalizeSlots(todayOff),
+            today.plusDays(1) to normalizeSlots(tomorrowOff)
+        ).mapNotNull { (d, s) -> s?.let { d to it } }
+        if (days.isEmpty()) return emptyList()
+
+        val knownDates = days.map { it.first }.toSet()
+        val out = ArrayList<Outage>()
+        var runStart: LocalDateTime? = null
+
+        fun close(end: LocalDateTime, mayContinue: Boolean) {
+            val s = runStart ?: return
+            out.add(Outage(id = "planned_$s", kind = OutageKind.PLANNED, start = s, end = end, mayContinue = mayContinue))
+            runStart = null
+        }
+
+        for ((day, slots) in days) {
+            val dayStart = day.atStartOfDay()
+            for (i in 0 until OutageConfig.SLOTS_PER_DAY) {
+                val slotStart = dayStart.plusMinutes(i.toLong() * OutageConfig.SLOT_MINUTES)
+                if (slots[i]) {
+                    if (runStart == null) runStart = slotStart
+                } else {
+                    close(slotStart, mayContinue = false)
+                }
+            }
+            if (runStart != null && day.plusDays(1) !in knownDates) {
+                close(day.plusDays(1).atStartOfDay(), mayContinue = true)
+            }
+        }
+        return out
+    }
+
+    /**
+     * Resolves one emergency record against [now]. A listed outage past its estimated restore is
+     * OVERDUE (still active) for [graceMinutes], then STALE (finished, never alerts).
+     */
+    fun resolveEmergency(
+        rec: EmergencyRecord,
+        now: LocalDateTime,
+        graceMinutes: Long = OutageConfig.OVERDUE_GRACE_MINUTES
+    ): Outage {
+        val est = rec.estimatedEnd
+        val closed = rec.closedAt
+        var end: LocalDateTime
+        var overdue = false
+        var stale = false
+        var isEstimate = false
+        when {
+            closed != null -> end = if (closed.isAfter(rec.start)) closed else rec.start
+            est == null -> {
+                end = if (now.isAfter(rec.start)) now else rec.start
+                overdue = !now.isBefore(rec.start)
+                isEstimate = true
+            }
+            now.isBefore(est) -> {
+                end = est
+                isEstimate = true
+            }
+            else -> {
+                val overdueMinutes = ChronoUnit.MINUTES.between(est, now)
+                isEstimate = true
+                if (overdueMinutes <= graceMinutes) {
+                    end = if (now.isAfter(est)) now else est
+                    overdue = true
+                } else {
+                    end = est
+                    stale = true
+                }
+            }
+        }
+        if (end.isBefore(rec.start)) end = rec.start
+        return Outage(
+            id = rec.id,
+            kind = OutageKind.EMERGENCY,
+            start = rec.start,
+            end = end,
+            endIsEstimate = isEstimate,
+            overdue = overdue,
+            stale = stale,
+            label = rec.label
+        )
+    }
+
+    /** Keeps only outages that touch [yesterday 00:00, tomorrow+1 00:00). Rows dated further ahead are ignored. */
+    fun inWindow(outages: List<Outage>, today: LocalDate): List<Outage> {
+        val from = today.minusDays(1).atStartOfDay()
+        val to = today.plusDays(2).atStartOfDay()
+        return outages.filter { it.start.isBefore(to) && it.end.isAfter(from) }
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // Spans, day views, status
+    // ---------------------------------------------------------------------------------------------
+
+    /** Union of the outages of [kinds] (all kinds when null); touching or overlapping outages merge. */
+    fun spans(outages: List<Outage>, kinds: Set<OutageKind>? = null): List<Span> {
+        val items = outages
+            .filter { (kinds == null || it.kind in kinds) && it.end.isAfter(it.start) }
+            .sortedBy { it.start }
+        val result = ArrayList<Span>()
+        var curStart: LocalDateTime? = null
+        var curEnd: LocalDateTime? = null
+        var curMay = false
+        var curKinds = LinkedHashSet<OutageKind>()
+        for (o in items) {
+            if (curStart == null || curEnd == null) {
+                curStart = o.start
+                curEnd = o.end
+                curMay = o.mayContinue
+                curKinds = linkedSetOf(o.kind)
+            } else if (!o.start.isAfter(curEnd)) {
+                if (o.end.isAfter(curEnd)) {
+                    curEnd = o.end
+                    curMay = o.mayContinue
+                } else if (o.end == curEnd) {
+                    curMay = curMay || o.mayContinue
+                }
+                curKinds.add(o.kind)
+            } else {
+                result.add(Span(curStart, curEnd, curMay, curKinds))
+                curStart = o.start
+                curEnd = o.end
+                curMay = o.mayContinue
+                curKinds = linkedSetOf(o.kind)
+            }
+        }
+        if (curStart != null && curEnd != null) result.add(Span(curStart, curEnd, curMay, curKinds))
+        return result
+    }
+
+    fun minutesBetween(a: LocalDateTime, b: LocalDateTime, zone: ZoneId = KYIV_ZONE): Long =
+        ChronoUnit.MINUTES.between(a.atZone(zone), b.atZone(zone))
+
+    fun secondsBetween(a: LocalDateTime, b: LocalDateTime, zone: ZoneId = KYIV_ZONE): Long =
+        ChronoUnit.SECONDS.between(a.atZone(zone), b.atZone(zone))
+
+    private fun maxOf(a: LocalDateTime, b: LocalDateTime) = if (a.isAfter(b)) a else b
+    private fun minOf(a: LocalDateTime, b: LocalDateTime) = if (a.isBefore(b)) a else b
+
+    /** The drum cells and list rows for one calendar day. Finished outages stay (history); they just never alert. */
+    fun dayView(
+        outages: List<Outage>,
+        date: LocalDate,
+        now: LocalDateTime,
+        zone: ZoneId = KYIV_ZONE
+    ): DayView {
+        val dayStart = date.atStartOfDay()
+        val dayEnd = date.plusDays(1).atStartOfDay()
+        val relevant = outages.filter { it.end.isAfter(it.start) && it.start.isBefore(dayEnd) && it.end.isAfter(dayStart) }
+
+        val slots = (0 until OutageConfig.SLOTS_PER_DAY).map { i ->
+            val s = dayStart.plusMinutes(i.toLong() * OutageConfig.SLOT_MINUTES)
+            val e = s.plusMinutes(OutageConfig.SLOT_MINUTES.toLong())
+            SlotState(
+                planned = relevant.any { it.isPlannedLike && it.start.isBefore(e) && it.end.isAfter(s) },
+                emergency = relevant.any { it.kind == OutageKind.EMERGENCY && it.start.isBefore(e) && it.end.isAfter(s) }
+            )
+        }
+
+        val rows = relevant
+            .map { o ->
+                val from = maxOf(o.start, dayStart)
+                val to = minOf(o.end, dayEnd)
+                DayRow(
+                    outage = o,
+                    from = from,
+                    to = to,
+                    status = o.statusAt(now),
+                    continuesFromPrevDay = o.start.isBefore(dayStart),
+                    continuesToNextDay = o.end.isAfter(dayEnd),
+                    durationMinutes = minutesBetween(o.start, o.end, zone),
+                    inDayMinutes = minutesBetween(from, to, zone)
+                )
+            }
+            .sortedWith(compareBy<DayRow> { it.from }.thenBy { it.outage.kind.ordinal })
+
+        val clipped = relevant.map { it.copy(start = maxOf(it.start, dayStart), end = minOf(it.end, dayEnd)) }
+        val total = spans(clipped).sumOf { minutesBetween(it.start, it.end, zone) }
+        return DayView(date, slots, rows, total)
+    }
+
+    private fun p2(n: Number): String = n.toString().padStart(2, '0')
+
+    /** "HH:mm" (ASCII digits whatever the device locale); an end of exactly 00:00 reads "24:00". */
+    fun formatSpanTime(t: LocalDateTime): String =
+        if (t.toLocalTime() == LocalTime.MIDNIGHT) "24:00" else "\${p2(t.hour)}:\${p2(t.minute)}"
+
+    fun formatSpan(span: Span): String =
+        "\${p2(span.start.hour)}:\${p2(span.start.minute)} – \${formatSpanTime(span.end)}"
+
+    fun formatCountdown(totalSeconds: Long): String {
+        val s = totalSeconds.coerceAtLeast(0L)
+        return "\${p2(s / 3600)}:\${p2((s % 3600) / 60)}:\${p2(s % 60)}"
+    }
+
+    /** Power state, countdown and next/current period from [now]. Stale emergencies never count as off. */
+    fun status(
+        outages: List<Outage>,
+        now: LocalDateTime,
+        zone: ZoneId = KYIV_ZONE
+    ): StatusInfo {
+        // An overdue emergency has no known end: treat it as lasting just past now so it is "current".
+        val openEnd = now.plusSeconds(1)
+        val effective = outages
+            .filter { !it.stale }
+            .map { if (it.overdue) it.copy(end = openEnd) else it }
+        val all = spans(effective)
+        val current = all.firstOrNull { !now.isBefore(it.start) && now.isBefore(it.end) }
+
+        if (current != null) {
+            if (current.end == openEnd && effective.any { it.overdue }) {
+                return StatusInfo(
+                    isOffNow = true,
+                    countdownSeconds = null,
+                    countdownText = "--:--:--",
+                    nextSlotTime = "\${p2(current.start.hour)}:\${p2(current.start.minute)} – --:--",
+                    currentSpan = current.copy(end = now),
+                    nextSpan = null
+                )
+            }
+            val secs = secondsBetween(now, current.end, zone)
+            return StatusInfo(true, secs, formatCountdown(secs), formatSpan(current), current, null)
+        }
+        val next = all.firstOrNull { it.start.isAfter(now) }
+        if (next != null) {
+            val secs = secondsBetween(now, next.start, zone)
+            return StatusInfo(false, secs, formatCountdown(secs), formatSpan(next), null, next)
+        }
+        return StatusInfo(false, null, "--:--:--", "Відключень немає", null, null)
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // Alerts and widget transitions
+    // ---------------------------------------------------------------------------------------------
+
+    /**
+     * One pre-warning per merged planned span (planned and repair works only), keyed by the span's
+     * absolute start. Spans already started, or whose alert time has passed, never alert; a 00:00
+     * continuation never gets its own alert because it is part of the earlier span.
+     */
+    fun planAlerts(
+        outages: List<Outage>,
+        now: LocalDateTime,
+        advanceMinutes: Int,
+        zone: ZoneId = KYIV_ZONE
+    ): List<AlertSpec> {
+        val plannedSpans = spans(outages.filter { !it.stale }, setOf(OutageKind.PLANNED, OutageKind.REPAIR))
+        val emergencies = outages.filter { it.kind == OutageKind.EMERGENCY && !it.stale }
+        return plannedSpans.mapNotNull { sp ->
+            if (!sp.start.isAfter(now)) return@mapNotNull null
+            // One continuous outage, one warning (spec/OUTAGE_ENGINE.md 6.2 step 2a): an emergency that started
+            // before the block and is still on at its start means power is already off
+            if (emergencies.any { it.start.isBefore(sp.start) && (it.overdue || !it.end.isBefore(sp.start)) }) return@mapNotNull null
+            val fireAt = sp.start.minusMinutes(advanceMinutes.toLong())
+            if (!fireAt.isAfter(now)) return@mapNotNull null
+            AlertSpec(
+                key = "planned_\${sp.start}",
+                fireAt = fireAt,
+                spanStart = sp.start,
+                spanEnd = sp.end,
+                mayContinue = sp.mayContinue,
+                durationMinutes = minutesBetween(sp.start, sp.end, zone)
+            )
+        }
+    }
+
+    /** The planned and repair spans of an address (not stale): what its pre-warnings are about. */
+    fun plannedSpans(outages: List<Outage>): List<Span> =
+        spans(outages.filter { !it.stale }, setOf(OutageKind.PLANNED, OutageKind.REPAIR))
+
+    /**
+     * Whether an emergency event is announced when emergency and scheduled outages of one address form
+     * one continuous outage (spec/NOTIFICATIONS.md 2.4a): only its beginning is announced, a longer
+     * emergency inside a warned block becomes a prolongation, and the end is not "restored" while the
+     * schedule keeps the power off.
+     */
+    fun emergencyDelivery(
+        kind: EmergencyEventKind,
+        start: LocalDateTime,
+        eta: LocalDateTime?,
+        now: LocalDateTime,
+        plannedSpans: List<Span>,
+        plannedAlertsOn: Boolean
+    ): EmergencyDelivery = when (kind) {
+        EmergencyEventKind.ETA_CHANGED -> EmergencyDelivery.SEND
+        EmergencyEventKind.END ->
+            if (plannedSpans.any { !it.start.isAfter(now) && now.isBefore(it.end) }) EmergencyDelivery.DROP else EmergencyDelivery.SEND
+        EmergencyEventKind.START -> {
+            val holder = if (plannedAlertsOn) plannedSpans.firstOrNull { !it.start.isAfter(start) && !start.isAfter(it.end) } else null
+            when {
+                holder == null -> EmergencyDelivery.SEND
+                eta != null && eta.isAfter(holder.end) -> EmergencyDelivery.PROLONG
+                else -> EmergencyDelivery.DROP
+            }
+        }
+    }
+
+    /** Instants where the power state flips (all kinds, stale excluded), inclusive of [from] and [to]. */
+    fun transitions(outages: List<Outage>, from: LocalDateTime, to: LocalDateTime): List<Transition> =
+        spans(outages.filter { !it.stale && !it.overdue })
+            .flatMap { listOf(Transition(it.start, true), Transition(it.end, false)) }
+            .filter { !it.at.isBefore(from) && !it.at.isAfter(to) }
+            .sortedBy { it.at }
+}
+
+/** How one emergency event is announced within a continuous outage (spec/NOTIFICATIONS.md 2.4a). */
+enum class EmergencyDelivery { SEND, PROLONG, DROP }
+`
+  },
+  {
+    path: 'app/src/main/java/ua/blackout/prewarning/core/OutageModels.kt',
+    language: 'kotlin',
+    description: 'Outage kinds, spans, day views and alert plan models',
+    content: `package ua.blackout.prewarning.core
+
+import java.time.LocalDateTime
+
+/**
+ * Platform-neutral outage model. Everything in \`core/\` is pure Kotlin (java.time only) so the same
+ * rules can be ported to TypeScript and Swift and verified against the JSON files in \`spec/vectors/\`.
+ *
+ * All instants are Kyiv wall-clock [LocalDateTime]s. Durations are measured as elapsed time in the
+ * Kyiv zone so a span over a DST night is counted correctly.
+ */
+object OutageConfig {
+    const val SLOTS_PER_DAY = 48
+    const val SLOT_MINUTES = 30
+
+    /** An emergency still listed by PowerOn this long after its estimated restore is "overdue" (still active). */
+    const val OVERDUE_GRACE_MINUTES = 60L
+
+    /** Ledger entries older than this (since last sighting or close) are dropped. */
+    const val LEDGER_RETENTION_HOURS = 48L
+
+    /** A changed restore estimate notifies only when it moved by at least this much. */
+    const val ETA_CHANGE_MIN_DELTA_MINUTES = 10L
+}
+
+/** What produced an outage. REPAIR (PowerOn planned works) is treated like PLANNED for alerts. */
+enum class OutageKind { PLANNED, REPAIR, EMERGENCY }
+
+enum class IntervalStatus { FINISHED, ACTIVE, UPCOMING, OVERDUE }
+
+data class Outage(
+    val id: String,
+    val kind: OutageKind,
+    val start: LocalDateTime,
+    /** Effective end. For a listed emergency past its estimate this is "now" while within the grace. */
+    val end: LocalDateTime,
+    /** The block touches the end of the known schedule window, so the real end may be later. */
+    val mayContinue: Boolean = false,
+    val endIsEstimate: Boolean = false,
+    /** Emergency still listed after its estimated restore, within the grace: treated as active. */
+    val overdue: Boolean = false,
+    /** Emergency still listed but beyond the grace: shown as finished, never alerts. */
+    val stale: Boolean = false,
+    val label: String? = null
+) {
+    val isPlannedLike: Boolean get() = kind == OutageKind.PLANNED || kind == OutageKind.REPAIR
+
+    fun statusAt(now: LocalDateTime): IntervalStatus = when {
+        stale -> IntervalStatus.FINISHED
+        now.isBefore(start) -> IntervalStatus.UPCOMING
+        overdue -> IntervalStatus.OVERDUE
+        now.isBefore(end) -> IntervalStatus.ACTIVE
+        else -> IntervalStatus.FINISHED
+    }
+}
+
+/** One emergency outage as observed from PowerOn (or restored from the ledger). */
+data class EmergencyRecord(
+    val id: String,
+    val start: LocalDateTime,
+    val estimatedEnd: LocalDateTime?,
+    /** Set by the ledger when a confirmed fetch no longer lists the outage. */
+    val closedAt: LocalDateTime? = null,
+    val label: String? = null
+)
+
+/** A maximal union of outages that touch or overlap. */
+data class Span(
+    val start: LocalDateTime,
+    val end: LocalDateTime,
+    val mayContinue: Boolean,
+    val kinds: Set<OutageKind>
+)
+
+/** State of one half-hour cell of a day on the drum chart. */
+data class SlotState(val planned: Boolean, val emergency: Boolean) {
+    val off: Boolean get() = planned || emergency
+}
+
+/** One outage as it appears in a day's list, clipped to that day. */
+data class DayRow(
+    val outage: Outage,
+    val from: LocalDateTime,
+    val to: LocalDateTime,
+    val status: IntervalStatus,
+    val continuesFromPrevDay: Boolean,
+    val continuesToNextDay: Boolean,
+    /** Full length of the outage in minutes (not clipped to the day). */
+    val durationMinutes: Long,
+    /** Minutes of the outage that fall inside this day. */
+    val inDayMinutes: Long
+)
+
+data class DayView(
+    val date: java.time.LocalDate,
+    val slots: List<SlotState>,
+    val rows: List<DayRow>,
+    /** Union of all kinds, clipped to the day, in elapsed minutes. */
+    val totalOffMinutes: Long
+)
+
+data class StatusInfo(
+    val isOffNow: Boolean,
+    val countdownSeconds: Long?,
+    /** HH:MM:SS, or "--:--:--" when nothing is ahead. */
+    val countdownText: String,
+    /** "HH:mm – HH:mm" of the current or next span, or "Відключень немає". */
+    val nextSlotTime: String,
+    val currentSpan: Span?,
+    val nextSpan: Span?
+)
+
+data class AlertSpec(
+    val key: String,
+    val fireAt: LocalDateTime,
+    val spanStart: LocalDateTime,
+    val spanEnd: LocalDateTime,
+    val mayContinue: Boolean,
+    val durationMinutes: Long
+)
+
+data class Transition(val at: LocalDateTime, val isOff: Boolean)
+`
+  },
+  {
+    path: 'app/src/main/java/ua/blackout/prewarning/core/EmergencyLedger.kt',
+    language: 'kotlin',
+    description: 'Per-address record of seen emergency outages (START / ETA_CHANGED / END)',
+    content: `package ua.blackout.prewarning.core
+
+import java.time.LocalDateTime
+import java.time.temporal.ChronoUnit
+import kotlin.math.abs
+
+/** Result of asking PowerOn about one address. An empty confirmed list means "no emergency", not "failed". */
+sealed interface EmergencyFetch {
+    data class Confirmed(val records: List<EmergencyRecord>) : EmergencyFetch
+    data class Unavailable(val reason: String) : EmergencyFetch
+}
+
+/** One emergency outage seen for an address, with what has already been announced about it. */
+data class LedgerEntry(
+    val id: String,
+    val start: LocalDateTime,
+    val estimatedEnd: LocalDateTime?,
+    val label: String?,
+    val firstSeen: LocalDateTime,
+    val lastSeen: LocalDateTime,
+    val closedAt: LocalDateTime?,
+    val startEmitted: Boolean,
+    val endEmitted: Boolean,
+    val lastEmittedEta: LocalDateTime?
+)
+
+enum class EmergencyEventKind { START, ETA_CHANGED, END }
+
+data class EmergencyEvent(
+    val kind: EmergencyEventKind,
+    val entryId: String,
+    val start: LocalDateTime,
+    val eta: LocalDateTime?,
+    /** START only: the outage begins in the future. */
+    val upcoming: Boolean = false,
+    /** END only: it disappeared before its estimated restore (restored early or cancelled). */
+    val earlyEnd: Boolean = false
+) {
+    /** Platform-neutral dedupe key, see \`spec/NOTIFICATIONS.md\`. */
+    fun key(addressKey: String): String = when (kind) {
+        EmergencyEventKind.START -> "emerg_start_\${addressKey}_$start"
+        EmergencyEventKind.ETA_CHANGED -> "emerg_change_\${addressKey}_\${start}_$eta"
+        EmergencyEventKind.END -> "emerg_end_\${addressKey}_$start"
+    }
+}
+
+data class LedgerResult(val entries: List<LedgerEntry>, val events: List<EmergencyEvent>)
+
+/**
+ * Remembers emergencies per address so that:
+ *  - a failed fetch never looks like "power restored" (Unavailable changes nothing),
+ *  - an outage that was already over when first seen never alerts,
+ *  - finished emergencies of today stay listable (PowerOn keeps no history),
+ *  - each transition (start / eta changed / end) is announced exactly once.
+ */
+object EmergencyLedger {
+
+    fun reconcile(
+        entries: List<LedgerEntry>,
+        fetch: EmergencyFetch,
+        now: LocalDateTime,
+        graceMinutes: Long = OutageConfig.OVERDUE_GRACE_MINUTES
+    ): LedgerResult {
+        val pruned = prune(entries, now)
+        if (fetch is EmergencyFetch.Unavailable) return LedgerResult(pruned, emptyList())
+        fetch as EmergencyFetch.Confirmed
+
+        val byId = pruned.associateBy { it.id }
+        val events = ArrayList<EmergencyEvent>()
+        val out = LinkedHashMap<String, LedgerEntry>()
+        val seen = HashSet<String>()
+        // Open entries PowerOn stopped listing: a listed record overlapping one is the same outage
+        // re-registered under a new start (continuation, spec/NOTIFICATIONS.md 2.2)
+        val listed = fetch.records.map { it.id }.toHashSet()
+        val vanished = pruned.filter { it.closedAt == null && it.id !in listed }
+        val absorbed = HashSet<String>()
+
+        for (rec in fetch.records) {
+            if (!seen.add(rec.id)) continue
+            val resolved = OutageEngine.resolveEmergency(rec.copy(closedAt = null), now, graceMinutes)
+            val old = byId[rec.id]
+            val continued = if (old == null) vanished.firstOrNull { it.id !in absorbed && overlaps(it, rec) } else null
+            when {
+                continued != null -> {
+                    absorbed.add(continued.id)
+                    var e = newEntry(rec, now, announced = continued.endEmitted).copy(
+                        firstSeen = continued.firstSeen,
+                        startEmitted = continued.startEmitted,
+                        lastEmittedEta = continued.lastEmittedEta
+                    )
+                    if (!resolved.stale && e.startEmitted && !e.endEmitted) {
+                        val newEta = rec.estimatedEnd
+                        val last = continued.lastEmittedEta
+                        if (newEta != null && last == null) {
+                            e = e.copy(lastEmittedEta = newEta)
+                        } else if (newEta != null && last != null &&
+                            abs(ChronoUnit.MINUTES.between(last, newEta)) >= OutageConfig.ETA_CHANGE_MIN_DELTA_MINUTES
+                        ) {
+                            events.add(EmergencyEvent(EmergencyEventKind.ETA_CHANGED, rec.id, rec.start, newEta))
+                            e = e.copy(lastEmittedEta = newEta)
+                        }
+                    }
+                    out[rec.id] = e
+                }
+                old == null -> {
+                    if (resolved.stale) {
+                        out[rec.id] = newEntry(rec, now, announced = true)
+                    } else {
+                        out[rec.id] = newEntry(rec, now, announced = false)
+                        events.add(EmergencyEvent(EmergencyEventKind.START, rec.id, rec.start, rec.estimatedEnd, upcoming = now.isBefore(rec.start)))
+                    }
+                }
+                old.closedAt != null -> {
+                    if (resolved.stale) {
+                        out[rec.id] = old.copy(lastSeen = now)
+                    } else {
+                        out[rec.id] = newEntry(rec, now, announced = false).copy(firstSeen = old.firstSeen)
+                        events.add(EmergencyEvent(EmergencyEventKind.START, rec.id, rec.start, rec.estimatedEnd, upcoming = now.isBefore(rec.start)))
+                    }
+                }
+                else -> {
+                    var e = old.copy(lastSeen = now, estimatedEnd = rec.estimatedEnd, label = rec.label ?: old.label)
+                    if (!resolved.stale && old.startEmitted && !old.endEmitted) {
+                        val newEta = rec.estimatedEnd
+                        val last = old.lastEmittedEta
+                        if (newEta != null && last == null) {
+                            e = e.copy(lastEmittedEta = newEta)
+                        } else if (newEta != null && last != null &&
+                            abs(ChronoUnit.MINUTES.between(last, newEta)) >= OutageConfig.ETA_CHANGE_MIN_DELTA_MINUTES
+                        ) {
+                            events.add(EmergencyEvent(EmergencyEventKind.ETA_CHANGED, rec.id, rec.start, newEta))
+                            e = e.copy(lastEmittedEta = newEta)
+                        }
+                    }
+                    out[rec.id] = e
+                }
+            }
+        }
+
+        for (old in pruned) {
+            if (old.id in seen) continue
+            if (old.closedAt != null) {
+                out[old.id] = old
+                continue
+            }
+            // Taken over by a new record, or covered by a listed one: the outage goes on, nothing ended
+            if (old.id in absorbed || fetch.records.any { overlaps(old, it) }) continue
+            val est = old.estimatedEnd
+            val wasStale = est != null && ChronoUnit.MINUTES.between(est, now) > graceMinutes
+            val silent = old.endEmitted || wasStale || !old.startEmitted
+            out[old.id] = old.copy(closedAt = now, endEmitted = true)
+            if (!silent) {
+                events.add(EmergencyEvent(EmergencyEventKind.END, old.id, old.start, est, earlyEnd = est != null && now.isBefore(est)))
+            }
+        }
+        return LedgerResult(out.values.toList(), events)
+    }
+
+    /** The entry's time and the record's time overlap or touch; a missing estimate is open-ended. */
+    private fun overlaps(e: LedgerEntry, r: EmergencyRecord): Boolean {
+        val eEnd = e.estimatedEnd
+        val rEnd = r.estimatedEnd
+        return (rEnd == null || !e.start.isAfter(rEnd)) && (eEnd == null || !r.start.isAfter(eEnd))
+    }
+
+    private fun newEntry(rec: EmergencyRecord, now: LocalDateTime, announced: Boolean) = LedgerEntry(
+        id = rec.id,
+        start = rec.start,
+        estimatedEnd = rec.estimatedEnd,
+        label = rec.label,
+        firstSeen = now,
+        lastSeen = now,
+        closedAt = null,
+        startEmitted = true,
+        endEmitted = announced,
+        lastEmittedEta = rec.estimatedEnd
+    )
+
+    fun prune(entries: List<LedgerEntry>, now: LocalDateTime): List<LedgerEntry> {
+        val cutoff = now.minusHours(OutageConfig.LEDGER_RETENTION_HOURS)
+        return entries.filter { (it.closedAt ?: it.lastSeen).isAfter(cutoff) }
+    }
+
+    /** Ledger entries as outages for the engine (active, overdue, stale and closed ones alike). */
+    fun outages(entries: List<LedgerEntry>, now: LocalDateTime): List<Outage> = entries.map {
+        OutageEngine.resolveEmergency(EmergencyRecord(it.id, it.start, it.estimatedEnd, it.closedAt, it.label), now)
+    }
+}
+`
+  },
+  {
+    path: 'app/src/main/java/ua/blackout/prewarning/core/AddressKeys.kt',
+    language: 'kotlin',
+    description: 'StreetKey / HouseKey: merge duplicate streets and compare houses',
+    content: `package ua.blackout.prewarning.core
+
+/**
+ * Canonical keys for matching street and house names across ztoe.com.ua, PowerOn and the device
+ * cache. Specified in \`spec/ADDRESS_KEY.md\`; the real duplicate pairs found on both sites are in
+ * \`spec/vectors/address_keys.json\`.
+ */
+object TextNorm {
+    private val NUMERIC_ENTITY = Regex("&#([xX][0-9a-fA-F]+|[0-9]+);")
+    private val NAMED_ENTITY = Regex("&([a-zA-Z]+);")
+    private val NAMED = mapOf(
+        "amp" to "&", "lt" to "<", "gt" to ">", "quot" to "\\"", "apos" to "'", "nbsp" to " ",
+        "rsquo" to "’", "lsquo" to "‘", "ndash" to "–", "mdash" to "—",
+        "laquo" to "«", "raquo" to "»", "hellip" to "…"
+    )
+
+    /** Decodes numeric and common named entities; repeats so \`&amp;#039;\` (double escaped) also becomes \`'\`. */
+    fun decodeEntities(raw: String): String {
+        var s = raw
+        repeat(3) {
+            if (!s.contains('&')) return s
+            val before = s
+            s = NUMERIC_ENTITY.replace(s) { m ->
+                val v = m.groupValues[1]
+                val cp = if (v[0] == 'x' || v[0] == 'X') v.substring(1).toIntOrNull(16) else v.toIntOrNull()
+                if (cp != null && cp in 1..0x10FFFF) String(Character.toChars(cp)) else m.value
+            }
+            s = NAMED_ENTITY.replace(s) { m -> NAMED[m.groupValues[1].lowercase()] ?: m.value }
+            if (s == before) return s
+        }
+        return s
+    }
+
+    /**
+     * Maps letters that look identical in Latin and Cyrillic to one skeleton letter, so
+     * \`16A\` (Latin) and \`16А\` (Cyrillic) compare equal. Input must already be lower-case.
+     */
+    fun skeleton(lower: String): String {
+        val sb = StringBuilder(lower.length)
+        for (ch in lower) sb.append(CONFUSABLE[ch] ?: ch)
+        return sb.toString()
+    }
+
+    private val CONFUSABLE: Map<Char, Char> = mapOf(
+        'а' to 'a', 'в' to 'b', 'с' to 'c', 'е' to 'e', 'н' to 'h', 'і' to 'i',
+        'к' to 'k', 'м' to 'm', 'о' to 'o', 'р' to 'p', 'т' to 't', 'х' to 'x', 'у' to 'y'
+    )
+
+    /** All apostrophe-like characters seen in street names. */
+    const val APOSTROPHES = "'’ʼ‘´\`ʻ′"
+}
+
+object StreetKey {
+    private val INITIAL_DOT_SPACE = Regex("(?<![\\\\p{L}\\\\p{N}])(\\\\p{L})\\\\.\\\\s+(?=\\\\p{L})")
+    private val SPACES = Regex("[\\\\s\\\\u00A0\\\\u200B]+")
+
+    private val TYPES: Map<String, String> = mapOf(
+        "вулиця" to "вул", "вул" to "вул",
+        "провулок" to "пров", "пров" to "пров", "пр-к" to "пров",
+        "проспект" to "просп", "просп" to "просп", "пр-т" to "просп",
+        "бульвар" to "б-р", "бульв" to "б-р", "бул" to "б-р", "б-р" to "б-р",
+        "площа" to "пл", "пл" to "пл",
+        "проїзд" to "пр-д", "пр-д" to "пр-д",
+        "узвіз" to "узв", "узв" to "узв",
+        "тупик" to "туп", "туп" to "туп",
+        "набережна" to "наб", "наб" to "наб",
+        "шосе" to "шосе",
+        "майдан" to "майдан", "м-н" to "майдан"
+    )
+
+    /** True for a street-type word of the table above (\`вул.\`, \`Провулок\`, \`б-р\` …), compared lower-case without trailing dots. */
+    fun isTypeWord(token: String): Boolean = TYPES.containsKey(token.lowercase().trimEnd('.'))
+
+    /** Stable comparison key. See \`spec/ADDRESS_KEY.md\` for the step list. */
+    fun of(raw: String): String {
+        var s = TextNorm.decodeEntities(raw).lowercase()
+        s = s.filter { TextNorm.APOSTROPHES.indexOf(it) < 0 }
+        s = SPACES.replace(s, " ").trim()
+        s = INITIAL_DOT_SPACE.replace(s) { "\${it.groupValues[1]}." }
+        val tokens = s.split(' ').filter { it.isNotEmpty() }.map { token ->
+            TYPES[token.trimEnd('.')] ?: token
+        }
+        return TextNorm.skeleton(tokens.joinToString(" "))
+    }
+}
+
+object HouseKey {
+    // "будинок" must come before "буд\\.?", otherwise the shorter alternative eats its first letters
+    private val PREFIX = Regex("^(?:будинок|буд\\\\.?|№)\\\\s*")
+    private val JUNK = Regex("[\\\\s'\\"«»’ʼ\`.]+")
+    private val HYPHEN_BEFORE_LETTER = Regex("(?<=\\\\p{N})-(?=\\\\p{L})")
+
+    /** \`34-А\`, \`34 А\`, \`34А\` and \`34A\` (Latin) share one key; \`14/а\` keeps its slash. */
+    fun of(raw: String): String {
+        var s = TextNorm.decodeEntities(raw).lowercase().trim()
+        s = PREFIX.replace(s, "")
+        s = JUNK.replace(s, "")
+        s = HYPHEN_BEFORE_LETTER.replace(s, "")
+        return TextNorm.skeleton(s)
+    }
+
+    /** PowerOn \`buildingNames\` is a comma separated list ("1, 10, 43А, 51а, 14/а"). */
+    fun tokens(buildingNames: String): List<String> =
+        buildingNames.split(',', ';').map { it.trim() }.filter { it.isNotEmpty() }
+
+    fun listContains(buildingNames: String, house: String): Boolean {
+        val target = of(house)
+        if (target.isEmpty()) return false
+        return tokens(buildingNames).any { of(it) == target }
+    }
+}
+`
+  },
+  {
+    path: 'app/src/main/java/ua/blackout/prewarning/core/PowerOnMapper.kt',
+    language: 'kotlin',
+    description: 'Maps PowerOn rows (Kyiv wall-clock labelled +00:00) to outages',
+    content: `package ua.blackout.prewarning.core
+
+import java.time.LocalDate
+import java.time.LocalDateTime
+
+/** One row of \`pw_accidents\` / \`pw_accident_planeds\` from the PowerOn API, reduced to plain types. */
+data class PowerOnRow(
+    val id: Long,
+    val cityId: Int?,
+    val cityName: String,
+    val streetId: Int?,
+    val streetName: String,
+    val dateEvent: String,
+    val datePlanIn: String,
+    val koment: String?,
+    /** 2 = mirror of the hourly schedule (GPV), anything else is a real emergency. Absent on planned works. */
+    val switchSubReason: Int?,
+    val typeOff: Int?,
+    /** Comma separated list of affected buildings on the street. */
+    val buildingNames: String
+)
+
+/**
+ * Maps PowerOn rows to outages for one house. See \`spec/POWERON_API.md\`.
+ *
+ * PowerOn timestamps look like \`2026-11-12T22:04:40+00:00\` but are Kyiv wall-clock time with a wrong
+ * offset label (verified: the mirror of queue 3.1 reads 22:04 to 00:04 while ztoe shows 22:00-24:00).
+ * The offset is therefore ignored, never converted.
+ */
+object PowerOnMapper {
+    private val ISO = Regex("^\\\\s*(\\\\d{4})-(\\\\d{2})-(\\\\d{2})[T ](\\\\d{2}):(\\\\d{2})(?::\\\\d{2}(?:\\\\.\\\\d+)?)?")
+
+    /** Minute precision; the \`+00:00\` / \`Z\` suffix is deliberately dropped. */
+    fun parseTime(raw: String?): LocalDateTime? {
+        val m = ISO.find(raw ?: return null) ?: return null
+        return runCatching {
+            LocalDateTime.of(
+                m.groupValues[1].toInt(), m.groupValues[2].toInt(), m.groupValues[3].toInt(),
+                m.groupValues[4].toInt(), m.groupValues[5].toInt()
+            )
+        }.getOrNull()
+    }
+
+    /** Real emergencies for [house] (switchSubReason != 2), merged per start time. */
+    fun emergencyRecordsFor(rows: List<PowerOnRow>, house: String): List<EmergencyRecord> {
+        val byId = LinkedHashMap<String, EmergencyRecord>()
+        for (row in rows) {
+            if (row.switchSubReason == 2) continue
+            if (!HouseKey.listContains(row.buildingNames, house)) continue
+            val start = parseTime(row.dateEvent) ?: continue
+            val est = parseTime(row.datePlanIn)?.takeIf { it.isAfter(start) }
+            val id = "pw_$start"
+            val label = row.koment?.trim()?.takeIf { it.isNotEmpty() }
+            val old = byId[id]
+            byId[id] = if (old == null) {
+                EmergencyRecord(id, start, est, null, label)
+            } else {
+                old.copy(
+                    estimatedEnd = listOfNotNull(old.estimatedEnd, est).maxOrNull(),
+                    label = old.label ?: label
+                )
+            }
+        }
+        return mergeOverlapping(byId.values.sortedBy { it.start })
+    }
+
+    /**
+     * Records whose times overlap or touch are one outage (spec/POWERON_API.md 5.1 step 7): operators
+     * re-register an ongoing outage as a new row when its estimate runs out. The merged record keeps the
+     * id and start of the earliest and the latest estimate; a record without an estimate is open-ended.
+     */
+    private fun mergeOverlapping(sorted: List<EmergencyRecord>): List<EmergencyRecord> {
+        val out = ArrayList<EmergencyRecord>(sorted.size)
+        for (rec in sorted) {
+            val last = out.lastOrNull()
+            val lastEnd = last?.estimatedEnd
+            if (last != null && (lastEnd == null || !rec.start.isAfter(lastEnd))) {
+                out[out.lastIndex] = last.copy(
+                    estimatedEnd = listOfNotNull(lastEnd, rec.estimatedEnd).maxOrNull(),
+                    label = last.label ?: rec.label
+                )
+            } else {
+                out.add(rec)
+            }
+        }
+        return out
+    }
+
+    /** Planned repair works for [house]; treated as planned outages. Rows beyond tomorrow are dropped. */
+    fun repairOutagesFor(rows: List<PowerOnRow>, house: String, today: LocalDate): List<Outage> {
+        val byId = LinkedHashMap<String, Outage>()
+        val limit = today.plusDays(2).atStartOfDay()
+        for (row in rows) {
+            if (!HouseKey.listContains(row.buildingNames, house)) continue
+            val start = parseTime(row.dateEvent) ?: continue
+            val end = parseTime(row.datePlanIn) ?: continue
+            if (!end.isAfter(start) || !start.isBefore(limit)) continue
+            val id = "repair_$start"
+            val label = row.koment?.trim()?.takeIf { it.isNotEmpty() }
+            val old = byId[id]
+            byId[id] = if (old == null) {
+                Outage(id, OutageKind.REPAIR, start, end, label = label)
+            } else {
+                old.copy(end = if (end.isAfter(old.end)) end else old.end, label = old.label ?: label)
+            }
+        }
+        return byId.values.sortedBy { it.start }
+    }
+}
+`
+  },
+  {
+    path: 'app/src/main/java/ua/blackout/prewarning/core/SiteState.kt',
+    language: 'kotlin',
+    description: 'Four ZTOE site states shown on the main screen',
+    content: `package ua.blackout.prewarning.core
+
+/**
+ * What the user should be told about the ztoe.com.ua schedule site. See \`spec/SITE_STATE.md\`.
+ *  - AVAILABLE_WITH_TABLE: the site answered and today's schedule table is present.
+ *  - AVAILABLE_NO_TABLE: the site answered but there is no schedule table (not published, or layout changed).
+ *  - SITE_UNREACHABLE: the device has working internet but the site did not answer (DNS, timeout, TLS, HTTP error).
+ *  - NO_INTERNET: the device itself has no validated internet connection.
+ */
+enum class SiteState { AVAILABLE_WITH_TABLE, AVAILABLE_NO_TABLE, SITE_UNREACHABLE, NO_INTERNET }
+
+/** Why a request failed, independent of the platform's exception types. */
+enum class FetchFailure { NONE, DNS, CONNECT, TIMEOUT, TLS, HTTP_ERROR, OTHER }
+
+object SiteStateResolver {
+    /**
+     * [networkValidated] is the operating system's own verdict that the device has working internet
+     * (Android \`NET_CAPABILITY_VALIDATED\`, iOS \`NWPath.status == .satisfied\`). No third-party host is
+     * contacted to decide it.
+     */
+    fun resolve(failure: FetchFailure, hasTodayTable: Boolean, networkValidated: Boolean): SiteState = when {
+        failure != FetchFailure.NONE -> if (networkValidated) SiteState.SITE_UNREACHABLE else SiteState.NO_INTERNET
+        hasTodayTable -> SiteState.AVAILABLE_WITH_TABLE
+        else -> SiteState.AVAILABLE_NO_TABLE
+    }
+}
+`
+  },
+  {
+    path: 'app/src/main/java/ua/blackout/prewarning/core/SiteNotice.kt',
+    language: 'kotlin',
+    description: 'Extracts the "УВАГА! ВАЖЛИВА ІНФОРМАЦІЯ!" notice when ztoe has no table',
+    content: `package ua.blackout.prewarning.core
+
+/**
+ * Extracts the notice ztoe publishes in place of the schedule ("УВАГА! ВАЖЛИВА ІНФОРМАЦІЯ!",
+ * for example "Графіки погодинних відключень електроенергії наразі не діють"). Regex based on purpose,
+ * so Kotlin, TypeScript and Swift give the same text for the same page (spec/SITE_STATE.md, section
+ * "Site notice"; vectors in site_notice.json).
+ *
+ * Rules: find the marker (case-insensitive, any whitespace or \`&nbsp;\` between the words); the block
+ * ends at the first closing \`h1\`-\`h6\`, \`p\`, \`div\`, \`td\`, \`center\` tag, an opening \`table\`/\`hr\`, or after
+ * [MAX_SCAN] characters. Inside it \`<br>\` is a line break, other tags are dropped, entities are decoded,
+ * every line is trimmed with its whitespace collapsed, and empty lines are removed. The result keeps
+ * the marker as its first line and is cut at [MAX_LENGTH] characters on a line boundary (with "…").
+ * Returns null when there is no marker or nothing follows it.
+ */
+object SiteNotice {
+    const val MAX_SCAN = 4000
+    const val MAX_LENGTH = 1000
+
+    /** ASCII whitespace plus the no-break space; spelled out so Kotlin, JS and Swift agree. */
+    private const val WS = "[ \\\\t\\\\n\\\\x0B\\\\f\\\\r\\\\u00A0]"
+
+    private val MARKER = Regex(
+        "УВАГА!(?:$WS|&nbsp;)*ВАЖЛИВА(?:$WS|&nbsp;)+ІНФОРМАЦІЯ!?",
+        RegexOption.IGNORE_CASE
+    )
+    private val BLOCK_END = Regex("</(?:h[1-6]|p|div|td|center)\\\\s*>|<(?:table|hr)\\\\b", RegexOption.IGNORE_CASE)
+    private val BR = Regex("<br\\\\s*/?>", RegexOption.IGNORE_CASE)
+    private val TAG = Regex("<[^>]*>")
+    private val SPACES = Regex("$WS+")
+
+    fun extract(html: String): String? {
+        val m = MARKER.find(html) ?: return null
+        val from = m.range.first
+        val scanEnd = minOf(html.length, m.range.last + 1 + MAX_SCAN)
+        val end = BLOCK_END.find(html.substring(m.range.last + 1, scanEnd))
+            ?.let { m.range.last + 1 + it.range.first } ?: scanEnd
+        val block = html.substring(from, end)
+
+        // Source line breaks are plain whitespace; only <br> starts a new line
+        val text = TextNorm.decodeEntities(BR.replace(block.replace(SPACES, " "), "\\n").replace(TAG, ""))
+        val lines = text.split('\\n')
+            .map { it.replace(SPACES, " ").trim() }
+            .filter { it.isNotEmpty() }
+        if (lines.size < 2) return null
+
+        val out = StringBuilder()
+        for (line in lines) {
+            val add = if (out.isEmpty()) line.length else line.length + 1
+            if (out.length + add > MAX_LENGTH) {
+                out.append("\\n…")
+                break
+            }
+            if (out.isNotEmpty()) out.append('\\n')
+            out.append(line)
+        }
+        return out.toString()
+    }
+}
+`
+  },
+  {
+    path: 'app/src/main/java/ua/blackout/prewarning/data/poweron/PowerOnClient.kt',
+    language: 'kotlin',
+    description: 'PowerOn JSON API client (dotted filters, pagination=false)',
+    content: `package ua.blackout.prewarning.data.poweron
+
+import org.json.JSONArray
+import org.json.JSONObject
+import ua.blackout.prewarning.core.EmergencyFetch
+import ua.blackout.prewarning.core.HouseKey
+import ua.blackout.prewarning.core.Outage
+import ua.blackout.prewarning.core.PowerOnMapper
+import ua.blackout.prewarning.core.PowerOnRow
+import ua.blackout.prewarning.core.StreetKey
+import ua.blackout.prewarning.core.TextNorm
+import java.io.IOException
+import java.net.HttpURLConnection
+import java.net.URL
+import java.net.URLEncoder
+import java.time.LocalDate
+import java.time.LocalDateTime
+
+/** The only network seam of the PowerOn client, so tests can replace it. */
+fun interface HttpGet {
+    @Throws(IOException::class)
+    fun get(url: String): String
+}
+
+class UrlConnectionHttpGet(
+    private val connectTimeoutMs: Int = 8_000,
+    private val readTimeoutMs: Int = 8_000
+) : HttpGet {
+    override fun get(url: String): String {
+        val conn = URL(url).openConnection() as HttpURLConnection
+        try {
+            conn.requestMethod = "GET"
+            conn.connectTimeout = connectTimeoutMs
+            conn.readTimeout = readTimeoutMs
+            conn.setRequestProperty("Accept", "application/json")
+            conn.setRequestProperty("User-Agent", "Mozilla/5.0 (Android; ZTBlackoutPreWarning)")
+            val code = conn.responseCode
+            if (code !in 200..299) throw IOException("HTTP $code")
+            return conn.inputStream.use { String(it.readBytes(), Charsets.UTF_8) }
+        } finally {
+            conn.disconnect()
+        }
+    }
+}
+
+/** What identifies the address on PowerOn. Names come from ztoe; ids are cached after the first resolution. */
+data class PowerOnTarget(
+    val remOtgId: Int?,
+    val settlementName: String,
+    /** Names of every ztoe street option merged into the selected street (duplicates keep all names). */
+    val streetNames: List<String>,
+    val house: String,
+    val cachedCityIds: List<Int> = emptyList(),
+    val cachedStreetIds: List<Int> = emptyList()
+)
+
+data class PowerOnIds(val cityIds: List<Int>, val streetIds: List<Int>)
+
+/**
+ * Outcome of one PowerOn refresh for an address. [repairs] is null when the planned-works request
+ * failed (keep what was known); [emergency] is Unavailable when the accidents request failed.
+ */
+data class PowerOnResult(
+    val emergency: EmergencyFetch,
+    val repairs: List<Outage>?,
+    val ids: PowerOnIds?
+)
+
+/**
+ * Per-address PowerOn queries. Everything here follows \`spec/POWERON_API.md\`:
+ *  - only the dotted filters work (\`street.id[]\`, \`city.id\`, \`otg.id\`); \`street=\`, \`otg=\` are ignored by the server,
+ *  - \`pagination=false\` is required (default page size is 30 of thousands of rows),
+ *  - timestamps are Kyiv wall-clock despite the \`+00:00\` label (handled in [PowerOnMapper.parseTime]),
+ *  - a failed request is Unavailable, never "no outage".
+ */
+class PowerOnClient(private val http: HttpGet = UrlConnectionHttpGet()) {
+
+    companion object {
+        const val BASE_URL = "https://api-ztoe-poweron.inneti.net/api"
+        const val IDS_TTL_MS = 7L * 24 * 60 * 60 * 1000
+        private val CITY_PREFIX = Regex("^(?:м\\\\.|місто|с\\\\.|село|смт\\\\.?|селище)\\\\s*", RegexOption.IGNORE_CASE)
+        private val PARENS = Regex("\\\\([^)]*\\\\)")
+        private const val EMERGENCY_REASONS = "switchSubReason[]=0&switchSubReason[]=1&switchSubReason[]=3"
+
+        fun cityKey(raw: String): String {
+            var s = TextNorm.decodeEntities(raw).lowercase()
+            s = PARENS.replace(s, " ")
+            s = CITY_PREFIX.replace(s.trim(), "")
+            s = s.filter { TextNorm.APOSTROPHES.indexOf(it) < 0 }
+            return s.replace(Regex("\\\\s+"), " ").trim()
+        }
+
+        /** Plain array (Accept: application/json) or a hydra collection, both accepted. */
+        fun toArray(json: String): JSONArray {
+            val trimmed = json.trim()
+            return when {
+                trimmed.startsWith("[") -> JSONArray(trimmed)
+                trimmed.startsWith("{") -> JSONObject(trimmed).optJSONArray("hydra:member") ?: JSONArray()
+                else -> JSONArray()
+            }
+        }
+
+        fun parseRows(json: String): List<PowerOnRow> {
+            val arr = toArray(json)
+            val rows = ArrayList<PowerOnRow>(arr.length())
+            for (i in 0 until arr.length()) {
+                val o = arr.optJSONObject(i) ?: continue
+                val city = o.optJSONObject("city")
+                val street = o.optJSONObject("street")
+                rows.add(
+                    PowerOnRow(
+                        id = o.optLong("id", 0L),
+                        cityId = city?.takeIf { it.has("id") }?.optInt("id"),
+                        cityName = city?.optString("name", "") ?: "",
+                        streetId = street?.takeIf { it.has("id") }?.optInt("id"),
+                        streetName = street?.optString("name", "") ?: "",
+                        dateEvent = o.optString("dateEvent", ""),
+                        datePlanIn = o.optString("datePlanIn", ""),
+                        koment = if (o.isNull("koment")) null else o.optString("koment"),
+                        switchSubReason = if (o.has("switchSubReason") && !o.isNull("switchSubReason")) o.optInt("switchSubReason") else null,
+                        typeOff = if (o.has("typeOff") && !o.isNull("typeOff")) o.optInt("typeOff") else null,
+                        buildingNames = o.optString("buildingNames", "")
+                    )
+                )
+            }
+            return rows
+        }
+
+        private fun enc(s: String): String = URLEncoder.encode(s, "UTF-8")
+    }
+
+    /** City ids by exact name (inside the REM when known), then street ids by canonical street key. */
+    fun resolveIds(target: PowerOnTarget): PowerOnIds {
+        val wanted = cityKey(target.settlementName)
+        val byRem = target.remOtgId?.let { "&otg.id=$it" } ?: ""
+        val cityRows = fetchCities(wanted, target.settlementName, byRem)
+        val cityIds = cityRows.map { it.first }.distinct()
+        if (cityIds.isEmpty()) return PowerOnIds(emptyList(), emptyList())
+
+        val streetKeys = target.streetNames.map { StreetKey.of(it) }.toSet()
+        val streetIds = LinkedHashSet<Int>()
+        for (cityId in cityIds) {
+            val body = http.get("$BASE_URL/pw_streets?city.id=$cityId&pagination=false")
+            val arr = toArray(body)
+            for (i in 0 until arr.length()) {
+                val o = arr.optJSONObject(i) ?: continue
+                if (StreetKey.of(o.optString("name", "")) in streetKeys) streetIds.add(o.optInt("id"))
+            }
+        }
+        return PowerOnIds(cityIds, streetIds.toList())
+    }
+
+    private fun fetchCities(wantedKey: String, rawName: String, byRem: String): List<Pair<Int, String>> {
+        fun query(extra: String): List<Pair<Int, String>> {
+            val bare = CITY_PREFIX.replace(TextNorm.decodeEntities(rawName).trim(), "").trim()
+            val body = http.get("$BASE_URL/pw_cities?name=\${enc(bare)}$extra&pagination=false")
+            val arr = toArray(body)
+            val out = ArrayList<Pair<Int, String>>()
+            for (i in 0 until arr.length()) {
+                val o = arr.optJSONObject(i) ?: continue
+                val name = o.optString("name", "")
+                if (cityKey(name) == wantedKey) out.add(o.optInt("id") to name)
+            }
+            return out
+        }
+        val inRem = if (byRem.isNotEmpty()) query(byRem) else emptyList()
+        return inRem.ifEmpty { query("") }
+    }
+
+    /**
+     * Fetches emergencies and planned works for the address. Resolution order for the query scope:
+     * street ids, then city ids (rows filtered by street key), then the REM (filtered by city and street).
+     */
+    fun fetch(target: PowerOnTarget, today: LocalDate, now: LocalDateTime): PowerOnResult {
+        var ids: PowerOnIds? = if (target.cachedStreetIds.isNotEmpty() || target.cachedCityIds.isNotEmpty()) {
+            PowerOnIds(target.cachedCityIds, target.cachedStreetIds)
+        } else {
+            null
+        }
+        try {
+            if (ids == null) ids = resolveIds(target)
+        } catch (e: Exception) {
+            return PowerOnResult(EmergencyFetch.Unavailable("resolve: \${e.message}"), null, null)
+        }
+
+        val scope: String
+        var streetFilter: Set<String>? = null
+        var cityFilter: String? = null
+        when {
+            ids.streetIds.isNotEmpty() -> scope = ids.streetIds.joinToString("&") { "street.id[]=$it" }
+            ids.cityIds.isNotEmpty() -> {
+                scope = ids.cityIds.joinToString("&") { "city.id[]=$it" }
+                streetFilter = target.streetNames.map { StreetKey.of(it) }.toSet()
+            }
+            target.remOtgId != null -> {
+                scope = "otg.id=\${target.remOtgId}"
+                streetFilter = target.streetNames.map { StreetKey.of(it) }.toSet()
+                cityFilter = cityKey(target.settlementName)
+            }
+            else -> return PowerOnResult(EmergencyFetch.Unavailable("no scope"), null, ids)
+        }
+
+        fun filtered(rows: List<PowerOnRow>): List<PowerOnRow> = rows.filter { r ->
+            (streetFilter == null || StreetKey.of(r.streetName) in streetFilter) &&
+                (cityFilter == null || cityKey(r.cityName) == cityFilter)
+        }
+
+        val emergency: EmergencyFetch = try {
+            val rows = filtered(parseRows(http.get("$BASE_URL/pw_accidents?$scope&$EMERGENCY_REASONS&pagination=false")))
+            val limit = today.plusDays(2).atStartOfDay()
+            val records = PowerOnMapper.emergencyRecordsFor(rows, target.house).filter { it.start.isBefore(limit) }
+            EmergencyFetch.Confirmed(records)
+        } catch (e: Exception) {
+            EmergencyFetch.Unavailable("accidents: \${e.message}")
+        }
+
+        val repairs: List<Outage>? = try {
+            val rows = filtered(parseRows(http.get("$BASE_URL/pw_accident_planeds?$scope&datePlanIn[after]=$today&pagination=false")))
+            PowerOnMapper.repairOutagesFor(rows, target.house, today)
+        } catch (_: Exception) {
+            null
+        }
+        return PowerOnResult(emergency, repairs, ids)
+    }
+}
+`
+  },
+  {
+    path: 'app/src/main/java/ua/blackout/prewarning/data/repository/OutageRepository.kt',
+    language: 'kotlin',
+    description: 'Single source of truth: refresh() does the network, snapshot() is local',
+    content: `package ua.blackout.prewarning.data.repository
+
+import ua.blackout.prewarning.widget.WidgetBindings
+import android.content.Context
+import ua.blackout.prewarning.core.DayView
+import ua.blackout.prewarning.core.EmergencyEvent
+import ua.blackout.prewarning.core.EmergencyFetch
+import ua.blackout.prewarning.core.EmergencyLedger
+import ua.blackout.prewarning.core.HouseKey
+import ua.blackout.prewarning.core.IntervalStatus
+import ua.blackout.prewarning.core.Outage
+import ua.blackout.prewarning.core.OutageEngine
+import ua.blackout.prewarning.core.OutageKind
+import ua.blackout.prewarning.core.SiteState
+import ua.blackout.prewarning.core.StatusInfo
+import ua.blackout.prewarning.core.StreetKey
+import ua.blackout.prewarning.core.Subscription
+import ua.blackout.prewarning.core.SubscriptionStore
+import ua.blackout.prewarning.core.Subscriptions
+import ua.blackout.prewarning.data.KYIV_ZONE
+import ua.blackout.prewarning.data.model.BlackoutSlot
+import ua.blackout.prewarning.data.model.SelectedAddressQuery
+import ua.blackout.prewarning.data.model.SlotStatus
+import ua.blackout.prewarning.data.model.UserSettings
+import ua.blackout.prewarning.data.parser.FetchStatus
+import ua.blackout.prewarning.data.parser.ZtoeAddressLookup
+import ua.blackout.prewarning.data.parser.ZtoeParser
+import ua.blackout.prewarning.data.poweron.PowerOnClient
+import ua.blackout.prewarning.data.poweron.PowerOnTarget
+import ua.blackout.prewarning.notification.NotificationHelper
+import java.time.LocalDate
+import java.time.LocalDateTime
+
+private fun hhmm(minuteOfDay: Int): String =
+    "\${(minuteOfDay / 60).toString().padStart(2, '0')}:\${(minuteOfDay % 60).toString().padStart(2, '0')}"
+
+/** Everything the screens, widgets and alarms need, derived from local state only (no network). */
+data class OutageSnapshot(
+    val now: LocalDateTime,
+    val queue: String,
+    val outages: List<Outage>,
+    /** Today's ztoe table is cached and still valid for today (or the address has no queue at all). */
+    val plannedKnown: Boolean,
+    val tomorrowPublished: Boolean,
+    val site: SiteSnapshot?,
+    val poweron: PowerOnSnapshot?,
+    val hasAddress: Boolean
+) {
+    val today: LocalDate get() = now.toLocalDate()
+
+    fun dayView(date: LocalDate): DayView = OutageEngine.dayView(outages, date, now)
+
+    fun status(): StatusInfo = OutageEngine.status(outages, now)
+
+    /** The planned schedule is unknown and nothing else is known either: screens go grey. */
+    val isUnclear: Boolean
+        get() = queue.isNotBlank() && !plannedKnown && outages.none { !it.stale && it.kind != OutageKind.PLANNED }
+
+    /** True when the shown schedule comes from the cache because the site could not be refreshed. */
+    val isStale: Boolean
+        get() = plannedKnown && queue.isNotBlank() && site != null && site.state != SiteState.AVAILABLE_WITH_TABLE
+
+    /** Legacy shape used by the existing main screen and widgets. */
+    fun scheduleStatus(): ScheduleStatusInfo {
+        if (isUnclear) {
+            return ScheduleStatusInfo(
+                isBlackoutNow = false,
+                countdownText = "--:--:--",
+                nextSlotTime = "--:-- - --:--",
+                totalBlackoutHours = 0.0,
+                isUnclear = true
+            )
+        }
+        val st = status()
+        return ScheduleStatusInfo(
+            isBlackoutNow = st.isOffNow,
+            countdownText = st.countdownText,
+            nextSlotTime = st.nextSlotTime,
+            totalBlackoutHours = dayView(today).totalOffMinutes / 60.0,
+            isUnclear = false
+        )
+    }
+
+    /** The 48 cells of [date] in the shape the drum chart and widgets draw. Empty when unclear. */
+    fun slotsFor(date: LocalDate): List<BlackoutSlot> {
+        if (isUnclear) return emptyList()
+        val view = dayView(date)
+        val dateStr = date.toString()
+        return view.slots.mapIndexed { i, s ->
+            val startMin = i * 30
+            val endMin = startMin + 30
+            val startStr = hhmm(startMin)
+            val endStr = if (endMin >= 1440) "24:00" else hhmm(endMin)
+            BlackoutSlot(
+                id = "\${dateStr}_\${startStr}_Q$queue",
+                startHour = startMin / 60,
+                endHour = endMin / 60,
+                startMinute = startMin % 60,
+                endMinute = endMin % 60,
+                startTimeStr = startStr,
+                endTimeStr = endStr,
+                status = if (s.off) SlotStatus.POWER_OFF else SlotStatus.POWER_ON,
+                isEmergency = s.emergency,
+                isPlanned = s.planned
+            )
+        }
+    }
+
+    /** The emergency outage to feature in the banner: active or overdue first, then the next upcoming one. */
+    fun featuredEmergency(): Outage? {
+        val live = outages.filter { it.kind == OutageKind.EMERGENCY && !it.stale }
+        return live.firstOrNull { val st = it.statusAt(now); st == IntervalStatus.ACTIVE || st == IntervalStatus.OVERDUE }
+            ?: live.filter { it.statusAt(now) == IntervalStatus.UPCOMING }.minByOrNull { it.start }
+    }
+}
+
+data class RefreshOutcome(
+    val siteState: SiteState?,
+    val fetchStatus: FetchStatus?,
+    val poweronOk: Boolean?,
+    val events: List<EmergencyEvent>,
+    val snapshot: OutageSnapshot
+)
+
+/**
+ * One place that refreshes both sources and turns the stored state into a snapshot. The main
+ * screen, the background worker, the widgets and the alarm scheduler all go through it, so they
+ * can no longer disagree about what is off and when (spec/OUTAGE_ENGINE.md).
+ */
+class OutageRepository(context: Context) {
+    private val appContext: Context = context.applicationContext
+    private val schedule = ScheduleRepository(appContext)
+    private val store = OutageStateStore(appContext)
+
+    /** Stable key of the selected address; survives duplicate-street merges because it uses the canonical street key. */
+    fun addressKey(query: SelectedAddressQuery?): String? {
+        query ?: return null
+        if (query.house.isBlank()) return null
+        val streetName = try {
+            ZtoeAddressLookup.findStreetById(query.streetId)?.nameUk
+        } catch (_: Exception) {
+            null
+        } ?: query.streetId
+        return "\${query.settlementId}|\${StreetKey.of(streetName)}|\${HouseKey.of(query.house)}"
+    }
+
+    fun snapshot(
+        settings: UserSettings,
+        now: LocalDateTime = LocalDateTime.now(KYIV_ZONE),
+        key: String? = addressKey(settings.selectedAddressQuery)
+    ): OutageSnapshot = snapshotOf(settings.queue, key, now, store.poweron())
+
+    /**
+     * The snapshot of one non-primary subscription for the main screen (spec/SUBSCRIPTIONS.md 9).
+     * The primary goes through [snapshot]; another item has its own PowerOn status under its address key.
+     */
+    fun snapshotFor(item: Subscription, now: LocalDateTime = LocalDateTime.now(KYIV_ZONE)): OutageSnapshot {
+        val key = item.address?.key
+        return snapshotOf(item.queue.orEmpty(), key, now, key?.let { store.poweron(it) })
+    }
+
+    private fun snapshotOf(q: String, key: String?, now: LocalDateTime, poweron: PowerOnSnapshot?): OutageSnapshot =
+        OutageSnapshot(
+            now = now,
+            queue = q,
+            outages = outagesFor(q, key, now),
+            plannedKnown = q.isBlank() || schedule.hasValidTodayCache(q),
+            tomorrowPublished = q.isNotBlank() && schedule.hasTomorrowSchedule(q),
+            site = store.site(),
+            poweron = poweron,
+            hasAddress = key != null
+        )
+
+    /**
+     * The outages of one queue and address key (either may be absent), local state only. One ztoe
+     * fetch caches all 12 queues, so this works for every subscription (spec/SUBSCRIPTIONS.md 8.1).
+     */
+    fun outagesFor(queue: String?, key: String?, now: LocalDateTime = LocalDateTime.now(KYIV_ZONE)): List<Outage> {
+        val today = now.toLocalDate()
+        val q = queue.orEmpty()
+        val planned = if (q.isNotBlank()) {
+            OutageEngine.buildPlanned(today, schedule.todayOffCells(q), schedule.tomorrowOffCells(q), schedule.yesterdayOffCells(q))
+        } else {
+            emptyList()
+        }
+        val emergencies = if (key != null) EmergencyLedger.outages(store.ledger(key), now) else emptyList()
+        val repairs = if (key != null) store.repairs(key) else emptyList()
+        return OutageEngine.inWindow(planned + repairs + emergencies, today)
+    }
+
+    /**
+     * Refreshes ztoe (planned) and PowerOn (emergency + repair works) for the selected address.
+     * Runs on a worker thread. A source that fails keeps its previous data and is reported as such;
+     * it never counts as "no outage". [shownId] is the item the main screen shows: it is polled whatever
+     * its switches (spec/SUBSCRIPTIONS.md 8.4).
+     */
+    fun refresh(settings: UserSettings, forceNetwork: Boolean = false, notify: Boolean = true, shownId: String? = null): RefreshOutcome {
+        val nowMs = System.currentTimeMillis()
+        var siteState: SiteState? = null
+        var fetchStatus: FetchStatus? = null
+        val subs: Pair<SubscriptionStore, Boolean>? = try {
+            val sync = SubscriptionSync(appContext)
+            sync.store() to sync.master()
+        } catch (_: Exception) {
+            null
+        }
+
+        // One fetch caches all 12 queues. A primary without a queue still fetches for the other addresses.
+        val ztoeQueue = settings.queue.ifBlank {
+            subs?.first?.let { s -> Subscriptions.alertOrder(s).firstNotNullOfOrNull { it.queue } }.orEmpty()
+        }
+        if (ztoeQueue.isNotBlank()) {
+            try {
+                val res = ZtoeParser.fetchFullSchedule(settings.cityUrl, ztoeQueue, appContext, forceNetwork)
+                store.saveSite(res.siteState, nowMs, res.notice)
+                if (settings.queue.isNotBlank()) {
+                    fetchStatus = res.status
+                    siteState = res.siteState
+                }
+            } catch (_: Exception) {
+            }
+        }
+
+        var poweronOk: Boolean? = null
+        var events: List<EmergencyEvent> = emptyList()
+        val query = settings.selectedAddressQuery
+        val key = addressKey(query)
+        if (query != null && key != null) {
+            val polled = pollPowerOn(query, key, nowMs)
+            poweronOk = polled?.first ?: false
+            events = polled?.second.orEmpty()
+            store.savePowerOn(poweronOk, nowMs)
+            if (notify && events.isNotEmpty() && settings.emergencyNotificationsEnabled) {
+                val primary = subs?.first?.primary
+                NotificationHelper.postEmergencyEvents(
+                    appContext, settings, key, events, subscriptionId = subs?.first?.primaryId,
+                    plannedSpans = OutageEngine.plannedSpans(outagesFor(settings.queue, key)),
+                    plannedAlertsOn = if (subs != null && primary != null) Subscriptions.plannedActive(subs.second, primary) else settings.notificationsEnabled
+                )
+            }
+        }
+        if (subs != null) refreshOtherAddresses(settings, subs.first, subs.second, key, nowMs, notify, shownId)
+        return RefreshOutcome(siteState, fetchStatus, poweronOk, events, snapshot(settings))
+    }
+
+    /**
+     * PowerOn for every other subscription that wants emergency alerts, plus the one the main screen
+     * shows (spec/SUBSCRIPTIONS.md 8.4): own request, own failure, own ledger, own status line.
+     */
+    private fun refreshOtherAddresses(
+        settings: UserSettings,
+        subs: SubscriptionStore,
+        master: Boolean,
+        primaryKey: String?,
+        nowMs: Long,
+        notify: Boolean,
+        shownId: String?
+    ) {
+        // Addresses on a widget are polled too, so the widget's emergency state is fresh (spec/SUBSCRIPTIONS.md 10)
+        val onWidgets = try {
+            WidgetBindings.shownItemIds(appContext, subs)
+        } catch (_: Exception) {
+            emptyList()
+        }
+        for (item in subs.items) {
+            val a = item.address ?: continue
+            if (item.id == subs.primaryId) continue
+            val alerts = master && item.emergencyAlerts
+            if (!alerts && item.id != shownId && item.id !in onWidgets) continue
+            val key = a.key
+            if (key == primaryKey) continue
+            val polled = pollPowerOn(SelectedAddressQuery(a.remSlug, a.settlementId, a.streetId, a.house), key, nowMs)
+            store.savePowerOn(key, polled?.first ?: false, nowMs)
+            if (polled == null) continue
+            if (notify && alerts && polled.second.isNotEmpty()) {
+                NotificationHelper.postEmergencyEvents(
+                    appContext, settings, key, polled.second, addressLine(item), enabled = true, subscriptionId = item.id,
+                    plannedSpans = OutageEngine.plannedSpans(outagesFor(item.queue, key)),
+                    plannedAlertsOn = Subscriptions.plannedActive(master, item)
+                )
+            }
+        }
+    }
+
+    /** Second line of an emergency notification for [item] (spec/SUBSCRIPTIONS.md 8.4). */
+    private fun addressLine(item: Subscription): String =
+        item.address?.text?.takeIf { it.isNotBlank() } ?: Subscriptions.displayLabel(item)
+
+    /** One PowerOn query: saves ids, ledger and repairs under [key]. Null when it failed or could not be built. */
+    private fun pollPowerOn(query: SelectedAddressQuery, key: String, nowMs: Long): Pair<Boolean, List<EmergencyEvent>>? = try {
+        ZtoeAddressLookup.initDiskCache(appContext)
+        val target = buildTarget(query, key, nowMs)
+        if (target == null) {
+            null
+        } else {
+            val now = LocalDateTime.now(KYIV_ZONE)
+            val result = PowerOnClient().fetch(target, now.toLocalDate(), now)
+            result.ids?.let { if (it.cityIds.isNotEmpty() || it.streetIds.isNotEmpty()) store.saveIds(key, it, nowMs) }
+            val ledger = EmergencyLedger.reconcile(store.ledger(key), result.emergency, now)
+            store.saveLedger(key, ledger.entries)
+            result.repairs?.let { store.saveRepairs(key, it) }
+            (result.emergency is EmergencyFetch.Confirmed) to ledger.events
+        }
+    } catch (_: Exception) {
+        null
+    }
+
+    private fun buildTarget(query: SelectedAddressQuery, key: String, nowMs: Long): PowerOnTarget? {
+        val rem = ZtoeAddressLookup.getRems().firstOrNull { it.id == query.remId }
+            ?: ZtoeAddressLookup.ZTOE_REM_OPTIONS.firstOrNull { it.id == query.remId }
+        val settlement = ZtoeAddressLookup.findSettlementById(query.settlementId) ?: return null
+        val street = ZtoeAddressLookup.findStreetById(query.streetId) ?: return null
+        val streetKey = StreetKey.of(street.nameUk)
+        val names = ZtoeAddressLookup.getStreetsForSettlement(settlement.id)
+            .filter { StreetKey.of(it.nameUk) == streetKey }
+            .map { it.nameUk }
+            .ifEmpty { listOf(street.nameUk) }
+        val cached = store.ids(key)?.takeIf { nowMs - it.second in 0 until PowerOnClient.IDS_TTL_MS }
+        return PowerOnTarget(
+            remOtgId = rem?.ztoeOtgId,
+            settlementName = settlement.nameUk,
+            streetNames = names,
+            house = query.house,
+            cachedCityIds = cached?.first?.cityIds.orEmpty(),
+            cachedStreetIds = cached?.first?.streetIds.orEmpty()
+        )
+    }
+}
+`
+  },
+  {
+    path: 'app/src/main/java/ua/blackout/prewarning/data/repository/OutageStateStore.kt',
+    language: 'kotlin',
+    description: 'Persisted site state, PowerOn status, ledger and site notice',
+    content: `package ua.blackout.prewarning.data.repository
+
+import android.content.Context
+import android.content.SharedPreferences
+import org.json.JSONArray
+import org.json.JSONObject
+import ua.blackout.prewarning.core.LedgerEntry
+import ua.blackout.prewarning.core.Outage
+import ua.blackout.prewarning.core.OutageKind
+import ua.blackout.prewarning.core.SiteState
+import ua.blackout.prewarning.data.poweron.PowerOnIds
+import java.time.LocalDateTime
+
+/** When the ztoe site was last checked and what was found. */
+data class SiteSnapshot(
+    val state: SiteState,
+    val checkedAtMs: Long,
+    val lastSuccessMs: Long?,
+    /** The site's own notice ("УВАГА! ВАЖЛИВА ІНФОРМАЦІЯ!"), kept only while the page has no table. */
+    val notice: String? = null
+)
+
+/** Whether the last PowerOn refresh worked. */
+data class PowerOnSnapshot(val ok: Boolean, val checkedAtMs: Long, val lastOkMs: Long?)
+
+/**
+ * Small persistent state of the outage pipeline, kept apart from user settings so a long network
+ * call can never overwrite a setting the user just changed. Layout: \`spec/PERSISTENCE.md\`.
+ */
+class OutageStateStore(context: Context) {
+    private val prefs: SharedPreferences =
+        context.applicationContext.getSharedPreferences("zt_outage_state_v1", Context.MODE_PRIVATE)
+
+    // --- emergency ledger (per address) ---------------------------------------------------------
+
+    fun ledger(addressKey: String): List<LedgerEntry> = readArray("ledger_$addressKey") { o ->
+        LedgerEntry(
+            id = o.getString("id"),
+            start = LocalDateTime.parse(o.getString("start")),
+            estimatedEnd = o.optStr("estimatedEnd")?.let(LocalDateTime::parse),
+            label = o.optStr("label"),
+            firstSeen = LocalDateTime.parse(o.getString("firstSeen")),
+            lastSeen = LocalDateTime.parse(o.getString("lastSeen")),
+            closedAt = o.optStr("closedAt")?.let(LocalDateTime::parse),
+            startEmitted = o.optBoolean("startEmitted", true),
+            endEmitted = o.optBoolean("endEmitted", false),
+            lastEmittedEta = o.optStr("lastEmittedEta")?.let(LocalDateTime::parse)
+        )
+    }
+
+    fun saveLedger(addressKey: String, entries: List<LedgerEntry>) {
+        val key = "ledger_$addressKey"
+        if (entries.isEmpty()) {
+            prefs.edit().remove(key).apply()
+            return
+        }
+        val arr = JSONArray()
+        for (e in entries) {
+            arr.put(
+                JSONObject()
+                    .put("id", e.id)
+                    .put("start", e.start.toString())
+                    .putOpt("estimatedEnd", e.estimatedEnd?.toString())
+                    .putOpt("label", e.label)
+                    .put("firstSeen", e.firstSeen.toString())
+                    .put("lastSeen", e.lastSeen.toString())
+                    .putOpt("closedAt", e.closedAt?.toString())
+                    .put("startEmitted", e.startEmitted)
+                    .put("endEmitted", e.endEmitted)
+                    .putOpt("lastEmittedEta", e.lastEmittedEta?.toString())
+            )
+        }
+        prefs.edit().putString(key, arr.toString()).apply()
+    }
+
+    // --- planned repair works from PowerOn (per address) -----------------------------------------
+
+    fun repairs(addressKey: String): List<Outage> = readArray("repair_$addressKey") { o ->
+        Outage(
+            id = o.getString("id"),
+            kind = OutageKind.REPAIR,
+            start = LocalDateTime.parse(o.getString("start")),
+            end = LocalDateTime.parse(o.getString("end")),
+            label = o.optStr("label")
+        )
+    }
+
+    fun saveRepairs(addressKey: String, outages: List<Outage>) {
+        val key = "repair_$addressKey"
+        if (outages.isEmpty()) {
+            prefs.edit().remove(key).apply()
+            return
+        }
+        val arr = JSONArray()
+        for (o in outages) {
+            arr.put(
+                JSONObject().put("id", o.id).put("start", o.start.toString()).put("end", o.end.toString()).putOpt("label", o.label)
+            )
+        }
+        prefs.edit().putString(key, arr.toString()).apply()
+    }
+
+    // --- resolved PowerOn ids (per address) -------------------------------------------------------
+
+    fun ids(addressKey: String): Pair<PowerOnIds, Long>? {
+        val raw = prefs.getString("ids_$addressKey", null) ?: return null
+        return try {
+            val o = JSONObject(raw)
+            val cities = o.optJSONArray("cityIds") ?: JSONArray()
+            val streets = o.optJSONArray("streetIds") ?: JSONArray()
+            PowerOnIds((0 until cities.length()).map { cities.getInt(it) }, (0 until streets.length()).map { streets.getInt(it) }) to
+                o.optLong("resolvedAtMs", 0L)
+        } catch (_: Exception) {
+            null
+        }
+    }
+
+    fun saveIds(addressKey: String, ids: PowerOnIds, nowMs: Long) {
+        val o = JSONObject()
+            .put("cityIds", JSONArray(ids.cityIds))
+            .put("streetIds", JSONArray(ids.streetIds))
+            .put("resolvedAtMs", nowMs)
+        prefs.edit().putString("ids_$addressKey", o.toString()).apply()
+    }
+
+    // --- site and source status -------------------------------------------------------------------
+
+    fun site(): SiteSnapshot? {
+        val name = prefs.getString("site_state", null) ?: return null
+        val state = runCatching { SiteState.valueOf(name) }.getOrNull() ?: return null
+        val success = prefs.getLong("site_last_success_ms", 0L).takeIf { it > 0L }
+        val notice = prefs.getString("site_notice", null)?.takeIf { it.isNotBlank() && state == SiteState.AVAILABLE_NO_TABLE }
+        return SiteSnapshot(state, prefs.getLong("site_checked_ms", 0L), success, notice)
+    }
+
+    fun saveSite(state: SiteState, nowMs: Long, notice: String? = null) {
+        val editor = prefs.edit().putString("site_state", state.name).putLong("site_checked_ms", nowMs)
+        // A notice only means something while the page has no table; any other state forgets it
+        if (state == SiteState.AVAILABLE_NO_TABLE && !notice.isNullOrBlank()) {
+            editor.putString("site_notice", notice)
+        } else if (state != SiteState.SITE_UNREACHABLE && state != SiteState.NO_INTERNET) {
+            editor.remove("site_notice")
+        }
+        if (state == SiteState.AVAILABLE_WITH_TABLE) editor.putLong("site_last_success_ms", nowMs)
+        editor.apply()
+    }
+
+    fun poweron(): PowerOnSnapshot? {
+        if (!prefs.contains("poweron_checked_ms")) return null
+        return PowerOnSnapshot(
+            ok = prefs.getBoolean("poweron_ok", false),
+            checkedAtMs = prefs.getLong("poweron_checked_ms", 0L),
+            lastOkMs = prefs.getLong("poweron_last_ok_ms", 0L).takeIf { it > 0L }
+        )
+    }
+
+    fun savePowerOn(ok: Boolean, nowMs: Long) {
+        val editor = prefs.edit().putBoolean("poweron_ok", ok).putLong("poweron_checked_ms", nowMs)
+        if (ok) editor.putLong("poweron_last_ok_ms", nowMs)
+        editor.apply()
+    }
+
+    /** PowerOn status of a non-primary address (spec/SUBSCRIPTIONS.md 8.4); the primary keeps the keys above. */
+    fun poweron(addressKey: String): PowerOnSnapshot? {
+        if (!prefs.contains("poweron_checked_ms_$addressKey")) return null
+        return PowerOnSnapshot(
+            ok = prefs.getBoolean("poweron_ok_$addressKey", false),
+            checkedAtMs = prefs.getLong("poweron_checked_ms_$addressKey", 0L),
+            lastOkMs = prefs.getLong("poweron_last_ok_ms_$addressKey", 0L).takeIf { it > 0L }
+        )
+    }
+
+    fun savePowerOn(addressKey: String, ok: Boolean, nowMs: Long) {
+        val editor = prefs.edit().putBoolean("poweron_ok_$addressKey", ok).putLong("poweron_checked_ms_$addressKey", nowMs)
+        if (ok) editor.putLong("poweron_last_ok_ms_$addressKey", nowMs)
+        editor.apply()
+    }
+
+    /** Forgets everything (used by "reset to defaults"). */
+    fun clearAll() {
+        prefs.edit().clear().apply()
+    }
+
+    fun getSharedPreferences(): SharedPreferences = prefs
+
+    // --- helpers --------------------------------------------------------------------------------
+
+    private fun <T> readArray(key: String, map: (JSONObject) -> T): List<T> {
+        val raw = prefs.getString(key, null) ?: return emptyList()
+        return try {
+            val arr = JSONArray(raw)
+            (0 until arr.length()).mapNotNull { i -> runCatching { map(arr.getJSONObject(i)) }.getOrNull() }
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
+
+    private fun JSONObject.optStr(key: String): String? = if (isNull(key)) null else getString(key).takeIf { it.isNotEmpty() }
+}
+`
+  },
+  {
+    path: 'app/src/main/java/ua/blackout/prewarning/notification/ExactAlarmGate.kt',
+    language: 'kotlin',
+    description: 'Exact alarms through SCHEDULE_EXACT_ALARM with inexact fallback',
+    content: `package ua.blackout.prewarning.notification
+
+import android.app.AlarmManager
+import android.content.Context
+import android.content.Intent
+import android.net.Uri
+import android.os.Build
+import android.provider.Settings
+
+/**
+ * Exact alarms need the "Alarms & reminders" special access on Android 12+ (\`SCHEDULE_EXACT_ALARM\`).
+ * Without it alerts fall back to inexact delivery and the UI shows a card that explains what to do
+ * and opens the right system screen.
+ */
+object ExactAlarmGate {
+    fun canScheduleExact(context: Context): Boolean {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return true
+        return try {
+            (context.applicationContext.getSystemService(Context.ALARM_SERVICE) as AlarmManager).canScheduleExactAlarms()
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    /** Intent for the system "Alarms & reminders" screen of this app, or null below Android 12. */
+    fun settingsIntent(context: Context): Intent? {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S) return null
+        return Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM, Uri.parse("package:\${context.packageName}"))
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    }
+}
+
+/**
+ * Stable integer request codes for PendingIntents and notifications. Replaces \`String.hashCode()\`,
+ * where two keys could collide and silently lose an alarm.
+ */
+object AlarmCodes {
+    private const val PREFS = "zt_alarm_codes_v1"
+    private const val NEXT = "__next"
+    private const val FIRST = 1000
+
+    @Synchronized
+    fun codeFor(context: Context, key: String): Int {
+        val prefs = context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val existing = prefs.getInt(key, -1)
+        if (existing >= 0) return existing
+        val next = prefs.getInt(NEXT, FIRST)
+        prefs.edit().putInt(key, next).putInt(NEXT, next + 1).apply()
+        return next
+    }
+
+    @Synchronized
+    fun lookup(context: Context, key: String): Int? {
+        val prefs = context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        return prefs.getInt(key, -1).takeIf { it >= 0 }
+    }
+
+    /** Forgets every code whose key is not in [keep] (call after the matching alarms were cancelled). */
+    @Synchronized
+    fun retainOnly(context: Context, keep: Set<String>) {
+        val prefs = context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val editor = prefs.edit()
+        for (k in prefs.all.keys) if (k != NEXT && k !in keep) editor.remove(k)
+        editor.apply()
+    }
+}
+`
+  },
+  {
+    path: 'app/src/main/java/ua/blackout/prewarning/ui/components/GlassCard.kt',
+    language: 'kotlin',
+    description: 'Shared dark glass card (border, shadow, radius)',
+    content: `package ua.blackout.prewarning.ui.components
+
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.padding
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.dp
+import ua.blackout.prewarning.ui.theme.ZtColors
+import ua.blackout.prewarning.ui.theme.ZtGlass
+import ua.blackout.prewarning.ui.theme.ZtShapes
+
+/**
+ * The glass card used by every block of the app: soft floating shadow, 24 dp corners, translucent
+ * matte fill with a top sheen and (by default) the lit glass rim. One implementation so border,
+ * radius and shadow cannot drift apart between screens; [glassSurface] gives the same look to
+ * surfaces that are not a GlassCard (About blocks, bottom navigation).
+ */
+@Composable
+fun GlassCard(
+    modifier: Modifier = Modifier,
+    shape: Shape = ZtShapes.Card,
+    cornerRadius: Dp = 24.dp,
+    background: Color = ZtColors.Card,
+    borderColor: Color? = ZtColors.CardBorder,
+    contentPadding: PaddingValues = PaddingValues(16.dp),
+    content: @Composable () -> Unit
+) {
+    Box(
+        modifier = modifier
+            .glassSurface(shape, cornerRadius, background, rim = false)
+            .then(
+                when (borderColor) {
+                    null -> Modifier
+                    // the default border is the lit glass rim; a custom colour (warning cards) stays solid
+                    ZtColors.CardBorder -> Modifier.border(1.dp, ZtGlass.Rim, shape)
+                    else -> Modifier.border(1.dp, borderColor, shape)
+                }
+            )
+            .padding(contentPadding)
+    ) {
+        content()
+    }
+}
+
+/** Liquid-glass surface: soft shadow, translucent fill, matte top sheen and (when [rim]) the lit rim. */
+fun Modifier.glassSurface(
+    shape: Shape,
+    cornerRadius: Dp,
+    background: Color = ZtColors.Card,
+    rim: Boolean = true
+): Modifier = this
+    .floatingShadow(color = ZtGlass.Shadow, borderRadius = cornerRadius)
+    .clip(shape)
+    .background(background)
+    .background(ZtGlass.Sheen)
+    .then(if (rim) Modifier.border(1.dp, ZtGlass.Rim, shape) else Modifier)
+`
+  },
+  {
+    path: 'app/src/main/java/ua/blackout/prewarning/ui/components/SearchablePickerField.kt',
+    language: 'kotlin',
+    description: 'Full-screen searchable picker for REM, settlement, street and house',
+    content: `package ua.blackout.prewarning.ui.components
+
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.imePadding
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.ArrowDropDown
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.ErrorOutline
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.Immutable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardCapitalization
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
+import ua.blackout.prewarning.ui.AppStrings
+import ua.blackout.prewarning.ui.theme.ZtColors
+import ua.blackout.prewarning.ui.theme.ZtMinTouch
+import ua.blackout.prewarning.ui.theme.ZtShapes
+import ua.blackout.prewarning.ui.theme.ZtType
+
+/** One row of a [SearchablePickerField]. [id] must be unique inside one list; duplicates are dropped. */
+@Immutable
+data class PickerItem(val id: String, val label: String)
+
+/** Colours of the app's glass text fields: dark fill, hairline border, accent when focused, light icons and cursor. */
+@Composable
+fun glassFieldColors(
+    focusedBorder: Color = ZtColors.Accent,
+    unfocusedBorder: Color = ZtColors.InputBorder
+) = OutlinedTextFieldDefaults.colors(
+    focusedTextColor = Color.White,
+    unfocusedTextColor = Color.White,
+    disabledTextColor = Color(0x80FFFFFF),
+    focusedBorderColor = focusedBorder,
+    unfocusedBorderColor = unfocusedBorder,
+    disabledBorderColor = Color(0x1AFFFFFF),
+    focusedContainerColor = Color(0x1AFFFFFF),
+    unfocusedContainerColor = ZtColors.InnerRow,
+    disabledContainerColor = Color(0x0DFFFFFF),
+    cursorColor = ZtColors.Accent,
+    focusedTrailingIconColor = Color.White,
+    unfocusedTrailingIconColor = Color(0xB3FFFFFF),
+    disabledTrailingIconColor = Color(0x4DFFFFFF),
+    focusedLeadingIconColor = Color(0xB3FFFFFF),
+    unfocusedLeadingIconColor = Color(0xB3FFFFFF),
+    focusedPlaceholderColor = ZtColors.TextTertiary,
+    unfocusedPlaceholderColor = ZtColors.TextTertiary
+)
+
+/**
+ * A read-only field that opens a full-screen searchable list. Built for the address lookup, where one
+ * list can hold 966 streets: rows are lazy and keyed by [PickerItem.id], search is [PickerSearch]
+ * (apostrophe, diacritic, case and street-type-prefix insensitive), and there is no entrance animation
+ * because people open it often.
+ *
+ * States: [loading] (spinner; a thin bar when rows are already shown), [loadFailed] (message with
+ * Retry when [onRetry] is set), and an empty result ("Нічого не знайдено").
+ *
+ * @param value text shown in the field, or null to show [placeholder]
+ * @param selectedId id of the current value; gets the check mark and the initial scroll position
+ * @param enabled when false the field is dimmed and does not open ([disabledHint] is read by TalkBack)
+ * @param kind [PickerSearch.Kind.HOUSE] for house numbers ("16А" equals "16a", "34-А" equals "34а")
+ */
+@Composable
+fun SearchablePickerField(
+    label: String,
+    value: String?,
+    placeholder: String,
+    items: List<PickerItem>,
+    selectedId: String?,
+    onSelect: (PickerItem) -> Unit,
+    lang: String,
+    modifier: Modifier = Modifier,
+    enabled: Boolean = true,
+    loading: Boolean = false,
+    loadFailed: Boolean = false,
+    onRetry: (() -> Unit)? = null,
+    kind: PickerSearch.Kind = PickerSearch.Kind.TEXT,
+    disabledHint: String? = null
+) {
+    var open by remember { mutableStateOf(false) }
+    val shape = ZtShapes.Control
+    val shownText = value?.takeIf { it.isNotBlank() } ?: placeholder
+
+    Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text(text = label, style = ZtType.label, color = Color(0xE6BAE6FD))
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(min = 56.dp)
+                .clip(shape)
+                .background(if (enabled) ZtColors.InnerRow else Color(0x0DFFFFFF))
+                .border(1.dp, if (enabled) ZtColors.InputBorder else Color(0x1AFFFFFF), shape)
+                .clickable(enabled = enabled, role = Role.Button, onClickLabel = label) { open = true }
+                .semantics(mergeDescendants = true) {
+                    contentDescription = "$label, $shownText"
+                    if (!enabled && disabledHint != null) stateDescription = disabledHint
+                }
+                .padding(start = 16.dp, end = 8.dp, top = 8.dp, bottom = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = shownText,
+                style = ZtType.body,
+                color = when {
+                    !enabled -> Color(0x80FFFFFF)
+                    value.isNullOrBlank() -> ZtColors.TextTertiary
+                    else -> Color.White
+                },
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f)
+            )
+            if (loading) {
+                CircularProgressIndicator(
+                    modifier = Modifier.padding(horizontal = 8.dp).size(18.dp),
+                    strokeWidth = 2.dp,
+                    color = ZtColors.Accent
+                )
+            }
+            Icon(
+                imageVector = Icons.Default.ArrowDropDown,
+                contentDescription = null,
+                tint = if (enabled) Color(0xB3FFFFFF) else Color(0x4DFFFFFF),
+                modifier = Modifier.size(24.dp)
+            )
+        }
+    }
+
+    if (open) {
+        PickerDialog(
+            title = label,
+            items = items,
+            selectedId = selectedId,
+            lang = lang,
+            loading = loading,
+            loadFailed = loadFailed,
+            onRetry = onRetry,
+            kind = kind,
+            onDismiss = { open = false },
+            onSelect = {
+                open = false
+                onSelect(it)
+            }
+        )
+    }
+}
+
+@Composable
+private fun PickerDialog(
+    title: String,
+    items: List<PickerItem>,
+    selectedId: String?,
+    lang: String,
+    loading: Boolean,
+    loadFailed: Boolean,
+    onRetry: (() -> Unit)?,
+    kind: PickerSearch.Kind,
+    onDismiss: () -> Unit,
+    onSelect: (PickerItem) -> Unit
+) {
+    // duplicate ids would crash LazyColumn(key = id), so the list is made unique once
+    val unique = remember(items) { items.distinctBy { it.id } }
+    val index = remember(unique, kind) { PickerSearch.Index(unique, kind) { it.label } }
+    var query by remember { mutableStateOf("") }
+    val shown = remember(index, query) { index.search(query) }
+    val initialIndex = remember { unique.indexOfFirst { it.id == selectedId }.coerceAtLeast(0) }
+    val listState = rememberLazyListState(initialFirstVisibleItemIndex = initialIndex)
+    val focusRequester = remember { FocusRequester() }
+    val keyboard = LocalSoftwareKeyboardController.current
+
+    LaunchedEffect(Unit) {
+        withFrameNanos { }
+        try {
+            focusRequester.requestFocus()
+        } catch (_: Exception) {
+            // the field is not attached yet on a very slow first frame; the user can still tap it
+        }
+    }
+
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(ZtColors.CardSolid)
+                .statusBarsPadding()
+                .navigationBarsPadding()
+                .imePadding()
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth().padding(start = 4.dp, end = 16.dp, top = 4.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                IconButton(onClick = onDismiss, modifier = Modifier.size(ZtMinTouch)) {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                        contentDescription = AppStrings.pickerClose(lang),
+                        tint = Color.White
+                    )
+                }
+                Text(
+                    text = title,
+                    style = ZtType.heading,
+                    color = Color.White,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f).padding(start = 4.dp)
+                )
+            }
+
+            OutlinedTextField(
+                value = query,
+                onValueChange = { query = it },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 8.dp)
+                    .heightIn(min = 56.dp)
+                    .focusRequester(focusRequester),
+                singleLine = true,
+                shape = ZtShapes.Control,
+                textStyle = ZtType.body,
+                placeholder = { Text(AppStrings.pickerSearchHint(lang), style = ZtType.body) },
+                leadingIcon = { Icon(Icons.Default.Search, contentDescription = null) },
+                trailingIcon = if (query.isNotEmpty()) {
+                    {
+                        IconButton(onClick = { query = "" }, modifier = Modifier.size(ZtMinTouch)) {
+                            Icon(Icons.Default.Close, contentDescription = AppStrings.pickerClearSearch(lang))
+                        }
+                    }
+                } else null,
+                keyboardOptions = KeyboardOptions(
+                    capitalization = KeyboardCapitalization.None,
+                    autoCorrectEnabled = false,
+                    imeAction = ImeAction.Search
+                ),
+                keyboardActions = KeyboardActions(onSearch = { keyboard?.hide() }),
+                colors = glassFieldColors()
+            )
+
+            if (loading && shown.isNotEmpty()) {
+                LinearProgressIndicator(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp),
+                    color = ZtColors.Accent,
+                    trackColor = Color(0x1AFFFFFF)
+                )
+            }
+            if (loadFailed && unique.isNotEmpty()) {
+                PickerStatusRow(
+                    text = AppStrings.pickerLoadError(lang),
+                    lang = lang,
+                    onRetry = onRetry,
+                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 4.dp)
+                )
+            }
+
+            Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
+                when {
+                    shown.isNotEmpty() -> LazyColumn(
+                        state = listState,
+                        modifier = Modifier.fillMaxSize(),
+                        contentPadding = PaddingValues(bottom = 16.dp)
+                    ) {
+                        items(shown, key = { it.id }) { item ->
+                            PickerRow(
+                                text = item.label,
+                                selected = item.id == selectedId,
+                                lang = lang,
+                                onClick = { onSelect(item) }
+                            )
+                        }
+                    }
+                    loading -> CenteredColumn {
+                        CircularProgressIndicator(color = ZtColors.Accent, strokeWidth = 3.dp)
+                        Text(AppStrings.pickerLoading(lang), style = ZtType.body, color = ZtColors.TextSecondary)
+                    }
+                    loadFailed && unique.isEmpty() -> CenteredColumn {
+                        Icon(Icons.Default.ErrorOutline, contentDescription = null, tint = ZtColors.ChipRedText, modifier = Modifier.size(32.dp))
+                        Text(
+                            AppStrings.pickerLoadError(lang),
+                            style = ZtType.body,
+                            color = Color.White,
+                            textAlign = TextAlign.Center
+                        )
+                        if (onRetry != null) PickerRetryButton(lang = lang, onRetry = onRetry)
+                    }
+                    else -> CenteredColumn {
+                        Text(
+                            AppStrings.pickerNothingFound(lang),
+                            style = ZtType.body,
+                            color = ZtColors.TextSecondary,
+                            textAlign = TextAlign.Center
+                        )
+                        if (unique.isEmpty() && onRetry != null) PickerRetryButton(lang = lang, onRetry = onRetry)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun PickerRow(text: String, selected: Boolean, lang: String, onClick: () -> Unit) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = 52.dp)
+            .selectable(selected = selected, role = Role.RadioButton, onClick = onClick)
+            .background(if (selected) ZtColors.InnerRow else Color.Transparent)
+            .padding(horizontal = 16.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(
+            text = text,
+            style = ZtType.body,
+            color = Color.White,
+            modifier = Modifier.weight(1f).padding(end = 12.dp)
+        )
+        if (selected) {
+            Icon(
+                imageVector = Icons.Default.Check,
+                contentDescription = AppStrings.pickerSelected(lang),
+                tint = ZtColors.Accent,
+                modifier = Modifier.size(24.dp)
+            )
+        }
+    }
+}
+
+@Composable
+private fun PickerStatusRow(text: String, lang: String, onRetry: (() -> Unit)?, modifier: Modifier = Modifier) {
+    Row(
+        modifier = modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Icon(Icons.Default.ErrorOutline, contentDescription = null, tint = ZtColors.ChipRedText, modifier = Modifier.size(20.dp))
+        Text(text, style = ZtType.caption, color = ZtColors.ChipRedText, modifier = Modifier.weight(1f))
+        if (onRetry != null) PickerRetryButton(lang = lang, onRetry = onRetry)
+    }
+}
+
+@Composable
+private fun PickerRetryButton(lang: String, onRetry: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .heightIn(min = ZtMinTouch)
+            .clip(ZtShapes.Control)
+            .background(Color(0x1AFFFFFF))
+            .border(1.dp, ZtColors.InputBorder, ZtShapes.Control)
+            .clickable(role = Role.Button, onClick = onRetry)
+            .padding(horizontal = 20.dp, vertical = 10.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(AppStrings.pickerRetry(lang), style = ZtType.label, color = Color.White)
+    }
+}
+
+@Composable
+private fun CenteredColumn(content: @Composable () -> Unit) {
+    Column(
+        modifier = Modifier.fillMaxSize().padding(24.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp, Alignment.CenterVertically),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        content()
+    }
+}
+`
+  },
+  {
+    path: 'app/src/main/java/ua/blackout/prewarning/ui/components/SiteStatusIndicator.kt',
+    language: 'kotlin',
+    description: 'Site status chips, banner and the ztoe notice card',
+    content: `package ua.blackout.prewarning.ui.components
+
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.CloudOff
+import androidx.compose.material.icons.filled.Event
+import androidx.compose.material.icons.filled.EventBusy
+import androidx.compose.material.icons.filled.HelpOutline
+import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material.icons.filled.WifiOff
+import androidx.compose.material3.Icon
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.unit.dp
+import ua.blackout.prewarning.core.SiteState
+import ua.blackout.prewarning.data.KYIV_ZONE
+import ua.blackout.prewarning.data.repository.OutageSnapshot
+import ua.blackout.prewarning.ui.AppStrings
+import ua.blackout.prewarning.ui.theme.ZtColors
+import ua.blackout.prewarning.ui.theme.ZtShapes
+import ua.blackout.prewarning.ui.theme.ZtType
+import java.time.Instant
+import java.time.ZoneId
+
+/** Colour family of a status chip or banner (UI_PROPOSALS section 3.3). Never the only cue: each also has an icon and text. */
+enum class StatusTone { GREEN, AMBER, RED, GREY }
+
+enum class StatusIcon { OK, WARNING, SERVER_DOWN, OFFLINE, UNKNOWN, TOMORROW_OK, TOMORROW_PENDING }
+
+data class StatusChip(val tone: StatusTone, val icon: StatusIcon, val text: String)
+
+data class SiteBanner(val tone: StatusTone, val icon: StatusIcon, val title: String, val message: String)
+
+/** Pure rules that decide which site and PowerOn status the main screen shows, so they can be unit tested. */
+object SiteStatusModel {
+
+    fun formatHhmm(epochMs: Long, zone: ZoneId = KYIV_ZONE): String {
+        val t = Instant.ofEpochMilli(epochMs).atZone(zone)
+        return "\${t.hour.toString().padStart(2, '0')}:\${t.minute.toString().padStart(2, '0')}"
+    }
+
+    private fun siteText(lang: String, state: SiteState): String = when (state) {
+        SiteState.AVAILABLE_WITH_TABLE -> AppStrings.siteStateWithTable(lang)
+        SiteState.AVAILABLE_NO_TABLE -> AppStrings.siteStateNoTable(lang)
+        SiteState.SITE_UNREACHABLE -> AppStrings.siteStateUnreachable(lang)
+        SiteState.NO_INTERNET -> AppStrings.siteStateNoInternet(lang)
+    }
+
+    private fun tone(state: SiteState) = when (state) {
+        SiteState.AVAILABLE_WITH_TABLE -> StatusTone.GREEN
+        SiteState.AVAILABLE_NO_TABLE -> StatusTone.AMBER
+        SiteState.SITE_UNREACHABLE -> StatusTone.RED
+        SiteState.NO_INTERNET -> StatusTone.GREY
+    }
+
+    private fun icon(state: SiteState) = when (state) {
+        SiteState.AVAILABLE_WITH_TABLE -> StatusIcon.OK
+        SiteState.AVAILABLE_NO_TABLE -> StatusIcon.WARNING
+        SiteState.SITE_UNREACHABLE -> StatusIcon.SERVER_DOWN
+        SiteState.NO_INTERNET -> StatusIcon.OFFLINE
+    }
+
+    private fun hint(lang: String, state: SiteState): String? = when (state) {
+        SiteState.AVAILABLE_WITH_TABLE -> null
+        SiteState.AVAILABLE_NO_TABLE -> AppStrings.siteStateHintNoTable(lang)
+        SiteState.SITE_UNREACHABLE -> AppStrings.siteStateHintUnreachable(lang)
+        SiteState.NO_INTERNET -> AppStrings.siteStateHintNoInternet(lang)
+    }
+
+    /** Chip row of the "Last updated" card. Empty when no queue is selected (nothing is checked then). */
+    fun chips(snapshot: OutageSnapshot, lang: String, zone: ZoneId = KYIV_ZONE): List<StatusChip> {
+        if (snapshot.queue.isBlank()) return emptyList()
+        val out = ArrayList<StatusChip>()
+        val site = snapshot.site
+        if (site == null) {
+            out.add(StatusChip(StatusTone.GREY, StatusIcon.UNKNOWN, AppStrings.siteStateChecking(lang)))
+        } else {
+            out.add(StatusChip(tone(site.state), icon(site.state), siteText(lang, site.state)))
+        }
+        if (snapshot.isStale) {
+            val since = site?.lastSuccessMs?.let { formatHhmm(it, zone) }
+            if (since != null) out.add(StatusChip(StatusTone.AMBER, StatusIcon.WARNING, AppStrings.staleChip(lang, since)))
+        }
+        if (snapshot.tomorrowPublished) {
+            out.add(StatusChip(StatusTone.GREEN, StatusIcon.TOMORROW_OK, AppStrings.tomorrowPublished(lang)))
+        } else {
+            out.add(StatusChip(StatusTone.GREY, StatusIcon.TOMORROW_PENDING, AppStrings.tomorrowNotPublishedShort(lang)))
+        }
+        return out
+    }
+
+    /** Small status line shown only when the last PowerOn (emergency outages) refresh failed. */
+    fun poweronLine(snapshot: OutageSnapshot, lang: String): StatusChip? =
+        if (snapshot.poweron?.ok == false) {
+            StatusChip(StatusTone.AMBER, StatusIcon.WARNING, AppStrings.poweronUnavailable(lang))
+        } else {
+            null
+        }
+
+    /**
+     * The site's own notice ("УВАГА! ВАЖЛИВА ІНФОРМАЦІЯ!") while the page is up but has no schedule
+     * table. Shown even without a queue: it concerns everybody in the region.
+     */
+    fun notice(snapshot: OutageSnapshot): String? {
+        val site = snapshot.site ?: return null
+        return site.notice?.takeIf { site.state == SiteState.AVAILABLE_NO_TABLE && it.isNotBlank() }
+    }
+
+    /**
+     * Glass banner above the hero, for degraded site states only. Not shown while the ztoe notice card
+     * is: the notice already explains the missing table and the chip below still names the state.
+     */
+    fun banner(snapshot: OutageSnapshot, lang: String, zone: ZoneId = KYIV_ZONE): SiteBanner? {
+        if (snapshot.queue.isBlank()) return null
+        val site = snapshot.site ?: return null
+        if (site.state == SiteState.AVAILABLE_WITH_TABLE) return null
+        if (notice(snapshot) != null) return null
+        val since = if (snapshot.isStale) site.lastSuccessMs?.let { formatHhmm(it, zone) } else null
+        val message = listOfNotNull(since?.let { AppStrings.staleDataSince(lang, it) }, hint(lang, site.state))
+            .joinToString("\\n")
+        return SiteBanner(tone(site.state), icon(site.state), siteText(lang, site.state), message)
+    }
+}
+
+private fun StatusTone.background(): Color = when (this) {
+    StatusTone.GREEN -> ZtColors.ChipGreen
+    StatusTone.AMBER -> ZtColors.ChipAmber
+    StatusTone.RED -> ZtColors.ChipRed
+    StatusTone.GREY -> ZtColors.ChipGrey
+}
+
+private fun StatusTone.content(): Color = when (this) {
+    StatusTone.GREEN -> ZtColors.ChipGreenText
+    StatusTone.AMBER -> ZtColors.ChipAmberText
+    StatusTone.RED -> ZtColors.ChipRedText
+    StatusTone.GREY -> ZtColors.ChipGreyText
+}
+
+private fun StatusIcon.vector(): ImageVector = when (this) {
+    StatusIcon.OK -> Icons.Default.CheckCircle
+    StatusIcon.WARNING -> Icons.Default.Warning
+    StatusIcon.SERVER_DOWN -> Icons.Default.CloudOff
+    StatusIcon.OFFLINE -> Icons.Default.WifiOff
+    StatusIcon.UNKNOWN -> Icons.Default.HelpOutline
+    StatusIcon.TOMORROW_OK -> Icons.Default.Event
+    StatusIcon.TOMORROW_PENDING -> Icons.Default.EventBusy
+}
+
+/** One status pill: tinted background, icon and text in the same family. Text wraps instead of clipping. */
+@Composable
+fun StatusChipView(chip: StatusChip, modifier: Modifier = Modifier) {
+    Row(
+        modifier = modifier
+            .clip(ZtShapes.Badge)
+            .background(chip.tone.background())
+            .padding(horizontal = 10.dp, vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        Icon(
+            imageVector = chip.icon.vector(),
+            contentDescription = null,
+            tint = chip.tone.content(),
+            modifier = Modifier.size(16.dp)
+        )
+        Text(text = chip.text, style = ZtType.label, color = chip.tone.content())
+    }
+}
+
+/** Chips for the "Last updated" card, plus the PowerOn status line when that source is down. */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+fun SiteStatusChipRow(snapshot: OutageSnapshot, lang: String, modifier: Modifier = Modifier) {
+    val chips = SiteStatusModel.chips(snapshot, lang)
+    val poweron = SiteStatusModel.poweronLine(snapshot, lang)
+    if (chips.isEmpty() && poweron == null) return
+    Column(modifier = modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        if (chips.isNotEmpty()) {
+            FlowRow(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                chips.forEach { StatusChipView(it) }
+            }
+        }
+        if (poweron != null) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                Icon(
+                    imageVector = poweron.icon.vector(),
+                    contentDescription = null,
+                    tint = poweron.tone.content(),
+                    modifier = Modifier.size(16.dp)
+                )
+                Text(text = poweron.text, style = ZtType.caption, color = poweron.tone.content())
+            }
+        }
+    }
+}
+
+/** Information card with the text ztoe publishes in place of the schedule, quoted as is. */
+@Composable
+fun SiteNoticeCard(text: String, lang: String, modifier: Modifier = Modifier) {
+    GlassCard(
+        modifier = modifier
+            .fillMaxWidth()
+            .semantics(mergeDescendants = true) { contentDescription = AppStrings.siteNoticeA11y(lang) + ". " + text }
+    ) {
+        Row(
+            verticalAlignment = Alignment.Top,
+            horizontalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(36.dp)
+                    .clip(CircleShape)
+                    .background(ZtColors.ChipAmber),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Info,
+                    contentDescription = null,
+                    tint = ZtColors.ChipAmberText,
+                    modifier = Modifier.size(20.dp)
+                )
+            }
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                Text(text = AppStrings.siteNoticeTitle(lang), style = ZtType.overline, color = ZtColors.ChipAmberText)
+                text.lines().forEachIndexed { i, line ->
+                    Text(
+                        text = line,
+                        style = if (i == 0) ZtType.subhead else ZtType.body,
+                        color = if (i == 0) Color.White else Color(0xE6BAE6FD)
+                    )
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Persistent glass banner for a degraded site state (not a 3 s toast). Compact: the title and each
+ * message line keep to one line each (two lines for the usual banner).
+ */
+@Composable
+fun SiteStatusBanner(banner: SiteBanner, modifier: Modifier = Modifier) {
+    GlassCard(
+        modifier = modifier
+            .fillMaxWidth()
+            .semantics(mergeDescendants = true) { liveRegion = LiveRegionMode.Polite },
+        contentPadding = PaddingValues(horizontal = 14.dp, vertical = 12.dp)
+    ) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(32.dp)
+                    .clip(CircleShape)
+                    .background(banner.tone.background()),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = banner.icon.vector(),
+                    contentDescription = null,
+                    tint = banner.tone.content(),
+                    modifier = Modifier.size(18.dp)
+                )
+            }
+            Column(modifier = Modifier.weight(1f)) {
+                OneLineText(text = banner.title, style = BannerTitle, color = banner.tone.content())
+                banner.message.lines().filter { it.isNotBlank() }.forEach { line ->
+                    // 0xE6 alpha instead of the 0xB3 token: small text on a translucent card needs the extra contrast
+                    OneLineText(text = line, style = ZtType.caption, color = Color(0xE6BAE6FD))
+                }
+            }
+        }
+    }
+}
+
+private val BannerTitle = ZtType.label.copy(fontWeight = FontWeight.Bold)
+
+/**
+ * Text kept on one line: when it does not fit, the size steps down 5 % at a time to at most 15 % below
+ * the style (never under 12 sp). If it still does not fit, it wraps instead of being cut.
+ */
+@Composable
+private fun OneLineText(text: String, style: TextStyle, color: Color) = BoxWithConstraints {
+    // Measured again when the width changes (rotation, split screen)
+    val width = maxWidth
+    val minSize = maxOf(style.fontSize.value * 0.85f, 12f)
+    var size by remember(text, style, width) { mutableFloatStateOf(style.fontSize.value) }
+    var wrap by remember(text, style, width) { mutableStateOf(false) }
+    var settled by remember(text, style, width) { mutableStateOf(false) }
+    Text(
+        text = text,
+        style = style.copy(fontSize = size.sp),
+        color = color,
+        maxLines = if (wrap) Int.MAX_VALUE else 1,
+        softWrap = wrap,
+        modifier = Modifier.drawWithContent { if (settled) drawContent() },
+        onTextLayout = { result ->
+            when {
+                settled -> Unit
+                !result.didOverflowWidth -> settled = true
+                size * 0.95f >= minSize -> size *= 0.95f
+                else -> { wrap = true; settled = true }
+            }
+        }
+    )
+}
+`
+  },
+  {
+    path: 'app/src/main/java/ua/blackout/prewarning/ui/components/OutageRowFormat.kt',
+    language: 'kotlin',
+    description: 'Text of outage rows, tags and the drum summary',
+    content: `package ua.blackout.prewarning.ui.components
+
+import ua.blackout.prewarning.core.DayRow
+import ua.blackout.prewarning.core.IntervalStatus
+import ua.blackout.prewarning.core.OutageEngine
+import ua.blackout.prewarning.core.OutageKind
+import ua.blackout.prewarning.data.model.BlackoutSlot
+import ua.blackout.prewarning.data.model.SlotStatus
+import ua.blackout.prewarning.ui.AppStrings
+import java.time.LocalDateTime
+
+/**
+ * Pure text rules of the outage list under the drum (spec/UI_DRUM.md section 5): one row per outage
+ * with its full span, the date on the far side of midnight, kind and state tags. No Android types, so
+ * it is unit tested (OutageRowFormatTest) and mirrored by the web simulator.
+ */
+object OutageRowFormat {
+
+    data class RowText(
+        val kind: OutageKind,
+        /** "10:00 – 12:00", "23:00 – 01:00 (14.11)", "00:00 – 01:00", "10:00 – --:--" for an overdue emergency. */
+        val timeText: String,
+        /** Full length of the outage ("2 год"); null when the end is unknown (overdue emergency). */
+        val durationText: String?,
+        /** "Аварійне" / "Планові роботи"; null for a plain planned outage (the dot is its marker). */
+        val kindTag: String?,
+        /** "з 13.11 23:00" on the day an outage continues into. */
+        val originTag: String?,
+        /** "завершено" / "очікується відновлення". */
+        val statusTag: String?,
+        /** "можливе продовження" when the real end is later than the known schedule. */
+        val continueTag: String?,
+        val isFinished: Boolean,
+        val isEmergency: Boolean,
+        val isRepair: Boolean,
+        /** One sentence for TalkBack: kind, time, duration and tags. */
+        val contentDescription: String
+    )
+
+    private fun p2(n: Int) = n.toString().padStart(2, '0')
+
+    fun hhmm(t: LocalDateTime): String = "\${p2(t.hour)}:\${p2(t.minute)}"
+
+    fun dayMonth(t: LocalDateTime): String = "\${p2(t.dayOfMonth)}.\${p2(t.monthValue)}"
+
+    /** End of an outage that leaves the day, with the date it really ends on; exactly 00:00 reads "24:00" of the day before. */
+    private fun endWithDate(end: LocalDateTime): String =
+        if (end.toLocalTime() == java.time.LocalTime.MIDNIGHT) {
+            "24:00 (\${dayMonth(end.minusDays(1))})"
+        } else {
+            "\${hhmm(end)} (\${dayMonth(end)})"
+        }
+
+    fun kindLabel(lang: String, kind: OutageKind): String = when (kind) {
+        OutageKind.EMERGENCY -> AppStrings.kindEmergency(lang)
+        OutageKind.REPAIR -> AppStrings.kindRepair(lang)
+        OutageKind.PLANNED -> AppStrings.kindPlanned(lang)
+    }
+
+    fun format(lang: String, row: DayRow): RowText {
+        val o = row.outage
+        val overdue = row.status == IntervalStatus.OVERDUE
+        val finished = row.status == IntervalStatus.FINISHED
+
+        val startText = if (row.continuesFromPrevDay) "00:00" else hhmm(row.from)
+        val endText = when {
+            overdue -> "--:--"
+            row.continuesToNextDay -> endWithDate(o.end)
+            else -> OutageEngine.formatSpanTime(row.to)
+        }
+        val timeText = "$startText – $endText"
+        val durationText = if (overdue) null else AppStrings.durationText(lang, row.durationMinutes)
+        val kindTag = when (o.kind) {
+            OutageKind.EMERGENCY -> AppStrings.kindEmergency(lang)
+            OutageKind.REPAIR -> AppStrings.kindRepair(lang)
+            OutageKind.PLANNED -> null
+        }
+        val originTag = if (row.continuesFromPrevDay) {
+            AppStrings.rowFromEarlier(lang, "\${dayMonth(o.start)} \${hhmm(o.start)}")
+        } else {
+            null
+        }
+        val statusTag = when (row.status) {
+            IntervalStatus.FINISHED -> AppStrings.rowFinished(lang)
+            IntervalStatus.OVERDUE -> AppStrings.rowOverdue(lang)
+            else -> null
+        }
+        val continueTag = if (o.mayContinue && !finished) AppStrings.rowMayContinue(lang) else null
+
+        val description = listOfNotNull(kindLabel(lang, o.kind), timeText, durationText, originTag, statusTag, continueTag)
+            .joinToString(", ")
+
+        return RowText(
+            kind = o.kind,
+            timeText = timeText,
+            durationText = durationText,
+            kindTag = kindTag,
+            originTag = originTag,
+            statusTag = statusTag,
+            continueTag = continueTag,
+            isFinished = finished,
+            isEmergency = o.kind == OutageKind.EMERGENCY,
+            isRepair = o.kind == OutageKind.REPAIR,
+            contentDescription = description
+        )
+    }
+
+    /** Contiguous runs of off half-hours of a day as (first cell, last cell exclusive, any emergency). */
+    private data class Run(val from: Int, val to: Int, val emergency: Boolean)
+
+    private fun cellsOf(slots: List<BlackoutSlot>): List<BlackoutSlot>? = when (slots.size) {
+        48 -> slots
+        24 -> slots.flatMap { listOf(it, it) }
+        else -> null
+    }
+
+    private fun runs(cells: List<BlackoutSlot>): List<Run> {
+        val out = ArrayList<Run>()
+        var start = -1
+        var emergency = false
+        for (i in cells.indices) {
+            val off = cells[i].status == SlotStatus.POWER_OFF
+            if (off) {
+                if (start < 0) {
+                    start = i
+                    emergency = false
+                }
+                if (cells[i].isEmergency) emergency = true
+            } else if (start >= 0) {
+                out.add(Run(start, i, emergency))
+                start = -1
+            }
+        }
+        if (start >= 0) out.add(Run(start, cells.size, emergency))
+        return out
+    }
+
+    private fun cellTime(index: Int): String {
+        val minutes = index * 30
+        return if (minutes >= 1440) "24:00" else "\${p2(minutes / 60)}:\${p2(minutes % 60)}"
+    }
+
+    /**
+     * One TalkBack sentence for the whole drum, replacing the 48 silent cells:
+     * "Шкала доби: без світла: 00:00 – 02:00, 10:00 – 12:00 (аварійне)".
+     * [unclearBase] is true when the schedule of the day is not known (grey drum).
+     */
+    fun drumSummary(lang: String, slots: List<BlackoutSlot>, unclearBase: Boolean): String {
+        val head = AppStrings.drumTitle(lang)
+        val cells = cellsOf(slots) ?: return "$head: \${AppStrings.outagesUnclear(lang)}"
+        val found = runs(cells)
+        val spans = found.joinToString(", ") { r ->
+            val text = "\${cellTime(r.from)} – \${cellTime(r.to)}"
+            if (r.emergency) "$text (\${AppStrings.drumEmergencyMark(lang)})" else text
+        }
+        val parts = ArrayList<String>()
+        if (unclearBase) parts.add(AppStrings.outagesUnclear(lang))
+        if (found.isNotEmpty()) {
+            parts.add(AppStrings.drumPowerOffAt(lang, spans))
+        } else if (!unclearBase) {
+            parts.add(AppStrings.drumNoOutages(lang))
+        }
+        return "$head: \${parts.joinToString("; ")}"
+    }
+}
+`
+  },
+  {
+    path: 'app/src/main/res/xml/blackout_widget_strip_info.xml',
+    language: 'xml',
+    description: 'Strip (4x1) drum-only AppWidget Provider Metadata',
+    content: `<?xml version="1.0" encoding="utf-8"?>
+<appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
+    android:description="@string/widget_strip_name"
+    android:initialKeyguardLayout="@layout/glance_default_loading_layout"
+    android:initialLayout="@layout/glance_default_loading_layout"
+    android:minWidth="250dp"
+    android:minHeight="40dp"
+    android:previewImage="@drawable/widget_preview_strip"
+    android:resizeMode="horizontal|vertical"
+    android:targetCellWidth="4"
+    android:targetCellHeight="1"
+    android:updatePeriodMillis="900000"
+    android:configure="ua.blackout.prewarning.widget.WidgetConfigActivity"
+    android:widgetFeatures="reconfigurable|configuration_optional"
+    android:widgetCategory="home_screen" />
+`
+  },
+  {
+    path: 'app/src/main/res/drawable/widget_preview_strip.xml',
+    language: 'xml',
+    description: 'Strip (4x1) Widget Picker Thumbnail Vector Drawable',
+    content: `<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="320dp"
+    android:height="90dp"
+    android:viewportWidth="320"
+    android:viewportHeight="90">
+
+    <!-- Outer rounded widget background (#141A29) -->
+    <path
+        android:fillColor="#141A29"
+        android:pathData="M22,4 L298,4 A18,18 0 0,1 316,22 L316,68 A18,18 0 0,1 298,86 L22,86 A18,18 0 0,1 4,68 L4,22 A18,18 0 0,1 22,4 Z" />
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#33FFFFFF"
+        android:strokeWidth="1.5"
+        android:pathData="M22,4 L298,4 A18,18 0 0,1 316,22 L316,68 A18,18 0 0,1 298,86 L22,86 A18,18 0 0,1 4,68 L4,22 A18,18 0 0,1 22,4 Z" />
+
+    <!-- Drum at the big widget's aspect (720 x 132): scaled to 52 high, centred -->
+    <group android:scaleY="0.79" android:pivotY="45">
+    <!-- Vintage analog counter faceplate (#D4D1C1) -->
+    <path
+        android:fillColor="#D4D1C1"
+        android:strokeColor="#7A7768"
+        android:strokeWidth="1.5"
+        android:pathData="M22,12 L298,12 A8,8 0 0,1 306,20 L306,70 A8,8 0 0,1 298,78 L22,78 A8,8 0 0,1 14,70 L14,20 A8,8 0 0,1 22,12 Z" />
+
+    <!-- Recessed drum window (#4E514E) -->
+    <path
+        android:fillColor="#4E514E"
+        android:pathData="M24,18 L296,18 A4,4 0 0,1 300,22 L300,52 A4,4 0 0,1 296,56 L24,56 A4,4 0 0,1 20,52 L20,22 A4,4 0 0,1 24,18 Z" />
+
+    <!-- Light power-on track (#FCFBF7) -->
+    <path
+        android:fillColor="#FCFBF7"
+        android:pathData="M24,22 L296,22 L296,52 L24,52 Z" />
+
+    <!-- Red blackout segments (#D62E26) -->
+    <path
+        android:fillColor="#D62E26"
+        android:pathData="M70,22 L115,22 L115,52 L70,52 Z" />
+    <path
+        android:fillColor="#D62E26"
+        android:pathData="M182,22 L238,22 L238,52 L182,52 Z" />
+
+    <!-- Emergency (amber) block -->
+    <path
+        android:fillColor="#F28A1B"
+        android:pathData="M250,22 L272,22 L272,52 L250,52 Z" />
+
+    <!-- Hour markers 00 06 12 18 24 -->
+    <path
+        android:fillColor="#1C1B18"
+        android:pathData="M24,63 L33,63 L33,68 L24,68 Z M88,63 L97,63 L97,68 L88,68 Z M156,63 L165,63 L165,68 L156,68 Z M224,63 L233,63 L233,68 L224,68 Z M287,63 L296,63 L296,68 L287,68 Z" />
+
+    <!-- Black current-time needle (#0B0B0A) with halo -->
+    <path
+        android:fillColor="#D9FFFFFF"
+        android:pathData="M145,14 L151,14 L151,60 L145,60 Z" />
+    <path
+        android:fillColor="#0B0B0A"
+        android:pathData="M146.5,14 L149.5,14 L149.5,60 L146.5,60 Z" />
+    </group>
+</vector>
+`
+  },
+  {
+    path: 'app/src/main/java/ua/blackout/prewarning/core/Subscriptions.kt',
+    language: 'kotlin',
+    description: 'Multi-address subscriptions: model, repair, store operations and migration (spec/SUBSCRIPTIONS.md)',
+    content: `package ua.blackout.prewarning.core
+
+/**
+ * Multi-address subscriptions: the stored model, its repair rules, the store operations, the
+ * migration from single-address settings, the primary mirror, the alert grouping and the main-screen switcher. Specified in \`spec/SUBSCRIPTIONS.md\`, golden cases in
+ * \`spec/vectors/subscriptions.json\`, mirrored in \`src/core/subscriptions.ts\`.
+ *
+ * The model is exchanged as plain maps (\`toMap\` / \`fromMap\`) so this package needs no JSON library;
+ * the platform encodes the map as a string.
+ */
+
+enum class QueueSource { LOOKUP, MANUAL }
+
+data class SubscriptionAddress(
+    val remSlug: String,
+    val settlementId: String,
+    val streetId: String,
+    /** Display name resolved from [streetId] when the address was stored; may be empty. */
+    val streetName: String,
+    val house: String,
+    /** Full human readable line (1.4.0 \`selected_address\`); may be empty. */
+    val text: String
+) {
+    val isValid: Boolean
+        get() = remSlug.isNotBlank() && settlementId.isNotBlank() && streetId.isNotBlank() && house.isNotBlank()
+
+    /** The 1.4.0 address key of \`ledger_*\`, \`repair_*\`, \`ids_*\` and emergency alert keys. */
+    val key: String
+        get() = "$settlementId|\${StreetKey.of(streetName.ifBlank { streetId })}|\${HouseKey.of(house)}"
+}
+
+data class Subscription(
+    val id: String,
+    /** Cleaned user label; empty = automatic (see [Subscriptions.displayLabel]). */
+    val label: String = "",
+    val address: SubscriptionAddress? = null,
+    val queue: String? = null,
+    val queueSource: QueueSource = QueueSource.MANUAL,
+    val queueStatusText: String? = null,
+    val plannedAlerts: Boolean = true,
+    val emergencyAlerts: Boolean = true,
+    val createdAtMs: Long = 0L
+) {
+    /** \`a:<address key>\` or \`q:<queue>\`; two items with one identity are duplicates. */
+    val identity: String
+        get() = address?.let { "a:\${it.key}" } ?: "q:\${queue.orEmpty()}"
+}
+
+data class SubscriptionStore(
+    val primaryId: String? = null,
+    val items: List<Subscription> = emptyList()
+) {
+    val primary: Subscription? get() = items.firstOrNull { it.id == primaryId }
+
+    companion object {
+        val EMPTY = SubscriptionStore()
+    }
+}
+
+/** 1.4.0 single-address settings, plus the street name the platform resolved for [streetId]. */
+data class LegacySettings(
+    val queue: String,
+    val customQueueStatusText: String?,
+    val selectedAddress: String?,
+    val remSlug: String,
+    val settlementId: String,
+    val streetId: String,
+    val streetName: String?,
+    val house: String,
+    val notificationsEnabled: Boolean,
+    val emergencyNotificationsEnabled: Boolean
+)
+
+data class MigrationResult(val store: SubscriptionStore, val alertsMaster: Boolean)
+
+/** Values for the single-address keys, written from the primary item (\`spec/SUBSCRIPTIONS.md\` section 7). */
+data class LegacyMirror(
+    val queue: String,
+    val customQueueStatusText: String?,
+    val selectedAddress: String?,
+    val remSlug: String,
+    val settlementId: String,
+    val streetId: String,
+    val house: String,
+    val notificationsEnabled: Boolean,
+    val emergencyNotificationsEnabled: Boolean
+)
+
+data class DroppedItem(val id: String?, val reason: String)
+
+data class RepairResult(val store: SubscriptionStore, val dropped: List<DroppedItem>)
+
+/** Either the new store or an error code from \`spec/SUBSCRIPTIONS.md\` section 4. */
+sealed class StoreResult {
+    data class Ok(val store: SubscriptionStore) : StoreResult()
+    data class Error(val code: String, val existingId: String? = null) : StoreResult()
+}
+
+object Subscriptions {
+    const val SCHEMA_VERSION = 1
+    const val MAX_ITEMS = 5
+    const val MAX_LABEL_LENGTH = 40
+
+    const val ERR_INVALID = "invalid"
+    const val ERR_DUPLICATE_ID = "duplicate_id"
+    const val ERR_DUPLICATE = "duplicate"
+    const val ERR_LIMIT = "limit_reached"
+    const val ERR_NOT_FOUND = "not_found"
+
+    private val ID = Regex("^[a-z0-9]{4,32}$")
+    private val QUEUE = Regex("^[1-6]\\\\.[12]$")
+    private val SPACES = Regex("[ \\\\t\\\\n\\\\u000B\\\\f\\\\r\\\\u00A0\\\\u200B]+")
+
+    fun isValidId(id: String?): Boolean = id != null && ID.matches(id)
+    fun isValidQueue(queue: String?): Boolean = queue != null && QUEUE.matches(queue)
+
+    private fun collapse(raw: String): String = SPACES.replace(raw, " ").trim(' ')
+
+    // ---------------------------------------------------------------------------------------------
+    // Labels
+    // ---------------------------------------------------------------------------------------------
+
+    fun cleanLabel(raw: String?): String {
+        val s = collapse(raw.orEmpty())
+        if (s.length <= MAX_LABEL_LENGTH) return s
+        var end = MAX_LABEL_LENGTH
+        if (Character.isHighSurrogate(s[end - 1])) end--
+        return s.substring(0, end)
+    }
+
+    fun defaultLabel(item: Subscription): String {
+        val a = item.address ?: return "Черга \${item.queue.orEmpty()}"
+        val house = collapse(a.house)
+        val street = collapse(TextNorm.decodeEntities(a.streetName))
+        if (street.isEmpty()) return "буд. $house"
+        val tokens = street.split(' ')
+        val core = if (tokens.size > 1 && StreetKey.isTypeWord(tokens[0])) tokens.drop(1) else tokens
+        return "\${core.joinToString(" ")} $house"
+    }
+
+    fun displayLabel(item: Subscription): String = item.label.ifEmpty { defaultLabel(item) }
+
+    // ---------------------------------------------------------------------------------------------
+    // Maps
+    // ---------------------------------------------------------------------------------------------
+
+    fun toMap(store: SubscriptionStore): Map<String, Any?> = linkedMapOf(
+        "schemaVersion" to SCHEMA_VERSION,
+        "primaryId" to store.primaryId,
+        "items" to store.items.map { itemToMap(it) }
+    )
+
+    fun itemToMap(item: Subscription): Map<String, Any?> = linkedMapOf(
+        "id" to item.id,
+        "label" to item.label,
+        "address" to item.address?.let {
+            linkedMapOf(
+                "remSlug" to it.remSlug,
+                "settlementId" to it.settlementId,
+                "streetId" to it.streetId,
+                "streetName" to it.streetName,
+                "house" to it.house,
+                "text" to it.text
+            )
+        },
+        "queue" to item.queue,
+        "queueSource" to item.queueSource.name,
+        "queueStatusText" to item.queueStatusText,
+        "plannedAlerts" to item.plannedAlerts,
+        "emergencyAlerts" to item.emergencyAlerts,
+        "createdAtMs" to item.createdAtMs
+    )
+
+    /**
+     * Lenient read: wrong types read as missing, nothing throws. Returns null ("absent") when the map
+     * is not a version-1 store, so the caller migrates again from the legacy keys. Call [repair] on
+     * the result before use.
+     */
+    fun fromMap(map: Map<*, *>?): SubscriptionStore? {
+        map ?: return null
+        val version = (map["schemaVersion"] as? Number)?.toInt() ?: return null
+        if (version != SCHEMA_VERSION) return null
+        val items = (map["items"] as? List<*>).orEmpty().mapNotNull { (it as? Map<*, *>)?.let(::itemFromMap) }
+        return SubscriptionStore(primaryId = map["primaryId"] as? String, items = items)
+    }
+
+    fun itemFromMap(m: Map<*, *>): Subscription {
+        val a = m["address"] as? Map<*, *>
+        return Subscription(
+            id = m["id"] as? String ?: "",
+            label = m["label"] as? String ?: "",
+            address = a?.let {
+                SubscriptionAddress(
+                    remSlug = it["remSlug"] as? String ?: "",
+                    settlementId = it["settlementId"] as? String ?: "",
+                    streetId = it["streetId"] as? String ?: "",
+                    streetName = it["streetName"] as? String ?: "",
+                    house = it["house"] as? String ?: "",
+                    text = it["text"] as? String ?: ""
+                )
+            },
+            queue = m["queue"] as? String,
+            queueSource = if (m["queueSource"] == QueueSource.LOOKUP.name) QueueSource.LOOKUP else QueueSource.MANUAL,
+            queueStatusText = m["queueStatusText"] as? String,
+            plannedAlerts = m["plannedAlerts"] as? Boolean ?: true,
+            emergencyAlerts = m["emergencyAlerts"] as? Boolean ?: true,
+            createdAtMs = (m["createdAtMs"] as? Number)?.toLong() ?: 0L
+        )
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // Repair
+    // ---------------------------------------------------------------------------------------------
+
+    /** Repair step 2: invalid queue or address -> null, label cleaned. */
+    fun normalize(item: Subscription): Subscription = item.copy(
+        label = cleanLabel(item.label),
+        address = item.address?.takeIf { it.isValid },
+        queue = item.queue?.takeIf { isValidQueue(it) }
+    )
+
+    fun repair(store: SubscriptionStore): RepairResult {
+        val dropped = ArrayList<DroppedItem>()
+        var items = store.items.filter { ok -> isValidId(ok.id).also { if (!it) dropped += DroppedItem(ok.id, "invalid_id") } }
+        items = items.map(::normalize)
+        items = items.filter { ok -> (ok.address != null || ok.queue != null).also { if (!it) dropped += DroppedItem(ok.id, "empty") } }
+        val ids = HashSet<String>()
+        items = items.filter { ok -> ids.add(ok.id).also { if (!it) dropped += DroppedItem(ok.id, "duplicate_id") } }
+        val identities = HashSet<String>()
+        items = items.filter { ok -> identities.add(ok.identity).also { if (!it) dropped += DroppedItem(ok.id, "duplicate_address") } }
+        if (items.size > MAX_ITEMS) {
+            items.drop(MAX_ITEMS).forEach { dropped += DroppedItem(it.id, "over_limit") }
+            items = items.take(MAX_ITEMS)
+        }
+        val primaryId = store.primaryId?.takeIf { p -> items.any { it.id == p } } ?: items.firstOrNull()?.id
+        return RepairResult(SubscriptionStore(primaryId, items), dropped)
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // Operations
+    // ---------------------------------------------------------------------------------------------
+
+    fun add(store: SubscriptionStore, candidate: Subscription): StoreResult {
+        if (!isValidId(candidate.id)) return StoreResult.Error(ERR_INVALID)
+        val item = normalize(candidate)
+        if (item.address == null && item.queue == null) return StoreResult.Error(ERR_INVALID)
+        if (store.items.any { it.id == item.id }) return StoreResult.Error(ERR_DUPLICATE_ID)
+        store.items.firstOrNull { it.identity == item.identity }?.let { return StoreResult.Error(ERR_DUPLICATE, it.id) }
+        if (store.items.size >= MAX_ITEMS) return StoreResult.Error(ERR_LIMIT)
+        return StoreResult.Ok(SubscriptionStore(store.primaryId ?: item.id, store.items + item))
+    }
+
+    fun remove(store: SubscriptionStore, id: String): StoreResult {
+        if (store.items.none { it.id == id }) return StoreResult.Error(ERR_NOT_FOUND)
+        val rest = store.items.filter { it.id != id }
+        val primaryId = if (store.primaryId != id && rest.any { it.id == store.primaryId }) {
+            store.primaryId
+        } else {
+            // minByOrNull keeps the first of equal values, which is the list-order tie rule
+            rest.minByOrNull { it.createdAtMs }?.id
+        }
+        return StoreResult.Ok(SubscriptionStore(primaryId, rest))
+    }
+
+    fun setPrimary(store: SubscriptionStore, id: String): StoreResult =
+        if (store.items.none { it.id == id }) StoreResult.Error(ERR_NOT_FOUND) else StoreResult.Ok(store.copy(primaryId = id))
+
+    fun setPlanned(store: SubscriptionStore, id: String, on: Boolean): StoreResult = update(store, id) { it.copy(plannedAlerts = on) }
+
+    fun setEmergency(store: SubscriptionStore, id: String, on: Boolean): StoreResult = update(store, id) { it.copy(emergencyAlerts = on) }
+
+    fun rename(store: SubscriptionStore, id: String, raw: String?): StoreResult = update(store, id) { it.copy(label = cleanLabel(raw)) }
+
+    /** Moves the item to [toIndex] (clamped); the primary and the fields stay unchanged (spec section 4). */
+    fun move(store: SubscriptionStore, id: String, toIndex: Int): StoreResult {
+        val from = store.items.indexOfFirst { it.id == id }
+        if (from < 0) return StoreResult.Error(ERR_NOT_FOUND)
+        val to = toIndex.coerceIn(0, store.items.size - 1)
+        val items = store.items.toMutableList()
+        items.add(to, items.removeAt(from))
+        return StoreResult.Ok(store.copy(items = items))
+    }
+
+    /** Result of a ZTOE lookup for an address item (\`spec/SUBSCRIPTIONS.md\` section 4). */
+    fun setQueueInfo(store: SubscriptionStore, id: String, queue: String?, statusText: String?, addressText: String?): StoreResult {
+        val item = store.items.firstOrNull { it.id == id } ?: return StoreResult.Error(ERR_NOT_FOUND)
+        val address = item.address ?: return StoreResult.Error(ERR_INVALID)
+        return update(store, id) {
+            it.copy(
+                queue = queue?.takeIf { q -> isValidQueue(q) },
+                queueStatusText = statusText?.takeIf { s -> s.isNotBlank() },
+                address = if (addressText.isNullOrBlank()) address else address.copy(text = addressText)
+            )
+        }
+    }
+
+    private inline fun update(store: SubscriptionStore, id: String, change: (Subscription) -> Subscription): StoreResult {
+        if (store.items.none { it.id == id }) return StoreResult.Error(ERR_NOT_FOUND)
+        return StoreResult.Ok(store.copy(items = store.items.map { if (it.id == id) change(it) else it }))
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // Effective switches
+    // ---------------------------------------------------------------------------------------------
+
+    fun plannedActive(master: Boolean, item: Subscription): Boolean = master && item.plannedAlerts && item.queue != null
+
+    fun emergencyActive(master: Boolean, item: Subscription, poweronIdsKnown: Boolean): Boolean =
+        master && item.emergencyAlerts && item.address != null && poweronIdsKnown
+
+    fun anyAlertsEnabled(master: Boolean, store: SubscriptionStore): Boolean =
+        master && store.items.any { it.plannedAlerts || it.emergencyAlerts }
+
+    // ---------------------------------------------------------------------------------------------
+    // Mirror of the primary item into the single-address keys (section 7)
+    // ---------------------------------------------------------------------------------------------
+
+    fun primaryMirror(store: SubscriptionStore, master: Boolean): LegacyMirror {
+        val p = store.primary
+        val a = p?.address
+        return LegacyMirror(
+            queue = p?.queue.orEmpty(),
+            customQueueStatusText = p?.queueStatusText,
+            selectedAddress = if (p != null && a != null) a.text.ifEmpty { displayLabel(p) } else null,
+            remSlug = a?.remSlug.orEmpty(),
+            settlementId = a?.settlementId.orEmpty(),
+            streetId = a?.streetId.orEmpty(),
+            house = a?.house.orEmpty(),
+            notificationsEnabled = master && (p?.plannedAlerts ?: true),
+            emergencyNotificationsEnabled = master && (p?.emergencyAlerts ?: true)
+        )
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // Migration
+    // ---------------------------------------------------------------------------------------------
+
+    fun migrate(legacy: LegacySettings, newId: String, nowMs: Long): MigrationResult {
+        val queue = legacy.queue.takeIf { isValidQueue(it) }
+        val address = SubscriptionAddress(
+            remSlug = legacy.remSlug,
+            settlementId = legacy.settlementId,
+            streetId = legacy.streetId,
+            streetName = legacy.streetName.orEmpty(),
+            house = legacy.house,
+            text = legacy.selectedAddress.orEmpty()
+        )
+        val item = when {
+            address.isValid -> Subscription(
+                id = newId,
+                address = address,
+                queue = queue,
+                queueSource = QueueSource.LOOKUP,
+                queueStatusText = legacy.customQueueStatusText?.takeIf { it.isNotBlank() },
+                createdAtMs = nowMs
+            )
+            queue != null -> Subscription(id = newId, queue = queue, queueSource = QueueSource.MANUAL, createdAtMs = nowMs)
+            else -> null
+        }?.copy(
+            plannedAlerts = legacy.notificationsEnabled,
+            emergencyAlerts = legacy.emergencyNotificationsEnabled
+        )
+        val store = if (item == null) SubscriptionStore.EMPTY else SubscriptionStore(item.id, listOf(item))
+        return MigrationResult(store, legacy.notificationsEnabled || legacy.emergencyNotificationsEnabled)
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // Alerts for every item (section 8)
+    // ---------------------------------------------------------------------------------------------
+
+    /** The primary first, then the other items by \`createdAtMs\`, list order on ties. */
+    fun alertOrder(store: SubscriptionStore): List<Subscription> {
+        val primary = store.primary
+        val rest = store.items.withIndex()
+            .filter { it.value.id != primary?.id }
+            .sortedWith(compareBy<IndexedValue<Subscription>> { it.value.createdAtMs }.thenBy { it.index })
+            .map { it.value }
+        return listOfNotNull(primary) + rest
+    }
+
+    /** One planned alert per (queue, span start, span end) over every \`plannedActive\` item (8.1). */
+    fun groupAlerts(store: SubscriptionStore, master: Boolean, alertsById: Map<String, List<AlertSpec>>): List<PlannedGroup> {
+        data class Acc(val queue: String, val first: AlertSpec, var mayContinue: Boolean, val members: LinkedHashSet<String>)
+        val groups = LinkedHashMap<String, Acc>()
+        for (item in alertOrder(store)) {
+            if (!plannedActive(master, item)) continue
+            val queue = item.queue ?: continue
+            val alerts = alertsById[item.id] ?: continue
+            for (a in alerts) {
+                val key = "planned_q\${queue}_\${a.spanStart}_\${a.spanEnd}"
+                val acc = groups.getOrPut(key) { Acc(queue, a, false, LinkedHashSet()) }
+                acc.mayContinue = acc.mayContinue || a.mayContinue
+                acc.members.add(item.id)
+            }
+        }
+        return groups.map { (key, g) ->
+            PlannedGroup(
+                key = key,
+                queue = g.queue,
+                fireAt = g.first.fireAt,
+                spanStart = g.first.spanStart,
+                spanEnd = g.first.spanEnd,
+                mayContinue = g.mayContinue,
+                durationMinutes = g.first.durationMinutes,
+                memberIds = g.members.toList()
+            )
+        }.sortedWith(compareBy<PlannedGroup> { it.fireAt }.thenBy { it.spanStart }.thenBy { it.key })
+    }
+
+    /** Fired-registry key of one item for one span (8.2). */
+    fun memberKey(id: String, spanStart: java.time.LocalDateTime): String = "planned_\${id}_$spanStart"
+
+    /** The address-independent key 1.4.0 recorded; it counts for every item. */
+    fun legacyAlertKey(spanStart: java.time.LocalDateTime): String = "planned_$spanStart"
+
+    fun pendingMembers(group: PlannedGroup, notified: (String) -> Boolean): List<String> =
+        group.memberIds.filter { !notified(memberKey(it, group.spanStart)) && !notified(legacyAlertKey(group.spanStart)) }
+
+    /** Labels that open the planned text, or null when the store has at most one item (8.3). */
+    fun alertLabels(store: SubscriptionStore, memberIds: List<String>): String? {
+        if (store.items.size <= 1 || memberIds.isEmpty()) return null
+        val labels = memberIds.mapNotNull { id -> store.items.firstOrNull { it.id == id }?.let { displayLabel(it) } }
+        if (labels.isEmpty()) return null
+        val head = labels.take(2).joinToString(" · ")
+        return if (labels.size > 2) "$head +\${labels.size - 2}" else head
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // Main screen (section 9)
+    // ---------------------------------------------------------------------------------------------
+
+    /** The chips of the address switcher: every item in list order, or none with fewer than 2 items. */
+    fun switcherItems(store: SubscriptionStore): List<Subscription> = if (store.items.size >= 2) store.items else emptyList()
+
+    /** The item the main screen shows: the selected one if it still exists, else the primary. */
+    fun viewItem(store: SubscriptionStore, selectedId: String?): Subscription? =
+        store.items.firstOrNull { it.id == selectedId } ?: store.primary
+
+    /** The master is on but no item has a switch on: "on" would silently mean nothing. */
+    fun noAlertsCaption(master: Boolean, store: SubscriptionStore): Boolean =
+        master && store.items.isNotEmpty() && !anyAlertsEnabled(master, store)
+
+    // ---------------------------------------------------------------------------------------------
+    // Widgets (spec/SUBSCRIPTIONS.md section 10)
+    // ---------------------------------------------------------------------------------------------
+
+    /** The item a widget shows: its bound item if it still exists, else the primary (null = follow primary). */
+    fun widgetItem(store: SubscriptionStore, boundId: String?): Subscription? = viewItem(store, boundId)
+
+    /**
+     * The address label a widget prints: always with two or more items; with one item only when the bound
+     * item was removed, so the fall back to the primary is visible.
+     */
+    fun widgetLabel(store: SubscriptionStore, boundId: String?): String? {
+        val item = widgetItem(store, boundId) ?: return null
+        val removed = boundId != null && store.items.none { it.id == boundId }
+        return if (store.items.size >= 2 || removed) displayLabel(item) else null
+    }
+
+    /** The distinct items the placed widgets show, in order of first appearance (redraw alarms, polling). */
+    fun widgetItemIds(store: SubscriptionStore, boundIds: List<String?>): List<String> =
+        boundIds.mapNotNull { widgetItem(store, it)?.id }.distinct()
+}
+
+/** One planned pre-warning shared by every item on one queue with the same span (\`spec/SUBSCRIPTIONS.md\` 8.1). */
+data class PlannedGroup(
+    val key: String,
+    val queue: String,
+    val fireAt: java.time.LocalDateTime,
+    val spanStart: java.time.LocalDateTime,
+    val spanEnd: java.time.LocalDateTime,
+    val mayContinue: Boolean,
+    val durationMinutes: Long,
+    val memberIds: List<String>
+)
+`
+  },
+  {
+    path: 'app/src/main/java/ua/blackout/prewarning/data/repository/SubscriptionRepository.kt',
+    language: 'kotlin',
+    description: 'Stores the multi-address subscriptions and the alerts master switch in the user settings',
+    content: `package ua.blackout.prewarning.data.repository
+
+import android.content.Context
+import android.content.SharedPreferences
+import org.json.JSONArray
+import org.json.JSONObject
+import ua.blackout.prewarning.core.LegacySettings
+import ua.blackout.prewarning.core.RepairResult
+import ua.blackout.prewarning.core.StoreResult
+import ua.blackout.prewarning.core.SubscriptionStore
+import ua.blackout.prewarning.core.Subscriptions
+import ua.blackout.prewarning.data.model.UserSettings
+import ua.blackout.prewarning.data.parser.ZtoeAddressLookup
+import java.security.SecureRandom
+
+/**
+ * Stores the multi-address subscriptions (\`spec/SUBSCRIPTIONS.md\`): the store as the JSON string
+ * [KEY_STORE] and the kill switch [KEY_MASTER], both in the user settings file so they travel with a
+ * device backup. The rules live in [Subscriptions]; this class only encodes, reads and writes.
+ *
+ * Used through [SubscriptionSync], which runs [ensureMigrated] before every read or change and
+ * writes the primary item back into the single-address keys (multi-address step 2).
+ */
+class SubscriptionRepository(
+    private val prefs: SharedPreferences,
+    private val clock: () -> Long = System::currentTimeMillis,
+    private val random: () -> String = ::randomId
+) {
+    constructor(context: Context) : this(
+        context.applicationContext.getSharedPreferences(SETTINGS_PREFS, Context.MODE_PRIVATE)
+    )
+
+    companion object {
+        const val SETTINGS_PREFS = "zt_user_settings_v1"
+        const val KEY_STORE = "zt_subscriptions_v1"
+        const val KEY_MASTER = "alerts_master_enabled"
+
+        private val LOCK = Any()
+        private val RNG = SecureRandom()
+        private const val ID_CHARS = "abcdefghijklmnopqrstuvwxyz0123456789"
+
+        /** 8 random characters from \`[a-z0-9]\`. */
+        fun randomId(): String = buildString { repeat(8) { append(ID_CHARS[RNG.nextInt(ID_CHARS.length)]) } }
+
+        /** The 1.4.0 settings as migration input; [streetName] is resolved by the caller (see [resolveStreetName]). */
+        fun legacyFrom(settings: UserSettings, streetName: String?): LegacySettings {
+            val q = settings.selectedAddressQuery
+            return LegacySettings(
+                queue = settings.queue,
+                customQueueStatusText = settings.customQueueStatusText,
+                selectedAddress = settings.selectedAddress,
+                remSlug = q?.remId.orEmpty(),
+                settlementId = q?.settlementId.orEmpty(),
+                streetId = q?.streetId.orEmpty(),
+                streetName = streetName,
+                house = q?.house.orEmpty(),
+                notificationsEnabled = settings.notificationsEnabled,
+                emergencyNotificationsEnabled = settings.emergencyNotificationsEnabled
+            )
+        }
+
+        /** Same lookup as \`OutageRepository.addressKey\`, so the migrated address key matches 1.4.0. */
+        fun resolveStreetName(streetId: String?): String? {
+            if (streetId.isNullOrBlank()) return null
+            return try {
+                ZtoeAddressLookup.findStreetById(streetId)?.nameUk
+            } catch (_: Exception) {
+                null
+            }
+        }
+
+        // -----------------------------------------------------------------------------------------
+        // JSON <-> plain map. Written by hand because JSONObject(Map) drops null values in some
+        // org.json versions and keeps them in others; the stored text must not depend on that.
+        // -----------------------------------------------------------------------------------------
+
+        fun encode(store: SubscriptionStore): String = (toJson(Subscriptions.toMap(store)) as JSONObject).toString()
+
+        /** Returns null for missing, unreadable or non-version-1 text ("absent"). */
+        fun decode(text: String?): SubscriptionStore? {
+            if (text.isNullOrBlank()) return null
+            val parsed = try {
+                JSONObject(text)
+            } catch (_: Exception) {
+                return null
+            }
+            return Subscriptions.fromMap(fromJson(parsed) as Map<*, *>)
+        }
+
+        private fun toJson(v: Any?): Any = when (v) {
+            null -> JSONObject.NULL
+            is Map<*, *> -> JSONObject().also { o -> v.forEach { (k, x) -> o.put(k.toString(), toJson(x)) } }
+            is List<*> -> JSONArray().also { a -> v.forEach { a.put(toJson(it)) } }
+            else -> v
+        }
+
+        private fun fromJson(v: Any?): Any? = when (v) {
+            null, JSONObject.NULL -> null
+            is JSONObject -> v.keys().asSequence().associateWith { fromJson(v.opt(it)) }
+            is JSONArray -> (0 until v.length()).map { fromJson(v.opt(it)) }
+            is Int -> v.toLong()
+            else -> v
+        }
+    }
+
+    /** The repaired store, or null when it has never been written (or is unreadable): then migrate. */
+    fun read(): RepairResult? = decode(prefs.getString(KEY_STORE, null))?.let { Subscriptions.repair(it) }
+
+    fun store(): SubscriptionStore = read()?.store ?: SubscriptionStore.EMPTY
+
+    fun alertsMaster(): Boolean = prefs.getBoolean(KEY_MASTER, true)
+
+    fun setAlertsMaster(on: Boolean) {
+        prefs.edit().putBoolean(KEY_MASTER, on).apply()
+    }
+
+    /**
+     * Runs the one-time migration from the 1.4.0 settings when the store is absent and returns the
+     * store in use. [legacy] is only evaluated when a migration is needed.
+     */
+    fun ensureMigrated(legacy: () -> LegacySettings): SubscriptionStore = synchronized(LOCK) {
+        read()?.let { return it.store }
+        val result = Subscriptions.migrate(legacy(), random(), clock())
+        prefs.edit()
+            .putString(KEY_STORE, encode(result.store))
+            .putBoolean(KEY_MASTER, result.alertsMaster)
+            .apply()
+        result.store
+    }
+
+    /** Read-modify-write under one lock; writes only when [op] succeeds. */
+    fun mutate(op: (SubscriptionStore) -> StoreResult): StoreResult = synchronized(LOCK) {
+        val result = op(store())
+        if (result is StoreResult.Ok) prefs.edit().putString(KEY_STORE, encode(result.store)).apply()
+        result
+    }
+
+    /** A fresh id that no current item uses. */
+    fun newItemId(): String {
+        val used = store().items.map { it.id }.toSet()
+        while (true) {
+            val id = random()
+            if (id !in used && Subscriptions.isValidId(id)) return id
+        }
+    }
+}
+`
+  },
+  {
+    path: 'app/src/main/java/ua/blackout/prewarning/data/repository/SubscriptionSync.kt',
+    language: 'kotlin',
+    description: 'Changes the subscription store and mirrors the primary address into the single-address settings',
+    content: `package ua.blackout.prewarning.data.repository
+
+import android.content.Context
+import ua.blackout.prewarning.core.QueueSource
+import ua.blackout.prewarning.core.StoreResult
+import ua.blackout.prewarning.core.Subscription
+import ua.blackout.prewarning.core.SubscriptionAddress
+import ua.blackout.prewarning.core.SubscriptionStore
+import ua.blackout.prewarning.core.Subscriptions
+import ua.blackout.prewarning.data.model.SelectedAddressQuery
+
+/**
+ * The one way to change addresses and alert switches since multi-address step 2
+ * (\`spec/SUBSCRIPTIONS.md\` section 7). Every call runs the one-time migration first, changes the
+ * subscription store, then writes the primary item into the single-address keys that the main
+ * screen and widgets still read (alerts read the store, section 8). Callers sync alarms and widgets themselves.
+ */
+class SubscriptionSync(context: Context) {
+    private val appContext = context.applicationContext
+    private val settingsRepo = SettingsRepository(appContext)
+    private val repo = SubscriptionRepository(appContext)
+
+    fun ensureReady(): SubscriptionStore = repo.ensureMigrated {
+        val s = settingsRepo.getSettings()
+        SubscriptionRepository.legacyFrom(s, SubscriptionRepository.resolveStreetName(s.selectedAddressQuery?.streetId))
+    }
+
+    fun store(): SubscriptionStore {
+        ensureReady()
+        return repo.store()
+    }
+
+    fun master(): Boolean {
+        ensureReady()
+        return repo.alertsMaster()
+    }
+
+    fun setMaster(on: Boolean) {
+        ensureReady()
+        val was = repo.alertsMaster()
+        repo.setAlertsMaster(on)
+        if (was != on) settingsRepo.applyMasterSound(on)
+        mirror()
+    }
+
+    /** Applies [op] to the store; on success writes the mirror. */
+    fun change(op: (SubscriptionStore) -> StoreResult): StoreResult {
+        ensureReady()
+        val result = repo.mutate(op)
+        if (result is StoreResult.Ok) mirror()
+        return result
+    }
+
+    fun addFromLookup(queue: String, statusText: String?, addressText: String, query: SelectedAddressQuery): StoreResult {
+        ensureReady()
+        val item = Subscription(
+            id = repo.newItemId(),
+            address = SubscriptionAddress(
+                remSlug = query.remId,
+                settlementId = query.settlementId,
+                streetId = query.streetId,
+                streetName = SubscriptionRepository.resolveStreetName(query.streetId).orEmpty(),
+                house = query.house,
+                text = addressText
+            ),
+            queue = queue.takeIf { Subscriptions.isValidQueue(it) },
+            queueSource = QueueSource.LOOKUP,
+            queueStatusText = statusText?.takeIf { it.isNotBlank() },
+            createdAtMs = System.currentTimeMillis()
+        )
+        return change { Subscriptions.add(it, item) }
+    }
+
+    fun addQueueOnly(queue: String): StoreResult {
+        ensureReady()
+        val item = Subscription(
+            id = repo.newItemId(),
+            queue = queue,
+            queueSource = QueueSource.MANUAL,
+            createdAtMs = System.currentTimeMillis()
+        )
+        return change { Subscriptions.add(it, item) }
+    }
+
+    /** A background ZTOE lookup for the primary address found its queue (or "no queue"). */
+    fun assignPrimaryQueue(queue: String?, statusText: String?, addressText: String?): StoreResult = change { s ->
+        val id = s.primaryId ?: return@change StoreResult.Error(Subscriptions.ERR_NOT_FOUND)
+        Subscriptions.setQueueInfo(s, id, queue, statusText, addressText)
+    }
+
+    fun mirror() {
+        settingsRepo.applyPrimaryMirror(Subscriptions.primaryMirror(repo.store(), repo.alertsMaster()))
     }
 }
 `

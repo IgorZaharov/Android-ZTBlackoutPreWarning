@@ -1,0 +1,17 @@
+{
+  "_doc": "Golden vectors for the ztoe.com.ua site state (spec/SITE_STATE.md). networkValidated is the operating system's own verdict that the device has working internet; no third-party host is contacted.",
+  "cases": [
+    { "failure": "NONE", "hasTodayTable": true,  "networkValidated": true,  "expect": "AVAILABLE_WITH_TABLE" },
+    { "failure": "NONE", "hasTodayTable": false, "networkValidated": true,  "expect": "AVAILABLE_NO_TABLE" },
+    { "failure": "NONE", "hasTodayTable": true,  "networkValidated": false, "expect": "AVAILABLE_WITH_TABLE" },
+    { "failure": "DNS", "hasTodayTable": false, "networkValidated": true,  "expect": "SITE_UNREACHABLE" },
+    { "failure": "CONNECT", "hasTodayTable": false, "networkValidated": true,  "expect": "SITE_UNREACHABLE" },
+    { "failure": "TIMEOUT", "hasTodayTable": false, "networkValidated": true,  "expect": "SITE_UNREACHABLE" },
+    { "failure": "TLS", "hasTodayTable": false, "networkValidated": true,  "expect": "SITE_UNREACHABLE" },
+    { "failure": "HTTP_ERROR", "hasTodayTable": false, "networkValidated": true,  "expect": "SITE_UNREACHABLE" },
+    { "failure": "OTHER", "hasTodayTable": false, "networkValidated": true,  "expect": "SITE_UNREACHABLE" },
+    { "failure": "DNS", "hasTodayTable": false, "networkValidated": false, "expect": "NO_INTERNET" },
+    { "failure": "CONNECT", "hasTodayTable": false, "networkValidated": false, "expect": "NO_INTERNET" },
+    { "failure": "TIMEOUT", "hasTodayTable": false, "networkValidated": false, "expect": "NO_INTERNET" }
+  ]
+}

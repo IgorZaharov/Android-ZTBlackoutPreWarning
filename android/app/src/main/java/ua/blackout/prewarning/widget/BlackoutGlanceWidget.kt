@@ -23,9 +23,12 @@ import androidx.glance.GlanceTheme
 import androidx.glance.Image
 import androidx.glance.ImageProvider
 import androidx.glance.LocalSize
+import androidx.glance.action.Action
 import androidx.glance.action.ActionParameters
+import androidx.glance.action.actionParametersOf
 import androidx.glance.action.actionStartActivity
 import androidx.glance.action.clickable
+import androidx.glance.appwidget.CircularProgressIndicator
 import androidx.glance.appwidget.GlanceAppWidget
 import androidx.glance.appwidget.GlanceAppWidgetManager
 import androidx.glance.appwidget.SizeMode
@@ -43,21 +46,25 @@ import androidx.glance.text.FontWeight
 import androidx.glance.text.Text
 import androidx.glance.text.TextStyle
 import androidx.glance.unit.ColorProvider
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import ua.blackout.prewarning.MainActivity
 import ua.blackout.prewarning.R
+import ua.blackout.prewarning.core.OutageEngine
+import ua.blackout.prewarning.data.KYIV_ZONE
 import ua.blackout.prewarning.data.model.BlackoutSlot
 import ua.blackout.prewarning.data.model.SlotStatus
-import ua.blackout.prewarning.data.parser.ZtoeParser
-import ua.blackout.prewarning.data.repository.ScheduleRepository
+import ua.blackout.prewarning.data.model.UserSettings
+import ua.blackout.prewarning.data.repository.OutageRepository
+import ua.blackout.prewarning.data.repository.OutageSnapshot
 import ua.blackout.prewarning.data.repository.SettingsRepository
+import ua.blackout.prewarning.notification.NotificationHelper
+import ua.blackout.prewarning.data.repository.SubscriptionSync
 import ua.blackout.prewarning.notification.AlarmScheduler
 import ua.blackout.prewarning.ui.AppStrings
-import java.time.LocalDate
-import java.time.LocalTime
-import java.time.format.DateTimeFormatter
-import ua.blackout.prewarning.data.KYIV_ZONE
+import java.time.Instant
+import java.time.LocalDateTime
 
 open class BlackoutGlanceWidget(private val forceBigLayout: Boolean = false) : GlanceAppWidget() {
 
@@ -75,12 +82,12 @@ open class BlackoutGlanceWidget(private val forceBigLayout: Boolean = false) : G
         val KEY_NOTIFICATIONS_ENABLED = booleanPreferencesKey("glance_notifications_enabled")
         val KEY_QUEUE = stringPreferencesKey("glance_queue")
         val KEY_LANGUAGE = stringPreferencesKey("glance_language")
+        /** Bumped on every redraw so Glance recomposes; the widget itself renders only live values. */
         val KEY_REFRESH_TICK = longPreferencesKey("glance_refresh_tick")
-        val KEY_IS_BLACKOUT_NOW = booleanPreferencesKey("glance_is_blackout_now")
-        val KEY_IS_UNCLEAR = booleanPreferencesKey("glance_is_unclear")
-        val KEY_COUNTDOWN_TEXT = stringPreferencesKey("glance_countdown_text")
-        val KEY_NEXT_SLOT_TIME = stringPreferencesKey("glance_next_slot_time")
-        val KEY_NEXT_BLACKOUT_TEXT = stringPreferencesKey("glance_next_blackout_text")
+        /** When the widget refresh button started a refresh (0 = idle); older than [REFRESH_BUSY_MAX_MS] counts as idle. */
+        val KEY_REFRESHING_SINCE = longPreferencesKey("glance_refreshing_since")
+        /** A refresh killed with the process must not leave the ring spinning: 2 clients x 8 s timeouts, plus margin. */
+        const val REFRESH_BUSY_MAX_MS = 30_000L
 
         private val COUNTDOWN_PART_REGEX = Regex("(\\d{1,2}|--)")
 
@@ -95,23 +102,97 @@ open class BlackoutGlanceWidget(private val forceBigLayout: Boolean = false) : G
             return rawCountdown
         }
 
-        private fun buildLightNoOutageSlots(): List<BlackoutSlot> {
-            return (0 until 48).map { idx ->
-                val sh = idx / 2
-                val sm = if (idx % 2 == 0) "00" else "30"
-                val eh = (idx + 1) / 2
-                val em = if ((idx + 1) % 2 == 0) "00" else "30"
-                val startStr = "${sh.toString().padStart(2, '0')}:$sm"
-                val endStr = "${eh.toString().padStart(2, '0')}:$em"
-                BlackoutSlot(
-                    hour = sh,
-                    startStr = startStr,
-                    endStr = endStr,
-                    status = SlotStatus.POWER_ON,
-                    label = "$startStr - $endStr"
+        /** Everything the two widget layouts show, derived from one [OutageSnapshot] (local state only). */
+        internal data class WidgetModel(
+            val lang: String,
+            val queueHeader: String,
+            val isUnclear: Boolean,
+            val isOffNow: Boolean,
+            val countdown: String,
+            /** Current outage when off, otherwise the next one: full "HH:mm – HH:mm" (end may be past midnight). */
+            val period: String,
+            val nextOutage: String,
+            /** The 48 half-hour cells of today (empty when unclear): the same states the main timeline draws. */
+            val slots: List<BlackoutSlot>,
+            val nowHour: Int,
+            val nowMinute: Int,
+            /** Small "data from HH:mm" caption when the cached schedule is shown because the site failed. */
+            val staleCaption: String?,
+            /** Address label of the shown item (`widgetLabel`, spec/SUBSCRIPTIONS.md 10); null keeps the 1.4.0 look. */
+            val addressLabel: String? = null
+        )
+
+        private fun p2(n: Int) = n.toString().padStart(2, '0')
+
+        internal fun buildWidgetModel(settings: UserSettings, snapshot: OutageSnapshot, addressLabel: String? = null): WidgetModel {
+            val lang = AppStrings.resolveLang(settings.language)
+            val now = snapshot.now
+            val isNoQueueHouse = !settings.customQueueStatusText.isNullOrBlank()
+            val queueHeader = when {
+                isNoQueueHouse -> if (lang == "uk") "Черга відсутня" else "No queue"
+                settings.queue.isBlank() -> if (lang == "uk") "Черга —" else "Queue —"
+                else -> "Черга ${settings.queue}"
+            }
+            val notConfigured = settings.queue.isBlank() && !isNoQueueHouse && !snapshot.hasAddress
+            if (notConfigured || snapshot.isUnclear) {
+                return WidgetModel(
+                    lang = lang,
+                    queueHeader = queueHeader,
+                    isUnclear = true,
+                    isOffNow = false,
+                    countdown = formatWidgetCountdown("--:--:--", lang),
+                    period = "--:-- - --:--",
+                    nextOutage = "--:-- - --:--",
+                    slots = emptyList(),
+                    nowHour = now.hour,
+                    nowMinute = now.minute,
+                    staleCaption = null,
+                    addressLabel = addressLabel
                 )
             }
+
+            val st = snapshot.status()
+            val period = if (!st.isOffNow && st.nextSpan == null) AppStrings.widgetNoOutages(lang) else st.nextSlotTime
+            // The next outage after the current moment, from the same merged spans the countdown uses
+            val next = OutageEngine.spans(snapshot.outages.filter { !it.stale }).firstOrNull { it.start.isAfter(now) }
+            val nextText = when {
+                next == null -> AppStrings.widgetNoMoreOutages(lang)
+                next.start.toLocalDate() == snapshot.today -> OutageEngine.formatSpan(next)
+                else -> "${AppStrings.widgetTomorrowPrefix(lang)} ${OutageEngine.formatSpan(next)}"
+            }
+            val staleCaption = if (snapshot.isStale) {
+                snapshot.site?.lastSuccessMs?.let { ms ->
+                    val t = LocalDateTime.ofInstant(Instant.ofEpochMilli(ms), KYIV_ZONE)
+                    AppStrings.staleChip(lang, "${p2(t.hour)}:${p2(t.minute)}")
+                }
+            } else {
+                null
+            }
+            return WidgetModel(
+                lang = lang,
+                queueHeader = queueHeader,
+                isUnclear = false,
+                isOffNow = st.isOffNow,
+                countdown = formatWidgetCountdown(st.countdownText, lang),
+                period = period,
+                nextOutage = nextText,
+                slots = snapshot.slotsFor(snapshot.today),
+                nowHour = now.hour,
+                nowMinute = now.minute,
+                staleCaption = staleCaption,
+                addressLabel = addressLabel
+            )
         }
+
+        /** 0 = power on, 1 = planned off, 2 = emergency only, 3 = emergency overlapping planned. */
+        private fun cellKind(s: BlackoutSlot): Int = when {
+            s.isEmergency && s.isPlanned -> 3
+            s.isEmergency -> 2
+            s.status == SlotStatus.POWER_OFF -> 1
+            else -> 0
+        }
+
+        private const val STRIPE_PX = 8f
 
         @Volatile
         private var cachedChartBitmapKey: String? = null
@@ -123,98 +204,67 @@ open class BlackoutGlanceWidget(private val forceBigLayout: Boolean = false) : G
                 val appCtx = context.applicationContext
                 val manager = GlanceAppWidgetManager(appCtx)
                 manager.getGlanceIds(BlackoutGlanceWidget::class.java).isNotEmpty() ||
-                    manager.getGlanceIds(BlackoutBigGlanceWidget::class.java).isNotEmpty()
+                    manager.getGlanceIds(BlackoutBigGlanceWidget::class.java).isNotEmpty() ||
+                    manager.getGlanceIds(BlackoutStripGlanceWidget::class.java).isNotEmpty()
             } catch (_: Exception) {
                 false
             }
         }
 
-        suspend fun syncAllWidgets(context: Context) {
+        /**
+         * Redraws every placed widget. The widgets render from [OutageRepository.snapshot] at draw time,
+         * so nothing computed here is persisted: this only bumps a tick that makes Glance recompose.
+         */
+        suspend fun syncAllWidgets(context: Context, refreshing: Boolean? = null) {
             val appCtx = context.applicationContext
             val manager = GlanceAppWidgetManager(appCtx)
             val smallIds = manager.getGlanceIds(BlackoutGlanceWidget::class.java)
             val bigIds = manager.getGlanceIds(BlackoutBigGlanceWidget::class.java)
-            val glanceIds = smallIds + bigIds
-            if (glanceIds.isEmpty()) return
+            val stripIds = manager.getGlanceIds(BlackoutStripGlanceWidget::class.java)
+            if (smallIds.isEmpty() && bigIds.isEmpty() && stripIds.isEmpty()) return
 
             val settings = SettingsRepository(appCtx).getSettings()
+            val alertsMaster = SubscriptionSync(appCtx).master()
             val resolvedLang = AppStrings.resolveLang(settings.language)
-            val scheduleRepo = ScheduleRepository(appCtx)
-
-            val todayDateIso = LocalDate.now(KYIV_ZONE).format(DateTimeFormatter.ISO_LOCAL_DATE)
-            val tomorrowDateIso = LocalDate.now(KYIV_ZONE).plusDays(1).format(DateTimeFormatter.ISO_LOCAL_DATE)
-            val isNoQueueHouse = !settings.customQueueStatusText.isNullOrBlank()
-            val baseTodaySlots = when {
-                isNoQueueHouse && settings.activeEmergencyOutage == null -> buildLightNoOutageSlots()
-                settings.queue.isBlank() && isNoQueueHouse -> buildLightNoOutageSlots()
-                else -> scheduleRepo.getTodaySlots(settings.queue)
-            }
-            val effectiveTodaySlots = ScheduleRepository.applyEmergencyOutageToSlots(
-                baseTodaySlots,
-                todayDateIso,
-                settings.activeEmergencyOutage
-            )
-            val rawTomorrowSlots = scheduleRepo.getTomorrowSlots(settings.queue)
-            val effectiveTomorrowSlots = rawTomorrowSlots?.let {
-                ScheduleRepository.applyEmergencyOutageToSlots(it, tomorrowDateIso, settings.activeEmergencyOutage)
-            }
-
-            val info = when {
-                settings.queue.isBlank() && !isNoQueueHouse && settings.activeEmergencyOutage == null ->
-                    ScheduleRepository.StatusAndCountdown(false, "--:--:--", "--:-- - --:--", true)
-                isNoQueueHouse && settings.activeEmergencyOutage == null ->
-                    ScheduleRepository.StatusAndCountdown(false, "--:--:--", "Відключень немає", false)
-                else ->
-                    ScheduleRepository.calculateStatusAndCountdown(
-                        slots = effectiveTodaySlots,
-                        tomorrowSlots = effectiveTomorrowSlots,
-                        now = LocalTime.now(KYIV_ZONE)
-                    )
-            }
-            val formattedCountdown = formatWidgetCountdown(info.countdownText, resolvedLang)
-            val nextBlackoutText = if (isNoQueueHouse && settings.activeEmergencyOutage == null) {
-                "Сьогодні більше немає"
-            } else {
-                val nowMin = LocalTime.now(KYIV_ZONE).let { it.hour * 60 + it.minute }
-                val upcoming = scheduleRepo.getDetailedIntervals(effectiveTodaySlots).firstOrNull { interval ->
-                    val p = interval.startStr.split(":")
-                    val startMin = (p.getOrNull(0)?.toIntOrNull() ?: 0) * 60 + (p.getOrNull(1)?.toIntOrNull() ?: 0)
-                    startMin > nowMin
-                }
-                if (upcoming != null) "${upcoming.startStr} – ${upcoming.endStr}" else "Сьогодні більше немає"
-            }
             val nowMs = System.currentTimeMillis()
-            for (gId in smallIds) {
+
+            suspend fun touch(gId: GlanceId) {
                 updateAppWidgetState(appCtx, PreferencesGlanceStateDefinition, gId) { prefs ->
                     prefs.toMutablePreferences().apply {
-                        this[KEY_NOTIFICATIONS_ENABLED] = settings.notificationsEnabled
+                        this[KEY_NOTIFICATIONS_ENABLED] = alertsMaster
                         this[KEY_QUEUE] = settings.queue
                         this[KEY_LANGUAGE] = resolvedLang
                         this[KEY_REFRESH_TICK] = nowMs
-                        this[KEY_IS_BLACKOUT_NOW] = info.isBlackoutNow
-                        this[KEY_IS_UNCLEAR] = info.isUnclear
-                        this[KEY_COUNTDOWN_TEXT] = formattedCountdown
-                        this[KEY_NEXT_SLOT_TIME] = info.nextSlotTime
-                        this[KEY_NEXT_BLACKOUT_TEXT] = nextBlackoutText
+                        if (refreshing != null) this[KEY_REFRESHING_SINCE] = if (refreshing) nowMs else 0L
                     }
                 }
-                BlackoutGlanceWidget().update(appCtx, gId)
+            }
+            for (gId in smallIds) {
+                try {
+                    touch(gId)
+                    BlackoutGlanceWidget().update(appCtx, gId)
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (_: Exception) {
+                }
             }
             for (gId in bigIds) {
-                updateAppWidgetState(appCtx, PreferencesGlanceStateDefinition, gId) { prefs ->
-                    prefs.toMutablePreferences().apply {
-                        this[KEY_NOTIFICATIONS_ENABLED] = settings.notificationsEnabled
-                        this[KEY_QUEUE] = settings.queue
-                        this[KEY_LANGUAGE] = resolvedLang
-                        this[KEY_REFRESH_TICK] = nowMs
-                        this[KEY_IS_BLACKOUT_NOW] = info.isBlackoutNow
-                        this[KEY_IS_UNCLEAR] = info.isUnclear
-                        this[KEY_COUNTDOWN_TEXT] = formattedCountdown
-                        this[KEY_NEXT_SLOT_TIME] = info.nextSlotTime
-                        this[KEY_NEXT_BLACKOUT_TEXT] = nextBlackoutText
-                    }
+                try {
+                    touch(gId)
+                    BlackoutBigGlanceWidget().update(appCtx, gId)
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (_: Exception) {
                 }
-                BlackoutBigGlanceWidget().update(appCtx, gId)
+            }
+            for (gId in stripIds) {
+                try {
+                    touch(gId)
+                    BlackoutStripGlanceWidget().update(appCtx, gId)
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (_: Exception) {
+                }
             }
         }
 
@@ -227,25 +277,25 @@ open class BlackoutGlanceWidget(private val forceBigLayout: Boolean = false) : G
             slots: List<BlackoutSlot>,
             currentH: Int,
             currentM: Int,
-            lang: String = "uk"
+            lang: String = "uk",
+            height: Int = 132
         ): Bitmap {
             val slotSignature = if (slots.isEmpty()) {
                 "UNCLEAR"
             } else {
                 buildString(slots.size) {
                     for (s in slots) {
-                        append(if (s.status == SlotStatus.POWER_OFF) '1' else '0')
+                        append(cellKind(s))
                     }
                 }
             }
-            val bitmapKey = "${slotSignature}_${currentH}_${currentM}_$lang"
+            val bitmapKey = "${slotSignature}_${currentH}_${currentM}_${lang}_$height"
             val existingBmp = cachedChartBitmap
             if (cachedChartBitmapKey == bitmapKey && existingBmp != null && !existingBmp.isRecycled) {
                 return existingBmp
             }
 
             val width = 720
-            val height = 132
             val bmp = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
             val canvas = Canvas(bmp)
             val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply { isDither = true }
@@ -271,7 +321,7 @@ open class BlackoutGlanceWidget(private val forceBigLayout: Boolean = false) : G
             val contourLeft = 18f
             val contourTop = 18f
             val contourRight = width - 18f
-            val contourBottom = 84f
+            val contourBottom = height - 48f
             val contourRect = RectF(contourLeft, contourTop, contourRight, contourBottom)
 
             paint.style = Paint.Style.FILL
@@ -287,7 +337,7 @@ open class BlackoutGlanceWidget(private val forceBigLayout: Boolean = false) : G
             val trackLeft = 26f
             val trackTop = 26f
             val trackRight = width - 26f
-            val trackBottom = 76f
+            val trackBottom = height - 56f
             val trackWidth = trackRight - trackLeft
             val trackRect = RectF(trackLeft, trackTop, trackRight, trackBottom)
 
@@ -337,28 +387,51 @@ open class BlackoutGlanceWidget(private val forceBigLayout: Boolean = false) : G
                 val textYCenter = (trackTop + trackBottom) / 2f - (unclearTextPaint.descent() + unclearTextPaint.ascent()) / 2f
                 canvas.drawText(unclearText, textX, textYCenter, unclearTextPaint)
             } else {
-                val is48 = slots.size >= 48
-                (0 until 24).forEach { hour ->
-                    val half1Off = if (is48) {
-                        slots.getOrNull(hour * 2)?.status == SlotStatus.POWER_OFF
-                    } else {
-                        slots.getOrNull(hour)?.status == SlotStatus.POWER_OFF
-                    }
-                    val half2Off = if (is48) {
-                        slots.getOrNull(hour * 2 + 1)?.status == SlotStatus.POWER_OFF
-                    } else {
-                        slots.getOrNull(hour)?.status == SlotStatus.POWER_OFF
-                    }
+                // Emergency overlay, same recipe as the main drum: the bottom half of the cell is amber with
+                // dark 45 degree stripes; the top half keeps the planned state (spec/UI_DRUM.md 1).
+                val trackMid = (trackTop + trackBottom) / 2f
+                val amberShader = LinearGradient(
+                    0f, trackMid, 0f, trackBottom,
+                    intArrayOf(0xFFFFB020.toInt(), 0xFFF28A1B.toInt(), 0xFFC96A0B.toInt()),
+                    floatArrayOf(0f, 0.5f, 1f),
+                    Shader.TileMode.CLAMP
+                )
+                val stripePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                    style = Paint.Style.STROKE
+                    strokeWidth = STRIPE_PX
+                }
+                val bandH = trackBottom - trackMid
+                val stripeStep = STRIPE_PX * 2f * 1.4142135f
 
+                for (idx in 0 until 48) {
+                    val kind = slots.getOrNull(idx)?.let { cellKind(it) } ?: 0
+                    val hour = idx / 2
                     val hLeft = trackLeft + hour * (hourWidth + sepPx)
+                    val left = if (idx % 2 == 0) hLeft else hLeft + halfWidth
+                    val right = if (idx % 2 == 0) hLeft + halfWidth else hLeft + hourWidth
 
-                    // Half 1: XX:00 - XX:30
-                    paint.shader = if (half1Off) offShader else onShader
-                    canvas.drawRect(hLeft, trackTop, hLeft + halfWidth, trackBottom, paint)
+                    paint.shader = when (kind) {
+                        1, 3 -> offShader
+                        else -> onShader
+                    }
+                    canvas.drawRect(left, trackTop, right, trackBottom, paint)
 
-                    // Half 2: XX:30 - (XX+1):00 (contiguous with Half 1, no half-hour separator)
-                    paint.shader = if (half2Off) offShader else onShader
-                    canvas.drawRect(hLeft + halfWidth, trackTop, hLeft + hourWidth, trackBottom, paint)
+                    if (kind >= 2) {
+                        paint.shader = amberShader
+                        canvas.drawRect(left, trackMid, right, trackBottom, paint)
+                        stripePaint.color = 0x8C1A1208.toInt()
+                        canvas.save()
+                        canvas.clipRect(left, trackMid, right, trackBottom)
+                        // Global phase (anchored at trackLeft) keeps the stripes continuous across cells
+                        var n = Math.floor(((left - trackLeft) / stripeStep).toDouble()).toInt()
+                        while (true) {
+                            val u = trackLeft - bandH + n * stripeStep
+                            if (u >= right) break
+                            canvas.drawLine(u, trackBottom, u + bandH, trackMid, stripePaint)
+                            n++
+                        }
+                        canvas.restore()
+                    }
                 }
                 paint.shader = null
             }
@@ -388,7 +461,7 @@ open class BlackoutGlanceWidget(private val forceBigLayout: Boolean = false) : G
             val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
                 color = 0xFF1C1B18.toInt()
                 typeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
-                textSize = 21f
+                textSize = 21f + (height - 132) * 0.1f
             }
             val labels = listOf(
                 0f to "00",
@@ -397,7 +470,7 @@ open class BlackoutGlanceWidget(private val forceBigLayout: Boolean = false) : G
                 0.75f to "18",
                 1.0f to "24"
             )
-            val textY = 116f
+            val textY = height - 16f
             labels.forEach { (pos, label) ->
                 val tw = textPaint.measureText(label)
                 val x = when (pos) {
@@ -416,94 +489,43 @@ open class BlackoutGlanceWidget(private val forceBigLayout: Boolean = false) : G
 
     override suspend fun provideGlance(context: Context, id: GlanceId) {
         val appContext = context.applicationContext
-        val settingsRepo = SettingsRepository(appContext)
-        val scheduleRepo = ScheduleRepository(appContext)
-        val initialSettings = settingsRepo.getSettings()
-
-        // Immediately fetch live schedule on first widget placement if cache is missing for selected queue
-        if (initialSettings.queue.isNotBlank() && !scheduleRepo.hasValidTodayCache(initialSettings.queue)) {
-            withContext(Dispatchers.IO) {
-                try {
-                    val res = ZtoeParser.fetchFullSchedule(initialSettings.cityUrl, initialSettings.queue, appContext)
-                    if (res.status == ua.blackout.prewarning.data.parser.FetchStatus.SUCCESS) {
-                        scheduleRepo.saveSchedule(initialSettings.queue, res.todaySlots, res.tomorrowSlots)
-                    } else {
-                        scheduleRepo.clearScheduleCache()
-                    }
-                } catch (_: Exception) {
-                    scheduleRepo.clearScheduleCache()
-                }
-            }
+        // Which address this widget shows is looked up by its app widget id (spec/SUBSCRIPTIONS.md 10)
+        val appWidgetId = try {
+            GlanceAppWidgetManager(appContext).getAppWidgetId(id)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            null
         }
 
+        // Drawing never touches the network and never wipes caches (C13/C14): the data is refreshed by the
+        // worker, the widget receiver and the refresh button, and every value below is computed live.
         provideContent {
             val prefs = currentState<Preferences>()
-            // Observe Glance state preferences so recomposition always triggers when toggled or refreshed
-            val currentSettings = settingsRepo.getSettings()
-            val resolvedLang = AppStrings.resolveLang(prefs[KEY_LANGUAGE] ?: currentSettings.language)
-            val notificationsEnabled = prefs[KEY_NOTIFICATIONS_ENABLED] ?: currentSettings.notificationsEnabled
-            val activeQueue = currentSettings.queue
-            val isNoQueueHouse = !currentSettings.customQueueStatusText.isNullOrBlank()
+            // Reading the tick subscribes this composition to the Glance state that syncAllWidgets bumps
+            @Suppress("UNUSED_VARIABLE")
             val refreshTick = prefs[KEY_REFRESH_TICK] ?: 0L
+            val refreshingSince = prefs[KEY_REFRESHING_SINCE] ?: 0L
+            val isRefreshing = refreshingSince > 0L && System.currentTimeMillis() - refreshingSince < REFRESH_BUSY_MAX_MS
+            val source = widgetSource(appContext, appWidgetId)
+            val model = buildWidgetModel(source.settings, source.snapshot, source.label)
+            val openApp = openAppAction(source.itemId)
 
-            val todayDateIso = LocalDate.now(KYIV_ZONE).format(DateTimeFormatter.ISO_LOCAL_DATE)
-            val tomorrowDateIso = LocalDate.now(KYIV_ZONE).plusDays(1).format(DateTimeFormatter.ISO_LOCAL_DATE)
-
-            // Always use Today's schedule for the widget, with active emergency outage overlaid
-            val baseTodaySlots = when {
-                isNoQueueHouse && currentSettings.activeEmergencyOutage == null -> buildLightNoOutageSlots()
-                activeQueue.isBlank() && isNoQueueHouse -> buildLightNoOutageSlots()
-                else -> scheduleRepo.getTodaySlots(activeQueue)
-            }
-            val slots = ScheduleRepository.applyEmergencyOutageToSlots(
-                baseTodaySlots,
-                todayDateIso,
-                currentSettings.activeEmergencyOutage
-            )
-            val rawTomorrowSlots = scheduleRepo.getTomorrowSlots(activeQueue)
-            val effectiveTomorrowSlots = rawTomorrowSlots?.let {
-                ScheduleRepository.applyEmergencyOutageToSlots(it, tomorrowDateIso, currentSettings.activeEmergencyOutage)
-            }
-            val liveInfo = when {
-                activeQueue.isBlank() && !isNoQueueHouse && currentSettings.activeEmergencyOutage == null ->
-                    ScheduleRepository.StatusAndCountdown(false, "--:--:--", "--:-- - --:--", true)
-                isNoQueueHouse && currentSettings.activeEmergencyOutage == null ->
-                    ScheduleRepository.StatusAndCountdown(false, "--:--:--", "Відключень немає", false)
-                else ->
-                    ScheduleRepository.calculateStatusAndCountdown(
-                        slots = slots,
-                        tomorrowSlots = effectiveTomorrowSlots,
-                        now = LocalTime.now(KYIV_ZONE)
-                    )
-            }
-
-            val isUnclear = slots.isEmpty() || (if (refreshTick > 0L) (prefs[KEY_IS_UNCLEAR] ?: liveInfo.isUnclear) else liveInfo.isUnclear)
-            val isBlackoutNow = !isUnclear && (if (refreshTick > 0L) (prefs[KEY_IS_BLACKOUT_NOW] ?: liveInfo.isBlackoutNow) else liveInfo.isBlackoutNow)
-            val rawCountdownText = if (isUnclear) "--:--:--" else (prefs[KEY_COUNTDOWN_TEXT]?.takeIf { it.isNotBlank() && refreshTick > 0L } ?: liveInfo.countdownText)
-            val countdownText = formatWidgetCountdown(rawCountdownText, resolvedLang)
-            val nextSlotTime = if (isUnclear) "--:-- - --:--" else (prefs[KEY_NEXT_SLOT_TIME]?.takeIf { it.isNotBlank() && refreshTick > 0L } ?: liveInfo.nextSlotTime)
-            val nextBlackoutText = if (isUnclear) {
-                "--:-- - --:--"
-            } else if (isNoQueueHouse && currentSettings.activeEmergencyOutage == null) {
-                "Сьогодні більше немає"
-            } else {
-                val nowMin = LocalTime.now(KYIV_ZONE).let { it.hour * 60 + it.minute }
-                val upcoming = scheduleRepo.getDetailedIntervals(slots).firstOrNull { interval ->
-                    val p = interval.startStr.split(":")
-                    val startMin = (p.getOrNull(0)?.toIntOrNull() ?: 0) * 60 + (p.getOrNull(1)?.toIntOrNull() ?: 0)
-                    startMin > nowMin
-                }
-                if (upcoming != null) "${upcoming.startStr} – ${upcoming.endStr}" else (prefs[KEY_NEXT_BLACKOUT_TEXT] ?: "Сьогодні більше немає")
-            }
+            val resolvedLang = model.lang
+            // the bell shows and toggles the master switch for all addresses (owner decision 4)
+            val notificationsEnabled = SubscriptionSync(appContext).master()
+            val isUnclear = model.isUnclear
+            val isBlackoutNow = model.isOffNow
+            val countdownText = model.countdown
+            val nextSlotTime = model.period
+            val nextBlackoutText = model.nextOutage
+            val slots = model.slots
+            val queueHeaderText = model.queueHeader
+            val addressLabel = model.addressLabel
+            val staleCaption = model.staleCaption
 
             val size = LocalSize.current
             val isBigWidget = forceBigLayout || size.height >= 110.dp || size.width >= 220.dp
-
-            val queueHeaderText = when {
-                isNoQueueHouse -> if (resolvedLang == "uk") "Черга відсутня" else "No queue"
-                activeQueue.isBlank() -> if (resolvedLang == "uk") "Черга —" else "Queue —"
-                else -> "Черга $activeQueue"
-            }
 
             val statusText = when {
                 isUnclear -> AppStrings.powerUnclear(resolvedLang)
@@ -525,8 +547,7 @@ open class BlackoutGlanceWidget(private val forceBigLayout: Boolean = false) : G
                         .padding(12.dp)
                 ) {
                     if (isBigWidget) {
-                        val now = LocalTime.now(KYIV_ZONE)
-                        val chartBitmap = renderAnalogCounterBitmap(slots, now.hour, now.minute, resolvedLang)
+                        val chartBitmap = renderAnalogCounterBitmap(slots, model.nowHour, model.nowMinute, resolvedLang)
 
                         // ----------------- 3x2 BIG WIDGET -----------------
                         Column(
@@ -541,24 +562,48 @@ open class BlackoutGlanceWidget(private val forceBigLayout: Boolean = false) : G
                                 Column(
                                     modifier = GlanceModifier
                                         .defaultWeight()
-                                        .clickable(actionStartActivity<MainActivity>())
+                                        .clickable(openApp)
                                 ) {
-                                    Text(
-                                        text = queueHeaderText,
-                                        style = TextStyle(
-                                            fontWeight = FontWeight.Bold,
-                                            fontSize = 16.sp,
-                                            color = ColorProvider(Color.White)
+                                    Row(verticalAlignment = Alignment.Vertical.CenterVertically) {
+                                        Text(
+                                            text = queueHeaderText,
+                                            style = TextStyle(
+                                                fontWeight = FontWeight.Bold,
+                                                fontSize = 16.sp,
+                                                color = ColorProvider(Color.White)
+                                            ),
+                                            maxLines = 1
                                         )
-                                    )
-                                    Text(
-                                        text = statusText,
-                                        style = TextStyle(
-                                            fontWeight = FontWeight.Bold,
-                                            fontSize = 11.sp,
-                                            color = ColorProvider(statusColor)
+                                        if (addressLabel != null) {
+                                            Spacer(modifier = GlanceModifier.width(6.dp))
+                                            Text(
+                                                text = addressLabel,
+                                                style = TextStyle(fontSize = 11.sp, color = ColorProvider(Color(0xB3BAE6FD))),
+                                                maxLines = 1
+                                            )
+                                        }
+                                    }
+                                    Row(verticalAlignment = Alignment.Vertical.CenterVertically) {
+                                        Text(
+                                            text = statusText,
+                                            style = TextStyle(
+                                                fontWeight = FontWeight.Bold,
+                                                fontSize = 11.sp,
+                                                color = ColorProvider(statusColor)
+                                            )
                                         )
-                                    )
+                                        if (staleCaption != null) {
+                                            Spacer(modifier = GlanceModifier.width(6.dp))
+                                            Text(
+                                                text = staleCaption,
+                                                style = TextStyle(
+                                                    fontSize = 9.sp,
+                                                    color = ColorProvider(Color(0xFFFFB020))
+                                                ),
+                                                maxLines = 1
+                                            )
+                                        }
+                                    }
                                 }
 
                                 // Round Refresh Button (same style as Notification toggle)
@@ -570,12 +615,20 @@ open class BlackoutGlanceWidget(private val forceBigLayout: Boolean = false) : G
                                         .clickable(actionRunCallback<RefreshWidgetActionCallback>()),
                                     contentAlignment = Alignment.Center
                                 ) {
-                                    Image(
-                                        provider = ImageProvider(R.drawable.ic_refresh),
-                                        contentDescription = "Оновити дані",
-                                        colorFilter = ColorFilter.tint(ColorProvider(Color.White)),
-                                        modifier = GlanceModifier.size(18.dp)
-                                    )
+                                    if (isRefreshing) {
+                                        // Glance cannot rotate an image; the platform progress ring animates on its own
+                                        CircularProgressIndicator(
+                                            color = ColorProvider(Color.White),
+                                            modifier = GlanceModifier.size(18.dp)
+                                        )
+                                    } else {
+                                        Image(
+                                            provider = ImageProvider(R.drawable.ic_refresh),
+                                            contentDescription = "Оновити дані",
+                                            colorFilter = ColorFilter.tint(ColorProvider(Color.White)),
+                                            modifier = GlanceModifier.size(18.dp)
+                                        )
+                                    }
                                 }
 
                                 Spacer(modifier = GlanceModifier.width(8.dp))
@@ -611,7 +664,7 @@ open class BlackoutGlanceWidget(private val forceBigLayout: Boolean = false) : G
                                     .cornerRadius(12.dp)
                                     .background(ColorProvider(Color(0x33000000)))
                                     .padding(horizontal = 10.dp, vertical = 6.dp)
-                                    .clickable(actionStartActivity<MainActivity>()),
+                                    .clickable(openApp),
                                 verticalAlignment = Alignment.Vertical.CenterVertically
                             ) {
                                 Column(modifier = GlanceModifier.defaultWeight()) {
@@ -655,7 +708,7 @@ open class BlackoutGlanceWidget(private val forceBigLayout: Boolean = false) : G
                                 modifier = GlanceModifier
                                     .fillMaxWidth()
                                     .height(52.dp)
-                                    .clickable(actionStartActivity<MainActivity>())
+                                    .clickable(openApp)
                             )
 
                             // Upcoming Outage Interval ("Наступне відключення")
@@ -666,7 +719,7 @@ open class BlackoutGlanceWidget(private val forceBigLayout: Boolean = false) : G
                                     .cornerRadius(8.dp)
                                     .background(ColorProvider(Color(0x26000000)))
                                     .padding(horizontal = 8.dp, vertical = 3.dp)
-                                    .clickable(actionStartActivity<MainActivity>()),
+                                    .clickable(openApp),
                                 verticalAlignment = Alignment.Vertical.CenterVertically
                             ) {
                                 Text(
@@ -705,9 +758,21 @@ open class BlackoutGlanceWidget(private val forceBigLayout: Boolean = false) : G
                                         fontSize = 14.sp,
                                         color = ColorProvider(Color.White)
                                     ),
-                                    modifier = GlanceModifier.clickable(actionStartActivity<MainActivity>())
+                                    maxLines = 1,
+                                    modifier = GlanceModifier.clickable(openApp)
                                 )
-                                Spacer(modifier = GlanceModifier.defaultWeight())
+                                if (addressLabel != null) {
+                                    Spacer(modifier = GlanceModifier.width(6.dp))
+                                    Text(
+                                        text = addressLabel,
+                                        style = TextStyle(fontSize = 10.sp, color = ColorProvider(Color(0xB3BAE6FD))),
+                                        maxLines = 1,
+                                        modifier = GlanceModifier.defaultWeight().clickable(openApp)
+                                    )
+                                    Spacer(modifier = GlanceModifier.width(6.dp))
+                                } else {
+                                    Spacer(modifier = GlanceModifier.defaultWeight())
+                                }
                                 Text(
                                     text = statusText,
                                     style = TextStyle(
@@ -715,7 +780,7 @@ open class BlackoutGlanceWidget(private val forceBigLayout: Boolean = false) : G
                                         fontSize = 10.sp,
                                         color = ColorProvider(statusColor)
                                     ),
-                                    modifier = GlanceModifier.clickable(actionStartActivity<MainActivity>())
+                                    modifier = GlanceModifier.clickable(openApp)
                                 )
                             }
 
@@ -729,7 +794,7 @@ open class BlackoutGlanceWidget(private val forceBigLayout: Boolean = false) : G
                                 Column(
                                     modifier = GlanceModifier
                                         .defaultWeight()
-                                        .clickable(actionStartActivity<MainActivity>())
+                                        .clickable(openApp)
                                 ) {
                                     Text(
                                         text = if (isBlackoutNow) "До увімкнення:" else "До відключення:",
@@ -755,12 +820,20 @@ open class BlackoutGlanceWidget(private val forceBigLayout: Boolean = false) : G
                                         .clickable(actionRunCallback<RefreshWidgetActionCallback>()),
                                     contentAlignment = Alignment.Center
                                 ) {
-                                    Image(
-                                        provider = ImageProvider(R.drawable.ic_refresh),
-                                        contentDescription = "Оновити дані",
-                                        colorFilter = ColorFilter.tint(ColorProvider(Color.White)),
-                                        modifier = GlanceModifier.size(16.dp)
-                                    )
+                                    if (isRefreshing) {
+                                        // Glance cannot rotate an image; the platform progress ring animates on its own
+                                        CircularProgressIndicator(
+                                            color = ColorProvider(Color.White),
+                                            modifier = GlanceModifier.size(16.dp)
+                                        )
+                                    } else {
+                                        Image(
+                                            provider = ImageProvider(R.drawable.ic_refresh),
+                                            contentDescription = "Оновити дані",
+                                            colorFilter = ColorFilter.tint(ColorProvider(Color.White)),
+                                            modifier = GlanceModifier.size(16.dp)
+                                        )
+                                    }
                                 }
 
                                 Spacer(modifier = GlanceModifier.width(6.dp))
@@ -796,6 +869,149 @@ open class BlackoutGlanceWidget(private val forceBigLayout: Boolean = false) : G
 
 class BlackoutBigGlanceWidget : BlackoutGlanceWidget(forceBigLayout = true)
 
+private val OPEN_SUBSCRIPTION = ActionParameters.Key<String>(NotificationHelper.EXTRA_SUBSCRIPTION_ID)
+
+/** A tap opens the main screen with the widget's address shown (spec/SUBSCRIPTIONS.md 9 and 10). */
+internal fun openAppAction(itemId: String?): Action =
+    if (itemId == null) actionStartActivity<MainActivity>()
+    else actionStartActivity<MainActivity>(actionParametersOf(OPEN_SUBSCRIPTION to itemId))
+
+/**
+ * Third widget (4x1): the 24-hour drum chart with the current-time needle, no buttons or switches; a tap
+ * opens the app. It draws from the same snapshot as the other two widgets, so the 48 half-hour states
+ * (including the emergency stripes) are identical. When the launcher cell is at least [INFO_MIN_HEIGHT]
+ * tall (a usual portrait row is about 100 dp) one line with the queue, status and countdown sits above it.
+ */
+class BlackoutStripGlanceWidget : GlanceAppWidget() {
+
+    override val stateDefinition: GlanceStateDefinition<*> = PreferencesGlanceStateDefinition
+
+    override val sizeMode = SizeMode.Responsive(
+        setOf(
+            DpSize(250.dp, 40.dp),              // drum only
+            DpSize(250.dp, INFO_MIN_HEIGHT)     // info line + drum
+        )
+    )
+
+    override suspend fun provideGlance(context: Context, id: GlanceId) {
+        val appContext = context.applicationContext
+        // Which address this widget shows is looked up by its app widget id (spec/SUBSCRIPTIONS.md 10)
+        val appWidgetId = try {
+            GlanceAppWidgetManager(appContext).getAppWidgetId(id)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            null
+        }
+
+        provideContent {
+            val prefs = currentState<Preferences>()
+            @Suppress("UNUSED_VARIABLE")
+            val refreshTick = prefs[BlackoutGlanceWidget.KEY_REFRESH_TICK] ?: 0L
+            val source = widgetSource(appContext, appWidgetId)
+            val model = BlackoutGlanceWidget.buildWidgetModel(source.settings, source.snapshot, source.label)
+            val openApp = openAppAction(source.itemId)
+            // Same bitmap as the big widget's drum (720 x 132), drawn at the same 52 dp height
+            val chartBitmap = BlackoutGlanceWidget.renderAnalogCounterBitmap(
+                model.slots, model.nowHour, model.nowMinute, model.lang
+            )
+            val statusText = when {
+                model.isUnclear -> AppStrings.powerUnclear(model.lang)
+                model.isOffNow -> "СВІТЛА НЕМАЄ"
+                else -> "СВІТЛО Є"
+            }
+            val statusColor = when {
+                model.isUnclear -> Color(0xFF9CA3AF)
+                model.isOffNow -> Color(0xFFFF5E3A)
+                else -> Color(0xFF34D399)
+            }
+            val description = if (model.isUnclear) {
+                AppStrings.outagesUnclear(model.lang)
+            } else {
+                "${model.queueHeader}. ${if (model.isOffNow) "СВІТЛА НЕМАЄ" else "СВІТЛО Є"}"
+            }
+            val showInfo = LocalSize.current.height >= INFO_MIN_HEIGHT
+
+            GlanceTheme {
+                Column(
+                    modifier = GlanceModifier
+                        .fillMaxSize()
+                        .cornerRadius(20.dp)
+                        .background(ColorProvider(Color(0xCC141A29)))
+                        .padding(6.dp)
+                        .clickable(openApp),
+                    verticalAlignment = Alignment.Vertical.CenterVertically
+                ) {
+                    if (showInfo) {
+                        Row(
+                            modifier = GlanceModifier.fillMaxWidth().padding(horizontal = 6.dp),
+                            verticalAlignment = Alignment.Vertical.CenterVertically
+                        ) {
+                            Text(
+                                text = model.queueHeader,
+                                style = TextStyle(
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 12.sp,
+                                    color = ColorProvider(Color.White)
+                                ),
+                                maxLines = 1
+                            )
+                            Spacer(modifier = GlanceModifier.width(6.dp))
+                            if (model.addressLabel != null) {
+                                Text(
+                                    text = model.addressLabel,
+                                    style = TextStyle(fontSize = 10.sp, color = ColorProvider(Color(0xB3BAE6FD))),
+                                    maxLines = 1,
+                                    modifier = GlanceModifier.defaultWeight()
+                                )
+                                Spacer(modifier = GlanceModifier.width(6.dp))
+                            }
+                            Text(
+                                text = statusText,
+                                style = TextStyle(
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 10.sp,
+                                    color = ColorProvider(statusColor)
+                                ),
+                                maxLines = 1,
+                                modifier = if (model.addressLabel == null) GlanceModifier.defaultWeight() else GlanceModifier
+                            )
+                            if (model.addressLabel != null && !model.isUnclear) Spacer(modifier = GlanceModifier.width(6.dp))
+                            if (!model.isUnclear) {
+                                Text(
+                                    text = model.countdown,
+                                    style = TextStyle(
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 12.sp,
+                                        color = ColorProvider(Color.White)
+                                    ),
+                                    maxLines = 1
+                                )
+                            }
+                        }
+                        Spacer(modifier = GlanceModifier.height(4.dp))
+                    }
+                    Image(
+                        provider = ImageProvider(chartBitmap),
+                        contentDescription = description,
+                        contentScale = ContentScale.FillBounds,
+                        modifier = GlanceModifier
+                            .fillMaxWidth()
+                            .height(DRUM_HEIGHT)
+                    )
+                }
+            }
+        }
+    }
+
+    private companion object {
+        /** Drum height of the big widget, so both widgets show the drum at the same size. */
+        val DRUM_HEIGHT = 52.dp
+        /** Smallest widget height with room for the info line: 52 drum + 12 padding + 4 gap + 16 line. */
+        val INFO_MIN_HEIGHT = 84.dp
+    }
+}
+
 class ToggleAlertsActionCallback : ActionCallback {
     override suspend fun onAction(
         context: Context,
@@ -803,10 +1019,9 @@ class ToggleAlertsActionCallback : ActionCallback {
         parameters: ActionParameters
     ) {
         val appContext = context.applicationContext
-        val settingsRepo = SettingsRepository(appContext)
-        val current = settingsRepo.getSettings()
-        val newState = !current.notificationsEnabled
-        settingsRepo.updateNotificationsEnabled(newState)
+        // The widget bell is the master switch for all addresses (multi-address owner decision 4)
+        val sync = SubscriptionSync(appContext)
+        sync.setMaster(!sync.master())
         try {
             AlarmScheduler.syncAlarms(appContext)
         } catch (_: Exception) {}
@@ -823,29 +1038,36 @@ class RefreshWidgetActionCallback : ActionCallback {
         parameters: ActionParameters
     ) {
         val appContext = context.applicationContext
-        val settingsRepo = SettingsRepository(appContext)
-        val scheduleRepo = ScheduleRepository(appContext)
-        val current = settingsRepo.getSettings()
-
-        withContext(Dispatchers.IO) {
-            try {
-                if (current.queue.isNotBlank()) {
-                    val res = ZtoeParser.fetchFullSchedule(current.cityUrl, current.queue, appContext, forceNetwork = true)
-                    if (res.status == ua.blackout.prewarning.data.parser.FetchStatus.SUCCESS) {
-                        scheduleRepo.saveSchedule(current.queue, res.todaySlots, res.tomorrowSlots)
-                    } else {
-                        scheduleRepo.clearScheduleCache()
-                    }
-                }
-                AlarmScheduler.syncAlarms(appContext)
-                BlackoutGlanceWidget.syncAllWidgets(appContext)
-            } catch (_: Exception) {
-                try {
-                    scheduleRepo.clearScheduleCache()
-                    AlarmScheduler.syncAlarms(appContext)
-                    BlackoutGlanceWidget.syncAllWidgets(appContext)
-                } catch (_: Exception) {}
+        // Show the progress ring on the refresh buttons while the refresh runs
+        try {
+            BlackoutGlanceWidget.syncAllWidgets(appContext, refreshing = true)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+        }
+        // Network refresh on IO through the one shared pipeline. A failed source keeps its previous data
+        // (nothing is cleared); each call is bounded by the connection timeouts of the clients (8 s).
+        try {
+            withContext(Dispatchers.IO) {
+                val settings = SettingsRepository(appContext).getSettings()
+                OutageRepository(appContext).refresh(settings, forceNetwork = true)
             }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+        }
+        // Whatever happened, re-plan alarms and redraw from what is stored now
+        try {
+            AlarmScheduler.syncAlarms(appContext)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+        }
+        try {
+            BlackoutGlanceWidget.syncAllWidgets(appContext, refreshing = false)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
         }
     }
 }

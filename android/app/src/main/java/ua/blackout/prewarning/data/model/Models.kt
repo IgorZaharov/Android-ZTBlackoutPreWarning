@@ -32,7 +32,9 @@ data class BlackoutSlot(
     val startTimeStr: String, // "14:00" or "14:30"
     val endTimeStr: String, // "18:00" or "15:00"
     val status: SlotStatus,
-    val isEmergency: Boolean = false
+    val isEmergency: Boolean = false,
+    /** Off because of the planned ztoe schedule (or repair works). With [isEmergency] both overlap on the drum. */
+    val isPlanned: Boolean = status == SlotStatus.POWER_OFF && !isEmergency
 ) {
     val hour: Int get() = startHour
     val startStr: String get() = startTimeStr
@@ -83,6 +85,10 @@ data class UserSettings(
     val vibrationEnabled: Boolean = true,
     val prevSoundEnabled: Boolean = true,
     val prevVibrationEnabled: Boolean = true,
+    /** Notify when the estimated restoration of an emergency moves (ETA_CHANGED), all addresses (spec/NOTIFICATIONS.md 2.4). */
+    val emergencyEtaAlerts: Boolean = true,
+    /** Notify when an emergency ends (END), all addresses. The start always notifies. */
+    val emergencyEndAlerts: Boolean = true,
     val themeMode: String = "SYSTEM", // "SYSTEM", "DARK", "LIGHT"
     val language: String = "SYSTEM" // "SYSTEM", "UK", "EN"
 )

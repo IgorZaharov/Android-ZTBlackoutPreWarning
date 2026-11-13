@@ -13,7 +13,10 @@ export interface BlackoutSlot {
   startTimeStr: string; // "14:00" or "14:30"
   endTimeStr: string; // "18:00" or "15:00"
   status: SlotStatus;
+  /** Part of an emergency outage (PowerOn). */
   isEmergency?: boolean;
+  /** Part of a planned outage (ztoe table or PowerOn planned works). A cell can be both planned and emergency. */
+  isPlanned?: boolean;
   rawLabel?: string;
 }
 
@@ -38,6 +41,10 @@ export interface SelectedAddressQuery {
   house: string;
 }
 
+/**
+ * @deprecated Legacy year-less emergency record. The 1.4.0 emergency state lives in the outage
+ * state store (core EmergencyLedger); this shape only remains for views that have not moved yet.
+ */
 export interface EmergencyOutageInfo {
   id: string;
   startTime: string; // e.g. "09.11.2026 06:35"
@@ -52,15 +59,25 @@ export interface UserSettings {
   customQueueStatusText?: string; // e.g. "В цей час не вимикається, за винятком випадків аварійних відключень" from ZTOE lookup table
   selectedAddress?: string; // e.g. "Житомирський РЕМ, м. Житомир,\nвул. Київська, буд. 104"
   selectedAddressQuery?: SelectedAddressQuery;
+  /** @deprecated retired in 1.4.0 (read but ignored); see OutageStateStore. */
   activeEmergencyOutage?: EmergencyOutageInfo | null;
   refreshIntervalMinutes: number; // default 30
   advanceNoticeMinutes: number; // default 15
   notificationsEnabled: boolean;
   emergencyNotificationsEnabled?: boolean;
+  /**
+   * Copy of the multi-address master switch (spec/SUBSCRIPTIONS.md section 7), written by
+   * subscriptionSync.ts so the bells can show it; the store's `alerts_master_enabled` is the source.
+   */
+  alertsMaster?: boolean;
   soundEnabled: boolean;
   vibrationEnabled: boolean;
   prevSoundEnabled?: boolean;
   prevVibrationEnabled?: boolean;
+  /** Notify when the estimated restoration of an emergency moves (ETA_CHANGED), all addresses; absent = on. */
+  emergencyEtaAlerts?: boolean;
+  /** Notify when an emergency ends (END), all addresses; absent = on. The start always notifies. */
+  emergencyEndAlerts?: boolean;
   theme: ThemeMode;
   language: Language;
 }
@@ -73,6 +90,8 @@ export interface NotificationRecord {
   message: string;
   queue: string;
   advanceMinutes: number;
+  /** The subscription a tap shows on the main view (spec/SUBSCRIPTIONS.md 9); absent = the primary. */
+  subscriptionId?: string;
 }
 
 export interface QueueOption {
