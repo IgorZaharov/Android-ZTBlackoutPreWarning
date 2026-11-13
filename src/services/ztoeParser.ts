@@ -3,8 +3,22 @@
  * Supports live scraping of https://www.ztoe.com.ua/unhooking-search.php
  * with 48 half-hour slot resolution matching iOS ZtoeParser.swift 100%.
  */
-import { BlackoutSlot, DaySchedule, EmergencyOutageInfo, QueueOption, SlotStatus } from '../types';
+import { BlackoutSlot, DaySchedule, EmergencyOutageInfo, QueueOption } from '../types';
 import validUrlsList from '../../valid-urls.json';
+import {
+  atStartOfDay,
+  formatLocalDate,
+  localDateTimeOf,
+  parseLocalDate,
+  plusDays,
+  type LocalDate,
+  type LocalDateTime,
+} from '../core/localTime';
+import { buildPlanned, dayView, minutesBetween, status as engineStatus } from '../core/outageEngine';
+import { makeOutage, type Outage } from '../core/outageModels';
+import { SiteStateResolver, type FetchFailure, type SiteState } from '../core/siteState';
+import { extractSiteNotice } from '../core/siteNotice';
+import { ScheduleCache, getScheduleCache } from './scheduleCache';
 
 export const QUEUES: QueueOption[] = [
   { id: '1.1', group: 1, subgroup: 1, label: 'Черга 1.1' },
@@ -366,7 +380,94 @@ export function getChartHalfHourBlocks(slots: BlackoutSlot[]): HourChartBlock[] 
 // END OF CRITICAL SECTION — DO NOT MODIFY UNLESS EXPLICITLY REQUESTED
 // =========================================================================================
 
-async function fetchHtmlDecoded(targetUrl: string, timeoutMs: number = 6000): Promise<string> {
+// =========================================================================================
+// Everything below is the 1.4.0 layer: all-queue parsing, site-state classification, the
+// schedule cache (a failed fetch never wipes it) and the legacy helpers kept for the views.
+// Mirrors android/.../data/parser/ZtoeParser.kt + ScheduleRepository.kt.
+// =========================================================================================
+
+const p2 = (n: number): string => String(n).padStart(2, '0');
+
+/** Calendar parts of a Kyiv LocalDate, in the shape the table matcher wants. */
+function partsOfDate(date: LocalDate): { year: number; month: number; day: number; dateStr: string } {
+  const dateStr = formatLocalDate(date);
+  const [year, month, day] = dateStr.split('-').map(Number);
+  return { year, month, day, dateStr };
+}
+
+/** The 48 (or 24) cells of one day as `BlackoutSlot`s, like `ScheduleRepository.decodeSlotsCached`. */
+export function cellsToSlots(cells: readonly boolean[], queueId: string, dateStr: string): BlackoutSlot[] {
+  const total = cells.length;
+  if (total === 0) return [];
+  const minutesPerSlot = Math.floor(1440 / total);
+  return cells.map((off, index) => {
+    const startTotal = index * minutesPerSlot;
+    const endTotal = (index + 1) * minutesPerSlot;
+    const startH = Math.floor(startTotal / 60);
+    const endH = Math.floor(endTotal / 60);
+    const startStr = `${p2(startH)}:${p2(startTotal % 60)}`;
+    const endStr = endH >= 24 ? '24:00' : `${p2(endH)}:${p2(endTotal % 60)}`;
+    return {
+      id: `${dateStr}_${startStr}_Q${queueId}`,
+      startHour: startH,
+      endHour: endH,
+      startMinute: startTotal % 60,
+      endMinute: endTotal % 60,
+      startTimeStr: startStr,
+      endTimeStr: endStr,
+      status: off ? 'POWER_OFF' : 'POWER_ON',
+    };
+  });
+}
+
+/** True where power is off. */
+export function slotsToOffCells(slots: readonly BlackoutSlot[]): boolean[] {
+  return slots.map((s) => s.status === 'POWER_OFF');
+}
+
+export interface ParsedQueueSchedule {
+  today: BlackoutSlot[];
+  tomorrow: BlackoutSlot[] | null;
+}
+
+/**
+ * Parses all 12 queues of the page in one pass (the table lookup runs once), like
+ * `ZtoeParser.parseAllQueuesSinglePass`. Empty map when the page has no table dated [today].
+ */
+export function parseZtoeHtmlAllQueues(html: string, today: LocalDate): Map<string, ParsedQueueSchedule> {
+  const todayParts = partsOfDate(today);
+  const tomorrowParts = partsOfDate(plusDays(today, 1));
+  const result = new Map<string, ParsedQueueSchedule>();
+
+  let todayTable: ParsedHtmlTable | null = null;
+  let tomorrowTable: ParsedHtmlTable | null = null;
+  for (const table of extractLeafTables(html)) {
+    if (!table.fullText.includes('1.1') || !table.fullText.includes('6.2')) continue;
+    const headerText = table.rows
+      .slice(0, 2)
+      .map((r) => r.cells.map((c) => c.text).join(' '))
+      .join(' ');
+    if (matchesHeaderDate(headerText, todayParts) && !todayTable) todayTable = table;
+    else if (matchesHeaderDate(headerText, tomorrowParts) && !tomorrowTable) tomorrowTable = table;
+  }
+  if (!todayTable) return result;
+
+  for (const q of QUEUES) {
+    const todaySlots = parseLeafTableForQueue(todayTable, q.id, todayParts.dateStr);
+    if (!todaySlots) continue;
+    const tomorrowSlots = tomorrowTable ? parseLeafTableForQueue(tomorrowTable, q.id, tomorrowParts.dateStr) : null;
+    result.set(q.id, { today: todaySlots, tomorrow: tomorrowSlots });
+  }
+  return result;
+}
+
+// ---------------------------------------------------------------------------------------------
+// Fetching with site-state classification
+// ---------------------------------------------------------------------------------------------
+
+const FETCH_TIMEOUT_MS = 8000;
+
+async function fetchHtmlDecoded(targetUrl: string, timeoutMs: number = FETCH_TIMEOUT_MS, force: boolean = false): Promise<string> {
   const proxyUrl = targetUrl.includes('ztoe.com.ua')
     ? `/proxy-ztoe/unhooking-search.php`
     : targetUrl;
@@ -377,7 +478,8 @@ async function fetchHtmlDecoded(targetUrl: string, timeoutMs: number = 6000): Pr
   try {
     const res = await fetch(proxyUrl, {
       signal: controller.signal,
-      headers: { Accept: 'text/html' }
+      headers: { Accept: 'text/html' },
+      ...(force ? { cache: 'no-store' as RequestCache } : {})
     });
     clearTimeout(timeout);
 
@@ -401,143 +503,218 @@ async function fetchHtmlDecoded(targetUrl: string, timeoutMs: number = 6000): Pr
   }
 }
 
+/** Maps a fetch error to the platform-neutral [FetchFailure] (spec/SITE_STATE.md section 2). */
+export function classifyFetchFailure(error: unknown): FetchFailure {
+  const name = error instanceof Error ? error.name : '';
+  const message = (error instanceof Error ? error.message : String(error)).toLowerCase();
+  if (name === 'AbortError' || name === 'TimeoutError' || message.includes('timeout') || message.includes('timed out') || message.includes('abort')) return 'TIMEOUT';
+  if (/^http[_ ]\d+/.test(message)) return 'HTTP_ERROR';
+  if (message.includes('enotfound') || message.includes('getaddrinfo') || message.includes('name not resolved')) return 'DNS';
+  if (message.includes('certificate') || message.includes('ssl') || message.includes('tls')) return 'TLS';
+  if (error instanceof TypeError || message.includes('failed to fetch') || message.includes('econnrefused') || message.includes('network')) return 'CONNECT';
+  return 'OTHER';
+}
+
+/** The web has no validated-network flag; `navigator.onLine` is the closest signal (spec/SITE_STATE.md section 4). */
+function browserOnline(): boolean {
+  return !(typeof navigator !== 'undefined' && navigator.onLine === false);
+}
+
+export type ZtoeFetchStatus = 'SUCCESS' | 'NO_INTERNET' | 'NO_QUEUES_FOUND';
+
+/** Result of one ztoe refresh, the web twin of Kotlin's `ScheduleFetchResult`. */
+export interface ScheduleFetchResult {
+  todaySlots: BlackoutSlot[];
+  tomorrowSlots: BlackoutSlot[] | null;
+  hasTomorrowSchedule: boolean;
+  status: ZtoeFetchStatus;
+  siteState: SiteState;
+  failure: FetchFailure;
+  /** Text of the "УВАГА! ВАЖЛИВА ІНФОРМАЦІЯ!" notice when the page has no schedule table (core/siteNotice). */
+  notice?: string | null;
+}
+
+export interface ZtoeFetchOptions {
+  /** Bypass the browser HTTP cache. */
+  force?: boolean;
+  /** The real instant; only tests pass one. */
+  now?: Date;
+  cache?: ScheduleCache;
+  /** Replaces the network (tests). Must reject on failure. */
+  fetchHtml?: (url: string, timeoutMs: number, force: boolean) => Promise<string>;
+  /** Replaces `navigator.onLine` (tests). */
+  isOnline?: () => boolean;
+}
+
+/**
+ * Fetches the ztoe page, parses all queues, stores them in the schedule cache and classifies the
+ * site. A failed request NEVER clears or overwrites the cache (spec/SITE_STATE.md section 6);
+ * only a non-whitelisted URL drops it, because a schedule from another source is meaningless.
+ */
+export async function fetchZtoeSchedule(url: string, queue: string, options: ZtoeFetchOptions = {}): Promise<ScheduleFetchResult> {
+  const now = options.now ?? new Date();
+  const cache = options.cache ?? getScheduleCache();
+  const isOnline = options.isOnline ?? browserOnline;
+  const fetchHtml = options.fetchHtml ?? fetchHtmlDecoded;
+  const today = parseLocalDate(getKyivDateParts(now).dateStr);
+  const trimmedQueue = (queue || '').trim();
+
+  const empty = { todaySlots: [] as BlackoutSlot[], tomorrowSlots: null, hasTomorrowSchedule: false };
+  const noTable = (pageHtml?: string): ScheduleFetchResult => ({
+    ...empty,
+    status: 'NO_QUEUES_FOUND',
+    siteState: 'AVAILABLE_NO_TABLE',
+    failure: 'NONE',
+    notice: pageHtml ? extractSiteNotice(pageHtml) : null,
+  });
+  // Read the network verdict after the failure, so a link that dropped during the request counts as NO_INTERNET.
+  const failed = (failure: FetchFailure): ScheduleFetchResult => ({
+    ...empty,
+    status: 'NO_INTERNET',
+    siteState: SiteStateResolver.resolve(failure, false, isOnline()),
+    failure,
+  });
+
+  const trimmedUrl = (url || '').trim();
+  if (!isValidZtoeUrl(trimmedUrl)) {
+    cache.clear();
+    return noTable();
+  }
+  // A valid but unrelated entry of valid-urls.json (example.com) has no schedule and cannot be read cross-origin.
+  if (!trimmedUrl.toLowerCase().includes('ztoe.com.ua')) return noTable();
+  if (!isOnline()) return failed('CONNECT');
+
+  let html: string;
+  try {
+    html = await fetchHtml(trimmedUrl, FETCH_TIMEOUT_MS, options.force ?? false);
+  } catch (e) {
+    return failed(classifyFetchFailure(e));
+  }
+
+  // From here the page arrived: whatever goes wrong is "available, but no usable table", not a fetch failure.
+  let queues: Map<string, ParsedQueueSchedule>;
+  try {
+    queues = parseZtoeHtmlAllQueues(html, today);
+  } catch {
+    return noTable(html);
+  }
+  if (queues.size === 0) return noTable(html);
+
+  try {
+    const batch = new Map<string, { today: boolean[]; tomorrow: boolean[] | null }>();
+    for (const [q, r] of queues) batch.set(q, { today: slotsToOffCells(r.today), tomorrow: r.tomorrow ? slotsToOffCells(r.tomorrow) : null });
+    cache.saveAllSchedulesBatch(batch, trimmedQueue, today, now.getTime());
+  } catch {
+    // a full or blocked storage must not turn a good fetch into a failure
+  }
+
+  const withTable = { siteState: 'AVAILABLE_WITH_TABLE' as SiteState, failure: 'NONE' as FetchFailure };
+  if (!trimmedQueue) return { ...empty, status: 'SUCCESS', ...withTable };
+  const mine = queues.get(trimmedQueue);
+  // The page and its table are there even when this queue's row is missing
+  if (!mine) return { ...empty, status: 'NO_QUEUES_FOUND', ...withTable };
+  return {
+    todaySlots: mine.today,
+    tomorrowSlots: mine.tomorrow,
+    hasTomorrowSchedule: mine.tomorrow !== null,
+    status: 'SUCCESS',
+    ...withTable,
+  };
+}
+
+// ---------------------------------------------------------------------------------------------
+// Cached cells for the outage engine (ScheduleRepository.todayOffCells and friends)
+// ---------------------------------------------------------------------------------------------
+
+export function todayOffCells(queue: string, today: LocalDate, cache: ScheduleCache = getScheduleCache()): boolean[] | null {
+  return cache.todayOffCells(queue, today);
+}
+export function tomorrowOffCells(queue: string, today: LocalDate, cache: ScheduleCache = getScheduleCache()): boolean[] | null {
+  return cache.tomorrowOffCells(queue, today);
+}
+/** The previous day's cells, kept for one more day so a block that began before midnight keeps its real start. */
+export function yesterdayOffCells(queue: string, today: LocalDate, cache: ScheduleCache = getScheduleCache()): boolean[] | null {
+  return cache.yesterdayOffCells(queue, today);
+}
+export function hasValidTodayCache(queue: string, today: LocalDate, cache: ScheduleCache = getScheduleCache()): boolean {
+  return cache.hasValidTodayCache(queue, today);
+}
+export function hasTomorrowSchedule(queue: string, today: LocalDate, cache: ScheduleCache = getScheduleCache()): boolean {
+  return cache.hasTomorrowSchedule(queue, today);
+}
+
+// ---------------------------------------------------------------------------------------------
+// Legacy DaySchedule API (still used by MainView / WidgetSimulator / App until the views are reworked)
+// ---------------------------------------------------------------------------------------------
+
 export interface FullScheduleFetchResponse {
   todaySchedule: DaySchedule;
   tomorrowSchedule: DaySchedule | null;
-  status: 'SUCCESS' | 'NO_INTERNET' | 'NO_QUEUES_FOUND';
+  status: ZtoeFetchStatus;
+  siteState?: SiteState;
+  failure?: FetchFailure;
 }
 
 export async function fetchFullSchedules(
   url: string,
-  queue: string
+  queue: string,
+  options: ZtoeFetchOptions = {}
 ): Promise<FullScheduleFetchResponse> {
-  const todayDate = new Date();
+  const todayDate = options.now ?? new Date();
   const tomorrowDate = new Date(todayDate.getTime() + 86400000);
   const todayParts = getKyivDateParts(todayDate);
   const tomorrowParts = getKyivDateParts(tomorrowDate);
+  const today = parseLocalDate(todayParts.dateStr);
+  const cache = options.cache ?? getScheduleCache();
 
   const todayLabel = `Сьогодні (${todayDate.toLocaleDateString('uk-UA', { day: 'numeric', month: 'long' })})`;
   const tomorrowLabel = `Завтра (${tomorrowDate.toLocaleDateString('uk-UA', { day: 'numeric', month: 'long' })})`;
-  const nowTimeStr = new Date().toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit', hour12: false });
+  const nowTimeStr = todayDate.toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit', hour12: false });
+
+  const make = (dateStr: string, dayLabel: string, slots: BlackoutSlot[], isUnclear: boolean): DaySchedule => ({
+    dateStr,
+    dayLabel,
+    queue,
+    city: 'Житомир (ZTOE)',
+    slots,
+    lastUpdated: nowTimeStr,
+    sourceUrl: url,
+    isUnclear,
+  });
 
   if (!queue || queue.trim() === '') {
     return {
-      todaySchedule: {
-        dateStr: todayParts.dateStr,
-        dayLabel: todayLabel,
-        queue: '',
-        city: 'Житомир (ZTOE)',
-        slots: [],
-        lastUpdated: nowTimeStr,
-        sourceUrl: url,
-        isUnclear: true
-      },
+      todaySchedule: make(todayParts.dateStr, todayLabel, [], true),
       tomorrowSchedule: null,
-      status: 'NO_QUEUES_FOUND'
+      status: 'NO_QUEUES_FOUND',
     };
   }
 
-  if (typeof navigator !== 'undefined' && navigator.onLine === false) {
+  const res = await fetchZtoeSchedule(url, queue, options);
+
+  if (res.status === 'SUCCESS') {
     return {
-      todaySchedule: {
-        dateStr: todayParts.dateStr,
-        dayLabel: todayLabel,
-        queue,
-        city: 'Житомир (ZTOE)',
-        slots: [],
-        lastUpdated: nowTimeStr,
-        sourceUrl: url,
-        isUnclear: true
-      },
-      tomorrowSchedule: null,
-      status: 'NO_INTERNET'
+      todaySchedule: make(todayParts.dateStr, todayLabel, res.todaySlots, false),
+      tomorrowSchedule: res.tomorrowSlots ? make(tomorrowParts.dateStr, tomorrowLabel, res.tomorrowSlots, false) : null,
+      status: 'SUCCESS',
+      siteState: res.siteState,
+      failure: res.failure,
     };
   }
 
-  if (!isValidZtoeUrl(url)) {
-    return {
-      todaySchedule: {
-        dateStr: todayParts.dateStr,
-        dayLabel: todayLabel,
-        queue,
-        city: 'Житомир (ZTOE)',
-        slots: [],
-        lastUpdated: nowTimeStr,
-        sourceUrl: url,
-        isUnclear: true
-      },
-      tomorrowSchedule: null,
-      status: 'NO_QUEUES_FOUND'
-    };
-  }
-
-  try {
-    const html = await fetchHtmlDecoded(url.trim());
-    const parsed = parseZtoeHtmlFull(html, queue, todayDate);
-
-    if (!parsed.hasTodayTable || !parsed.todaySlots) {
-      return {
-        todaySchedule: {
-          dateStr: todayParts.dateStr,
-          dayLabel: todayLabel,
-          queue,
-          city: 'Житомир (ZTOE)',
-          slots: [],
-          lastUpdated: nowTimeStr,
-          sourceUrl: url,
-          isUnclear: true
-        },
-        tomorrowSchedule: null,
-        status: 'NO_QUEUES_FOUND'
-      };
-    }
-
-    const todaySchedule: DaySchedule = {
-      dateStr: todayParts.dateStr,
-      dayLabel: todayLabel,
-      queue,
-      city: 'Житомир (ZTOE)',
-      slots: parsed.todaySlots,
-      lastUpdated: nowTimeStr,
-      sourceUrl: url,
-      isUnclear: false
-    };
-
-    const tomorrowSchedule: DaySchedule | null =
-      parsed.hasTomorrowTable && parsed.tomorrowSlots
-        ? {
-            dateStr: tomorrowParts.dateStr,
-            dayLabel: tomorrowLabel,
-            queue,
-            city: 'Житомир (ZTOE)',
-            slots: parsed.tomorrowSlots,
-            lastUpdated: nowTimeStr,
-            sourceUrl: url,
-            isUnclear: false
-          }
-        : null;
-
-    return {
-      todaySchedule,
-      tomorrowSchedule,
-      status: 'SUCCESS'
-    };
-  } catch {
-    return {
-      todaySchedule: {
-        dateStr: todayParts.dateStr,
-        dayLabel: todayLabel,
-        queue,
-        city: 'Житомир (ZTOE)',
-        slots: [],
-        lastUpdated: nowTimeStr,
-        sourceUrl: url,
-        isUnclear: true
-      },
-      tomorrowSchedule: null,
-      status: 'NO_INTERNET'
-    };
-  }
+  // The site could not be used: keep showing the saved schedule (it is only valid for today's date stamp).
+  const cachedToday = todayOffCells(queue, today, cache);
+  const cachedTomorrow = tomorrowOffCells(queue, today, cache);
+  return {
+    todaySchedule: cachedToday
+      ? make(todayParts.dateStr, todayLabel, cellsToSlots(cachedToday, queue, todayParts.dateStr), false)
+      : make(todayParts.dateStr, todayLabel, [], true),
+    tomorrowSchedule:
+      cachedToday && cachedTomorrow ? make(tomorrowParts.dateStr, tomorrowLabel, cellsToSlots(cachedTomorrow, queue, tomorrowParts.dateStr), false) : null,
+    status: res.status,
+    siteState: res.siteState,
+    failure: res.failure,
+  };
 }
 
 /**
@@ -643,131 +820,64 @@ export function getBlackoutIntervals(slots: BlackoutSlot[]): BlackoutInterval[] 
   return intervals;
 }
 
-export interface ParsedEmergencyDateTime {
-  dateStr?: string; // "YYYY-MM-DD"
-  totalMinutes: number; // 0..1440
+// ---------------------------------------------------------------------------------------------
+// Legacy overlay + countdown: thin wrappers over the outage engine (the old year-less HTML-table
+// emergency path is gone). The views should move to outageRepository.snapshot() instead.
+// ---------------------------------------------------------------------------------------------
+
+const LEGACY_DT = /(\d{1,2})\.(\d{1,2})(?:\.(\d{2,4}))?[ \t]+(\d{1,2}):(\d{2})/;
+const LEGACY_ISO = /(\d{4})-(\d{2})-(\d{2})[ \tT]+(\d{1,2}):(\d{2})/;
+const LEGACY_TIME = /(\d{1,2}):(\d{2})/;
+
+/** "DD.MM.YYYY HH:mm", "DD.MM HH:mm", ISO, or a bare "HH:mm" (date null) as a LocalDateTime on [anchor] when undated. */
+function parseLegacyDateTime(raw: string | undefined | null, anchor: LocalDate): { at: LocalDateTime; dated: boolean } | null {
+  if (!raw) return null;
+  const s = raw.trim();
+  const dmy = LEGACY_DT.exec(s);
+  if (dmy) {
+    const year = dmy[3] ? (dmy[3].length <= 2 ? 2000 + +dmy[3] : +dmy[3]) : partsOfDate(anchor).year;
+    const at = localDateTimeOf(year, +dmy[2], +dmy[1], +dmy[4], +dmy[5]);
+    return at === null ? null : { at, dated: true };
+  }
+  const iso = LEGACY_ISO.exec(s);
+  if (iso) {
+    const at = localDateTimeOf(+iso[1], +iso[2], +iso[3], +iso[4], +iso[5]);
+    return at === null ? null : { at, dated: true };
+  }
+  const t = LEGACY_TIME.exec(s);
+  if (t) {
+    const h = +t[1];
+    const m = +t[2];
+    if (h > 24 || m > 59) return null;
+    const base = atStartOfDay(anchor);
+    return { at: (base + (h * 60 + m) * 60_000) as LocalDateTime, dated: false };
+  }
+  return null;
 }
 
-export function parseEmergencyDateTime(raw: string | undefined | null): ParsedEmergencyDateTime | null {
-  if (!raw || typeof raw !== 'string') return null;
-  const trimmed = raw.trim();
-  if (!trimmed) return null;
-
-  let dateStr: string | undefined;
-  const dmyMatch = trimmed.match(/(\d{2})\.(\d{2})\.(\d{4})/);
-  if (dmyMatch) {
-    const [, dd, mm, yyyy] = dmyMatch;
-    dateStr = `${yyyy}-${mm}-${dd}`;
-  } else {
-    const ymdMatch = trimmed.match(/(\d{4})-(\d{2})-(\d{2})/);
-    if (ymdMatch) {
-      const [, yyyy, mm, dd] = ymdMatch;
-      dateStr = `${yyyy}-${mm}-${dd}`;
-    }
-  }
-
-  const timeMatch = trimmed.match(/(\d{1,2}):(\d{2})(?::\d{2})?(?!\.\d)/);
-  if (!timeMatch) return null;
-  const hours = parseInt(timeMatch[1], 10);
-  const minutes = parseInt(timeMatch[2], 10);
-  if (isNaN(hours) || isNaN(minutes) || hours < 0 || hours > 24 || minutes < 0 || minutes > 59) {
-    return null;
-  }
-  const totalMinutes = Math.min(1440, Math.max(0, hours * 60 + minutes));
-  return { dateStr, totalMinutes };
+/** A legacy "active emergency" record as one engine outage (no resolving against "now": the record says it applies). */
+function legacyEmergencyOutage(info: EmergencyOutageInfo, anchorToday: LocalDate): Outage | null {
+  const start = parseLegacyDateTime(info.startTime, anchorToday);
+  const end = parseLegacyDateTime(info.estimatedRestoreTime, anchorToday);
+  if (!start || !end) return null;
+  let endAt = end.at;
+  if (!start.dated && !end.dated && endAt <= start.at) endAt = (endAt + 86_400_000) as LocalDateTime;
+  if (!(endAt > start.at)) return null;
+  return makeOutage({ id: info.id || `legacy_${start.at}`, kind: 'EMERGENCY', start: start.at, end: endAt, label: info.outageType ?? null });
 }
 
-export function getEmergencyOverlapMinutesForDay(
-  emergencyOutage: EmergencyOutageInfo | null | undefined,
-  targetDateStr: string,
-  isTomorrow: boolean = false
-): { startMin: number; endMin: number } | null {
-  if (!emergencyOutage) return null;
-  const startParsed = parseEmergencyDateTime(emergencyOutage.startTime);
-  const endParsed = parseEmergencyDateTime(emergencyOutage.estimatedRestoreTime);
-  if (!startParsed || !endParsed) return null;
-
-  let overlap: { startMin: number; endMin: number } | null = null;
-
-  if (startParsed.dateStr && endParsed.dateStr) {
-    if (startParsed.dateStr === endParsed.dateStr) {
-      if (isTomorrow) {
-        if (targetDateStr === startParsed.dateStr) {
-          overlap = { startMin: startParsed.totalMinutes, endMin: endParsed.totalMinutes };
-        }
-      } else {
-        // Active emergency outage on Today's schedule always applies to Today's timeline
-        overlap = { startMin: startParsed.totalMinutes, endMin: endParsed.totalMinutes };
-      }
-    } else if (startParsed.dateStr < endParsed.dateStr) {
-      if (targetDateStr === startParsed.dateStr) {
-        overlap = { startMin: startParsed.totalMinutes, endMin: 1440 };
-      } else if (targetDateStr === endParsed.dateStr) {
-        overlap = { startMin: 0, endMin: endParsed.totalMinutes };
-      } else if (targetDateStr > startParsed.dateStr && targetDateStr < endParsed.dateStr) {
-        overlap = { startMin: 0, endMin: 1440 };
-      } else if (!isTomorrow && targetDateStr < endParsed.dateStr) {
-        overlap = { startMin: startParsed.totalMinutes, endMin: 1440 };
-      } else if (isTomorrow && targetDateStr > startParsed.dateStr) {
-        const endNextDayStr = (() => {
-          const d = new Date(`${endParsed.dateStr}T12:00:00Z`);
-          if (isNaN(d.getTime())) return '';
-          d.setUTCDate(d.getUTCDate() + 1);
-          return d.toISOString().slice(0, 10);
-        })();
-        if (targetDateStr !== endNextDayStr) {
-          overlap = { startMin: 0, endMin: endParsed.totalMinutes };
-        }
-      }
-    }
-  } else {
-    if (startParsed.totalMinutes < endParsed.totalMinutes) {
-      if (!isTomorrow) {
-        overlap = { startMin: startParsed.totalMinutes, endMin: endParsed.totalMinutes };
-      }
-    } else {
-      if (!isTomorrow) {
-        overlap = { startMin: startParsed.totalMinutes, endMin: 1440 };
-      } else {
-        overlap = { startMin: 0, endMin: endParsed.totalMinutes };
-      }
-    }
+function safeLocalDate(dateStr: string | undefined): LocalDate {
+  try {
+    return parseLocalDate(dateStr || '');
+  } catch {
+    return parseLocalDate(getKyivDateParts().dateStr);
   }
-
-  if (!overlap || overlap.endMin <= overlap.startMin) {
-    return null;
-  }
-  return overlap;
-}
-
-export function createEmptyDaySlots(dateStr: string, queueId: string = 'emergency'): BlackoutSlot[] {
-  const slots: BlackoutSlot[] = [];
-  for (let index = 0; index < 48; index++) {
-    const startTotalMin = index * 30;
-    const endTotalMin = (index + 1) * 30;
-    const startH = Math.floor(startTotalMin / 60);
-    const startM = startTotalMin % 60;
-    const endH = Math.floor(endTotalMin / 60);
-    const endM = endTotalMin % 60;
-    const startStr = `${String(startH).padStart(2, '0')}:${String(startM).padStart(2, '0')}`;
-    const endStr = endH >= 24 ? '24:00' : `${String(endH).padStart(2, '0')}:${String(endM).padStart(2, '0')}`;
-    slots.push({
-      id: `${dateStr}_${startStr}_Q${queueId || 'emergency'}`,
-      startHour: startH,
-      endHour: endH,
-      startMinute: startM,
-      endMinute: endM,
-      startTimeStr: startStr,
-      endTimeStr: endStr,
-      status: 'POWER_ON',
-    });
-  }
-  return slots;
 }
 
 /**
- * Overlays an active Emergency Outage ("Аварійне відключення") on top of a DaySchedule
- * (Today or Tomorrow) so emergency outages take priority over and merge with ZTOE scheduled outages.
+ * Overlays an emergency outage on a DaySchedule (Today or Tomorrow). Now a wrapper over the engine's
+ * day view: the day's cells are planned cells plus the emergency outage clipped to that day.
+ * Returns 48-slot schedules; when [schedule] is null a schedule is synthesised if the outage touches the day.
  */
 export function applyEmergencyOutageToSchedule(
   schedule: DaySchedule | null,
@@ -776,61 +886,41 @@ export function applyEmergencyOutageToSchedule(
 ): DaySchedule | null {
   if (!emergencyOutage) return schedule;
 
-  if (!schedule) {
-    const targetDate = isTomorrow ? new Date(Date.now() + 86400000) : new Date();
-    const targetParts = getKyivDateParts(targetDate);
-    const overlap = getEmergencyOverlapMinutesForDay(emergencyOutage, targetParts.dateStr, isTomorrow);
-    if (!overlap) return null;
-    const dayPrefix = isTomorrow ? 'Завтра' : 'Сьогодні';
-    const dayLabel = `${dayPrefix} (${targetDate.toLocaleDateString('uk-UA', { day: 'numeric', month: 'long' })})`;
-    const nowTimeStr = new Date().toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit', hour12: false });
-    const baseSlots = createEmptyDaySlots(targetParts.dateStr, 'emergency');
-    const mergedSlots = baseSlots.map((slot, index) => {
-      const slotStartMin = index * 30;
-      const slotEndMin = (index + 1) * 30;
-      const isEmergencyOff = slotStartMin < overlap.endMin && slotEndMin > overlap.startMin;
-      return isEmergencyOff ? { ...slot, status: 'POWER_OFF' as SlotStatus, isEmergency: true } : slot;
-    });
-    return {
-      dateStr: targetParts.dateStr,
-      dayLabel,
-      queue: '',
-      city: 'Житомир (ZTOE)',
-      slots: mergedSlots,
-      lastUpdated: nowTimeStr,
-      sourceUrl: DEFAULT_ZTOE_URL,
-      isUnclear: false,
-    };
-  }
+  const targetDate: LocalDate = schedule
+    ? safeLocalDate(schedule.dateStr)
+    : parseLocalDate(getKyivDateParts(isTomorrow ? new Date(Date.now() + 86400000) : new Date()).dateStr);
+  const anchorToday = isTomorrow ? plusDays(targetDate, -1) : targetDate;
+  const emergency = legacyEmergencyOutage(emergencyOutage, anchorToday);
+  if (!emergency) return schedule;
 
-  const overlap = getEmergencyOverlapMinutesForDay(emergencyOutage, schedule.dateStr, isTomorrow);
-  if (!overlap) return schedule;
+  const baseSlots = schedule?.slots ?? [];
+  const planned = baseSlots.length > 0 ? baseSlots.map((s) => s.status === 'POWER_OFF' && !s.isEmergency) : null;
+  const outages = [...buildPlanned(anchorToday, isTomorrow ? null : planned, isTomorrow ? planned : null), emergency];
+  const view = dayView(outages, targetDate, atStartOfDay(anchorToday));
+  if (!view.slots.some((s) => s.emergency)) return schedule;
 
-  const baseSlots =
-    schedule.slots && schedule.slots.length > 0
-      ? schedule.slots
-      : createEmptyDaySlots(schedule.dateStr, schedule.queue || 'emergency');
-
-  const totalSlots = baseSlots.length;
-  const minutesPerSlot = Math.floor(1440 / totalSlots);
-
-  const mergedSlots = baseSlots.map((slot, index) => {
-    const slotStartMin = index * minutesPerSlot;
-    const slotEndMin = (index + 1) * minutesPerSlot;
-    const isEmergencyOff = slotStartMin < overlap.endMin && slotEndMin > overlap.startMin;
-    if (isEmergencyOff) {
-      return {
-        ...slot,
-        status: 'POWER_OFF' as SlotStatus,
-        isEmergency: true,
-      };
-    }
-    return slot;
+  const queueId = schedule?.queue || 'emergency';
+  const dateStr = formatLocalDate(targetDate);
+  const cellSlots = cellsToSlots(
+    view.slots.map((s) => s.off),
+    queueId,
+    dateStr
+  ).map((slot, i) => {
+    const wasEmergency = Boolean(baseSlots.length === 48 && baseSlots[i]?.isEmergency);
+    const isEmergency = view.slots[i].emergency || wasEmergency;
+    return isEmergency ? { ...slot, status: 'POWER_OFF' as const, isEmergency: true } : slot;
   });
 
+  if (schedule) return { ...schedule, slots: cellSlots, isUnclear: false };
+  const targetJs = isTomorrow ? new Date(Date.now() + 86400000) : new Date();
   return {
-    ...schedule,
-    slots: mergedSlots,
+    dateStr,
+    dayLabel: `${isTomorrow ? 'Завтра' : 'Сьогодні'} (${targetJs.toLocaleDateString('uk-UA', { day: 'numeric', month: 'long' })})`,
+    queue: '',
+    city: 'Житомир (ZTOE)',
+    slots: cellSlots,
+    lastUpdated: new Date().toLocaleTimeString('uk-UA', { hour: '2-digit', minute: '2-digit', hour12: false }),
+    sourceUrl: DEFAULT_ZTOE_URL,
     isUnclear: false,
   };
 }
@@ -847,18 +937,28 @@ export interface OutageCountdownInfo {
 }
 
 /**
- * Compute the closest blackout and exact countdown from current time (supports 48 half-hour slots)
+ * The wall clock the legacy DaySchedule helpers use: the date of [schedule] with the local
+ * hours/minutes/seconds of [now] (what the old implementation did). New code reads a true Kyiv
+ * "now" through `fromInstant` / `kyivNow` instead.
+ */
+export function legacyClock(schedule: DaySchedule, now: Date = new Date()): { today: LocalDate; now: LocalDateTime } {
+  const today = safeLocalDate(schedule.dateStr);
+  return {
+    today,
+    now: (atStartOfDay(today) + ((now.getHours() * 60 + now.getMinutes()) * 60 + now.getSeconds()) * 1000) as LocalDateTime,
+  };
+}
+
+/**
+ * Status and countdown from a Today (and optional Tomorrow) DaySchedule, computed by the outage
+ * engine, so a block over midnight is one block. [now] is read as the wall clock of the schedule's
+ * day (its local hours/minutes/seconds), exactly like the old implementation.
  */
 export function calculateOutageCountdown(
   schedule: DaySchedule,
   now: Date = new Date(),
   tomorrowSchedule: DaySchedule | null = null
 ): OutageCountdownInfo {
-  const currentHour = now.getHours();
-  const currentMin = now.getMinutes();
-  const currentSec = now.getSeconds();
-  const currentMinuteOfDay = currentHour * 60 + currentMin;
-
   const slots = schedule.slots || [];
   const intervals = getBlackoutIntervals(slots);
 
@@ -875,127 +975,33 @@ export function calculateOutageCountdown(
     };
   }
 
-  const totalSlots = slots.length;
-  const minutesPerSlot = Math.floor(1440 / totalSlots);
-  const currentSlotIdx = Math.min(totalSlots - 1, Math.max(0, Math.floor(currentMinuteOfDay / minutesPerSlot)));
-  const currentSlot = slots[currentSlotIdx] || null;
-  const isCurrentlyBlackout = currentSlot?.status === 'POWER_OFF';
+  const { today, now: nowLdt } = legacyClock(schedule, now);
+  const tomorrowSlots = tomorrowSchedule?.slots && tomorrowSchedule.slots.length > 0 ? tomorrowSchedule.slots : null;
+  const outages = buildPlanned(today, slotsToOffCells(slots), tomorrowSlots ? slotsToOffCells(tomorrowSlots) : null);
+  const st = engineStatus(outages, nowLdt);
 
-  const parseIntervalMinutes = (iv: BlackoutInterval) => {
-    const [sH, sM] = iv.start.split(':').map(Number);
-    const [eH, eM] = iv.end === '24:00' ? [24, 0] : iv.end.split(':').map(Number);
-    return { startMin: sH * 60 + (sM || 0), endMin: eH * 60 + (eM || 0) };
+  const minutesPerSlot = Math.floor(1440 / slots.length);
+  const currentIdx = Math.min(slots.length - 1, Math.max(0, Math.floor((now.getHours() * 60 + now.getMinutes()) / minutesPerSlot)));
+  const currentSlot = slots[currentIdx] || null;
+
+  const slotAt = (at: LocalDateTime): BlackoutSlot | null => {
+    const tomorrowStart = atStartOfDay(plusDays(today, 1));
+    const onTomorrow = at >= tomorrowStart;
+    const list = onTomorrow ? tomorrowSlots : slots;
+    if (!list) return null;
+    const offsetMin = Math.floor((at - (onTomorrow ? tomorrowStart : atStartOfDay(today))) / 60_000);
+    const per = Math.floor(1440 / list.length);
+    return list[Math.min(list.length - 1, Math.max(0, Math.floor(offsetMin / per)))] || null;
   };
 
-  if (isCurrentlyBlackout) {
-    const activeInterval = intervals.find(iv => {
-      const { startMin, endMin } = parseIntervalMinutes(iv);
-      return currentMinuteOfDay >= startMin && currentMinuteOfDay < endMin;
-    });
-
-    let endMinuteOfDay = activeInterval ? parseIntervalMinutes(activeInterval).endMin : (currentSlotIdx + 1) * minutesPerSlot;
-    let activeEndStr = activeInterval ? activeInterval.end : currentSlot.endTimeStr;
-    if (endMinuteOfDay >= 1440 && tomorrowSchedule?.slots?.length) {
-      const tomorrowIntervals = getBlackoutIntervals(tomorrowSchedule.slots);
-      if (tomorrowIntervals.length > 0) {
-        const firstTom = parseIntervalMinutes(tomorrowIntervals[0]);
-        if (firstTom.startMin === 0) {
-          endMinuteOfDay = 1440 + firstTom.endMin;
-          activeEndStr = tomorrowIntervals[0].end;
-        }
-      }
-    }
-
-    const diffMin = endMinuteOfDay - currentMinuteOfDay;
-    const secondsRemaining = Math.max(0, diffMin * 60 - currentSec);
-    const h = Math.floor(secondsRemaining / 3600);
-    const m = Math.floor((secondsRemaining % 3600) / 60);
-    const s = secondsRemaining % 60;
-
-    return {
-      isCurrentlyBlackout: true,
-      currentSlot,
-      closestBlackoutSlot: currentSlot,
-      minutesUntilNextBlackout: 0,
-      formattedTimeLeft: `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`,
-      slotDescription: activeInterval ? `${activeInterval.start} – ${activeEndStr}` : `${currentSlot.startTimeStr} – ${activeEndStr}`,
-      intervals
-    };
-  }
-
-  const nextInterval = intervals.find(iv => {
-    const { startMin } = parseIntervalMinutes(iv);
-    return startMin > currentMinuteOfDay;
-  });
-
-  if (nextInterval) {
-    const { startMin, endMin } = parseIntervalMinutes(nextInterval);
-    let nextEndStr = nextInterval.end;
-    if (endMin >= 1440 && tomorrowSchedule?.slots?.length) {
-      const tomorrowIntervals = getBlackoutIntervals(tomorrowSchedule.slots);
-      if (tomorrowIntervals.length > 0) {
-        const firstTom = parseIntervalMinutes(tomorrowIntervals[0]);
-        if (firstTom.startMin === 0) {
-          nextEndStr = tomorrowIntervals[0].end;
-        }
-      }
-    }
-    const diffMin = startMin - currentMinuteOfDay;
-    const secondsRemaining = Math.max(0, diffMin * 60 - currentSec);
-    const h = Math.floor(secondsRemaining / 3600);
-    const m = Math.floor((secondsRemaining % 3600) / 60);
-    const s = secondsRemaining % 60;
-
-    const nextSlotIdx = Math.min(totalSlots - 1, Math.floor(startMin / minutesPerSlot));
-    const closestSlot = slots[nextSlotIdx] || null;
-
-    return {
-      isCurrentlyBlackout: false,
-      currentSlot,
-      closestBlackoutSlot: closestSlot,
-      minutesUntilNextBlackout: diffMin,
-      formattedTimeLeft: `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`,
-      slotDescription: `${nextInterval.start} – ${nextEndStr}`,
-      intervals
-    };
-  }
-
-  if (tomorrowSchedule?.slots?.length) {
-    const tomorrowIntervals = getBlackoutIntervals(tomorrowSchedule.slots);
-    if (tomorrowIntervals.length > 0) {
-      const firstTomorrow = tomorrowIntervals[0];
-      const { startMin: tomStartMin } = parseIntervalMinutes(firstTomorrow);
-      const targetMin = 1440 + tomStartMin;
-      const diffMin = targetMin - currentMinuteOfDay;
-      const secondsRemaining = Math.max(0, diffMin * 60 - currentSec);
-      const h = Math.floor(secondsRemaining / 3600);
-      const m = Math.floor((secondsRemaining % 3600) / 60);
-      const s = secondsRemaining % 60;
-
-      const tomTotalSlots = tomorrowSchedule.slots.length;
-      const tomMinutesPerSlot = Math.floor(1440 / tomTotalSlots);
-      const tomSlotIdx = Math.min(tomTotalSlots - 1, Math.floor(tomStartMin / tomMinutesPerSlot));
-      const closestSlot = tomorrowSchedule.slots[tomSlotIdx] || null;
-
-      return {
-        isCurrentlyBlackout: false,
-        currentSlot,
-        closestBlackoutSlot: closestSlot,
-        minutesUntilNextBlackout: diffMin,
-        formattedTimeLeft: `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`,
-        slotDescription: `${firstTomorrow.start} – ${firstTomorrow.end}`,
-        intervals
-      };
-    }
-  }
-
+  const next = st.nextSpan;
   return {
-    isCurrentlyBlackout: false,
+    isCurrentlyBlackout: st.isOffNow,
     currentSlot,
-    closestBlackoutSlot: null,
-    minutesUntilNextBlackout: null,
-    formattedTimeLeft: '--:--:--',
-    slotDescription: 'Відключень немає',
+    closestBlackoutSlot: st.isOffNow ? currentSlot : next ? slotAt(next.start) : null,
+    minutesUntilNextBlackout: st.isOffNow ? 0 : next ? minutesBetween(nowLdt, next.start) : null,
+    formattedTimeLeft: st.countdownText,
+    slotDescription: st.nextSlotTime,
     intervals
   };
 }
@@ -1007,10 +1013,12 @@ export interface SiteVerificationResult {
   status: 'SUCCESS' | 'NO_INTERNET' | 'NO_QUEUES_FOUND';
   messageUk: string;
   messageEn: string;
+  siteState?: SiteState;
 }
 
 /**
- * Verifies site URL against /valid-urls.json, Internet accessibility, and confirms that a schedule table with current date & queues exists
+ * Verifies site URL against /valid-urls.json, Internet accessibility, and confirms that a schedule table with current date & queues exists.
+ * A diagnostic only: it never touches the schedule cache.
  */
 export async function verifyZtoeSiteAndData(
   url: string,
@@ -1023,7 +1031,8 @@ export async function verifyZtoeSiteAndData(
       hasData: false,
       status: 'NO_INTERNET',
       messageUk: 'Немає доступу до Інтернету',
-      messageEn: 'No Internet access'
+      messageEn: 'No Internet access',
+      siteState: 'NO_INTERNET'
     };
   }
 
@@ -1035,7 +1044,8 @@ export async function verifyZtoeSiteAndData(
       hasData: false,
       status: 'NO_QUEUES_FOUND',
       messageUk: 'На сайті не знайдено черг',
-      messageEn: 'No queues found on site'
+      messageEn: 'No queues found on site',
+      siteState: 'AVAILABLE_NO_TABLE'
     };
   }
 
@@ -1047,7 +1057,8 @@ export async function verifyZtoeSiteAndData(
       hasData: false,
       status: 'NO_QUEUES_FOUND',
       messageUk: 'На сайті не знайдено черг',
-      messageEn: 'No queues found on site'
+      messageEn: 'No queues found on site',
+      siteState: 'AVAILABLE_NO_TABLE'
     };
   }
 
@@ -1062,7 +1073,8 @@ export async function verifyZtoeSiteAndData(
         hasData: true,
         status: 'SUCCESS',
         messageUk: 'Сайт доступний, графік оновлено',
-        messageEn: 'Site reachable, schedule updated'
+        messageEn: 'Site reachable, schedule updated',
+        siteState: 'AVAILABLE_WITH_TABLE'
       };
     } else {
       return {
@@ -1071,17 +1083,20 @@ export async function verifyZtoeSiteAndData(
         hasData: false,
         status: 'NO_QUEUES_FOUND',
         messageUk: 'На сайті не знайдено черг',
-        messageEn: 'No queues found on site'
+        messageEn: 'No queues found on site',
+        siteState: 'AVAILABLE_NO_TABLE'
       };
     }
-  } catch {
+  } catch (e) {
+    const failure = classifyFetchFailure(e);
     return {
       isChecking: false,
       isAvailable: false,
       hasData: false,
       status: 'NO_INTERNET',
       messageUk: 'Немає доступу до Інтернету',
-      messageEn: 'No Internet access'
+      messageEn: 'No Internet access',
+      siteState: SiteStateResolver.resolve(failure, false, browserOnline())
     };
   }
 }

@@ -6,14 +6,17 @@ import android.content.Intent
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import ua.blackout.prewarning.data.repository.AlertRegistry
-import ua.blackout.prewarning.data.repository.ScheduleRepository
-import ua.blackout.prewarning.data.repository.SettingsRepository
-import ua.blackout.prewarning.widget.BlackoutGlanceWidget
-import java.time.LocalDate
-import java.time.LocalDateTime
-import java.time.LocalTime
+import ua.blackout.prewarning.core.OutageEngine
+import ua.blackout.prewarning.core.OutageKind
 import ua.blackout.prewarning.data.KYIV_ZONE
+import ua.blackout.prewarning.data.repository.AlertRegistry
+import ua.blackout.prewarning.data.repository.OutageRepository
+import ua.blackout.prewarning.data.repository.SettingsRepository
+import ua.blackout.prewarning.ui.AppStrings
+import ua.blackout.prewarning.widget.BlackoutGlanceWidget
+import java.time.Instant
+import java.time.LocalDateTime
+import java.time.temporal.ChronoUnit
 
 class AlarmReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
@@ -22,82 +25,74 @@ class AlarmReceiver : BroadcastReceiver() {
 
         CoroutineScope(Dispatchers.IO).launch {
             try {
+                // The notification goes first: redrawing widgets can involve a network fetch and must never delay a warning
+                when (intent.action) {
+                    AlarmScheduler.ACTION_ALERT -> handleAlert(appContext, intent)
+                    AlarmScheduler.ACTION_MIDNIGHT -> AlarmScheduler.syncAlarms(appContext)
+                }
                 try {
                     BlackoutGlanceWidget.syncAllWidgets(appContext)
-                } catch (_: Exception) {}
-
-                if (intent.action == "ua.blackout.prewarning.ACTION_WIDGET_TRANSITION_UPDATE") {
-                    return@launch
+                } catch (_: Exception) {
                 }
-
-                val currentSettings = SettingsRepository(appContext).getSettings()
-                if (!currentSettings.notificationsEnabled) {
-                    return@launch
-                }
-
-                val slotId = intent.getStringExtra("EXTRA_SLOT_ID") ?: return@launch
-                val intentQueue = intent.getStringExtra("EXTRA_QUEUE") ?: return@launch
-
-                // Reject stale alarms from any queue other than the user's currently selected queue (e.g. default 1.1)
-                if (intentQueue != currentSettings.queue || !slotId.endsWith("_Q${currentSettings.queue}")) {
-                    return@launch
-                }
-
-                val kyivZone = KYIV_ZONE
-                val today = LocalDate.now(kyivZone)
-                if (!slotId.startsWith("block_${today}_")) {
-                    return@launch
-                }
-
-                val timeStr = intent.getStringExtra("EXTRA_TIME") ?: return@launch
-                val minutes = intent.getIntExtra("EXTRA_MINUTES", currentSettings.advanceNoticeMinutes)
-
-                // Verify that the alarm corresponds to an active blackout interval in today's schedule for the selected queue
-                val scheduleRepo = ScheduleRepository(appContext)
-                val todayIntervals = scheduleRepo.getDetailedIntervals(scheduleRepo.getTodaySlots(currentSettings.queue))
-                val matchingInterval = todayIntervals.firstOrNull { "${it.startStr}–${it.endStr}" == timeStr }
-                    ?: return@launch
-
-                // Verify current time is within the valid pre-warning window [alertTime - 2min, blockStartTime + 2min]
-                // Prevents past-due alarms from firing when the user changes system time on mobile
-                val startParts = matchingInterval.startStr.split(":")
-                val startH = startParts.getOrNull(0)?.toIntOrNull() ?: return@launch
-                val startM = startParts.getOrNull(1)?.toIntOrNull() ?: return@launch
-                val blockStartTime = LocalDateTime.of(today, LocalTime.of(startH, startM))
-                val alertTime = blockStartTime.minusMinutes(minutes.toLong())
-                val now = LocalDateTime.now(kyivZone)
-
-                if (now.isBefore(alertTime.minusMinutes(2))) {
-                    // System clock was moved backward before the alert window; reschedule alarms
-                    AlarmScheduler.syncAlarms(appContext, onTimeChanged = true)
-                    return@launch
-                }
-                if (now.isAfter(blockStartTime.plusMinutes(2))) {
-                    // System clock was moved forward past the outage start time; do not fire stale pre-warning
-                    return@launch
-                }
-
-                val alertRegistry = AlertRegistry(appContext)
-
-                // STRICT REQUIREMENT: Send notification only once per blackout slot
-                if (alertRegistry.hasNotified(slotId)) {
-                    return@launch
-                }
-
-                // Mark as notified immediately
-                alertRegistry.markNotified(slotId)
-
-                val queue = currentSettings.queue
-                val title = "Попередження: відключення світла"
-                val body = "Черга $queue: відключення розпочнеться о $timeStr (через $minutes хв)."
-
-                val notificationId = slotId.hashCode()
-                NotificationHelper.showPreWarningNotification(appContext, notificationId, title, body)
             } finally {
                 try {
                     pendingResult.finish()
-                } catch (_: Exception) {}
+                } catch (_: Exception) {
+                }
             }
         }
+    }
+
+    private suspend fun handleAlert(appContext: Context, intent: Intent) {
+        val settings = SettingsRepository(appContext).getSettings()
+        if (!settings.notificationsEnabled) return
+
+        val key = intent.getStringExtra(AlarmScheduler.EXTRA_KEY) ?: return
+        val startMs = intent.getLongExtra(AlarmScheduler.EXTRA_SPAN_START_MS, -1L)
+        if (startMs < 0L) return
+        val advance = intent.getIntExtra(AlarmScheduler.EXTRA_MINUTES, settings.advanceNoticeMinutes)
+
+        val spanStart = LocalDateTime.ofInstant(Instant.ofEpochMilli(startMs), KYIV_ZONE)
+        val now = LocalDateTime.now(KYIV_ZONE)
+        val alertTime = spanStart.minusMinutes(advance.toLong())
+
+        if (now.isBefore(alertTime.minusMinutes(2))) {
+            // The system clock moved backward before the alert window: plan again
+            AlarmScheduler.syncAlarms(appContext, onTimeChanged = true)
+            return
+        }
+        if (now.isAfter(spanStart.plusMinutes(2))) {
+            // The outage has already begun: a pre-warning would be stale
+            return
+        }
+
+        // The span must still be part of today's plan (schedule or repair works may have changed since scheduling)
+        val snapshot = OutageRepository(appContext).snapshot(settings, now)
+        val span = OutageEngine.spans(
+            snapshot.outages.filter { !it.stale },
+            setOf(OutageKind.PLANNED, OutageKind.REPAIR)
+        ).firstOrNull { it.start == spanStart } ?: return
+
+        val registry = AlertRegistry(appContext)
+        if (registry.hasNotified(key)) return
+        registry.markNotified(key)
+
+        val lang = AppStrings.resolveLang(settings.language)
+        val body = AppStrings.plannedAlertBody(
+            lang = lang,
+            queue = settings.queue,
+            // A start is never "24:00": an outage starting at midnight reads 00:00 (spec/NOTIFICATIONS.md)
+            start = "%02d:%02d".format(span.start.hour, span.start.minute),
+            end = OutageEngine.formatSpanTime(span.end),
+            minutesLeft = ChronoUnit.MINUTES.between(now, spanStart),
+            durationMinutes = OutageEngine.minutesBetween(span.start, span.end),
+            mayContinue = span.mayContinue
+        )
+        NotificationHelper.showPreWarningNotification(
+            appContext,
+            AlarmCodes.codeFor(appContext, key),
+            AppStrings.plannedAlertTitle(lang),
+            body
+        )
     }
 }

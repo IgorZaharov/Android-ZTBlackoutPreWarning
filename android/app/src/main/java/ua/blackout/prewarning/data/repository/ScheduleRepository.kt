@@ -446,6 +446,7 @@ class ScheduleRepository(context: Context) {
 
         // Store serialized slot statuses as a simple 48-char string of '0' (ON) and '1' (OFF)
         val todayEncoded = todaySlots.joinToString("") { if (it.status == SlotStatus.POWER_OFF) "1" else "0" }
+        archiveYesterday(editor, queue, today.minusDays(1).format(DateTimeFormatter.ISO_LOCAL_DATE))
         editor.putString("cache_today_date", todayStr)
         editor.putString("cache_today_date_$queue", todayStr)
         editor.putString("cache_today_queue", queue)
@@ -483,8 +484,10 @@ class ScheduleRepository(context: Context) {
         editor.putString("cache_today_queue", activeQueue)
         editor.putLong("cache_last_sync_ms", System.currentTimeMillis())
 
+        val yesterdayStr = today.minusDays(1).format(DateTimeFormatter.ISO_LOCAL_DATE)
         for ((queue, pair) in schedules) {
             val (todaySlots, tomorrowSlots) = pair
+            archiveYesterday(editor, queue, yesterdayStr)
             val todayEncoded = todaySlots.joinToString("") { if (it.status == SlotStatus.POWER_OFF) "1" else "0" }
             editor.putString("cache_today_date_$queue", todayStr)
             editor.putString("cache_today_slots_$queue", todayEncoded)
@@ -520,7 +523,9 @@ class ScheduleRepository(context: Context) {
 
         // Midnight rollover: promote cached tomorrow schedule into today when date crosses 00:00 Kyiv time
         if (cachedDate == yesterdayStr && cachedTomorrowDate == todayStr && !cachedTomorrowEncoded.isNullOrEmpty()) {
-            prefs.edit()
+            val editor = prefs.edit()
+            archiveYesterday(editor, queue, yesterdayStr)
+            editor
                 .putString("cache_today_date", todayStr)
                 .putString("cache_today_date_$queue", todayStr)
                 .putString("cache_today_slots_$queue", cachedTomorrowEncoded)
@@ -530,6 +535,44 @@ class ScheduleRepository(context: Context) {
                 .apply()
         }
     }
+
+    /**
+     * Keeps the last day's cells for one more day so an outage that began before midnight keeps its
+     * real start and length in today's list (spec/OUTAGE_ENGINE.md, "yesterday tail").
+     */
+    private fun archiveYesterday(editor: SharedPreferences.Editor, queue: String, yesterdayStr: String) {
+        val oldDate = prefs.getString("cache_today_date_$queue", prefs.getString("cache_today_date", null))
+        val oldSlots = prefs.getString("cache_today_slots_$queue", null)
+        if (oldDate == yesterdayStr && !oldSlots.isNullOrEmpty()) {
+            editor.putString("cache_yesterday_date_$queue", yesterdayStr)
+            editor.putString("cache_yesterday_slots_$queue", oldSlots)
+        }
+    }
+
+    private fun encodedToCells(encoded: String?): List<Boolean>? {
+        if (encoded.isNullOrEmpty() || encoded.length < 24) return null
+        return encoded.map { it == '1' }
+    }
+
+    /** True where power is off per the ztoe table; null when there is no valid cache for that day. */
+    fun todayOffCells(queue: String): List<Boolean>? {
+        if (queue.isBlank()) return null
+        return encodedToCells(getEncodedTodaySlots(queue))
+    }
+
+    fun tomorrowOffCells(queue: String): List<Boolean>? {
+        if (queue.isBlank()) return null
+        return getTomorrowSlots(queue)?.map { it.status == SlotStatus.POWER_OFF }
+    }
+
+    fun yesterdayOffCells(queue: String): List<Boolean>? {
+        if (queue.isBlank()) return null
+        val yesterdayStr = LocalDate.now(KYIV_ZONE).minusDays(1).format(DateTimeFormatter.ISO_LOCAL_DATE)
+        if (prefs.getString("cache_yesterday_date_$queue", null) != yesterdayStr) return null
+        return encodedToCells(prefs.getString("cache_yesterday_slots_$queue", null))
+    }
+
+    fun lastSyncMs(): Long = prefs.getLong("cache_last_sync_ms", 0L)
 
     fun getEncodedTodaySlots(queue: String): String {
         if (queue.isBlank()) return ""

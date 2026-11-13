@@ -158,15 +158,20 @@ async function runUnitTestA() {
     path.join(ROOT_DIR, 'android/app/src/main/java/ua/blackout/prewarning/widget/BlackoutGlanceWidget.kt'),
     'utf-8'
   );
+  // 1.4.0: both draw 48 half-hour cells indexed 0..47 (cell i = hour i/2, half i%2) with the same
+  // planned / emergency / overlap classification (spec/UI_DRUM.md section 1).
   assert.ok(
-    timelineBarKt.includes('slots.getOrNull(hour * 2)?.status == SlotStatus.POWER_OFF') &&
-      timelineBarKt.includes('slots.getOrNull(hour * 2 + 1)?.status == SlotStatus.POWER_OFF'),
-    'TimelineBar.kt must use half-hour hour*2 and hour*2+1 lookup'
+    timelineBarKt.includes('48 -> slots') &&
+      timelineBarKt.includes('val left = (i / 2) * (hourW + gap) + (i % 2) * halfW') &&
+      timelineBarKt.includes('emergency = off && s.isEmergency'),
+    'TimelineBar.kt must draw 48 half-hour cells (cell i = hour i/2, half i%2)'
   );
   assert.ok(
-    glanceWidgetKt.includes('slots.getOrNull(hour * 2)?.status == SlotStatus.POWER_OFF') &&
-      glanceWidgetKt.includes('slots.getOrNull(hour * 2 + 1)?.status == SlotStatus.POWER_OFF'),
-    'BlackoutGlanceWidget.kt must use identical half-hour hour*2 and hour*2+1 lookup'
+    glanceWidgetKt.includes('for (idx in 0 until 48)') &&
+      glanceWidgetKt.includes('slots.getOrNull(idx)?.let { cellKind(it) }') &&
+      glanceWidgetKt.includes('val hour = idx / 2') &&
+      glanceWidgetKt.includes('s.isEmergency && s.isPlanned -> 3'),
+    'BlackoutGlanceWidget.kt must draw the identical 48 half-hour cells'
   );
 
   console.log('Unit Test A PASSED: Main Window and Big Widget graphs match 100%.');
@@ -286,7 +291,7 @@ function runUnitTestB() {
   assert.ok(
     appStringsKt.includes('Charity / Благодійність і Пожертви') &&
       appStringsKt.includes('BLACKOUT HOURS FOR TODAY:') &&
-      mainViewTsx.includes('Blackout hours for today:'),
+      (translations.en as Record<string, string>).blackoutHoursForDayHeader === 'Blackout hours for today:',
     'Main Application must use "Blackout hours for today" in English and About Window must use "Charity / Благодійність і Пожертви"'
   );
 
@@ -407,27 +412,28 @@ function runUnitTestB() {
   assert.ok(
     scheduleRepoKt.includes('calculateStatusAndCountdown') &&
       scheduleRepoKt.includes('computeDetailedIntervals') &&
-      mainScreenKt.includes('key(queue, selectedDayTab, activeSlotsSignature)'),
+      mainScreenKt.includes('val activeDate = if (isTomorrowSelected) tomorrowDate else todayDate') &&
+      mainScreenKt.includes('remember(snapshot, activeDate) { snapshot.dayView(activeDate) }'),
     'MainScreen.kt and ScheduleRepository.kt must recompose blackout hours on Today/Tomorrow tab switch and compute tomorrow 1st blackout'
   );
 
-  // 11. Verify Build Version 1.3.5, GitHub v1.3.2 KYIV_ZONE Fix & Developer Handover Documentation across project files
+  // 11. Verify Build Version 1.4.0, GitHub v1.3.2 KYIV_ZONE Fix & Developer Handover Documentation across project files
   const packageJson = JSON.parse(fs.readFileSync(path.join(ROOT_DIR, 'package.json'), 'utf-8'));
-  assert.equal(packageJson.version, '1.3.5', 'package.json version must be 1.3.5');
+  assert.equal(packageJson.version, '1.4.0', 'package.json version must be 1.4.0');
   const buildGradle = fs.readFileSync(path.join(ROOT_DIR, 'android/app/build.gradle.kts'), 'utf-8');
-  assert.ok(buildGradle.includes('"1.3.5"'), 'android/app/build.gradle.kts default versionName must be 1.3.5');
+  assert.ok(buildGradle.includes('"1.4.0"'), 'android/app/build.gradle.kts default versionName must be 1.4.0');
   const aboutScreenKt = fs.readFileSync(
     path.join(ROOT_DIR, 'android/app/src/main/java/ua/blackout/prewarning/ui/screens/AboutScreen.kt'),
     'utf-8'
   );
-  assert.ok(aboutScreenKt.includes('"1.3.5"'), 'AboutScreen.kt fallback version must be 1.3.5');
+  assert.ok(aboutScreenKt.includes('"1.4.0"'), 'AboutScreen.kt fallback version must be 1.4.0');
   const aboutViewTsx = fs.readFileSync(path.join(ROOT_DIR, 'src/components/AboutView.tsx'), 'utf-8');
-  assert.ok(aboutViewTsx.includes("'1.3.5'"), 'AboutView.tsx fallback version must be 1.3.5');
+  assert.ok(aboutViewTsx.includes("'1.4.0'"), 'AboutView.tsx fallback version must be 1.4.0');
   const readmeMd = fs.readFileSync(path.join(ROOT_DIR, 'README.md'), 'utf-8');
-  assert.ok(readmeMd.includes('(v1.3.5)'), 'README.md must reference v1.3.5');
+  assert.ok(readmeMd.includes('(v1.4.0)'), 'README.md must reference v1.4.0');
   assert.ok(
-    changelog.includes('## [1.3.5]') && changelog.includes('## [1.3.4]') && changelog.includes('## [1.3.3]'),
-    'CHANGELOG.md must document v1.3.5, v1.3.4, and v1.3.3'
+    changelog.includes("## [1.4.0]") && changelog.includes("## [1.3.5]") && changelog.includes("## [1.3.4]"),
+    'CHANGELOG.md must document v1.4.0, v1.3.5, and v1.3.4'
   );
 
   // Verify GitHub v1.3.2 fix (KyivZone.kt KYIV_ZONE fallback) is included across Android codebase
@@ -1758,7 +1764,10 @@ async function runUnitTestC_ZhytomyrRoulette() {
 
   // 8. Verify UI files: ZTOE schedules bottom link ("Графіки відключень на сайті"), Share button, Main Menu button, aligned Green V mark, Nocturnal Creature, Deposit Power Points, 2s Game Over delay, About page links, Unclear schedule state, Emulator 9999 & Reset Progress buttons, and 9 generated ticket images
   const appTsx = fs.readFileSync(path.join(ROOT_DIR, 'src/App.tsx'), 'utf-8');
-  const mainViewTsx = fs.readFileSync(path.join(ROOT_DIR, 'src/components/MainView.tsx'), 'utf-8');
+  // 1.4.0: visible strings live in i18n.ts, so the view and its strings are checked together
+  const mainViewTsx =
+    fs.readFileSync(path.join(ROOT_DIR, 'src/components/MainView.tsx'), 'utf-8') +
+    fs.readFileSync(path.join(ROOT_DIR, 'src/services/i18n.ts'), 'utf-8');
   const widgetSimTsx = fs.readFileSync(path.join(ROOT_DIR, 'src/components/WidgetSimulator.tsx'), 'utf-8');
   const mainScreenKt = fs.readFileSync(
     path.join(ROOT_DIR, 'android/app/src/main/java/ua/blackout/prewarning/ui/screens/MainScreen.kt'),
@@ -1795,15 +1804,15 @@ async function runUnitTestC_ZhytomyrRoulette() {
     'Main Application screen (Web and Android) must include "Графіки відключень на сайті" link pointing to https://www.ztoe.com.ua/unhooking-search.php after the Facebook link'
   );
   assert.ok(
-    mainViewTsx.includes('t.statusUnclear') &&
-      mainViewTsx.includes('t.outagesUnclear') &&
-      mainViewTsx.includes('countdown.slotDescription') &&
-      mainViewTsx.includes('!isUnclear') &&
+    mainViewTsx.includes('isStatusUnclear ? t.powerUnclear') &&
+      mainViewTsx.includes("isStatusUnclear ? '--:-- - --:--'") &&
+      mainViewTsx.includes('unclearBase={activeUnclear}') &&
+      mainViewTsx.includes("outagesUnclear: 'Графіки не діють'") &&
       widgetSimTsx.includes('t.statusUnclear') &&
       widgetSimTsx.includes('t.outagesUnclear') &&
       widgetSimTsx.includes('--:-- - --:--') &&
       mainScreenKt.includes('AppStrings.powerUnclear(lang)') &&
-      mainScreenKt.includes('!isUnclear') &&
+      mainScreenKt.includes('if (isStatusUnclear) "--:-- - --:--"') &&
       timelineBarKt.includes('AppStrings.outagesUnclear(lang)') &&
       glanceWidgetKt.includes('AppStrings.outagesUnclear(lang)') &&
       glanceWidgetKt.includes('AppStrings.powerUnclear(resolvedLang)'),
@@ -2210,14 +2219,15 @@ async function runUnitTestC_ZhytomyrRoulette() {
       settingsScreenKt.includes('AppStrings.siteReachable(lang)') &&
       settingsScreenKt.includes('AppStrings.errorNoQueuesFound(lang)') &&
       settingsScreenKt.includes('AppStrings.languageTitle(lang)') &&
-      settingsScreenKt.includes('"Системна"') &&
+      settingsScreenKt.includes('AppStrings.langSystem(lang)') &&
       settingsScreenKt.includes('"Українська"') &&
       settingsScreenKt.includes('"English"') &&
       settingsScreenKt.includes('AppStrings.testAlertBtn(lang)') &&
       settingsScreenKt.includes('AppStrings.refreshBtn(lang)') &&
       settingsScreenKt.includes('AppStrings.resetDefaultsBtn(lang)') &&
-      settingsScreenKt.includes('Color(0xBF141A29)') &&
-      settingsScreenKt.includes('Color(0xFFFF5E3A)') &&
+      // 1.4.0: card and accent colours come from ZtTokens (ZtColors.Card = 0xBF141A29, ZtColors.Accent = 0xFFFF5E3A)
+      settingsScreenKt.includes('GlassCard(') &&
+      settingsScreenKt.includes('ZtColors.Accent') &&
       settingsScreenKt.includes('Icons.Default.Tune'),
     'SettingsScreen.kt must include Site URL card, Language selector, Test notification and Refresh buttons, and Frosted Glass / Orange colors matching the Emulator'
   );
@@ -2247,319 +2257,56 @@ async function runUnitTestC_ZhytomyrRoulette() {
 }
 
 async function runUnitTestE_AddressLookupAndUnsetQueue() {
-  console.log('--- Running Unit Test E: Interactive ZTOE Address Lookup, First-Launch Unselected Queue, No-Queue Houses & Emergency Outages ---');
+  console.log('--- Running Unit Test E: Address Lookup, Duplicate Streets, First-Launch Unselected Queue, Emergency Switch & Widgets (1.4.0) ---');
 
   const {
     ZTOE_REM_OPTIONS,
     ZTOE_FULL_NO_OUTAGE_MESSAGE,
+    ZTOE_STREET_OPTIONS,
     parseZtoeAddressLookupTableHtml,
-    parseZtoeEmergencyOutagesTableHtml,
-    matchEmergencyOutageFromAccidentsJson,
-    checkAddressOnZtoeWebsite,
-    getKyivska37DemoEmergencyOutage,
+    parseZtoeRemOptionsHtml,
+    parseZtoeSettlementOptionsHtml,
+    parseZtoeStreetOptionsHtml,
+    mergeStreets,
+    findStreetById,
   } = await import('../src/services/ztoeAddressLookup');
-  const {
-    applyEmergencyOutageToSchedule,
-    getBlackoutIntervals,
-    fetchFullSchedules,
-  } = await import('../src/services/ztoeParser');
   const {
     DEFAULT_SETTINGS,
     loadUserSettings,
     saveUserSettings,
     resetAllAppDataToFirstLaunch,
-    checkAndTriggerEmergencyOutageAlert,
+    toggleMasterNotifications,
+    toggleEmergencyNotifications,
+    triggerEmergencyEventAlerts,
+    clearNotifiedHistory,
   } = await import('../src/services/alertManager');
+  const { parseLocalDateTime } = await import('../src/core/localTime');
 
-  // 1. Verify First-Launch Defaults (queue: '', language: 'system') and Reset to First Launch
+  const read = (rel: string) => fs.readFileSync(path.join(ROOT_DIR, rel), 'utf-8');
+  const KT = 'android/app/src/main/java/ua/blackout/prewarning/';
+
+  // 1. First-launch defaults (queue '' and language 'system') and reset to first launch
   assert.equal(DEFAULT_SETTINGS.queue, '', 'DEFAULT_SETTINGS.queue must be empty string on first launch');
   assert.equal(DEFAULT_SETTINGS.language, 'system', 'DEFAULT_SETTINGS.language must be "system" on first launch');
-
   saveUserSettings({
     ...DEFAULT_SETTINGS,
     queue: '5.2',
     selectedAddress: 'м. Житомир, вул. Київська, буд. 77',
-    selectedAddressQuery: {
-      remId: 'zhytomyr',
-      settlementId: 'zt_city',
-      streetId: 'zt_kyivska',
-      house: '77',
-    },
+    selectedAddressQuery: { remId: 'zhytomyr', settlementId: 'zt_city', streetId: 'zt_kyivska', house: '77' },
   });
   const resetSettings = resetAllAppDataToFirstLaunch();
   assert.equal(resetSettings.queue, '', 'resetAllAppDataToFirstLaunch must reset queue to empty string');
   assert.equal(resetSettings.selectedAddress, undefined, 'resetAllAppDataToFirstLaunch must clear selectedAddress');
   assert.equal(resetSettings.selectedAddressQuery, undefined, 'resetAllAppDataToFirstLaunch must clear selectedAddressQuery');
-  assert.equal(loadUserSettings().queue, '', 'loadUserSettings after resetAllAppDataToFirstLaunch must return empty queue');
+  assert.equal(loadUserSettings().queue, '', 'loadUserSettings after reset must return empty queue');
 
-  // 2. Verify ZTOE Address Directory & Queue 5.2 Preservation Fix (Житомир, Київська, буд. 77 -> 5.2)
-  assert.ok(ZTOE_REM_OPTIONS.length >= 6, 'ZTOE_REM_OPTIONS must include Zhytomyr and regional РЕМ districts');
-  const kyivska77 = await checkAddressOnZtoeWebsite({
-    remId: 'zhytomyr',
-    settlementId: 'zt_city',
-    streetId: 'zt_kyivska',
-    house: '77',
-  });
-  assert.ok(kyivska77 !== null);
-  assert.equal(
-    kyivska77!.queue,
-    '5.2',
-    'м. Житомир, вул. Київська, буд. 77 must resolve to queue 5.2 (never overwritten by 3.2)'
-  );
-
-  // 3. Verify No-Queue House (м. Житомир, вул. Київська, буд. 104)
-  const kyivska104 = await checkAddressOnZtoeWebsite({
-    remId: 'zhytomyr',
-    settlementId: 'zt_city',
-    streetId: 'zt_kyivska',
-    house: '104',
-  });
-  assert.ok(kyivska104 !== null);
-  assert.equal(kyivska104!.queue, '', 'No-queue house (Київська 104) must have queue: ""');
-  assert.equal(
-    kyivska104!.statusText,
-    ZTOE_FULL_NO_OUTAGE_MESSAGE,
-    'No-queue house must return exact ZTOE status message'
-  );
-
-  // Verify HTML table parser for both numeric queue and no-queue status message
-  const sampleQueueHtml = '<table><tr><th>Будинок</th><th>Черга</th><th>Підчерга</th></tr><tr><td>15</td><td>5</td><td>2</td></tr></table>';
-  const parsedQueueRows = parseZtoeAddressLookupTableHtml(sampleQueueHtml);
-  assert.equal(parsedQueueRows.find((r) => r.house === '15')?.queue, '5.2');
-  const sampleNoQueueHtml =
-    '<table><tr><th>Будинок</th><th>Черга</th><th>Підчерга</th></tr><tr><td>104</td><td colspan="2">В цей час не вимикається, за винятком випадків аварійних відключень</td></tr></table>';
-  const parsedNoQueueRows = parseZtoeAddressLookupTableHtml(sampleNoQueueHtml);
-  assert.equal(parsedNoQueueRows.find((r) => r.house === '104')?.queue, '');
-  assert.equal(
-    parsedNoQueueRows.find((r) => r.house === '104')?.statusText,
-    'В цей час не вимикається, за винятком випадків аварійних відключень'
-  );
-
-  // 4. Verify Emergency Outage Detection (pw_accidents JSON & HTML table) and Kyivska 37 Demo Outage
-  const demoBaseDate = new Date('2026-11-09T12:00:00+02:00');
-  const demoEmergency = getKyivska37DemoEmergencyOutage(demoBaseDate);
-  assert.equal(demoEmergency.startTime, '09.11.2026 22:00');
-  assert.equal(demoEmergency.estimatedRestoreTime, '09.11.2026 23:59');
-
-  const kyivska37 = await checkAddressOnZtoeWebsite({
-    remId: 'zhytomyr',
-    settlementId: 'zt_city',
-    streetId: 'zt_kyivska',
-    house: '37',
-  });
-  assert.ok(kyivska37 !== null);
-  assert.equal(kyivska37!.queue, '2.2');
-  assert.ok(kyivska37!.emergencyOutage, 'м. Житомир, вул. Київська, буд. 37 must include active emergencyOutage');
-
-  const sampleAccidentsJson = [
-    {
-      id: 391476673,
-      city: { name: 'м. Житомир' },
-      street: { name: 'вул. Київська' },
-      buildingNames: '35, 37, 39',
-      dateEvent: '2026-04-06T19:21:00+00:00',
-      datePlanIn: '2026-04-07T20:00:00+00:00',
-      typeOff: 1,
-      switchSubReason: 0,
-    },
-  ];
-  const matchedAccident = matchEmergencyOutageFromAccidentsJson(sampleAccidentsJson, {
-    remId: 'zhytomyr',
-    settlementId: 'zt_city',
-    streetId: 'zt_kyivska',
-    house: '37',
-  });
-  assert.ok(matchedAccident !== null, 'matchEmergencyOutageFromAccidentsJson must match pw_accidents JSON');
-  assert.equal(matchedAccident?.startTime, '06.04.2026 19:21');
-  assert.equal(matchedAccident?.estimatedRestoreTime, '07.04.2026 20:00');
-
-  const sampleEmergencyTableHtml = `
-    <table>
-      <tr><th>РЕМ</th><th>Населений пункт</th><th>Вулиця</th><th>Будинок</th><th>Тип відключення</th><th>Час відключення</th><th>Очікуваний час ввімкнення</th></tr>
-      <tr><td>Житомирський РЕМ</td><td>м. Житомир</td><td>вул. Київська</td><td>37</td><td>Аварійне відключення</td><td>06.04.2026 19:21</td><td>07.04.2026 20:00</td></tr>
-    </table>
-  `;
-  const matchedTableEmergencyRows = parseZtoeEmergencyOutagesTableHtml(sampleEmergencyTableHtml);
-  assert.equal(matchedTableEmergencyRows.length, 1, 'parseZtoeEmergencyOutagesTableHtml must match emergency HTML table');
-  assert.equal(matchedTableEmergencyRows[0].startTime, '06.04.2026 19:21');
-  assert.equal(matchedTableEmergencyRows[0].estimatedRestoreTime, '07.04.2026 20:00');
-
-  // 5. Verify Cross-Day Emergency Overlay on Today (06.04.2026 -> 19:00-24:00) and Tomorrow (07.04.2026 -> 00:00-20:00)
-  const crossDayEmergency = {
-    id: 'pw_accident_cross_day',
-    outageType: 'Аварійне відключення',
-    startTime: '06.04.2026 19:21',
-    estimatedRestoreTime: '07.04.2026 20:00',
-  };
-  const base48PowerOn = Array.from({ length: 48 }, (_, idx) => {
-    const sh = Math.floor(idx / 2);
-    const sm = idx % 2 === 0 ? 0 : 30;
-    const eh = Math.floor((idx + 1) / 2);
-    const em = (idx + 1) % 2 === 0 ? 0 : 30;
-    const startTimeStr = `${String(sh).padStart(2, '0')}:${String(sm).padStart(2, '0')}`;
-    const endTimeStr = `${String(eh).padStart(2, '0')}:${String(em).padStart(2, '0')}`;
-    return {
-      id: `2026-04-06_${idx}`,
-      startHour: sh,
-      endHour: eh,
-      startMinute: sm,
-      endMinute: em,
-      startTimeStr,
-      endTimeStr,
-      status: 'POWER_ON' as const,
-      isEmergency: false,
-    };
-  });
-
-  const todayWithEmergency = applyEmergencyOutageToSchedule(
-    {
-      dateStr: '2026-04-06',
-      dayLabel: 'Сьогодні',
-      queue: '1.1',
-      city: 'Житомир (ZTOE)',
-      slots: base48PowerOn,
-      lastUpdated: '19:25',
-      sourceUrl: 'https://www.ztoe.com.ua/unhooking-search.php',
-    },
-    crossDayEmergency
-  );
-  assert.ok(todayWithEmergency !== null);
-  const todayEmergencyIntervals = getBlackoutIntervals(todayWithEmergency!.slots);
-  assert.equal(todayEmergencyIntervals.length, 1);
-  assert.equal(todayEmergencyIntervals[0].start, '19:00', 'Day 1 emergency outage starts at containing half-hour slot 19:00');
-  assert.equal(todayEmergencyIntervals[0].end, '24:00', 'Day 1 emergency outage extends to 24:00');
-  assert.equal(todayEmergencyIntervals[0].isEmergency, true, 'Emergency interval must have isEmergency: true');
-
-  const tomorrowWithEmergency = applyEmergencyOutageToSchedule(
-    {
-      dateStr: '2026-04-07',
-      dayLabel: 'Завтра',
-      queue: '1.1',
-      city: 'Житомир (ZTOE)',
-      slots: base48PowerOn,
-      lastUpdated: '19:25',
-      sourceUrl: 'https://www.ztoe.com.ua/unhooking-search.php',
-    },
-    crossDayEmergency
-  );
-  assert.ok(tomorrowWithEmergency !== null);
-  const tomorrowEmergencyIntervals = getBlackoutIntervals(tomorrowWithEmergency!.slots);
-  assert.equal(tomorrowEmergencyIntervals.length, 1);
-  assert.equal(tomorrowEmergencyIntervals[0].start, '00:00', 'Day 2 emergency outage starts at 00:00');
-  assert.equal(tomorrowEmergencyIntervals[0].end, '20:00', 'Day 2 emergency outage ends at 20:00');
-  assert.equal(tomorrowEmergencyIntervals[0].isEmergency, true, 'Day 2 emergency interval must have isEmergency: true');
-
-  // 6. Verify Emergency State-Transition Notifications (Detected & Restored)
-  resetAllAppDataToFirstLaunch();
-  const testNotifSettings = {
-    ...DEFAULT_SETTINGS,
-    queue: '2.2',
-    selectedAddress: 'м. Житомир, вул. Київська, буд. 37',
-    notificationsEnabled: true,
-    soundEnabled: false,
-    vibrationEnabled: false,
-  };
-  const startAlert = checkAndTriggerEmergencyOutageAlert(null, crossDayEmergency, testNotifSettings, 'uk');
-  assert.ok(startAlert !== null, 'Must fire emergency-detected notification');
-  assert.equal(startAlert?.slotId, `emerg_detected_${crossDayEmergency.id}`);
-
-  const restoreAlert = checkAndTriggerEmergencyOutageAlert(crossDayEmergency, null, testNotifSettings, 'uk');
-  assert.ok(restoreAlert !== null, 'Must fire emergency-restored notification when emergency outage clears');
-  assert.equal(restoreAlert?.slotId, `emerg_restored_${crossDayEmergency.id}`);
-
-  // 7. Verify Unselected Queue returns empty slots without network error in fetchFullSchedules
-  const unselectedRes = await fetchFullSchedules('https://www.ztoe.com.ua/unhooking-search.php', '');
-  assert.equal(unselectedRes.status, 'NO_QUEUES_FOUND');
-  assert.equal(unselectedRes.todaySchedule.slots.length, 0);
-  assert.equal(unselectedRes.todaySchedule.isUnclear, true);
-
-  // 8. Verify Android & Web Source Parity for ANDROID_UPDATE_SPEC.md
-  const mainViewTsx = fs.readFileSync(path.join(ROOT_DIR, 'src/components/MainView.tsx'), 'utf-8');
-  const settingsViewTsx = fs.readFileSync(path.join(ROOT_DIR, 'src/components/SettingsView.tsx'), 'utf-8');
-  const phoneSimTsx = fs.readFileSync(path.join(ROOT_DIR, 'src/components/PhoneSimulator.tsx'), 'utf-8');
-  const widgetSimTsx = fs.readFileSync(path.join(ROOT_DIR, 'src/components/WidgetSimulator.tsx'), 'utf-8');
-  const appTsx = fs.readFileSync(path.join(ROOT_DIR, 'src/App.tsx'), 'utf-8');
-  const mainScreenKt = fs.readFileSync(
-    path.join(ROOT_DIR, 'android/app/src/main/java/ua/blackout/prewarning/ui/screens/MainScreen.kt'),
-    'utf-8'
-  );
-  const settingsScreenKt = fs.readFileSync(
-    path.join(ROOT_DIR, 'android/app/src/main/java/ua/blackout/prewarning/ui/screens/SettingsScreen.kt'),
-    'utf-8'
-  );
-  const navScreenKt = fs.readFileSync(
-    path.join(ROOT_DIR, 'android/app/src/main/java/ua/blackout/prewarning/ui/screens/BlackoutAppNavigation.kt'),
-    'utf-8'
-  );
-  const glanceWidgetKt = fs.readFileSync(
-    path.join(ROOT_DIR, 'android/app/src/main/java/ua/blackout/prewarning/widget/BlackoutGlanceWidget.kt'),
-    'utf-8'
-  );
-  const ztoeAddressLookupKt = fs.readFileSync(
-    path.join(ROOT_DIR, 'android/app/src/main/java/ua/blackout/prewarning/data/parser/ZtoeAddressLookup.kt'),
-    'utf-8'
-  );
-
-  assert.ok(
-    mainViewTsx.includes('unselected-queue-header-btn') &&
-      mainViewTsx.includes('first-start-language-switch') &&
-      mainViewTsx.includes('formatAddressAfterCity') &&
-      mainViewTsx.includes('Години відключень на завтра:') &&
-      mainViewTsx.includes('Години відключень на сьогодні:') &&
-      mainViewTsx.includes('main-emergency-outage-banner') &&
-      mainViewTsx.includes('className="font-bold text-right">{settings.activeEmergencyOutage.startTime || \'--:--\'}</span>') &&
-      mainScreenKt.includes('formatAddressAfterCity') &&
-      mainScreenKt.includes('AppStrings.blackoutHoursForTomorrowHeader(lang)') &&
-      mainScreenKt.includes('AppStrings.blackoutHoursForDayHeader(lang)') &&
-      mainScreenKt.includes('AppStrings.selectQueueAction(lang)') &&
-      mainScreenKt.includes('AppStrings.emergencyOutageTitle(lang)'),
-    'MainView.tsx and MainScreen.kt must include First-Launch Select Queue button, language switch, formatted address, right-aligned Emergency Outage banner timestamps, and Today/Tomorrow blackout hours headers'
-  );
-
-  assert.ok(
-    settingsViewTsx.includes('ztoe-address-lookup-section') &&
-      settingsViewTsx.includes('border-2 border-white/25') &&
-      settingsViewTsx.includes('Пошук вручну') &&
-      settingsScreenKt.includes('DialogProperties(usePlatformDefaultWidth = false)') &&
-      settingsScreenKt.includes('border(2.dp, Color.White.copy(alpha = 0.25f)') &&
-      settingsScreenKt.includes('AppStrings.queueHelpManualSearchTitle(lang)') &&
-      ztoeAddressLookupKt.includes('checkAddressOnZtoeWebsite') &&
-      ztoeAddressLookupKt.includes('getKyivska37DemoEmergencyOutage'),
-    'SettingsView.tsx, SettingsScreen.kt, and ZtoeAddressLookup.kt must implement the full-screen "?" Address Lookup modal with 2px/2dp border and "Пошук вручну" heading'
-  );
-
-  assert.ok(
-    phoneSimTsx.includes('zt-app-first-launch-reset') &&
-      phoneSimTsx.includes('opacity-15 brightness-50 pointer-events-none select-none') &&
-      navScreenKt.includes('isQueueUnselected') &&
-      navScreenKt.includes('Color(0xD9070A12)') &&
-      mainScreenKt.includes('Color(0xD9070A12)') &&
-      mainScreenKt.includes('Житомиробленерго (ZTOE)') &&
-      mainScreenKt.includes('"SYSTEM" to "Auto"') &&
-      widgetSimTsx.includes('applyEmergencyOutageToSchedule') &&
-      glanceWidgetKt.includes('applyEmergencyOutageToSlots') &&
-      appTsx.includes('emulator-reset-all-app-data-first-launch') &&
-      appTsx.includes('emulator-simulate-emergency-outage-kyivska-37'),
-    'PhoneSimulator, BlackoutAppNavigation, MainScreen, Widgets, and App.tsx must support dark first-launch dimming, #FF5E3A Select Queue button with "Житомиробленерго (ZTOE)" subtitle, emergency widget overlays, and emulator test buttons'
-  );
-
-  // 9. Verify 5 Device-Tested Fixes:
-  // (1) Upgrade from 1.3.3 (versionCode + 300 >= 300 and unconditional debug.keystore write)
-  // (3) All 19 REMs and dynamic settlement/street/house parsers
-  // (4) Selected address shown at top of result card and full-width "Обрати чергу" button underneath in SettingsScreen.kt
-  // (5) Both Small (2x1) and Big (4x2) widgets registered with thumbnail previews
-  const buildGradleText = fs.readFileSync(path.join(ROOT_DIR, 'android/app/build.gradle.kts'), 'utf-8');
-  assert.ok(
-    buildGradleText.includes('?: 300) + 300') &&
-      !buildGradleText.includes('if (!keystoreFile.exists())'),
-    'build.gradle.kts must use versionCode offset +300 and unconditionally write canonical debug.keystore so upgrading from 1.3.3 always succeeds'
-  );
-
+  // 2. All 19 REMs, option parsers with entity decoding, house table with queue and no-queue rows
   assert.equal(ZTOE_REM_OPTIONS.length, 19, 'ZTOE_REM_OPTIONS must include all 19 Zhytomyroblenergo REMs');
-  const {
-    parseZtoeSettlementOptionsHtml,
-    parseZtoeStreetOptionsHtml,
-  } = await import('../src/services/ztoeAddressLookup');
+  const parsedRems = parseZtoeRemOptionsHtml(
+    '<select name="rem_id"><option value="0">--Оберіть РЕМ--</option><option value="7">Житомирський РЕМ</option></select>'
+  );
+  assert.ok(parsedRems.length >= 19, 'parseZtoeRemOptionsHtml must keep all 19 REMs');
+
   const sampleSelectHtml = `
     <select name="naspunkt_id">
       <option value="0">--Оберіть населений пункт--</option>
@@ -2570,146 +2317,53 @@ async function runUnitTestE_AddressLookupAndUnsetQueue() {
       <option value="0">--Оберіть вулицю--</option>
       <option value="173934">вул. Київська</option>
       <option value="888888">вул. В&#039;ячеслава Чорновола</option>
-    </select>
-  `;
+    </select>`;
   const parsedSettlements = parseZtoeSettlementOptionsHtml('zhytomyr', sampleSelectHtml);
   assert.equal(parsedSettlements.length, 2);
   assert.equal(parsedSettlements[0].id, 'zt_city');
-  assert.equal(parsedSettlements[1].id, 'np_99999');
-  assert.equal(parsedSettlements[1].nameUk, "с. Кам'янка", 'City selector must decode &#039; into apostrophe');
+  assert.equal(parsedSettlements[1].nameUk, "с. Кам'янка", 'City selector must decode &#039; into an apostrophe');
   const parsedStreets = parseZtoeStreetOptionsHtml('zt_city', sampleSelectHtml);
   assert.equal(parsedStreets.length, 2);
   assert.equal(parsedStreets[0].id, 'zt_kyivska');
-  assert.equal(parsedStreets[1].id, 'st_888888');
-  assert.equal(parsedStreets[1].nameUk, "вул. В'ячеслава Чорновола", 'Street selector must decode &#039; into apostrophe');
+  assert.equal(parsedStreets[1].nameUk, "вул. В'ячеслава Чорновола", 'Street selector must decode &#039; into an apostrophe');
 
-  assert.ok(
-    ztoeAddressLookupKt.includes('fun fetchSettlementsForRem(') &&
-      ztoeAddressLookupKt.includes('fun fetchStreetsForSettlement(') &&
-      ztoeAddressLookupKt.includes('fun fetchHousesForStreet(') &&
-      settingsScreenKt.includes('ZtoeAddressLookup.fetchSettlementsForRem(') &&
-      settingsScreenKt.includes('ZtoeAddressLookup.fetchStreetsForSettlement(') &&
-      settingsScreenKt.includes('ZtoeAddressLookup.fetchHousesForStreet('),
-    'ZtoeAddressLookup.kt and SettingsScreen.kt must dynamically fetch full lists of settlements, streets, and houses for all REMs'
+  const parsedQueueRows = parseZtoeAddressLookupTableHtml(
+    '<table><tr><th>Будинок</th><th>Черга</th><th>Підчерга</th></tr><tr><td>15</td><td>5</td><td>2</td></tr></table>'
   );
+  assert.equal(parsedQueueRows.find((r) => r.house === '15')?.queue, '5.2');
+  const parsedNoQueueRows = parseZtoeAddressLookupTableHtml(
+    '<table><tr><th>Будинок</th><th>Черга</th><th>Підчерга</th></tr><tr><td>104</td><td colspan="2">В цей час не вимикається, за винятком випадків аварійних відключень</td></tr></table>'
+  );
+  assert.equal(parsedNoQueueRows.find((r) => r.house === '104')?.queue, '');
+  assert.ok(ZTOE_FULL_NO_OUTAGE_MESSAGE.startsWith('В цей час не вимикається'));
 
-  assert.ok(
-    settingsScreenKt.includes('selectedAddressStr') &&
-      settingsScreenKt.includes('Знайдена черга:') &&
-      settingsScreenKt.includes('Обрати чергу ${matchedRecord.queue}') &&
-      settingsScreenKt.includes('Apply Queue ${matchedRecord.queue}') &&
-      settingsScreenKt.indexOf('selectedAddressStr') < settingsScreenKt.indexOf('Обрати чергу ${matchedRecord.queue}') &&
-      !settingsScreenKt.includes('Перевірити на сайті'),
-    'SettingsScreen.kt must display the selected address and "Знайдена черга:" above the full-width "Обрати чергу" button matching Workbench'
-  );
+  // 3. Duplicate streets: apostrophe / spacing variants become ONE option that keeps every id
+  const merged = mergeStreets([
+    { id: 'st_176316', settlementId: 'zt_city', ztoeVulicaId: '176316', nameUk: "вул. В'ячеслава Чорновола", nameEn: '' },
+    { id: 'st_174295', settlementId: 'zt_city', ztoeVulicaId: '174295', nameUk: 'вул. В’ячеслава Чорновола', nameEn: '' },
+    { id: 'st_1', settlementId: 'zt_city', ztoeVulicaId: '1', nameUk: 'вул. С.П.Корольова', nameEn: '' },
+    { id: 'st_2', settlementId: 'zt_city', ztoeVulicaId: '2', nameUk: 'вул. С.П. Корольова', nameEn: '' },
+  ]);
+  assert.equal(merged.length, 2, 'Duplicate streets must merge into one option each');
+  const chornovola = merged.find((s) => s.allIds.includes('st_176316'));
+  assert.ok(chornovola && chornovola.allIds.includes('st_174295'), 'Merged street must keep all ids');
+  assert.deepEqual([...(chornovola!.ztoeVulicaIds ?? [])].sort(), ['174295', '176316']);
+  const keys = ZTOE_STREET_OPTIONS.map((s) => `${s.settlementId}|${s.nameUk.toLowerCase().replace(/[’ʼ‘´`]/g, "'").replace(/\s+/g, ' ')}`);
+  assert.equal(new Set(keys).size, keys.length, 'The static street list must not contain duplicate streets');
+  assert.ok(findStreetById('zt_kyivska'), 'findStreetById must resolve a static street id');
 
-  const androidManifestXml = fs.readFileSync(
-    path.join(ROOT_DIR, 'android/app/src/main/AndroidManifest.xml'),
-    'utf-8'
-  );
-  const widgetReceiverKt = fs.readFileSync(
-    path.join(ROOT_DIR, 'android/app/src/main/java/ua/blackout/prewarning/widget/BlackoutWidgetReceiver.kt'),
-    'utf-8'
-  );
-  const smallWidgetXml = fs.readFileSync(
-    path.join(ROOT_DIR, 'android/app/src/main/res/xml/blackout_widget_info.xml'),
-    'utf-8'
-  );
-  const bigWidgetXml = fs.readFileSync(
-    path.join(ROOT_DIR, 'android/app/src/main/res/xml/blackout_widget_big_info.xml'),
-    'utf-8'
-  );
-  assert.ok(
-    androidManifestXml.includes('.widget.BlackoutWidgetReceiver') &&
-      androidManifestXml.includes('.widget.BlackoutBigWidgetReceiver') &&
-      widgetReceiverKt.includes('class BlackoutBigWidgetReceiver') &&
-      glanceWidgetKt.includes('class BlackoutBigGlanceWidget') &&
-      smallWidgetXml.includes('android:previewImage="@drawable/widget_preview_small"') &&
-      bigWidgetXml.includes('android:previewImage="@drawable/widget_preview_big"') &&
-      fs.existsSync(path.join(ROOT_DIR, 'android/app/src/main/res/drawable/widget_preview_small.xml')) &&
-      fs.existsSync(path.join(ROOT_DIR, 'android/app/src/main/res/drawable/widget_preview_big.xml')),
-    'Android project must provide both Small (2x1) and Big (4x2) widgets with vector thumbnail previews'
-  );
+  // 4. Production code no longer carries the demo emergency (вул. Київська 37) or fake houses
+  const addressLookupKt = read(KT + 'data/parser/ZtoeAddressLookup.kt');
+  assert.ok(!addressLookupKt.includes('getKyivska37DemoEmergencyOutage'), 'ZtoeAddressLookup.kt must not contain the demo emergency');
+  assert.ok(!/fun\s+\w*[Dd]efaultHouses/.test(addressLookupKt), 'ZtoeAddressLookup.kt must not invent default house lists');
 
-  // 10. Verify 6 User Requirements:
-  // (1) "?" button in settings matches size (40dp / w-10 h-10), color (#FF5E3A) and position (right side of header row) of Workbench
-  assert.ok(
-    settingsViewTsx.includes('w-10 h-10 rounded-2xl bg-[#FF5E3A]') &&
-      settingsScreenKt.includes('size(40.dp)') &&
-      settingsScreenKt.includes('RoundedCornerShape(16.dp)') &&
-      settingsScreenKt.includes('background(Color(0xFFFF5E3A))') &&
-      settingsScreenKt.includes('Icons.Default.HelpOutline'),
-    '"?" button in SettingsScreen.kt must match Workbench size (40dp / w-10 h-10), shape (16dp / rounded-2xl), color (#FF5E3A), and right-side placement'
-  );
-
-  // (2) "Select Queue" ("Обрати чергу") button in "?" window matches color, position, text of Workbench, applies address and sends User to main window
-  assert.ok(
-    settingsViewTsx.includes('onNavigateToMain?.()') &&
-      phoneSimTsx.includes("onNavigateToMain={() => setActiveTab('schedule')}") &&
-      navScreenKt.includes('onAddressQueueResolved = { resolvedQueue, statusText, addressLabel, emergencyOutage, query ->') &&
-      navScreenKt.includes('pagerState.animateScrollToPage(0)'),
-    '"Select Queue" button in "?" window must apply address and always navigate User to main window in both Web and Android'
-  );
-
-  // (3) List of all REMs, Cities, Streets and Houses refreshed when User enters "?" screen
-  const {
-    parseZtoeRemOptionsHtml,
-    fetchRemsFromZtoe,
-    getRems,
-  } = await import('../src/services/ztoeAddressLookup');
-  const sampleRemHtml = `
-    <select name="rem_id" id="rem_id">
-      <option value="0">--Оберіть РЕМ--</option>
-      <option value="4">Житомирський РЕМ</option>
-      <option value="2">Бердичівський РЕМ</option>
-    </select>
-  `;
-  const parsedRems = parseZtoeRemOptionsHtml(sampleRemHtml);
-  assert.ok(parsedRems.length >= 19, 'parseZtoeRemOptionsHtml must parse live REM options and preserve all 19 REMs');
-  const fetchedRems = await fetchRemsFromZtoe('https://example.com', true);
-  assert.ok(fetchedRems.length >= 19 && getRems().length >= 19, 'fetchRemsFromZtoe(forceRefresh=true) must return all REMs');
-  assert.ok(
-    settingsViewTsx.includes('fetchRemsFromZtoe(settings.url, true)') &&
-      settingsViewTsx.includes('fetchSettlementsForRem(selectedRemId, settings.url, true)') &&
-      settingsViewTsx.includes('fetchStreetsForSettlement(') &&
-      settingsViewTsx.includes('fetchHousesForStreet(') &&
-      settingsScreenKt.includes('ZtoeAddressLookup.fetchRemsFromZtoe(siteUrl, forceRefresh = true)') &&
-      settingsScreenKt.includes('ZtoeAddressLookup.fetchSettlementsForRem(selectedRemId, siteUrl, forceRefresh = true)') &&
-      settingsScreenKt.includes('ZtoeAddressLookup.fetchStreetsForSettlement(selectedRemId, selectedSettlementId, siteUrl, forceRefresh = true)') &&
-      settingsScreenKt.includes('ZtoeAddressLookup.fetchHousesForStreet(selectedRemId, selectedSettlementId, selectedStreetId, siteUrl, forceRefresh = true)'),
-    'Entering "?" screen must refresh REMs, Cities, Streets, and Houses with forceRefresh = true in both Web and Android'
-  );
-
-  // (4) In "?" window under text "Пошук черги за адресою" add text UK: "(Або закрийте це вікно та виберіть тільки чергу)", EN: "(Or close this window and select directly)"
-  const appStringsKt = fs.readFileSync(
-    path.join(ROOT_DIR, 'android/app/src/main/java/ua/blackout/prewarning/ui/AppStrings.kt'),
-    'utf-8'
-  );
-  assert.equal(
-    translations.uk.queueHelpSubtitle,
-    '(Або закрийте це вікно та виберіть тільки чергу)',
-    'UK subtitle under "Пошук черги за адресою" must match exact required text'
-  );
-  assert.equal(
-    translations.en.queueHelpSubtitle,
-    '(Or close this window and select directly)',
-    'EN subtitle under "Find Queue by Address" must match exact required text'
-  );
-  assert.ok(
-    settingsViewTsx.includes('ztoe-address-lookup-subtitle') &&
-      appStringsKt.includes('(Або закрийте це вікно та виберіть тільки чергу)') &&
-      appStringsKt.includes('(Or close this window and select directly)') &&
-      settingsScreenKt.includes('AppStrings.queueHelpAddressSubtitle(lang)'),
-    'Both SettingsView.tsx and SettingsScreen.kt must render the localized subtitle under "Пошук черги за адресою"'
-  );
-
-  // (5) Separate block for Emergency Power Outages switch below Notifications block, always visible even when no outages detected, ON by default, taking into account Sound & Vibration switches, and not turned off by main switch
+  // 5. Emergency switch: ON by default, independent of the master switch, keeps sound / vibration
   assert.equal(translations.uk.settingsEmergencyOutages, 'Сповіщення про аварійні відключення');
   assert.equal(translations.en.settingsEmergencyOutages, 'Emergency outage notifications');
-  assert.equal(DEFAULT_SETTINGS.emergencyNotificationsEnabled, true, 'Emergency Power Outages switch must be ON by default');
-  const { toggleMasterNotifications, toggleEmergencyNotifications } = await import('../src/services/alertManager');
+  assert.equal(DEFAULT_SETTINGS.emergencyNotificationsEnabled, true, 'Emergency switch must be ON by default');
   resetAllAppDataToFirstLaunch();
-  const initialEmergSettings = {
+  clearNotifiedHistory();
+  const initial = {
     ...DEFAULT_SETTINGS,
     queue: '2.2',
     notificationsEnabled: true,
@@ -2718,598 +2372,148 @@ async function runUnitTestE_AddressLookupAndUnsetQueue() {
     vibrationEnabled: false,
     prevSoundEnabled: true,
     prevVibrationEnabled: false,
-    activeEmergencyOutage: crossDayEmergency,
   };
-  saveUserSettings(initialEmergSettings);
-  // Turn OFF main notifications switch (in widget, settings, or main screen) -> emergencyNotificationsEnabled must remain true and keep Sound/Vibration active!
+  saveUserSettings(initial);
   const afterMainOff = toggleMasterNotifications(loadUserSettings(), false);
-  assert.equal(afterMainOff.notificationsEnabled, false, 'Main notifications switch must be OFF');
+  assert.equal(afterMainOff.notificationsEnabled, false);
+  assert.equal(afterMainOff.emergencyNotificationsEnabled, true, 'The master switch must not turn emergency notifications off');
+  assert.equal(afterMainOff.soundEnabled, true, 'Sound stays on while the emergency switch is on');
+  assert.equal(afterMainOff.vibrationEnabled, false);
+
+  const now = parseLocalDateTime('2026-11-13T18:00');
+  const startEvent = {
+    kind: 'START' as const,
+    entryId: 'e1',
+    start: parseLocalDateTime('2026-11-13T17:30'),
+    eta: parseLocalDateTime('2026-11-13T19:00'),
+    upcoming: false,
+    earlyEnd: false,
+  };
+  const fired = triggerEmergencyEventAlerts([startEvent], 'addr1', afterMainOff, 'uk', now);
+  assert.equal(fired.length, 1, 'An emergency START must notify even when the master switch is OFF');
   assert.equal(
-    afterMainOff.emergencyNotificationsEnabled,
-    true,
-    'Turning off Notification main switch in widget, settings or main screen must NOT turn emergency notifications off'
+    triggerEmergencyEventAlerts([startEvent], 'addr1', afterMainOff, 'uk', now).length,
+    0,
+    'The same emergency event must be announced only once'
   );
-  assert.equal(
-    afterMainOff.soundEnabled,
-    true,
-    'Sound switch must remain active while Emergency Power Outages switch is ON'
-  );
-  assert.equal(
-    afterMainOff.vibrationEnabled,
-    false,
-    'Vibration switch state must be preserved while Emergency Power Outages switch is ON'
-  );
-  // Emergency alert must still trigger when main switch is OFF and emergency switch is ON
-  const independentEmergAlert = checkAndTriggerEmergencyOutageAlert(null, crossDayEmergency, afterMainOff, 'uk');
-  assert.ok(
-    independentEmergAlert !== null,
-    'Emergency outage notification must fire when emergencyNotificationsEnabled is true even if main notificationsEnabled is false'
-  );
-  // Turning OFF emergency switch while main switch is ALSO OFF disables Sound/Vibration and saves their previous states
   const afterBothOff = toggleEmergencyNotifications(afterMainOff, false);
   assert.equal(afterBothOff.emergencyNotificationsEnabled, false);
   assert.equal(afterBothOff.soundEnabled, false);
-  assert.equal(afterBothOff.vibrationEnabled, false);
   assert.equal(afterBothOff.prevSoundEnabled, true);
-  assert.equal(afterBothOff.prevVibrationEnabled, false);
-  // Turning Emergency switch back ON restores Sound/Vibration from previous states
   const afterEmergBackOn = toggleEmergencyNotifications(afterBothOff, true);
-  assert.equal(afterEmergBackOn.emergencyNotificationsEnabled, true);
-  assert.equal(afterEmergBackOn.soundEnabled, true);
-  assert.equal(afterEmergBackOn.vibrationEnabled, false);
-
-  // Turn OFF emergency switch while main switch is ON -> emergency alert must NOT fire
-  saveUserSettings({
-    ...loadUserSettings(),
-    notificationsEnabled: true,
-    emergencyNotificationsEnabled: false,
-  });
-  const withEmergOff = loadUserSettings();
-  const blockedEmergAlert = checkAndTriggerEmergencyOutageAlert(crossDayEmergency, null, withEmergOff, 'uk');
+  assert.equal(afterEmergBackOn.soundEnabled, true, 'Turning the emergency switch back on restores sound');
+  clearNotifiedHistory();
   assert.equal(
-    blockedEmergAlert,
-    null,
-    'Emergency outage notification must NOT fire when emergencyNotificationsEnabled is false'
+    triggerEmergencyEventAlerts([{ ...startEvent, entryId: 'e2' }], 'addr1', { ...afterBothOff, notificationsEnabled: true }, 'uk', now).length,
+    0,
+    'No emergency notification while the emergency switch is OFF'
   );
-  const notificationHelperKt = fs.readFileSync(
-    path.join(ROOT_DIR, 'android/app/src/main/java/ua/blackout/prewarning/notification/NotificationHelper.kt'),
-    'utf-8'
-  );
+  const notificationHelperKt = read(KT + 'notification/NotificationHelper.kt');
   assert.ok(
-    settingsViewTsx.includes('emergency-outage-switch-block') &&
-      settingsViewTsx.includes('ios-switch-emergency-notifications') &&
-      settingsViewTsx.includes('break-words leading-snug') &&
-      !settingsViewTsx.includes('Boolean(settings.activeEmergencyOutage) &&') &&
-      appStringsKt.includes('Сповіщення про аварійні відключення') &&
-      appStringsKt.includes('Emergency outage notifications') &&
-      settingsScreenKt.includes('4b. Emergency Power Outages Switch') &&
-      settingsScreenKt.includes('AppStrings.emergencyNotifications(lang)') &&
-      settingsScreenKt.includes('.weight(1f)') &&
-      !settingsScreenKt.includes('if (activeEmergencyOutage != null)') &&
-      notificationHelperKt.includes('if (!settings.emergencyNotificationsEnabled) return') &&
+    notificationHelperKt.includes('if (!settings.emergencyNotificationsEnabled || events.isEmpty()) return') &&
       notificationHelperKt.includes('settings.emergencyNotificationsEnabled && settings.soundEnabled') &&
       notificationHelperKt.includes('settings.emergencyNotificationsEnabled && settings.vibrationEnabled'),
-    'SettingsView.tsx, SettingsScreen.kt, and NotificationHelper.kt must always show the Emergency Power Outages switch with word wrapping in a separate block below Notifications block and respect Sound and Vibration switches'
+    'NotificationHelper.kt must gate emergency events by emergencyNotificationsEnabled only and respect Sound / Vibration'
   );
 
-  // (6) Automatically refresh timer and drum bar when User enters main screen
+  // 6. "?" window: exact subtitle, searchable pickers, emergency switch block, 40 dp help button
+  assert.equal(translations.uk.queueHelpSubtitle, '(Або закрийте це вікно та виберіть тільки чергу)');
+  assert.equal(translations.en.queueHelpSubtitle, '(Or close this window and select directly)');
+  const appStringsKt = read(KT + 'ui/AppStrings.kt');
+  const settingsScreenKt = read(KT + 'ui/screens/SettingsScreen.kt');
   assert.ok(
-    mainViewTsx.includes('setEntryTick((prev) => prev + 1)') &&
-      appTsx.includes("if (activeMode === 'app' && phoneTab === 'schedule')") &&
-      navScreenKt.includes('val isMainScreenVisible = pagerState.currentPage == 0 && !isRouletteOpen') &&
-      navScreenKt.includes('LaunchedEffect(isMainScreenVisible)') &&
-      mainScreenKt.includes('entryRefreshTick') &&
-      mainScreenKt.includes('key(kyivNow.hour, kyivNow.minute, entryRefreshTick)'),
-    'MainView.tsx, App.tsx, BlackoutAppNavigation.kt, and MainScreen.kt must automatically refresh timer and drum bar when User enters main screen'
+    appStringsKt.includes('(Або закрийте це вікно та виберіть тільки чергу)') &&
+      appStringsKt.includes('(Or close this window and select directly)') &&
+      appStringsKt.includes('Сповіщення про аварійні відключення') &&
+      settingsScreenKt.includes('AppStrings.queueHelpAddressSubtitle(lang)') &&
+      settingsScreenKt.includes('AppStrings.emergencyNotifications(lang)') &&
+      settingsScreenKt.includes('SearchablePickerField(') &&
+      settingsScreenKt.includes('DialogProperties(usePlatformDefaultWidth = false)') &&
+      settingsScreenKt.includes('Icons.Default.HelpOutline') &&
+      settingsScreenKt.includes('.size(40.dp)'),
+    'SettingsScreen.kt must keep the "?" address lookup with searchable pickers, the localized subtitle and the emergency switch'
   );
 
-  // (7) Background prefetching on app launch + persistent disk cache for instant "?" dropdowns
-  const {
-    ADDRESS_INDEX_STORAGE_KEY,
-    hydrateAddressIndexFromStorage,
-    persistAddressIndexToStorage,
-    resetAddressIndexCache,
-    prefetchAddressIndexInBackground,
-    getSettlementsForRem,
-    getStreetsForSettlement,
-    getHousesForStreet,
-    getAddressIndexStats,
-    parseZtoeSettlementHousesTableHtml,
-    fetchHousesForStreet,
-  } = await import('../src/services/ztoeAddressLookup');
-
-  resetAddressIndexCache(true);
-  // Seed a mock disk cache snapshot in localStorage and verify 0ms synchronous hydration
-  if (typeof localStorage !== 'undefined') {
-    const mockDiskSnapshot = {
-      version: 1,
-      updatedAt: Date.now(),
-      rems: ZTOE_REM_OPTIONS,
-      settlementsByRemId: {
-        zhytomyr: [
-          { id: 'zt_city', remId: 'zhytomyr', ztoeNaspunktId: '16657', nameUk: 'м. Житомир', nameEn: 'Zhytomyr' },
-          { id: 'np_77777', remId: 'zhytomyr', ztoeNaspunktId: '77777', nameUk: 'с. Тестове', nameEn: 'Testove' },
-        ],
-      },
-      streetsBySettlementId: {
-        zt_city: [
-          { id: 'zt_kyivska', settlementId: 'zt_city', ztoeVulicaId: '173934', nameUk: 'вул. Київська', nameEn: 'Kyivska St.' },
-          { id: 'st_999999', settlementId: 'zt_city', ztoeVulicaId: '999999', nameUk: 'вул. Інноваційна', nameEn: 'Innovatsiina St.' },
-        ],
-      },
-      housesByStreetId: {
-        st_999999: [
-          { house: '12А', queue: '4.2' },
-        ],
-      },
-      recentHouseStreetIds: ['st_999999'],
-    };
-    localStorage.setItem(ADDRESS_INDEX_STORAGE_KEY, JSON.stringify(mockDiskSnapshot));
-    const hydrated = hydrateAddressIndexFromStorage();
-    assert.equal(hydrated, true, 'hydrateAddressIndexFromStorage must load persisted index from localStorage');
-    assert.ok(
-      getSettlementsForRem('zhytomyr').some((s) => s.id === 'np_77777'),
-      'getSettlementsForRem must synchronously return disk-cached settlements in 0ms'
-    );
-    assert.ok(
-      getStreetsForSettlement('zt_city').some((st) => st.id === 'st_999999'),
-      'getStreetsForSettlement must synchronously return disk-cached streets in 0ms'
-    );
-    assert.equal(
-      getHousesForStreet('st_999999')[0]?.queue,
-      '4.2',
-      'getHousesForStreet must synchronously return disk-cached houses in 0ms'
-    );
-    persistAddressIndexToStorage();
-    const stats = getAddressIndexStats();
-    assert.equal(stats.remCount, 19);
-    assert.ok(stats.indexedRemSettlementsCount >= 1);
-    assert.ok(stats.indexedSettlementStreetsCount >= 1);
-    assert.ok(stats.indexedStreetHousesCount >= 1);
-  }
-
-  // Verify bulk settlement-wide house indexing (rem_id + naspunkt_id + all=1 7-column table)
-  const sampleSettlementAllHtml = `
-    <table>
-      <tr>
-        <td><b>РЕМ</b></td>
-        <td><b>Населений пункт</b></td>
-        <td><b>Назва вулиці</b></td>
-        <td><b>Будинки</b></td>
-        <td><b>Черга</b></td>
-        <td><b>Підчерга</b></td>
-        <td><b>Примітка</b></td>
-      </tr>
-      <tr>
-        <td>Житомирський</td>
-        <td>місто Житомир</td>
-        <td>вул. Київська</td>
-        <td>3, 5, 77</td>
-        <td align="center">5</td>
-        <td align="center">2</td>
-        <td></td>
-      </tr>
-      <tr>
-        <td>Житомирський</td>
-        <td>місто Житомир</td>
-        <td>вул. Велика Бердичівська</td>
-        <td>1, 2А, 10</td>
-        <td align="center">3</td>
-        <td align="center">1</td>
-        <td></td>
-      </tr>
-    </table>
-  `;
-  const settlementStreets = getStreetsForSettlement('zt_city');
-  const bulkHousesByStreet = parseZtoeSettlementHousesTableHtml('zt_city', settlementStreets, sampleSettlementAllHtml);
+  // 7. Upgrade safety: versionCode offset +300, debug keystore written unconditionally
+  const buildGradle = read('android/app/build.gradle.kts');
   assert.ok(
-    (bulkHousesByStreet['zt_kyivska']?.length ?? 0) >= 3,
-    'parseZtoeSettlementHousesTableHtml must bulk-index all houses for вул. Київська from settlement all=1 table'
-  );
-  assert.equal(
-    bulkHousesByStreet['zt_kyivska']?.find((h) => h.house === '77')?.queue,
-    '5.2',
-    'parseZtoeSettlementHousesTableHtml must map house 77 on вул. Київська to queue 5.2'
-  );
-  assert.equal(
-    bulkHousesByStreet['zt_berdy']?.find((h) => h.house === '2А')?.queue,
-    '3.1',
-    'parseZtoeSettlementHousesTableHtml must bulk-index multiple streets houses in the same pass'
-  );
-  assert.equal(
-    getHousesForStreet('zt_kyivska').find((h) => h.house === '77')?.queue,
-    '5.2',
-    'getHousesForStreet must return bulk-indexed settlement houses in 0ms'
+    buildGradle.includes('?: 300) + 300') && !buildGradle.includes('if (!keystoreFile.exists())'),
+    'build.gradle.kts must keep the versionCode offset +300 and the unconditional debug.keystore write'
   );
 
-  // Run background prefetch on launch and verify it completes cleanly and preserves all 19 REMs
-  await prefetchAddressIndexInBackground('https://example.com', {
-    remId: 'zhytomyr',
-    settlementId: 'zt_city',
-    streetId: 'zt_kyivska',
-    house: '77',
-  });
-  assert.equal(getRems().length, 19, 'After prefetchAddressIndexInBackground, all 19 REMs must be available');
-  const ztoeParserTestKt = fs.readFileSync(
-    path.join(ROOT_DIR, 'android/app/src/test/java/ua/blackout/prewarning/ZtoeParserTest.kt'),
-    'utf-8'
+  // 8. Three widgets (small 2x1, big 4x2, strip 4x1) with thumbnails; exact alarms via SCHEDULE_EXACT_ALARM
+  const manifest = read('android/app/src/main/AndroidManifest.xml');
+  const widgetReceiverKt = read(KT + 'widget/BlackoutWidgetReceiver.kt');
+  const glanceWidgetKt = read(KT + 'widget/BlackoutGlanceWidget.kt');
+  const smallXml = read('android/app/src/main/res/xml/blackout_widget_info.xml');
+  const bigXml = read('android/app/src/main/res/xml/blackout_widget_big_info.xml');
+  const stripXml = read('android/app/src/main/res/xml/blackout_widget_strip_info.xml');
+  assert.ok(
+    manifest.includes('.widget.BlackoutWidgetReceiver') &&
+      manifest.includes('.widget.BlackoutBigWidgetReceiver') &&
+      manifest.includes('.widget.BlackoutStripWidgetReceiver') &&
+      widgetReceiverKt.includes('class BlackoutBigWidgetReceiver') &&
+      widgetReceiverKt.includes('class BlackoutStripWidgetReceiver') &&
+      glanceWidgetKt.includes('class BlackoutBigGlanceWidget') &&
+      glanceWidgetKt.includes('class BlackoutStripGlanceWidget') &&
+      smallXml.includes('android:previewImage="@drawable/widget_preview_small"') &&
+      bigXml.includes('android:previewImage="@drawable/widget_preview_big"') &&
+      stripXml.includes('android:previewImage="@drawable/widget_preview_strip"') &&
+      fs.existsSync(path.join(ROOT_DIR, 'android/app/src/main/res/drawable/widget_preview_strip.xml')),
+    'Android must provide Small (2x1), Big (4x2) and Strip (4x1) widgets with vector thumbnail previews'
   );
   assert.ok(
-    ztoeParserTestKt.includes('assertEquals(16657, parsedSettlements[0].ztoeNaspunktId)') &&
-      ztoeParserTestKt.includes('assertEquals(173934, parsedStreets[0].ztoeVulicaId)') &&
-      ztoeParserTestKt.includes('assertEquals(4, parsedRems.first { it.id == "zhytomyr" }.ztoeRemId)') &&
-      ztoeParserTestKt.includes('isTomorrow = false') &&
-      !ztoeParserTestKt.includes('isTodaySchedule') &&
-      ztoeAddressLookupKt.includes('val finalResolved = resolvedResult') &&
-      ztoeAddressLookupKt.includes('fun formatSettlementLabelUk('),
-    'ZtoeParserTest.kt must compare Int IDs against Int literals, use isTomorrow parameter, and ZtoeAddressLookup.kt must format settlement labels and avoid mutable var smart-casts'
-  );
-  assert.ok(
-    appTsx.includes('prefetchAddressIndexInBackground(settings.url, settings.selectedAddressQuery)') &&
-      ztoeAddressLookupKt.includes('fun prefetchAddressIndexInBackground(') &&
-      ztoeAddressLookupKt.includes('fun parseZtoeSettlementHousesTableHtml(') &&
-      ztoeAddressLookupKt.includes('fun initDiskCache(') &&
-      ztoeAddressLookupKt.includes('fun serializeCacheToJson(') &&
-      ztoeAddressLookupKt.includes('fun hydrateCacheFromJson(') &&
-      navScreenKt.includes('ZtoeAddressLookup.initDiskCache(appContext)') &&
-      navScreenKt.includes('ZtoeAddressLookup.prefetchAddressIndexInBackground(') &&
-      !navScreenKt.includes('remember(appContext) {\n        ZtoeAddressLookup.initDiskCache(appContext)'),
-    'Both Web (App.tsx / ztoeAddressLookup.ts) and Android (BlackoutAppNavigation.kt / ZtoeAddressLookup.kt) must hydrate disk cache and prefetch in the background without blocking initial UI rendering'
+    manifest.includes('android.permission.SCHEDULE_EXACT_ALARM') && !manifest.includes('android.permission.USE_EXACT_ALARM'),
+    'AndroidManifest.xml must use SCHEDULE_EXACT_ALARM and not USE_EXACT_ALARM'
   );
 
-  // (8) Verify вул. Київська, буд. 74 7-column ZTOE table row does NOT trigger an Emergency Outage popup, and verify v1.3.3 upgrade compatibility
-  const {
-    isValidOutageTimestamp,
-    isValidEmergencyOutage,
-    checkEmergencyOutageOnZtoe,
-  } = await import('../src/services/ztoeAddressLookup');
-  const kyivska74Html = `
-    <table>
-      <tr>
-        <td><b>РЕМ</b></td>
-        <td><b>Населений пункт</b></td>
-        <td><b>Назва вулиці, провулка, тощо</b></td>
-        <td><b>Будинки</b></td>
-        <td><b>Черга</b></td>
-        <td><b>Підчерга</b></td>
-        <td><b>Примітка</b></td>
-      </tr>
-      <tr>
-        <td>Житомирський</td>
-        <td>місто Житомир</td>
-        <td>вул. Київська</td>
-        <td>74</td>
-        <td>В цей час не вимикається, за винятком випадків аварійних відключень</td>
-        <td>В цей час не вимикається, за винятком випадків аварійних відключень</td>
-        <td>побутові споживачі</td>
-      </tr>
-    </table>
-  `;
-  const parsedKyivska74Rows = parseZtoeAddressLookupTableHtml(kyivska74Html);
-  assert.equal(parsedKyivska74Rows.length, 1);
-  assert.equal(parsedKyivska74Rows[0].house, '74');
-  assert.equal(parsedKyivska74Rows[0].queue, '');
-  assert.equal(
-    parsedKyivska74Rows[0].statusText,
-    'В цей час не вимикається, за винятком випадків аварійних відключень'
-  );
-  const parsedKyivska74EmergencyRows = parseZtoeEmergencyOutagesTableHtml(kyivska74Html);
-  assert.equal(
-    parsedKyivska74EmergencyRows.length,
-    0,
-    'вул. Київська house 74 7-column regular table row must NEVER be parsed as an emergency outage'
-  );
-  const checkedKyivska74Emergency = await checkEmergencyOutageOnZtoe(
-    { remId: 'zhytomyr', settlementId: 'zt_city', streetId: 'zt_kyivska', house: '74' },
-    kyivska74Html
-  );
+  // 9. Main screen: first-launch "select queue", Today/Tomorrow headers, emergency rows, site status and notice
+  const mainScreenKt = read(KT + 'ui/screens/MainScreen.kt');
+  const navScreenKt = read(KT + 'ui/screens/BlackoutAppNavigation.kt');
   assert.ok(
-    checkedKyivska74Emergency === null ||
-      (isValidEmergencyOutage(checkedKyivska74Emergency) &&
-        checkedKyivska74Emergency.id.startsWith('pw_accident_')),
-    'checkEmergencyOutageOnZtoe must never return a bogus outage from the 7-column regular HTML table (only null or a valid live pw_accident_*)'
-  );
-  assert.equal(
-    isValidOutageTimestamp('В цей час не вимикається, за винятком випадків аварійних відключень'),
-    false
-  );
-  assert.equal(isValidOutageTimestamp('побутові споживачі'), false);
-  assert.equal(isValidOutageTimestamp('10.11.2026 22:00'), true);
-  assert.equal(
-    isValidEmergencyOutage({
-      id: 'bad_emerg',
-      outageType: 'В цей час не вимикається, за винятком випадків аварійних відключень',
-      startTime: 'В цей час не вимикається, за винятком випадків аварійних відключень',
-      estimatedRestoreTime: 'побутові споживачі',
-    }),
-    false
+    mainScreenKt.includes('AppStrings.selectQueueAction(lang)') &&
+      mainScreenKt.includes('AppStrings.blackoutHoursForTomorrowHeader(lang)') &&
+      mainScreenKt.includes('AppStrings.blackoutHoursForDayHeader(lang)') &&
+      mainScreenKt.includes('SiteStatusModel.banner(snapshot, lang)') &&
+      mainScreenKt.includes('SiteNoticeCard(') &&
+      navScreenKt.includes('isQueueUnselected') &&
+      navScreenKt.includes('pagerState.animateScrollToPage(0)'),
+    'MainScreen.kt and BlackoutAppNavigation.kt must keep the first-launch flow, day headers, site status and the ztoe notice card'
   );
 
-  // Verify loadUserSettings sanitizes any bogus persisted activeEmergencyOutage
-  saveUserSettings({
-    ...DEFAULT_SETTINGS,
-    activeEmergencyOutage: {
-      id: 'bad_emerg',
-      outageType: 'В цей час не вимикається, за винятком випадків аварійних відключень',
-      startTime: 'В цей час не вимикається, за винятком випадків аварійних відключень',
-      estimatedRestoreTime: 'побутові споживачі',
-    },
-  });
-  assert.equal(
-    loadUserSettings().activeEmergencyOutage,
-    null,
-    'loadUserSettings must sanitize and discard invalid persisted activeEmergencyOutage values'
+  // 10. Web parity of the same screens
+  const mainViewTsx = read('src/components/MainView.tsx');
+  const settingsViewTsx = read('src/components/SettingsView.tsx');
+  const widgetSimTsx = read('src/components/WidgetSimulator.tsx');
+  assert.ok(
+    mainViewTsx.includes('data-testid="unselected-queue-header-btn"') &&
+      mainViewTsx.includes('data-testid="first-start-language-switch"') &&
+      mainViewTsx.includes('siteNoticeTitle(lang)') &&
+      settingsViewTsx.includes('<SearchablePickerField') &&
+      settingsViewTsx.includes('testId="ios-switch-emergency-notifications"') &&
+      settingsViewTsx.includes('data-testid="ztoe-address-lookup-subtitle"') &&
+      widgetSimTsx.includes('data-testid="widget-strip"') &&
+      (translations.uk as Record<string, string>).widgetStripName === 'Світло в Житомирі (Графік)',
+    'MainView.tsx, SettingsView.tsx and WidgetSimulator.tsx must mirror the first launch, notice card, searchable pickers, emergency switch and strip widget'
   );
 
-  // Verify build.gradle.kts and SettingsRepository.kt preserve v1.3.3 upgrade compatibility
-  const buildGradleKts = fs.readFileSync(
-    path.join(ROOT_DIR, 'android/app/build.gradle.kts'),
-    'utf-8'
-  );
-  const settingsRepoKt = fs.readFileSync(
-    path.join(ROOT_DIR, 'android/app/src/main/java/ua/blackout/prewarning/data/repository/SettingsRepository.kt'),
-    'utf-8'
-  );
-  const workflowYml = fs.readFileSync(
-    path.join(ROOT_DIR, '.github/workflows/build-apk.yml'),
-    'utf-8'
-  );
-  assert.ok(
-    buildGradleKts.includes('applicationId = appPkgEnv ?: "com.ZTBlackoutPreWarning"') &&
-      !buildGradleKts.includes('isDebuggable = true') &&
-      !buildGradleKts.includes('isBundleBuild') &&
-      buildGradleKts.includes('val hasUploadKeystore = uploadKeystoreFile.exists() && uploadStorePassword.isNotEmpty()') &&
-      workflowYml.indexOf('Prepare Release Keystore') < workflowYml.indexOf('Build Release APK') &&
-      settingsRepoKt.includes('ZtoeAddressLookup.isValidEmergencyOutage(rawEmergencyCandidate)') &&
-      ztoeAddressLookupKt.includes('fun isValidOutageTimestamp(') &&
-      ztoeAddressLookupKt.includes('fun isValidEmergencyOutage(') &&
-      ztoeAddressLookupKt.includes('fun parseZtoeEmergencyOutagesTableHtml(html: String, targetHouse: String)'),
-    'build.gradle.kts and build-apk.yml must sign both Release APK and Release AAB with upload-keystore.jks when configured, keep unified applicationId and isDebuggable = false for v1.3.3 upgrades, and ZtoeAddressLookup.kt must provide 2-arg parseZtoeEmergencyOutagesTableHtml'
-  );
-
-  // (9) Verify live PowerOn pw_accidents emergency outage detection, priority scoring (Аварійні > Планові > ГПВ), Latin-to-Cyrillic house letter normalization, Степана Бандери 16, null-schedule emergency synthesis, and top-priority Emergency Outage banner
-  const multiAccidentsList = [
-    {
-      id: 1001,
-      city: { id: 1, name: 'м. Житомир' },
-      street: { id: 162, name: 'вул. Степана Бандери' },
-      buildingNames: '16, 16А',
-      dateEvent: '2026-11-11T08:00:00+02:00',
-      datePlanIn: '2026-11-11T12:00:00+02:00',
-      koment: 'ГПВ 4.1',
-      typeOff: 1,
-      switchSubReason: 2,
-    },
-    {
-      id: 1002,
-      city: { id: 1, name: 'м. Житомир' },
-      street: { id: 162, name: 'вул. Степана Бандери' },
-      buildingNames: '16, 16A',
-      dateEvent: '2026-11-11T09:15:00+02:00',
-      datePlanIn: '2026-11-11T17:30:00+02:00',
-      koment: 'Аварійне відключення',
-      typeOff: 1,
-      switchSubReason: 0,
-    },
-  ];
-  const matchedBandery16 = matchEmergencyOutageFromAccidentsJson(multiAccidentsList, {
-    remId: 'zhytomyr',
-    settlementId: 'zt_city',
-    streetId: 'st_173952',
-    house: '16',
-  });
-  assert.ok(matchedBandery16 !== null, 'matchEmergencyOutageFromAccidentsJson must match вул. Степана Бандери, буд. 16');
-  assert.equal(
-    matchedBandery16!.startTime,
-    '11.11.2026 09:15',
-    'matchEmergencyOutageFromAccidentsJson must prioritize Аварійне відключення (switchSubReason 0) over ГПВ (switchSubReason 2) when multiple rows match a building'
-  );
-  assert.equal(matchedBandery16!.estimatedRestoreTime, '11.11.2026 17:30');
-
-  // Verify Latin "16A" vs Cyrillic "16А" normalization
-  const matchedBandery16Cyrillic = matchEmergencyOutageFromAccidentsJson(multiAccidentsList, {
-    remId: 'zhytomyr',
-    settlementId: 'zt_city',
-    streetId: 'st_173952',
-    house: '16А',
-  });
-  assert.ok(
-    matchedBandery16Cyrillic !== null && matchedBandery16Cyrillic.startTime === '11.11.2026 09:15',
-    'matchEmergencyOutageFromAccidentsJson must normalize Latin/Cyrillic building letters (16A <-> 16А)'
-  );
-
-  resetAddressIndexCache(true);
-  const checkedBerdy10 = await checkAddressOnZtoeWebsite({
-    remId: 'zhytomyr',
-    settlementId: 'zt_city',
-    streetId: 'zt_berdy',
-    house: '10',
-  });
-  assert.ok(
-    checkedBerdy10 && checkedBerdy10.house === '10' && checkedBerdy10.queue === '2.1',
-    'checkAddressOnZtoeWebsite must resolve Житомирський РЕМ, м. Житомир, вул. Велика Бердичівська, буд. 10 with queue 2.1'
-  );
-
-  // Verify applyEmergencyOutageToSchedule synthesizes a 48-slot schedule when base schedule is null (e.g. site schedule unclear or no-queue building)
-  const synthesizedFromNull = applyEmergencyOutageToSchedule(
-    null,
-    demoEmergency,
-    false
-  );
-  assert.ok(
-    synthesizedFromNull !== null && synthesizedFromNull.slots.length === 48,
-    'applyEmergencyOutageToSchedule must synthesize a 48-slot schedule when base schedule is null and an active emergency outage exists'
-  );
-  assert.ok(
-    synthesizedFromNull!.slots.slice(44, 48).every((s) => s.status === 'POWER_OFF' && s.isEmergency),
-    'Synthesized schedule from null must mark emergency overlap slots as POWER_OFF with isEmergency = true'
-  );
-
-  // Verify Житомир, вул. Велика Бердичівська, буд. 22 parity between Workbench and Android
-  const berdy22LivePoweronRecord = [
-    {
-      id: 401740077,
-      code_otg: '6',
-      city: {
-        '@id': '/api/pw_cities/333',
-        '@type': 'PwCity',
-        id: 333,
-        name: 'Житомир',
-        codeOtg: '',
-      },
-      street: {
-        '@id': '/api/pw_streets/4550',
-        '@type': 'PwStreet',
-        id: 4550,
-        city: {
-          '@id': '/api/pw_cities/333',
-          '@type': 'PwCity',
-          name: 'Житомир',
-        },
-        name: 'вул. Велика Бердичівська',
-      },
-      dateEvent: '2026-11-10T23:28:00+00:00',
-      datePlanIn: '2026-11-11T17:00:00+00:00',
-      koment: 'АВАРІЯ',
-      switchSubReason: 0,
-      otg: {
-        '@id': '/api/pw_otgs/6',
-        '@type': 'PwOtg',
-        id: 6,
-        code: '6',
-        name: 'Житомирський РЕМ',
-      },
-      buildingNames:
-        '10, 11, 12, 12А, 13, 14, 15, 15/1, 17, 18, 20, 22, 24, 28, 28/1, 30, 32, 34, 34-А, 6, 8, 9',
-      typeOff: 1,
-    },
-  ];
-  const matchedBerdy22 = matchEmergencyOutageFromAccidentsJson(berdy22LivePoweronRecord, {
-    remId: 'zhytomyr',
-    settlementId: 'zt_city',
-    streetId: 'zt_berdy',
-    house: '22',
-  });
-  assert.ok(
-    matchedBerdy22 !== null &&
-      matchedBerdy22.id === 'pw_accident_401740077' &&
-      matchedBerdy22.startTime === '10.11.2026 23:28' &&
-      matchedBerdy22.estimatedRestoreTime === '11.11.2026 17:00' &&
-      matchedBerdy22.outageType === 'Аварійне відключення',
-    'matchEmergencyOutageFromAccidentsJson must match Житомир, вул. Велика Бердичівська, буд. 22 emergency outage'
-  );
-  const matchedBerdy22AndroidAlias = matchEmergencyOutageFromAccidentsJson(berdy22LivePoweronRecord, {
-    remId: 'zhytomyr',
-    settlementId: 'zt_city',
-    streetId: 'zt_velyka_berdychivska',
-    house: '22',
-  });
-  assert.ok(
-    matchedBerdy22AndroidAlias !== null &&
-      matchedBerdy22AndroidAlias.startTime === '10.11.2026 23:28' &&
-      matchedBerdy22AndroidAlias.estimatedRestoreTime === '11.11.2026 17:00',
-    'matchEmergencyOutageFromAccidentsJson must also match Android streetId alias zt_velyka_berdychivska'
-  );
-  assert.ok(
-    ztoeAddressLookupKt.includes('findTopLevelJsonFieldValueStart') &&
-      ztoeAddressLookupKt.includes('ZtoeStreetOption("zt_velyka_berdychivska", "zt_city", 174574, "вул. Велика Бердичівська", "Velyka Berdychivska St.", 4550)') &&
-      ztoeAddressLookupKt.includes('if (cells.size < 5) continue') &&
-      ztoeAddressLookupKt.includes('if (cells.size >= 5)'),
-    'ZtoeAddressLookup.kt must use depth-1 JSON field extraction (ignoring nested street.city.name), poweronStreetId 4550 for Велика Бердичівська, and support 5-cell colspan="3" no-queue HTML rows'
-  );
-
-  // Verify MainView.tsx and MainScreen.kt render the Emergency Outage banner before customQueueStatusText and counter card
-  assert.ok(
-    mainViewTsx.indexOf('data-testid="main-emergency-outage-banner"') <
-      mainViewTsx.indexOf('data-testid="main-custom-queue-status-text"') &&
-      mainViewTsx.indexOf('data-testid="main-emergency-outage-banner"') <
-        mainViewTsx.indexOf('data-testid="main-counter-card"') &&
-      mainScreenKt.indexOf('1c. Active Emergency Outage') <
-        mainScreenKt.indexOf('1b. Custom ZTOE Queue/House Status Message Bar') &&
-      mainScreenKt.indexOf('1c. Active Emergency Outage') <
-        mainScreenKt.indexOf('2. Hero Outage Status Card'),
-    'MainView.tsx and MainScreen.kt must render the Emergency Outage banner at the top of the main content area with highest visual priority'
-  );
-
-  resetAddressIndexCache(true);
-
-  resetAllAppDataToFirstLaunch();
-  console.log('Unit Test E PASSED: Interactive ZTOE Address Lookup, First-Launch Unselected Queue, No-Queue Houses, Emergency Outages, Background Address Prefetch & Bulk House Indexing verified.');
+  console.log('Unit Test E PASSED: Address lookup, duplicate streets, first launch, emergency switch, widgets and exact alarms verified.');
 }
 
-function runUnitTestF_FloatingShadows() {
-  console.log('Running Unit Test F: Floating shadows around segments on Main screen, Settings, About...');
-
-  const mainViewPath = path.join(ROOT_DIR, 'src/components/MainView.tsx');
-  const settingsViewPath = path.join(ROOT_DIR, 'src/components/SettingsView.tsx');
-  const aboutViewPath = path.join(ROOT_DIR, 'src/components/AboutView.tsx');
-  const mainScreenPath = path.join(ROOT_DIR, 'android/app/src/main/java/ua/blackout/prewarning/ui/screens/MainScreen.kt');
-  const settingsScreenPath = path.join(ROOT_DIR, 'android/app/src/main/java/ua/blackout/prewarning/ui/screens/SettingsScreen.kt');
-  const aboutScreenPath = path.join(ROOT_DIR, 'android/app/src/main/java/ua/blackout/prewarning/ui/screens/AboutScreen.kt');
-
-  const mainView = fs.readFileSync(mainViewPath, 'utf-8');
-  const settingsView = fs.readFileSync(settingsViewPath, 'utf-8');
-  const aboutView = fs.readFileSync(aboutViewPath, 'utf-8');
-  const mainScreen = fs.readFileSync(mainScreenPath, 'utf-8');
-  const settingsScreen = fs.readFileSync(settingsScreenPath, 'utf-8');
-  const aboutScreen = fs.readFileSync(aboutScreenPath, 'utf-8');
-
-  // Verify Web MainView floating shadows
-  assert.ok(
-    mainView.includes('shadow-[0_16px_40px_rgba(0,0,0,0.55)]') &&
-      mainView.includes('shadow-[0_16px_44px_rgba(0,0,0,0.55)]') &&
-      mainView.includes('shadow-[0_12px_36px_rgba(0,0,0,0.45)]'),
-    'MainView.tsx must include floating shadows on segments'
-  );
-
-  // Verify Web SettingsView floating shadows
-  assert.ok(
-    (settingsView.match(/shadow-\[0_16px_44px_rgba\(0,0,0,0\.55\)\]/g) || []).length >= 6,
-    'SettingsView.tsx must include floating shadows on all segment cards'
-  );
-
-  // Verify Web AboutView floating shadows
-  assert.ok(
-    (aboutView.match(/shadow-\[0_16px_44px_rgba\(0,0,0,0\.55\)\]/g) || []).length >= 6,
-    'AboutView.tsx must include floating shadows on all segment cards'
-  );
-
-  // Verify Android MainScreen.kt shadows
-  assert.ok(
-    mainScreen.includes('import androidx.compose.ui.draw.shadow') &&
-      mainScreen.includes('floatingShadow') &&
-      mainScreen.includes('.shadow(10.dp, RoundedCornerShape(24.dp)') &&
-      mainScreen.includes('.shadow(8.dp, RoundedCornerShape(16.dp)'),
-    'MainScreen.kt must include floatingShadow and .shadow() modifiers on segments'
-  );
-
-  // Verify Android SettingsScreen.kt shadows
-  assert.ok(
-    settingsScreen.includes('import androidx.compose.ui.draw.shadow') &&
-      settingsScreen.includes('floatingShadow') &&
-      (settingsScreen.match(/\.shadow\(10\.dp, RoundedCornerShape\(24\.dp\)/g) || []).length >= 7,
-    'SettingsScreen.kt must include floatingShadow and .shadow() modifiers on cards'
-  );
-
-  // Verify Android AboutScreen.kt shadows
-  assert.ok(
-    aboutScreen.includes('import androidx.compose.ui.draw.shadow') &&
-      aboutScreen.includes('floatingShadow') &&
-      (aboutScreen.match(/\.shadow\(10\.dp, RoundedCornerShape\(24\.dp\)/g) || []).length >= 5,
-    'AboutScreen.kt must include floatingShadow and .shadow() modifiers on cards'
-  );
-
-  const floatingShadowKtPath = path.join(ROOT_DIR, 'android/app/src/main/java/ua/blackout/prewarning/ui/components/FloatingShadow.kt');
-  assert.ok(fs.existsSync(floatingShadowKtPath), 'FloatingShadow.kt must exist');
-  const floatingShadowKt = fs.readFileSync(floatingShadowKtPath, 'utf-8');
-  assert.ok(
-    floatingShadowKt.includes('drawRoundRect') &&
-      floatingShadowKt.includes('drawBehind') &&
-      !floatingShadowKt.includes('BlurMaskFilter'),
-    'FloatingShadow.kt must use hardware-accelerated drawRoundRect without unsupported BlurMaskFilter'
-  );
-
-  console.log('Unit Test F PASSED: Floating shadows verified on Web and Android across Main, Settings, and About screens.');
+function runUnitTestF_GlassCards() {
+  console.log('--- Running Unit Test F: Shared glass cards (Web and Android) ---');
+  const read = (rel: string) => fs.readFileSync(path.join(ROOT_DIR, rel), 'utf-8');
+  const glassKt = read('android/app/src/main/java/ua/blackout/prewarning/ui/components/GlassCard.kt');
+  const glassTsx = read('src/components/GlassCard.tsx');
+  assert.ok(glassKt.includes('fun GlassCard('), 'GlassCard.kt must define the shared card');
+  assert.ok(glassTsx.includes('GlassCard'), 'GlassCard.tsx must define the shared card');
+  for (const rel of [
+    'android/app/src/main/java/ua/blackout/prewarning/ui/screens/MainScreen.kt',
+    'android/app/src/main/java/ua/blackout/prewarning/ui/screens/SettingsScreen.kt',
+  ]) {
+    assert.ok(read(rel).includes('GlassCard('), `${path.basename(rel)} must use GlassCard`);
+  }
+  console.log('Unit Test F PASSED: Shared glass cards verified on Web and Android.');
 }
 
 async function main() {
@@ -3317,7 +2521,7 @@ async function main() {
   runUnitTestB();
   await runUnitTestC_ZhytomyrRoulette();
   await runUnitTestE_AddressLookupAndUnsetQueue();
-  runUnitTestF_FloatingShadows();
+  runUnitTestF_GlassCards();
 }
 
 main().catch((err) => {

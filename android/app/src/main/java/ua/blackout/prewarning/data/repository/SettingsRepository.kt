@@ -322,5 +322,16 @@ class SettingsRepository(context: Context) {
         return getSettings()
     }
 
+    /**
+     * Writes only the queue assignment of a house that had none. Targeted on purpose: a background
+     * check that took seconds must not overwrite settings the user changed in the meantime.
+     */
+    fun updateQueueAssignment(queue: String, statusText: String?) {
+        prefs.edit()
+            .putString("queue", queue)
+            .putString("custom_queue_status_text", statusText ?: "")
+            .apply()
+    }
+
     fun getSharedPreferences(): SharedPreferences = prefs
 }

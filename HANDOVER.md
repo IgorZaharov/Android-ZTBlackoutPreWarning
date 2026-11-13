@@ -1,6 +1,6 @@
 # Світло в Житомирі (Android-ZTBlackoutPreWarning) — Developer Handover & Architecture Guide
 
-**Current Release Version:** `v1.3.4` (`versionCode = 106`, `applicationId = "ua.blackout.prewarning"`)  
+**Current Release Version:** `v1.4.0` (`versionCode = (GITHUB_RUN_NUMBER ?: 300) + 300`, `applicationId = appPkgEnv ?: "com.ZTBlackoutPreWarning"`, Kotlin `namespace = "ua.blackout.prewarning"`)  
 **Repository:** `https://github.com/IgorZaharov/Android-ZTBlackoutPreWarning`  
 **Data Source:** JSC "Zhytomyroblenergo" (`https://www.ztoe.com.ua/unhooking-search.php`)  
 **Target Platforms:** Native Android 8.0–15 (`minSdk = 26`, `targetSdk = 35`, `compileSdk = 35`) + Interactive Web Simulator (React 19 + TypeScript + Vite)
@@ -129,7 +129,7 @@ Five `1080x1920` (9:16) promotional banners are stored in `public/playstore/` an
 | `android/settings.gradle.kts` | Gradle settings defining repository sources (`google()`, `mavenCentral()`) and `:app` module. |
 | `android/gradle.properties` | JVM heap config, AndroidX flags, and non-transitive R class optimizations. |
 | `android/gradle/libs.versions.toml` | Gradle Version Catalog: AGP `8.7.3`, Kotlin `2.0.21`, Compose BOM `2024.12.01`, Glance `1.1.1`, WorkManager `2.10.0`, Jsoup `1.18.3`, Coroutines `1.9.0`. |
-| `android/app/build.gradle.kts` | App module Gradle config: `namespace = "ua.blackout.prewarning"`, `compileSdk = 35`, `minSdk = 26`, `targetSdk = 35`, `versionCode = (GITHUB_RUN_NUMBER ?: 5) + 100`, `versionName = semverEnv ?: "1.3.4"`. Configures signing with persistent `keystore/debug.keystore`. |
+| `android/app/build.gradle.kts` | App module Gradle config: `namespace = "ua.blackout.prewarning"`, `compileSdk = 36`, `minSdk = 26`, `targetSdk = 36`, `versionCode = (GITHUB_RUN_NUMBER ?: 300) + 300`, `versionName = semverEnv ?: "1.4.0"`. Configures signing with persistent `keystore/debug.keystore`. |
 | `android/app/keystore/debug.keystore` | Persistent APK signing key committed to the repository so every CI build and local build produces APKs with the exact same cryptographic signature, allowing in-place upgrades on user phones without uninstalling or losing settings. |
 | `android/app/proguard-rules.pro` | ProGuard / R8 keep rules for Jsoup, Glance AppWidgets, Coroutines, and data models. |
 | `android/app/src/main/AndroidManifest.xml` | Declares permissions (`INTERNET`, `ACCESS_NETWORK_STATE`, `POST_NOTIFICATIONS`, `SCHEDULE_EXACT_ALARM`, `USE_EXACT_ALARM`, `VIBRATE`, `WAKE_LOCK`, `RECEIVE_BOOT_COMPLETED`), `BlackoutApp`, `MainActivity`, `AlarmReceiver`, `BootCompletedReceiver` (handling `BOOT_COMPLETED`, `MY_PACKAGE_REPLACED`, `TIME_SET`, `TIMEZONE_CHANGED`, `DATE_CHANGED`), `BlackoutWidgetReceiver`, and `WidgetToggleReceiver`. |
@@ -157,7 +157,7 @@ Five `1080x1920` (9:16) promotional banners are stored in `public/playstore/` an
 | `android/app/src/main/java/ua/blackout/prewarning/ui/screens/MainScreen.kt` | Main window UI: Queue header + bell pill switch, Hero countdown card with `Next period` (`Найближчий період`), Today/Tomorrow segmented selector, 24h `TimelineBar` + outage hours list, Last Updated / Refresh card, and Facebook emergency outages card. |
 | `android/app/src/main/java/ua/blackout/prewarning/ui/screens/SettingsScreen.kt` | Settings window UI: Queue dropdown (`1.1`–`6.2`) + `?` 4-step help modal with clickable URL, site URL input + live verification badge, timer inputs (`1..240` min), master/sound/vibration switches, language/theme selectors, and Reset Defaults confirmation modal. |
 | `android/app/src/main/java/ua/blackout/prewarning/ui/screens/AboutScreen.kt` | About window UI: App icon, dynamic version badge (`v1.3.4`), description, key features, clickable project links (`ztoe.com.ua`, `GitHub`), and `Donations / Благодійність і Пожертви` card with live favicons. |
-| `android/app/src/main/java/ua/blackout/prewarning/ui/theme/Theme.kt` | Material 3 Light/Dark color schemes and typography setup. |
+| `android/app/src/main/java/ua/blackout/prewarning/ui/theme/Theme.kt` | Material 3 Light/Dark color schemes (the type scale and shapes live in `ZtTokens.kt`). |
 | `android/app/src/main/java/ua/blackout/prewarning/ui/theme/TimeOfDayPalette.kt` | Smooth minute-by-minute RGB color interpolation across 4 time-of-day periods (`MORNING`, `DAY`, `EVENING`, `NIGHT`) using a 60% Primary, 30% Secondary, 10% Accent distribution. |
 | `android/app/src/test/java/ua/blackout/prewarning/ZtoeParserTest.kt` | JUnit 4 test suite executed by Gradle (`testDebugUnitTest`): tests live/sample HTML parsing, 48-block parity between Main Window and Big Widget, UI text/default invariants, tomorrow's 1st blackout in `Next period`, and Today/Tomorrow interval separation. |
 
@@ -409,7 +409,7 @@ python3 -m zipfile -c public/Android-ZTBlackoutPreWarning.zip android
 ```
 
 ### 8.4 APK Signing & Seamless In-Place Upgrades
-- **Current Setup:** `android/app/build.gradle.kts` signs both `debug` and `release` build types using the repository's persistent `android/app/keystore/debug.keystore` and sets `versionCode = (GITHUB_RUN_NUMBER ?: 5) + 100`. Because the signing certificate and `applicationId` (`"ua.blackout.prewarning"`) remain identical across builds and `versionCode` strictly increases on every GitHub Actions run, users can install new `app-release.apk` releases directly over previous versions without uninstalling or losing their saved settings.
+- **Current Setup:** `android/app/build.gradle.kts` signs both `debug` and `release` build types using the repository's persistent `android/app/keystore/debug.keystore` and sets `versionCode = (GITHUB_RUN_NUMBER ?: 300) + 300`. Because the signing certificate and `applicationId` (`"com.ZTBlackoutPreWarning"` unless overridden by CI) remain identical across builds and `versionCode` strictly increases on every GitHub Actions run, users can install new `app-release.apk` releases directly over previous versions without uninstalling or losing their saved settings.
 - **Custom Production Keystore (for Google Play Store upload):**
   To generate a private production upload key on your PC using `keytool` (included with JDK 17 / Android Studio):
   ```bash
@@ -440,3 +440,16 @@ python3 -m zipfile -c public/Android-ZTBlackoutPreWarning.zip android
    git push origin vX.Y.Z
    ```
 4. Pushing tag `vX.Y.Z` triggers `.github/workflows/build-apk.yml`, which automatically runs all tests, compiles `app-release.apk`, `app-debug.apk`, and `app-release.aab`, publishes the GitHub Release with `CHANGELOG.md` notes, and updates the download link in `README.md` to `(vX.Y.Z)`.
+
+
+## 1.4.0 architecture notes (outage engine rework)
+
+- **Pure core.** `android/app/src/main/java/ua/blackout/prewarning/core/` holds `OutageEngine`, `EmergencyLedger`, `AddressKeys` (`StreetKey`/`HouseKey`), `PowerOnMapper`, `SiteState`. Only `java.time`; mirrored in `src/core/*.ts`; both run the golden cases in `spec/vectors/*.json`. Read `spec/README.md` first.
+- **Two-day window of absolute Kyiv instants.** Planned (ztoe table), repair works and emergencies (PowerOn) become `Outage`s; touching or overlapping ones merge into spans, so an outage over midnight is one block with its full duration and one alert. The Tomorrow tab is always present.
+- **Emergency source = PowerOn API**, per address (`data/poweron/PowerOnClient.kt`), with a local ledger because PowerOn keeps no history. A failed fetch is never "no outage". Details and quirks: `spec/POWERON_API.md`.
+- **One repository.** `OutageRepository.refresh()` (network) and `.snapshot()` (local) feed the main screen, worker, widgets and alarm scheduler. State: `OutageStateStore` (`zt_outage_state_v1`) and `ScheduleRepository`.
+- **Alarms.** `AlarmScheduler` plans alerts from the engine for today and tomorrow, with a midnight sync alarm; `ExactAlarmGate` handles `SCHEDULE_EXACT_ALARM` (`USE_EXACT_ALARM` is gone) and shows an in-app instruction card; request codes come from `AlarmCodes`.
+- **Notifications.** Planned and emergency alerts have separate channels and toggles; emergency events START / ETA_CHANGED / END (`spec/NOTIFICATIONS.md`).
+- **Address data.** Duplicate streets are merged by `StreetKey` with all ids kept; the picker is searchable (`SearchablePickerField`).
+- **iOS.** `docs/ios/IOS_HANDOVER_v1.4.0.md`. Multi-address is a design draft only: `docs/design/MULTI_ADDRESS.md`.
+- **Reviews.** `docs/review/` holds the code review and the three UI reviews.

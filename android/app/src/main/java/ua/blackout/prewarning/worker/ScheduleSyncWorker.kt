@@ -8,14 +8,11 @@ import androidx.work.NetworkType
 import androidx.work.PeriodicWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.WorkerParameters
-import ua.blackout.prewarning.data.parser.FetchStatus
+import kotlinx.coroutines.CancellationException
 import ua.blackout.prewarning.data.parser.ZtoeAddressLookup
-import ua.blackout.prewarning.data.parser.ZtoeParser
-import ua.blackout.prewarning.data.repository.ScheduleRepository
+import ua.blackout.prewarning.data.repository.OutageRepository
 import ua.blackout.prewarning.data.repository.SettingsRepository
 import ua.blackout.prewarning.notification.AlarmScheduler
-import ua.blackout.prewarning.notification.NotificationHelper
-import ua.blackout.prewarning.ui.AppStrings
 import ua.blackout.prewarning.widget.BlackoutGlanceWidget
 import java.util.concurrent.TimeUnit
 
@@ -25,87 +22,61 @@ class ScheduleSyncWorker(
 ) : CoroutineWorker(context, workerParams) {
 
     override suspend fun doWork(): Result {
-        return try {
-            val appContext = context.applicationContext
+        val appContext = context.applicationContext
+        try {
             val settingsRepo = SettingsRepository(appContext)
-            var settings = settingsRepo.getSettings()
-            val resolvedLang = AppStrings.resolveLang(settings.language)
+            val settings = settingsRepo.getSettings()
 
-            // Re-check saved address query & emergency outages on ZTOE website
+            // A house without a queue may be given one by the site later. Only the two fields that
+            // belong to this check are written, so a setting the user changes meanwhile is never reverted.
             val addressQuery = settings.selectedAddressQuery
-            if (addressQuery != null) {
-                ZtoeAddressLookup.initDiskCache(appContext)
-                val latestAddressLookup = ZtoeAddressLookup.checkAddressOnZtoeWebsite(addressQuery, settings.cityUrl)
-                if (latestAddressLookup != null) {
-                    val prevEmergency = settings.activeEmergencyOutage
-                    val nextEmergency = latestAddressLookup.emergencyOutage
-
-                    NotificationHelper.checkAndTriggerEmergencyOutageAlert(
-                        context = appContext,
-                        prevOutage = prevEmergency,
-                        nextOutage = nextEmergency,
-                        settings = settings,
-                        lang = resolvedLang
-                    )
-
-                    val emergencyChanged =
-                        (prevEmergency?.id != nextEmergency?.id) ||
-                            (prevEmergency?.startTime != nextEmergency?.startTime) ||
-                            (prevEmergency?.estimatedRestoreTime != nextEmergency?.estimatedRestoreTime)
-
-                    val hadNoQueue = settings.queue.isBlank()
-                    val queueAssignedForNoQueueHouse = hadNoQueue &&
-                        (latestAddressLookup.queue != settings.queue ||
-                            latestAddressLookup.statusText != settings.customQueueStatusText)
-
-                    if (queueAssignedForNoQueueHouse || emergencyChanged) {
-                        val nextQueue = if (queueAssignedForNoQueueHouse) latestAddressLookup.queue else settings.queue
-                        val nextStatusText = if (queueAssignedForNoQueueHouse) latestAddressLookup.statusText else settings.customQueueStatusText
-                        settings = settings.copy(
-                            queue = nextQueue,
-                            customQueueStatusText = nextStatusText,
-                            activeEmergencyOutage = nextEmergency
-                        )
-                        settingsRepo.saveSettings(settings)
-                    }
-                }
-            }
-
-            val scheduleRepo = ScheduleRepository(appContext)
-            val fetchRes = ZtoeParser.fetchFullSchedule(settings.cityUrl, settings.queue, appContext)
-
-            // Only save schedule when live fetch succeeded; clear cached results if unreachable or no queues found
-            if (fetchRes.status == FetchStatus.SUCCESS) {
-                if (settings.queue.isNotBlank()) {
-                    scheduleRepo.saveSchedule(settings.queue, fetchRes.todaySlots, fetchRes.tomorrowSlots)
-                }
-            } else {
-                scheduleRepo.clearScheduleCache()
-            }
-
-            val hasWidgets = try {
-                BlackoutGlanceWidget.hasActiveWidgets(appContext)
-            } catch (_: Exception) {
-                false
-            }
-
-            if (hasWidgets) {
+            if (addressQuery != null && settings.queue.isBlank()) {
                 try {
-                    BlackoutGlanceWidget.syncAllWidgets(appContext)
-                } catch (_: Exception) {}
+                    ZtoeAddressLookup.initDiskCache(appContext)
+                    val lookup = ZtoeAddressLookup.checkAddressOnZtoeWebsite(addressQuery, settings.cityUrl)
+                    if (lookup != null && (lookup.queue != settings.queue || lookup.statusText != settings.customQueueStatusText)) {
+                        settingsRepo.updateQueueAssignment(lookup.queue, lookup.statusText)
+                    }
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (_: Exception) {
+                }
             }
 
-            // Re-read latest settings right before scheduling alarms in case user changed queue while network fetch was running
-            AlarmScheduler.syncAlarms(appContext)
+            // Each source is isolated inside OutageRepository: a failing site never stops the other one,
+            // and a failure is never treated as "no outage".
+            try {
+                OutageRepository(appContext).refresh(settingsRepo.getSettings())
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+            }
 
-            Result.success()
+            try {
+                if (BlackoutGlanceWidget.hasActiveWidgets(appContext)) {
+                    BlackoutGlanceWidget.syncAllWidgets(appContext)
+                }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+            }
+            return Result.success()
+        } catch (e: CancellationException) {
+            throw e
         } catch (e: Exception) {
-            Result.retry()
+            return if (runAttemptCount < MAX_ATTEMPTS) Result.retry() else Result.success()
+        } finally {
+            // Alarms are planned from the latest stored state even when a source failed above
+            try {
+                AlarmScheduler.syncAlarms(appContext)
+            } catch (_: Exception) {
+            }
         }
     }
 
     companion object {
         const val WORK_NAME = "ScheduleSyncWorker"
+        private const val MAX_ATTEMPTS = 3
 
         fun schedulePeriodicWork(
             context: Context,
@@ -113,6 +84,7 @@ class ScheduleSyncWorker(
         ) {
             val appContext = context.applicationContext
             val settings = SettingsRepository(appContext).getSettings()
+            // WorkManager never runs periodic work more often than every 15 minutes
             val intervalMinutes = settings.refreshIntervalMinutes.coerceAtLeast(15L)
 
             val constraints = Constraints.Builder()

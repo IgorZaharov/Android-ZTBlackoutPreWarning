@@ -1,12 +1,41 @@
 /**
  * Alert & Notification Manager
- * Handles advance alert thresholds, deduplication (strictly once per blackout slot),
- * sound & vibration independence, master toggle state memory, and local storage persistence.
+ * Mirrors the Android alert logic (spec/NOTIFICATIONS.md):
+ *  - planned pre-warnings come from the outage engine's plan (one alert per merged span of today and
+ *    tomorrow, key `planned_<ISO start>`, never for a started, finished or stale span),
+ *  - emergency alerts are events of the emergency ledger (START / ETA_CHANGED / END), gated by their
+ *    own switch, independent of the master switch,
+ *  - deduplication by key in the notified registry, sound & vibration independence, master toggle
+ *    state memory, and local storage persistence.
  */
 import { BlackoutSlot, DaySchedule, EmergencyOutageInfo, NotificationRecord, UserSettings } from '../types';
-import { calculateOutageCountdown, DEFAULT_ZTOE_URL } from './ztoeParser';
+import { DEFAULT_ZTOE_URL, legacyClock } from './ztoeParser';
 import { isValidEmergencyOutage } from './ztoeAddressLookup';
-import { translations } from './i18n';
+import {
+  emergencyChangedBody,
+  emergencyEndBody,
+  emergencyEarlyEndTitle,
+  emergencyEarlyEndBody,
+  emergencyStartBody,
+  plannedAlertBody,
+  translations,
+} from './i18n';
+import { eventKey, type EmergencyEvent } from '../core/emergencyLedger';
+import {
+  formatLocalDate,
+  hourOf,
+  minuteOf,
+  plusDays,
+  plusMinutes,
+  toLocalDate,
+  wallMinutesBetween,
+  type LocalDate,
+  type LocalDateTime,
+} from '../core/localTime';
+import { OutageEngine, buildPlanned } from '../core/outageEngine';
+import type { AlertSpec, Outage } from '../core/outageModels';
+import { getOutageStateStore } from './outageStore';
+import { getScheduleCache } from './scheduleCache';
 
 const SETTINGS_KEY = 'zt_blackout_user_settings_v1';
 const NOTIFIED_SLOTS_KEY = 'zt_blackout_notified_slots_v1';
@@ -242,6 +271,13 @@ export function resetAllAppDataToFirstLaunch(): UserSettings {
   memoryNotifiedSlots.clear();
   memorySettings = null;
   try {
+    // the schedule cache, the emergency ledger and the site/PowerOn status belong to the old address
+    getScheduleCache().clear();
+    getOutageStateStore().clearAll();
+  } catch {
+    // ignore
+  }
+  try {
     if (typeof localStorage !== 'undefined') {
       localStorage.removeItem(SETTINGS_KEY);
       localStorage.removeItem(NOTIFIED_SLOTS_KEY);
@@ -286,214 +322,195 @@ export function triggerDeviceVibration(): void {
   }
 }
 
+// ---------------------------------------------------------------------------------------------
+// Planned pre-warnings (spec/NOTIFICATIONS.md section 1), driven by the outage engine
+// ---------------------------------------------------------------------------------------------
+
+/** An alert whose moment passed this long ago is still delivered (a throttled background tab), like AlarmReceiver's tolerance. */
+const ALERT_GRACE_MINUTES = 2;
+
 /**
- * Check if an advance alert should be fired for current schedule.
- * Strictly guarantees only 1 notification per continuous blackout block.
- * Several consecutive blackout timeslots are treated as ONE blackout.
+ * The alert plan: one alert per merged planned/repair span of the window yesterday..tomorrow, at
+ * `start - advance`, never retroactive, never for a started, finished or stale span. Key
+ * `planned_<ISO start>`. Empty while the master switch is off.
+ */
+export function planPreWarnings(outages: readonly Outage[], now: LocalDateTime, settings: Pick<UserSettings, 'notificationsEnabled' | 'advanceNoticeMinutes'>): AlertSpec[] {
+  if (!settings.notificationsEnabled) return [];
+  return OutageEngine.planAlerts(outages, now, settings.advanceNoticeMinutes);
+}
+
+const hm = (t: LocalDateTime): string => `${String(hourOf(t)).padStart(2, '0')}:${String(minuteOf(t)).padStart(2, '0')}`;
+
+function deliver(record: NotificationRecord, playSound: boolean, vibrate: boolean, onFired?: (record: NotificationRecord) => void): void {
+  appendAlertLog(record);
+  if (playSound) playNotificationTone();
+  // Vibration is independent of sound
+  if (vibrate) triggerDeviceVibration();
+  if (onFired) onFired(record);
+}
+
+/**
+ * The web stand-in for the exact alarms: called on every tick with the current outages, it fires
+ * the alerts whose moment has come (`fireAt <= now`, the span has not begun more than 2 minutes ago)
+ * once each (registry key). The plan comes from the engine; like AlarmReceiver it never alerts for
+ * finished or stale spans. Gated by `notificationsEnabled` only.
+ */
+export function checkAndTriggerPlannedAlerts(
+  outages: readonly Outage[],
+  now: LocalDateTime,
+  settings: UserSettings,
+  lang: 'uk' | 'en',
+  onNotificationFired?: (record: NotificationRecord) => void
+): NotificationRecord[] {
+  if (!settings.notificationsEnabled) return [];
+  const advance = settings.advanceNoticeMinutes;
+  // Look back far enough that an alert that became due since the last tick (or a throttled tab) is still planned
+  const lookback = plusMinutes(now, -(advance + ALERT_GRACE_MINUTES));
+  const due = OutageEngine.planAlerts(outages, lookback, advance).filter((a) => !(a.fireAt > now));
+  if (due.length === 0) return [];
+
+  const t = translations[lang];
+  const fired: NotificationRecord[] = [];
+  for (const alert of due) {
+    if (loadNotifiedSlotIds().has(alert.key)) continue;
+    markSlotAsNotified(alert.key);
+    const minutesLeft = wallMinutesBetween(now, alert.spanStart);
+    const record: NotificationRecord = {
+      id: `alert_${Date.now()}_${fired.length}`,
+      slotId: alert.key,
+      timestamp: Date.now(),
+      title: t.plannedAlertTitle,
+      message: plannedAlertBody(
+        lang,
+        settings.queue,
+        hm(alert.spanStart),
+        OutageEngine.formatSpanTime(alert.spanEnd),
+        minutesLeft,
+        alert.durationMinutes,
+        alert.mayContinue
+      ),
+      queue: settings.queue,
+      advanceMinutes: Math.max(minutesLeft, 0),
+    };
+    deliver(record, settings.soundEnabled, settings.vibrationEnabled, onNotificationFired);
+    fired.push(record);
+  }
+  return fired;
+}
+
+/**
+ * Check if an advance alert should be fired for a legacy DaySchedule (today's table, emergency
+ * cells excluded). Thin wrapper over [checkAndTriggerPlannedAlerts]: several consecutive blackout
+ * slots are ONE merged span, so there is strictly one notification per continuous block.
  */
 export function checkAndTriggerAdvanceAlert(
   schedule: DaySchedule,
   settings: UserSettings,
   lang: 'uk' | 'en',
-  onNotificationFired?: (record: NotificationRecord) => void
+  onNotificationFired?: (record: NotificationRecord) => void,
+  now: Date = new Date()
 ): NotificationRecord | null {
-  if (!settings.notificationsEnabled || !settings.queue) {
-    return null;
-  }
+  if (!settings.notificationsEnabled || !settings.queue) return null;
+  const slots = schedule.slots || [];
+  if (slots.length === 0 || schedule.isUnclear) return null;
+  const clock = legacyClock(schedule, now);
+  const planned = slots.map((s) => s.status === 'POWER_OFF' && !s.isEmergency);
+  const fired = checkAndTriggerPlannedAlerts(buildPlanned(clock.today, planned, null), clock.now, settings, lang, onNotificationFired);
+  return fired[0] ?? null;
+}
 
-  const countdown = calculateOutageCountdown(schedule);
-  const slot = countdown.closestBlackoutSlot;
-  const minutes = countdown.minutesUntilNextBlackout;
+// ---------------------------------------------------------------------------------------------
+// Emergency events (spec/NOTIFICATIONS.md section 2), produced by the ledger
+// ---------------------------------------------------------------------------------------------
 
-  if (!slot || minutes === null || minutes <= 0) {
-    return null;
-  }
-
-  // Check if within the advance notice window (e.g. <= 15 min)
-  if (minutes > settings.advanceNoticeMinutes) {
-    return null;
-  }
-
-  // Find the continuous blackout block (merging consecutive slots, including 30-min intervals)
-  const intervals = countdown.intervals;
-  const slotStartMin = slot.startHour * 60 + (slot.startMinute || 0);
-  const block = intervals.find(iv => {
-    const ivStartMin = iv.startHour * 60 + (iv.startMinute || 0);
-    const ivEndMin = iv.endHour * 60 + (iv.endMinute || 0);
-    return ivStartMin <= slotStartMin && ivEndMin > slotStartMin;
-  });
-
-  // Unique block ID identifying this entire continuous blackout period
-  const blockId = block
-    ? `${schedule.dateStr}_block_${block.start}_${block.end}_Q${schedule.queue}`
-    : slot.id;
-
-  // Check if already notified for this block or any sub-slot within this continuous block
-  const notifiedSet = loadNotifiedSlotIds();
-  if (notifiedSet.has(blockId) || notifiedSet.has(slot.id)) {
-    return null;
-  }
-
-  // Mark the block ID and slot as notified
-  markSlotAsNotified(blockId);
-  markSlotAsNotified(slot.id);
-
-  // Display time: e.g. "14:00–18:00" if consecutive slots, or "14:00"
-  const timeDisplay = block
-    ? `${block.start}–${block.end}`
-    : slot.startTimeStr;
-
-  const t = translations[lang];
-  const record: NotificationRecord = {
-    id: `alert_${Date.now()}`,
-    slotId: blockId,
-    timestamp: Date.now(),
-    title: t.realAlertTitle,
-    message: t.realAlertBody
-      .replace('{queue}', schedule.queue)
-      .replace('{time}', timeDisplay)
-      .replace('{minutes}', minutes.toString()),
-    queue: schedule.queue,
-    advanceMinutes: minutes
-  };
-
-  appendAlertLog(record);
-
-  // Play sound if enabled
-  if (settings.notificationsEnabled && settings.soundEnabled) {
-    playNotificationTone();
-  }
-
-  // Trigger vibration independently even if sound is disabled!
-  if (settings.notificationsEnabled && settings.vibrationEnabled) {
-    triggerDeviceVibration();
-  }
-
-  if (onNotificationFired) {
-    onNotificationFired(record);
-  }
-
-  return record;
+/** "22:04", "завтра 01:00", "вчора 23:30" or "13.11 22:04" relative to [today]. */
+export function formatWhen(lang: 'uk' | 'en', dt: LocalDateTime, today: LocalDate): string {
+  const time = hm(dt);
+  const date = toLocalDate(dt);
+  if (date === today) return time;
+  if (date === plusDays(today, 1)) return `${translations[lang].tomorrowWord} ${time}`;
+  if (date === plusDays(today, -1)) return `${translations[lang].yesterdayWord} ${time}`;
+  const dateStr = formatLocalDate(date);
+  return `${dateStr.slice(8, 10)}.${dateStr.slice(5, 7)} ${time}`;
 }
 
 /**
- * Triggers a state-transition notification for Emergency Outages ("Аварійне відключення"):
- * 1) Fires once when an emergency outage is first detected for the user's selected house upon refresh.
- * 2) Fires once when an active emergency outage is cleared/restored upon refresh.
- * Controlled independently by settings.emergencyNotificationsEnabled (default true),
- * working independently from the main settings.notificationsEnabled switch.
+ * Posts the notifications for ledger events (start / restore time changed / end). Each event is
+ * announced once: its key (`emerg_start_<addr>_<startISO>` etc.) is remembered in the notified
+ * registry. Callers only pass events produced by a confirmed fetch, so a failed request never gets
+ * here. Gated by `emergencyNotificationsEnabled` ONLY: the master switch does not affect emergencies.
  */
-export function checkAndTriggerEmergencyOutageAlert(
-  prevOutage: EmergencyOutageInfo | null | undefined,
-  nextOutage: EmergencyOutageInfo | null | undefined,
+export function triggerEmergencyEventAlerts(
+  events: readonly EmergencyEvent[],
+  addressKey: string,
   settings: UserSettings,
   lang: 'uk' | 'en',
+  now: LocalDateTime,
   onNotificationFired?: (record: NotificationRecord) => void
+): NotificationRecord[] {
+  const emergencyEnabled = settings.emergencyNotificationsEnabled ?? true;
+  if (!emergencyEnabled || events.length === 0) return [];
+  const t = translations[lang];
+  const today = toLocalDate(now);
+  const address = settings.selectedAddress?.replace(/\n/g, ' ').trim() || null;
+  const fired: NotificationRecord[] = [];
+
+  for (const ev of events) {
+    const key = eventKey(ev, addressKey);
+    if (loadNotifiedSlotIds().has(key)) continue;
+    markSlotAsNotified(key);
+
+    const start = formatWhen(lang, ev.start, today);
+    const eta = ev.eta !== null ? formatWhen(lang, ev.eta, today) : null;
+    let title: string;
+    let body: string;
+    switch (ev.kind) {
+      case 'START':
+        title = ev.upcoming ? t.emergencyUpcomingTitle : t.emergencyStartTitle;
+        body = emergencyStartBody(lang, start, eta);
+        break;
+      case 'ETA_CHANGED':
+        title = t.emergencyChangedTitle;
+        body = emergencyChangedBody(lang, eta ?? start);
+        break;
+      case 'END':
+        if (ev.earlyEnd && eta !== null) {
+          // Before the estimated restore PowerOn can not tell "restored early" from "cancelled"
+          title = emergencyEarlyEndTitle(lang);
+          body = emergencyEarlyEndBody(lang, eta);
+        } else {
+          title = t.emergencyEndTitle;
+          body = emergencyEndBody(lang, start);
+        }
+        break;
+    }
+    const record: NotificationRecord = {
+      id: `emerg_${Date.now()}_${fired.length}`,
+      slotId: key,
+      timestamp: Date.now(),
+      title,
+      message: address ? `${body}\n${address}` : body,
+      queue: settings.queue || '—',
+      advanceMinutes: 0,
+    };
+    deliver(record, settings.soundEnabled, settings.vibrationEnabled, onNotificationFired);
+    fired.push(record);
+  }
+  return fired;
+}
+
+/**
+ * @deprecated Retired in 1.4.0. Emergency alerts are events of the ledger now: `OutageRepository.refresh`
+ * reconciles PowerOn with the ledger and calls [triggerEmergencyEventAlerts]. This shim stays only so
+ * the old App.tsx keeps compiling; it never fires anything.
+ */
+export function checkAndTriggerEmergencyOutageAlert(
+  _prevOutage: EmergencyOutageInfo | null | undefined,
+  _nextOutage: EmergencyOutageInfo | null | undefined,
+  _settings: UserSettings,
+  _lang: 'uk' | 'en',
+  _onNotificationFired?: (record: NotificationRecord) => void
 ): NotificationRecord | null {
-  const emergencySwitchEnabled = settings.emergencyNotificationsEnabled ?? true;
-  if (!emergencySwitchEnabled) {
-    return null;
-  }
-
-  const notifiedSet = loadNotifiedSlotIds();
-  const shouldPlaySound = Boolean(settings.soundEnabled);
-  const shouldVibrate = Boolean(settings.vibrationEnabled);
-
-  // Case 1: Emergency outage detected (transition from none or different outage ID -> active)
-  if (nextOutage && (!prevOutage || prevOutage.id !== nextOutage.id)) {
-    const detectKey = `emerg_detected_${nextOutage.id}`;
-    if (notifiedSet.has(detectKey)) {
-      return null;
-    }
-    markSlotAsNotified(detectKey);
-
-    const title =
-      lang === 'uk'
-        ? nextOutage.outageType || 'Аварійне відключення'
-        : 'Emergency Outage';
-    const timeWindowUk = [
-      nextOutage.startTime ? `Початок: ${nextOutage.startTime}` : '',
-      nextOutage.estimatedRestoreTime ? `Орієнтовне відновлення: ${nextOutage.estimatedRestoreTime}` : '',
-    ]
-      .filter(Boolean)
-      .join(' · ');
-    const timeWindowEn = [
-      nextOutage.startTime ? `Start: ${nextOutage.startTime}` : '',
-      nextOutage.estimatedRestoreTime ? `Estimated restore: ${nextOutage.estimatedRestoreTime}` : '',
-    ]
-      .filter(Boolean)
-      .join(' · ');
-
-    const message =
-      lang === 'uk'
-        ? `За вашою адресою зафіксовано аварійне відключення.${timeWindowUk ? ` ${timeWindowUk}` : ''}`
-        : `An emergency power outage was detected at your address.${timeWindowEn ? ` ${timeWindowEn}` : ''}`;
-
-    const record: NotificationRecord = {
-      id: `emerg_alert_${Date.now()}`,
-      slotId: detectKey,
-      timestamp: Date.now(),
-      title,
-      message,
-      queue: settings.queue || '—',
-      advanceMinutes: 0,
-    };
-
-    appendAlertLog(record);
-
-    if (shouldPlaySound) {
-      playNotificationTone();
-    }
-    if (shouldVibrate) {
-      triggerDeviceVibration();
-    }
-    if (onNotificationFired) {
-      onNotificationFired(record);
-    }
-    return record;
-  }
-
-  // Case 2: Emergency outage restored (transition from active -> none)
-  if (prevOutage && !nextOutage) {
-    const restoreKey = `emerg_restored_${prevOutage.id}`;
-    if (notifiedSet.has(restoreKey)) {
-      return null;
-    }
-    markSlotAsNotified(restoreKey);
-
-    const title =
-      lang === 'uk'
-        ? 'Аварійне відключення завершено'
-        : 'Emergency Outage Resolved';
-    const message =
-      lang === 'uk'
-        ? 'Аварійне відключення за вашою адресою завершено, електропостачання відновлено.'
-        : 'The emergency outage at your address has ended and power has been restored.';
-
-    const record: NotificationRecord = {
-      id: `emerg_restore_${Date.now()}`,
-      slotId: restoreKey,
-      timestamp: Date.now(),
-      title,
-      message,
-      queue: settings.queue || '—',
-      advanceMinutes: 0,
-    };
-
-    appendAlertLog(record);
-
-    if (shouldPlaySound) {
-      playNotificationTone();
-    }
-    if (shouldVibrate) {
-      triggerDeviceVibration();
-    }
-    if (onNotificationFired) {
-      onNotificationFired(record);
-    }
-    return record;
-  }
-
   return null;
 }
 

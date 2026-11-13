@@ -1,0 +1,43 @@
+{
+  "_doc": "Authoritative table of the 19 REMs (regional electricity networks) of Zhytomyroblenergo. 'slug' is the id used by ZTOE_REM_OPTIONS (Kotlin: ZtoeAddressLookup.kt, TypeScript: src/services/ztoeAddressLookup.ts). 'ztoeRemId' is the value of the rem_id form field on https://www.ztoe.com.ua/unhooking-search.php. 'poweronOtgId' is the otg.id filter value of https://api-ztoe-poweron.inneti.net/api (pw_otgs). The two id spaces differ (for example Zhytomyr is 7 on ztoe and 6 on PowerOn): never reuse one for the other. nameUk / nameEn are the names in ZTOE_REM_OPTIONS (nameUk equals the PowerOn pw_otgs name character for character). ztoeLabelUk is the option label on the ztoe form (no 'РЕМ' suffix). displayOrder is the order of ZTOE_REM_OPTIONS (the order the app lists them in).",
+  "verification": {
+    "date": "2026-11-13",
+    "ztoeFormListedRemIds": [1, 2, 3, 4, 5, 7, 9, 11, 13, 14, 16, 17, 18, 19, 20, 21, 23, 24, 25],
+    "poweronOtgIdsUsed": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19],
+    "comparedAgainst": [
+      "live https://www.ztoe.com.ua/unhooking-search.php (rem_id select, 19 options)",
+      "live https://api-ztoe-poweron.inneti.net/api/pw_otgs?pagination=false (20 rows; ids 1-19 are the REMs)",
+      "android/app/src/main/java/ua/blackout/prewarning/data/parser/ZtoeAddressLookup.kt ZTOE_REM_OPTIONS",
+      "src/services/ztoeAddressLookup.ts ZTOE_REM_OPTIONS"
+    ],
+    "result": "all 19 rows agree on ztoeRemId, poweronOtgId, nameUk and slug in every source"
+  },
+  "discrepancies": [],
+  "observations": [
+    "PowerOn pw_otgs has a 20th row, id 20, name АТ \"Житомиробленерго\" (the company itself, not a REM). It has no ztoe rem_id and is not part of this table; never use it as an otg.id for an address.",
+    "ztoe rem_id values 6, 8, 10, 12, 15 and 22 are not offered by the ztoe form; the ids are not contiguous.",
+    "Kotlin stores the ids as Int, the TypeScript table stores them as strings; compare numerically.",
+    "The approved plan says the old iOS handover documents use different ids (Житомирський = 4, Бердичівський = 1); those documents are wrong, use this table."
+  ],
+  "rems": [
+    { "displayOrder": 1,  "slug": "zhytomyr",    "ztoeRemId": 7,  "poweronOtgId": 6,  "nameUk": "Житомирський РЕМ",    "nameEn": "Zhytomyr REM",    "ztoeLabelUk": "Житомирський" },
+    { "displayOrder": 2,  "slug": "berdychiv",   "ztoeRemId": 3,  "poweronOtgId": 3,  "nameUk": "Бердичівський РЕМ",   "nameEn": "Berdychiv REM",   "ztoeLabelUk": "Бердичівський" },
+    { "displayOrder": 3,  "slug": "korosten",    "ztoeRemId": 9,  "poweronOtgId": 7,  "nameUk": "Коростенський РЕМ",   "nameEn": "Korosten REM",    "ztoeLabelUk": "Коростенський" },
+    { "displayOrder": 4,  "slug": "zviahel",     "ztoeRemId": 16, "poweronOtgId": 11, "nameUk": "Звягельський РЕМ",    "nameEn": "Zviahel REM",     "ztoeLabelUk": "Звягельський" },
+    { "displayOrder": 5,  "slug": "malyn",       "ztoeRemId": 14, "poweronOtgId": 10, "nameUk": "Малинський РЕМ",      "nameEn": "Malyn REM",       "ztoeLabelUk": "Малинський" },
+    { "displayOrder": 6,  "slug": "radomyshl",   "ztoeRemId": 20, "poweronOtgId": 15, "nameUk": "Радомишльський РЕМ",  "nameEn": "Radomyshl REM",   "ztoeLabelUk": "Радомишльський" },
+    { "displayOrder": 7,  "slug": "andrushivka", "ztoeRemId": 1,  "poweronOtgId": 1,  "nameUk": "Андрушівський РЕМ",   "nameEn": "Andrushivka REM", "ztoeLabelUk": "Андрушівський" },
+    { "displayOrder": 8,  "slug": "baranivka",   "ztoeRemId": 2,  "poweronOtgId": 2,  "nameUk": "Баранівський РЕМ",    "nameEn": "Baranivka REM",   "ztoeLabelUk": "Баранівський" },
+    { "displayOrder": 9,  "slug": "brusyliv",    "ztoeRemId": 4,  "poweronOtgId": 4,  "nameUk": "Брусилівський РЕМ",   "nameEn": "Brusyliv REM",    "ztoeLabelUk": "Брусилівський" },
+    { "displayOrder": 10, "slug": "korostyshiv", "ztoeRemId": 11, "poweronOtgId": 8,  "nameUk": "Коростишівський РЕМ", "nameEn": "Korostyshiv REM", "ztoeLabelUk": "Коростишівський" },
+    { "displayOrder": 11, "slug": "liubar",      "ztoeRemId": 13, "poweronOtgId": 9,  "nameUk": "Любарський РЕМ",      "nameEn": "Liubar REM",      "ztoeLabelUk": "Любарський" },
+    { "displayOrder": 12, "slug": "ovruch",      "ztoeRemId": 17, "poweronOtgId": 12, "nameUk": "Овруцький РЕМ",       "nameEn": "Ovruch REM",      "ztoeLabelUk": "Овруцький" },
+    { "displayOrder": 13, "slug": "olevsk",      "ztoeRemId": 18, "poweronOtgId": 13, "nameUk": "Олевський РЕМ",       "nameEn": "Olevsk REM",      "ztoeLabelUk": "Олевський" },
+    { "displayOrder": 14, "slug": "popilnia",    "ztoeRemId": 19, "poweronOtgId": 14, "nameUk": "Попільнянський РЕМ",  "nameEn": "Popilnia REM",    "ztoeLabelUk": "Попільнянський" },
+    { "displayOrder": 15, "slug": "pulyny",      "ztoeRemId": 23, "poweronOtgId": 17, "nameUk": "Пулинський РЕМ",      "nameEn": "Pulyny REM",      "ztoeLabelUk": "Пулинський" },
+    { "displayOrder": 16, "slug": "romaniv",     "ztoeRemId": 21, "poweronOtgId": 16, "nameUk": "Романівський РЕМ",    "nameEn": "Romaniv REM",     "ztoeLabelUk": "Романівський" },
+    { "displayOrder": 17, "slug": "khoroshiv",   "ztoeRemId": 5,  "poweronOtgId": 5,  "nameUk": "Хорошівський РЕМ",    "nameEn": "Khoroshiv REM",   "ztoeLabelUk": "Хорошівський" },
+    { "displayOrder": 18, "slug": "cherniakhiv", "ztoeRemId": 24, "poweronOtgId": 18, "nameUk": "Черняхівський РЕМ",   "nameEn": "Cherniakhiv REM", "ztoeLabelUk": "Черняхівський" },
+    { "displayOrder": 19, "slug": "chudniv",     "ztoeRemId": 25, "poweronOtgId": 19, "nameUk": "Чуднівський РЕМ",     "nameEn": "Chudniv REM",     "ztoeLabelUk": "Чуднівський" }
+  ]
+}

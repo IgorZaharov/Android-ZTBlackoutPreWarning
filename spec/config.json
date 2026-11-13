@@ -1,0 +1,72 @@
+{
+  "_doc": "Machine-readable shared constants for the outage logic (see spec/README.md). Values marked 'core' are asserted by spec/vectors through android/.../core/OutageModels.kt (OutageConfig); the rest come from the existing Android code or the approved 1.4.0 plan and are listed with their source in 'sources'. Durations are minutes unless the key says otherwise.",
+  "specVersion": 1,
+  "timezone": "Europe/Kyiv",
+  "timezoneLegacyId": "Europe/Kiev",
+  "grid": {
+    "slotsPerDay": 48,
+    "slotMinutes": 30,
+    "queues": ["1.1", "1.2", "2.1", "2.2", "3.1", "3.2", "4.1", "4.2", "5.1", "5.2", "6.1", "6.2"]
+  },
+  "outage": {
+    "overdueGraceMinutes": 60,
+    "ledgerRetentionHours": 48,
+    "etaChangeMinDeltaMinutes": 10,
+    "windowDaysBeforeToday": 1,
+    "windowDaysAfterToday": 1
+  },
+  "defaults": {
+    "advanceNoticeMinutes": 15,
+    "refreshIntervalMinutes": 30,
+    "notificationsEnabled": true,
+    "emergencyNotificationsEnabled": true,
+    "soundEnabled": true,
+    "vibrationEnabled": true,
+    "themeMode": "SYSTEM",
+    "language": "SYSTEM"
+  },
+  "settingsRanges": {
+    "advanceNoticeMinutes": { "min": 1, "max": 240 },
+    "refreshIntervalMinutes": { "min": 1, "max": 240 }
+  },
+  "refreshFloorMinutes": 15,
+  "ztoe": {
+    "scheduleUrl": "https://www.ztoe.com.ua/unhooking-search.php",
+    "allowedUrlsFile": "valid-urls.json",
+    "encoding": "windows-1251",
+    "connectTimeoutMs": 8000,
+    "readTimeoutMs": 8000
+  },
+  "poweron": {
+    "baseUrl": "https://api-ztoe-poweron.inneti.net/api",
+    "accept": "application/ld+json",
+    "defaultPageSize": 30,
+    "pagination": "pagination=false",
+    "emergencySwitchSubReasons": [0, 1, 3],
+    "mirrorSwitchSubReason": 2,
+    "connectTimeoutMs": 8000,
+    "readTimeoutMs": 8000,
+    "accidentCacheTtlSeconds": 60,
+    "timestampOffsetPolicy": "drop-offset-never-convert"
+  },
+  "alerts": {
+    "iosMaxPendingLocalNotifications": 64,
+    "iosRollingWindowMaxPending": 40,
+    "androidExactAlarmPermission": "android.permission.SCHEDULE_EXACT_ALARM"
+  },
+  "donations": {
+    "file": "donations.json",
+    "refreshHours": 24
+  },
+  "sources": {
+    "grid, outage.*": "android/app/src/main/java/ua/blackout/prewarning/core/OutageModels.kt (OutageConfig)",
+    "defaults, settingsRanges": "android/.../data/model/Models.kt (UserSettings) and data/repository/SettingsRepository.kt (coerceIn 1..240)",
+    "refreshFloorMinutes": "WorkManager periodic work minimum interval (15 min); see spec/NOTIFICATIONS.md",
+    "ztoe.*": "valid-urls.json, android/.../data/parser/ZtoeParser.kt (8000 ms timeouts)",
+    "poweron.baseUrl, poweron.accidentCacheTtlSeconds": "android/.../data/parser/ZtoeAddressLookup.kt (ACCIDENTS_CACHE_TTL_MS = 60000)",
+    "poweron.connectTimeoutMs, poweron.readTimeoutMs": "approved plan, section 5.1; the pre-1.4.0 accident fetch still uses 5000 ms and is being replaced",
+    "poweron.defaultPageSize, poweron.accept": "live probe 2026-11-13, see spec/POWERON_API.md",
+    "alerts.*": "approved plan, section 5.4 decision 5; AndroidManifest.xml",
+    "donations.refreshHours": "android/.../data/repository/DonationsRepository.kt (REFRESH_INTERVAL_MS = 24 h)"
+  }
+}

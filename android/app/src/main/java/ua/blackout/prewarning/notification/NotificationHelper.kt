@@ -13,18 +13,30 @@ import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
 import androidx.core.app.NotificationCompat
+import androidx.core.app.NotificationManagerCompat
 import ua.blackout.prewarning.MainActivity
 import ua.blackout.prewarning.R
-import ua.blackout.prewarning.data.model.EmergencyOutageInfo
+import ua.blackout.prewarning.core.EmergencyEvent
+import ua.blackout.prewarning.core.EmergencyEventKind
+import ua.blackout.prewarning.data.KYIV_ZONE
 import ua.blackout.prewarning.data.model.UserSettings
 import ua.blackout.prewarning.data.repository.AlertRegistry
 import ua.blackout.prewarning.data.repository.SettingsRepository
+import ua.blackout.prewarning.ui.AppStrings
+import java.time.LocalDate
+import java.time.LocalDateTime
 
 object NotificationHelper {
     const val CHANNEL_SOUND_VIBE = "zt_blackout_sound_vibe_v2"
     const val CHANNEL_SOUND_ONLY = "zt_blackout_sound_only_v2"
     const val CHANNEL_VIBE_ONLY = "zt_blackout_vibe_only_v2"
     const val CHANNEL_SILENT = "zt_blackout_silent_v2"
+
+    // Emergency outages get their own channels so users can tune them separately in the system settings
+    const val CHANNEL_EMERGENCY_SOUND_VIBE = "zt_emergency_sound_vibe_v1"
+    const val CHANNEL_EMERGENCY_SOUND_ONLY = "zt_emergency_sound_only_v1"
+    const val CHANNEL_EMERGENCY_VIBE_ONLY = "zt_emergency_vibe_only_v1"
+    const val CHANNEL_EMERGENCY_SILENT = "zt_emergency_silent_v1"
 
     private val VIBRATION_PATTERN = longArrayOf(0, 400, 200, 400)
 
@@ -89,7 +101,23 @@ object NotificationHelper {
                 setSound(null, null)
             }
 
-            manager.createNotificationChannels(listOf(ch1, ch2, ch3, ch4))
+            fun emergencyChannel(id: String, name: String, importance: Int, sound: Boolean, vibrate: Boolean) =
+                NotificationChannel(id, name, importance).apply {
+                    description = "Сповіщення про аварійні відключення"
+                    enableVibration(vibrate)
+                    vibrationPattern = if (vibrate) VIBRATION_PATTERN else longArrayOf(0)
+                    if (sound) setSound(soundUri, audioAttributes) else setSound(null, null)
+                }
+
+            manager.createNotificationChannels(
+                listOf(
+                    ch1, ch2, ch3, ch4,
+                    emergencyChannel(CHANNEL_EMERGENCY_SOUND_VIBE, "Аварійні відключення (Звук + Вібрація)", NotificationManager.IMPORTANCE_HIGH, true, true),
+                    emergencyChannel(CHANNEL_EMERGENCY_SOUND_ONLY, "Аварійні відключення (Тільки звук)", NotificationManager.IMPORTANCE_HIGH, true, false),
+                    emergencyChannel(CHANNEL_EMERGENCY_VIBE_ONLY, "Аварійні відключення (Тільки вібрація)", NotificationManager.IMPORTANCE_HIGH, false, true),
+                    emergencyChannel(CHANNEL_EMERGENCY_SILENT, "Аварійні відключення (Без звуку і вібрації)", NotificationManager.IMPORTANCE_LOW, false, false)
+                )
+            )
         }
     }
 
@@ -126,81 +154,65 @@ object NotificationHelper {
         } catch (_: Exception) {}
     }
 
-    fun checkAndTriggerEmergencyOutageAlert(
+    /**
+     * Posts the notifications for ledger events (start / restore time changed / end). Each event is
+     * announced once: its key (`spec/NOTIFICATIONS.md`) is remembered in [AlertRegistry].
+     * Callers only pass events produced by a confirmed fetch, so a failed request never reaches here.
+     */
+    fun postEmergencyEvents(
         context: Context,
         settings: UserSettings,
-        previousEmergency: EmergencyOutageInfo?,
-        currentEmergency: EmergencyOutageInfo?
-    ): Pair<String, String>? {
-        val lang = ua.blackout.prewarning.ui.AppStrings.resolveLang(settings.language)
-        return checkAndTriggerEmergencyOutageAlert(
-            context = context,
-            prevOutage = previousEmergency,
-            nextOutage = currentEmergency,
-            settings = settings,
-            lang = lang
-        )
+        addressKey: String,
+        events: List<EmergencyEvent>
+    ) {
+        if (!settings.emergencyNotificationsEnabled || events.isEmpty()) return
+        val appContext = context.applicationContext
+        val lang = AppStrings.resolveLang(settings.language)
+        val today = LocalDate.now(KYIV_ZONE)
+        val registry = AlertRegistry(appContext)
+        val address = settings.selectedAddress?.replace("\n", " ")?.takeIf { it.isNotBlank() }
+
+        for (ev in events) {
+            val key = ev.key(addressKey)
+            if (registry.hasFired(key)) continue
+            registry.markFired(key)
+
+            val start = formatWhen(lang, ev.start, today)
+            val eta = ev.eta?.let { formatWhen(lang, it, today) }
+            val (title, body) = when (ev.kind) {
+                EmergencyEventKind.START -> {
+                    val t = if (ev.upcoming) AppStrings.emergencyUpcomingTitle(lang) else AppStrings.emergencyStartTitle(lang)
+                    t to AppStrings.emergencyStartBody(lang, start, eta)
+                }
+                EmergencyEventKind.ETA_CHANGED ->
+                    AppStrings.emergencyChangedTitle(lang) to AppStrings.emergencyChangedBody(lang, eta ?: start)
+                EmergencyEventKind.END ->
+                    if (ev.earlyEnd && eta != null) {
+                        AppStrings.emergencyEarlyEndTitle(lang) to AppStrings.emergencyEarlyEndBody(lang, eta)
+                    } else {
+                        AppStrings.emergencyEndTitle(lang) to AppStrings.emergencyEndBody(lang, start)
+                    }
+            }
+            showPreWarningNotification(
+                context = appContext,
+                notificationId = AlarmCodes.codeFor(appContext, key),
+                title = title,
+                body = if (address != null) "$body\n$address" else body,
+                isTest = false,
+                isEmergencyAlert = true
+            )
+        }
     }
 
-    fun checkAndTriggerEmergencyOutageAlert(
-        context: Context,
-        prevOutage: EmergencyOutageInfo?,
-        nextOutage: EmergencyOutageInfo?,
-        settings: UserSettings,
-        lang: String
-    ): Pair<String, String>? {
-        if (!settings.emergencyNotificationsEnabled) return null
-        val registry = AlertRegistry(context.applicationContext)
-
-        // 1. Outage Restored (prev active -> next null)
-        if (prevOutage != null && nextOutage == null) {
-            val restoreKey = "emergency_restore_${prevOutage.id}_${prevOutage.startTime}"
-            if (registry.hasFired(restoreKey)) return null
-            registry.markFired(restoreKey)
-            val title = if (lang == "uk") "Аварійне відключення завершено" else "Emergency Outage Restored"
-            val body = if (lang == "uk") {
-                "Електропостачання за вашою адресою відновлено (початок був: ${prevOutage.startTime})."
-            } else {
-                "Power supply at your address has been restored (started: ${prevOutage.startTime})."
-            }
-            showPreWarningNotification(
-                context = context,
-                notificationId = restoreKey.hashCode(),
-                title = title,
-                body = body,
-                isTest = false,
-                isEmergencyAlert = true
-            )
-            return title to body
+    /** "22:04", "завтра 01:00" or "13.11 22:04" relative to [today]. */
+    fun formatWhen(lang: String, dt: LocalDateTime, today: LocalDate): String {
+        val hm = "${dt.hour.toString().padStart(2, '0')}:${dt.minute.toString().padStart(2, '0')}"
+        return when (dt.toLocalDate()) {
+            today -> hm
+            today.plusDays(1) -> "${AppStrings.tomorrowWord(lang)} $hm"
+            today.minusDays(1) -> "${AppStrings.yesterdayWord(lang)} $hm"
+            else -> "${dt.dayOfMonth.toString().padStart(2, '0')}.${dt.monthValue.toString().padStart(2, '0')} $hm"
         }
-
-        // 2. Outage Detected (next active)
-        if (nextOutage != null) {
-            val detectKey = "emergency_detect_${nextOutage.id}_${nextOutage.startTime}_${nextOutage.estimatedRestoreTime}"
-            if (registry.hasFired(detectKey)) return null
-            registry.markFired(detectKey)
-            val title = if (lang == "uk") {
-                nextOutage.outageType.ifBlank { "Аварійне відключення" }
-            } else {
-                "Emergency Outage"
-            }
-            val body = if (lang == "uk") {
-                "Зафіксовано аварійне відключення. Початок: ${nextOutage.startTime}. Орієнтовне відновлення: ${nextOutage.estimatedRestoreTime}."
-            } else {
-                "Emergency outage detected. Start: ${nextOutage.startTime}. Estimated restore: ${nextOutage.estimatedRestoreTime}."
-            }
-            showPreWarningNotification(
-                context = context,
-                notificationId = detectKey.hashCode(),
-                title = title,
-                body = body,
-                isTest = false,
-                isEmergencyAlert = true
-            )
-            return title to body
-        }
-
-        return null
     }
 
     fun showPreWarningNotification(
@@ -233,11 +245,20 @@ object NotificationHelper {
 
         createNotificationChannels(context)
 
-        val targetChannelId = when {
-            activeSound && activeVibe -> CHANNEL_SOUND_VIBE
-            activeSound && !activeVibe -> CHANNEL_SOUND_ONLY
-            !activeSound && activeVibe -> CHANNEL_VIBE_ONLY
-            else -> CHANNEL_SILENT
+        val targetChannelId = if (isEmergencyAlert) {
+            when {
+                activeSound && activeVibe -> CHANNEL_EMERGENCY_SOUND_VIBE
+                activeSound && !activeVibe -> CHANNEL_EMERGENCY_SOUND_ONLY
+                !activeSound && activeVibe -> CHANNEL_EMERGENCY_VIBE_ONLY
+                else -> CHANNEL_EMERGENCY_SILENT
+            }
+        } else {
+            when {
+                activeSound && activeVibe -> CHANNEL_SOUND_VIBE
+                activeSound && !activeVibe -> CHANNEL_SOUND_ONLY
+                !activeSound && activeVibe -> CHANNEL_VIBE_ONLY
+                else -> CHANNEL_SILENT
+            }
         }
 
         val intent = Intent(context, MainActivity::class.java).apply {
@@ -275,8 +296,11 @@ object NotificationHelper {
             if (!activeSound) {
                 builder.setDefaults(NotificationCompat.DEFAULT_VIBRATE)
             }
-            // Trigger hardware vibrator directly with USAGE_ALARM so vibration always fires even when sound is disabled
-            triggerVibration(context)
+            // Trigger hardware vibrator directly with USAGE_ALARM so vibration always fires even when sound is disabled,
+            // but never when the notification itself is blocked (no POST_NOTIFICATIONS permission or app muted)
+            if (NotificationManagerCompat.from(context).areNotificationsEnabled()) {
+                triggerVibration(context)
+            }
         } else {
             builder.setVibrate(longArrayOf(0))
         }
@@ -286,6 +310,7 @@ object NotificationHelper {
             builder.setSilent(true)
         }
 
+        if (!NotificationManagerCompat.from(context).areNotificationsEnabled()) return
         val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         manager.notify(notificationId, builder.build())
     }

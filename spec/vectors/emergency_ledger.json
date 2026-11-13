@@ -1,0 +1,99 @@
+{
+  "_doc": "Golden vectors for the emergency ledger (spec/NOTIFICATIONS.md). Each case is a sequence of steps starting from an empty ledger. 'fetch' is either {confirmed:[records]} (an empty list means PowerOn confirmed there is no emergency) or {unavailable:true} (the request failed). 'events' lists every event emitted by that step, in order. Keys use addressKey 'addr'. Expected values were derived by hand.",
+  "cases": [
+    {
+      "name": "start, then restored early after a confirmed empty answer",
+      "addressKey": "addr",
+      "steps": [
+        { "now": "2026-11-13T17:45", "fetch": { "confirmed": [ { "id": "pw_2026-11-13T17:30", "start": "2026-11-13T17:30", "estimatedEnd": "2026-11-13T19:00", "label": "МО" } ] },
+          "events": [ { "kind": "START", "key": "emerg_start_addr_2026-11-13T17:30", "upcoming": false } ] },
+        { "now": "2026-11-13T18:30", "fetch": { "confirmed": [] },
+          "events": [ { "kind": "END", "key": "emerg_end_addr_2026-11-13T17:30", "earlyEnd": true } ] },
+        { "now": "2026-11-13T18:40", "fetch": { "confirmed": [] }, "events": [] }
+      ]
+    },
+    {
+      "name": "a failed fetch never ends an outage and never repeats the start",
+      "addressKey": "addr",
+      "steps": [
+        { "now": "2026-11-13T17:45", "fetch": { "confirmed": [ { "id": "pw_2026-11-13T17:30", "start": "2026-11-13T17:30", "estimatedEnd": "2026-11-13T19:00" } ] },
+          "events": [ { "kind": "START", "key": "emerg_start_addr_2026-11-13T17:30", "upcoming": false } ] },
+        { "now": "2026-11-13T18:00", "fetch": { "unavailable": true }, "events": [] },
+        { "now": "2026-11-13T18:10", "fetch": { "confirmed": [ { "id": "pw_2026-11-13T17:30", "start": "2026-11-13T17:30", "estimatedEnd": "2026-11-13T19:00" } ] }, "events": [] },
+        { "now": "2026-11-13T18:40", "fetch": { "confirmed": [] },
+          "events": [ { "kind": "END", "key": "emerg_end_addr_2026-11-13T17:30", "earlyEnd": true } ] }
+      ]
+    },
+    {
+      "name": "an outage already over when first seen is silent, also when it disappears",
+      "addressKey": "addr",
+      "steps": [
+        { "now": "2026-11-13T18:00", "fetch": { "confirmed": [ { "id": "pw_2026-11-13T10:00", "start": "2026-11-13T10:00", "estimatedEnd": "2026-11-13T12:00" } ] }, "events": [] },
+        { "now": "2026-11-13T18:30", "fetch": { "confirmed": [] }, "events": [] }
+      ]
+    },
+    {
+      "name": "restore estimate moves: small shifts are ignored, a 10+ minute move notifies once",
+      "addressKey": "addr",
+      "steps": [
+        { "now": "2026-11-13T17:45", "fetch": { "confirmed": [ { "id": "pw_2026-11-13T17:30", "start": "2026-11-13T17:30", "estimatedEnd": "2026-11-13T19:00" } ] },
+          "events": [ { "kind": "START", "key": "emerg_start_addr_2026-11-13T17:30", "upcoming": false } ] },
+        { "now": "2026-11-13T18:00", "fetch": { "confirmed": [ { "id": "pw_2026-11-13T17:30", "start": "2026-11-13T17:30", "estimatedEnd": "2026-11-13T19:05" } ] }, "events": [] },
+        { "now": "2026-11-13T18:10", "fetch": { "confirmed": [ { "id": "pw_2026-11-13T17:30", "start": "2026-11-13T17:30", "estimatedEnd": "2026-11-13T19:30" } ] },
+          "events": [ { "kind": "ETA_CHANGED", "key": "emerg_change_addr_2026-11-13T17:30_2026-11-13T19:30" } ] },
+        { "now": "2026-11-13T18:20", "fetch": { "confirmed": [ { "id": "pw_2026-11-13T17:30", "start": "2026-11-13T17:30", "estimatedEnd": "2026-11-13T19:30" } ] }, "events": [] }
+      ]
+    },
+    {
+      "name": "a 9 minute move of the estimate is ignored, exactly 10 minutes notifies",
+      "addressKey": "addr",
+      "steps": [
+        { "now": "2026-11-13T17:45", "fetch": { "confirmed": [ { "id": "pw_2026-11-13T17:30", "start": "2026-11-13T17:30", "estimatedEnd": "2026-11-13T19:00" } ] },
+          "events": [ { "kind": "START", "key": "emerg_start_addr_2026-11-13T17:30", "upcoming": false } ] },
+        { "now": "2026-11-13T18:00", "fetch": { "confirmed": [ { "id": "pw_2026-11-13T17:30", "start": "2026-11-13T17:30", "estimatedEnd": "2026-11-13T19:09" } ] }, "events": [] },
+        { "now": "2026-11-13T18:10", "fetch": { "confirmed": [ { "id": "pw_2026-11-13T17:30", "start": "2026-11-13T17:30", "estimatedEnd": "2026-11-13T19:10" } ] },
+          "events": [ { "kind": "ETA_CHANGED", "key": "emerg_change_addr_2026-11-13T17:30_2026-11-13T19:10" } ] }
+      ]
+    },
+    {
+      "name": "disappearing after the estimate but within the grace is a normal end",
+      "addressKey": "addr",
+      "steps": [
+        { "now": "2026-11-13T17:45", "fetch": { "confirmed": [ { "id": "pw_2026-11-13T17:30", "start": "2026-11-13T17:30", "estimatedEnd": "2026-11-13T19:00" } ] },
+          "events": [ { "kind": "START", "key": "emerg_start_addr_2026-11-13T17:30", "upcoming": false } ] },
+        { "now": "2026-11-13T19:30", "fetch": { "confirmed": [] },
+          "events": [ { "kind": "END", "key": "emerg_end_addr_2026-11-13T17:30", "earlyEnd": false } ] }
+      ]
+    },
+    {
+      "name": "disappearing more than 60 minutes after the estimate is silent",
+      "addressKey": "addr",
+      "steps": [
+        { "now": "2026-11-13T17:45", "fetch": { "confirmed": [ { "id": "pw_2026-11-13T17:30", "start": "2026-11-13T17:30", "estimatedEnd": "2026-11-13T19:00" } ] },
+          "events": [ { "kind": "START", "key": "emerg_start_addr_2026-11-13T17:30", "upcoming": false } ] },
+        { "now": "2026-11-13T20:30", "fetch": { "confirmed": [] }, "events": [] }
+      ]
+    },
+    {
+      "name": "an outage starting later today is announced once as upcoming",
+      "addressKey": "addr",
+      "steps": [
+        { "now": "2026-11-13T18:00", "fetch": { "confirmed": [ { "id": "pw_2026-11-13T19:00", "start": "2026-11-13T19:00", "estimatedEnd": "2026-11-13T20:00" } ] },
+          "events": [ { "kind": "START", "key": "emerg_start_addr_2026-11-13T19:00", "upcoming": true } ] },
+        { "now": "2026-11-13T19:10", "fetch": { "confirmed": [ { "id": "pw_2026-11-13T19:00", "start": "2026-11-13T19:00", "estimatedEnd": "2026-11-13T20:00" } ] }, "events": [] }
+      ]
+    },
+    {
+      "name": "an outage that reappears after being closed starts again",
+      "addressKey": "addr",
+      "steps": [
+        { "now": "2026-11-13T17:45", "fetch": { "confirmed": [ { "id": "pw_2026-11-13T17:30", "start": "2026-11-13T17:30", "estimatedEnd": "2026-11-13T19:00" } ] },
+          "events": [ { "kind": "START", "key": "emerg_start_addr_2026-11-13T17:30", "upcoming": false } ] },
+        { "now": "2026-11-13T18:30", "fetch": { "confirmed": [] },
+          "events": [ { "kind": "END", "key": "emerg_end_addr_2026-11-13T17:30", "earlyEnd": true } ] },
+        { "now": "2026-11-13T18:50", "fetch": { "confirmed": [ { "id": "pw_2026-11-13T17:30", "start": "2026-11-13T17:30", "estimatedEnd": "2026-11-13T19:30" } ] },
+          "events": [ { "kind": "START", "key": "emerg_start_addr_2026-11-13T17:30", "upcoming": false } ] }
+      ]
+    }
+  ]
+}

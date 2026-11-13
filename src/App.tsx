@@ -18,15 +18,14 @@ import {
   CheckCircle2,
   Bell
 } from 'lucide-react';
-import { DaySchedule, UserSettings, NotificationRecord, Language } from './types';
-import { fetchFullSchedules, applyEmergencyOutageToSchedule } from './services/ztoeParser';
-import { checkAddressOnZtoeWebsite, getKyivska37DemoEmergencyOutage, prefetchAddressIndexInBackground } from './services/ztoeAddressLookup';
-import { 
-  loadUserSettings, 
-  saveUserSettings, 
-  createTestNotification, 
-  checkAndTriggerAdvanceAlert, 
-  checkAndTriggerEmergencyOutageAlert,
+import { UserSettings, NotificationRecord, Language } from './types';
+import { checkAddressOnZtoeWebsite, prefetchAddressIndexInBackground } from './services/ztoeAddressLookup';
+import {
+  loadUserSettings,
+  saveUserSettings,
+  createTestNotification,
+  checkAndTriggerPlannedAlerts,
+  triggerEmergencyEventAlerts,
   DEFAULT_SETTINGS,
   clearNotifiedHistory,
   resetAllAppDataToFirstLaunch,
@@ -34,6 +33,12 @@ import {
 } from './services/alertManager';
 import { resolveLanguage, translations } from './services/i18n';
 import { getInterpolatedTimePalette } from './services/timeOfDayPalette';
+import { getOutageRepository } from './services/outageRepository';
+import { getOutageStateStore } from './services/outageStore';
+import { getScheduleCache } from './services/scheduleCache';
+import { fromInstant, localDateTimeOf, plusMinutes, type LocalDateTime } from './core/localTime';
+import { EmergencyFetch, reconcile } from './core/emergencyLedger';
+import type { EmergencyRecord } from './core/outageModels';
 import { PhoneSimulator } from './components/PhoneSimulator';
 import { CodeExplorer } from './components/CodeExplorer';
 import { PlayStoreGuide } from './components/PlayStoreGuide';
@@ -41,10 +46,15 @@ import { WidgetSimulator } from './components/WidgetSimulator';
 import { BuildAndDownloadView } from './components/BuildAndDownloadView';
 import { addPowerPoints, resetAllRouletteProgress, resetSavedPowerPoints } from './services/rouletteGame';
 
+type RefreshStatus = 'SUCCESS' | 'NO_INTERNET' | 'NO_QUEUES_FOUND';
+
+/** Id of the ledger entry written by the "Simulate emergency" workbench button. */
+const SIMULATED_EMERGENCY_ID = 'simulator-emergency';
+
 export default function App() {
   const [settings, setSettings] = useState<UserSettings>(() => loadUserSettings());
-  const [schedule, setSchedule] = useState<DaySchedule | null>(null);
-  const [tomorrowSchedule, setTomorrowSchedule] = useState<DaySchedule | null>(null);
+  // Bumped after every refresh so the outage snapshot is rebuilt from the freshly stored state
+  const [dataVersion, setDataVersion] = useState(0);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [activeNotification, setActiveNotification] = useState<NotificationRecord | null>(null);
   
@@ -80,75 +90,57 @@ export default function App() {
     }
   }, [settings.theme]);
 
-  // Load schedule from ztoe.com.ua / rotation engine and re-check saved address & emergency outages against ZTOE website
-  const loadSchedules = useCallback(async (currentSettings: UserSettings): Promise<'SUCCESS' | 'NO_INTERNET' | 'NO_QUEUES_FOUND'> => {
+  // One refresh pipeline (OutageRepository.refresh): ztoe schedule + PowerOn emergencies/repairs for the selected address.
+  // A source that fails keeps its previous data; emergency events (start / ETA changed / end) are announced once.
+  const skipNextSettingsRefresh = React.useRef(false);
+  const loadSchedules = useCallback(async (currentSettings: UserSettings, force = false): Promise<RefreshStatus> => {
     setIsRefreshing(true);
     try {
-      let effectiveQueue = currentSettings.queue;
+      const repo = getOutageRepository();
+      let effective = currentSettings;
 
-      if (currentSettings.selectedAddressQuery) {
-        const latestAddressLookup = await checkAddressOnZtoeWebsite(
-          currentSettings.selectedAddressQuery,
-          currentSettings.url
-        );
-        if (latestAddressLookup) {
-          const prevEmergency = currentSettings.activeEmergencyOutage ?? null;
-          const nextEmergency = latestAddressLookup.emergencyOutage ?? null;
-
-          checkAndTriggerEmergencyOutageAlert(
-            prevEmergency,
-            nextEmergency,
-            currentSettings,
-            resolveLanguage(currentSettings.language),
-            (record) => {
-              setActiveNotification(record);
-            }
-          );
-
-          const emergencyChanged =
-            (prevEmergency?.id || null) !== (nextEmergency?.id || null) ||
-            (prevEmergency?.startTime || '') !== (nextEmergency?.startTime || '') ||
-            (prevEmergency?.estimatedRestoreTime || '') !== (nextEmergency?.estimatedRestoreTime || '');
-
-          const hadNoQueue = !currentSettings.queue || currentSettings.queue.trim() === '';
-          const queueAssignedForNoQueueHouse =
-            hadNoQueue &&
-            (latestAddressLookup.queue !== currentSettings.queue ||
-              latestAddressLookup.statusText !== currentSettings.customQueueStatusText);
-
-          if (queueAssignedForNoQueueHouse || emergencyChanged) {
-            const nextQueue = queueAssignedForNoQueueHouse
-              ? latestAddressLookup.queue
-              : currentSettings.queue;
-            const nextStatusText = queueAssignedForNoQueueHouse
-              ? latestAddressLookup.statusText
-              : currentSettings.customQueueStatusText;
-            effectiveQueue = nextQueue;
-            const updatedSettings: UserSettings = {
-              ...currentSettings,
-              queue: nextQueue,
-              customQueueStatusText: nextStatusText,
-              activeEmergencyOutage: nextEmergency,
-            };
-            setSettings(updatedSettings);
-            saveUserSettings(updatedSettings);
-          }
+      // A house that "is not disconnected" can get a queue later: re-check the address when no queue is stored
+      if (currentSettings.selectedAddressQuery && (!currentSettings.queue || currentSettings.queue.trim() === '')) {
+        const latest = await checkAddressOnZtoeWebsite(currentSettings.selectedAddressQuery, currentSettings.url);
+        if (latest && ((latest.queue || '') !== currentSettings.queue || latest.statusText !== currentSettings.customQueueStatusText)) {
+          effective = { ...currentSettings, queue: latest.queue || '', customQueueStatusText: latest.queue ? undefined : latest.statusText };
+          skipNextSettingsRefresh.current = true;
+          setSettings(effective);
+          saveUserSettings(effective);
         }
       }
 
-      const res = await fetchFullSchedules(currentSettings.url, effectiveQueue);
-      setSchedule(res.todaySchedule);
-      setTomorrowSchedule(res.tomorrowSchedule);
-      return res.status;
+      // The notifications are delivered here (not inside refresh) so the in-app heads-up card shows them too
+      const outcome = await repo.refresh(effective, force, false);
+      const key = repo.addressKey(effective.selectedAddressQuery);
+      if (key && outcome.events.length > 0) {
+        triggerEmergencyEventAlerts(
+          outcome.events,
+          key,
+          effective,
+          resolveLanguage(effective.language),
+          fromInstant(Date.now()),
+          (record) => setActiveNotification(record)
+        );
+      }
+      setDataVersion((v) => v + 1);
+      return outcome.fetchStatus ?? 'SUCCESS';
     } catch (err) {
-      console.error('Failed to load schedule:', err);
+      console.error('Failed to refresh outage data:', err);
+      setDataVersion((v) => v + 1);
       return 'NO_INTERNET';
     } finally {
       setIsRefreshing(false);
     }
   }, []);
 
+  // Refresh on load and whenever the queue, the site or the address changes
   useEffect(() => {
+    if (skipNextSettingsRefresh.current) {
+      skipNextSettingsRefresh.current = false;
+      setDataVersion((v) => v + 1);
+      return;
+    }
     loadSchedules(settings);
   }, [
     loadSchedules,
@@ -169,7 +161,7 @@ export default function App() {
     }
   }, [activeMode, phoneTab]);
 
-  // Periodic background refresh that also re-checks selectedAddressQuery against the ZTOE website
+  // Periodic background refresh at the chosen interval
   useEffect(() => {
     const intervalMs = Math.max(1, settings.refreshIntervalMinutes || 30) * 60 * 1000;
     const refreshTimerId = setInterval(() => {
@@ -196,9 +188,8 @@ export default function App() {
   const [now, setNow] = useState<Date>(() => new Date());
   const [timeOfDayOverride, setTimeOfDayOverride] = useState<'auto' | 'morning' | 'day' | 'evening' | 'night'>('auto');
 
-  // Background ticker: updates countdown and checks advance alerts.
-  // Pauses 1s countdown updates when not on Main screen (phoneTab !== 'schedule' in 'app' mode)
-  // and throttles to 30s when browser tab is hidden to maximize device battery life.
+  // Background ticker: updates the countdown and fires the planned pre-warnings (the web stand-in for the exact alarms).
+  // 1s on the countdown screens, 15s elsewhere, 30s while the browser tab is hidden (battery).
   useEffect(() => {
     let tickerId: any;
     const formatLocalIsoDate = (d: Date) =>
@@ -212,24 +203,16 @@ export default function App() {
       const currentDateStr = formatLocalIsoDate(currentNow);
       if (currentDateStr !== lastDateStr) {
         lastDateStr = currentDateStr;
-        if (tomorrowSchedule && tomorrowSchedule.dateStr === currentDateStr) {
-          setSchedule({ ...tomorrowSchedule, dayLabel: 'Сьогодні' });
-          setTomorrowSchedule(null);
-        }
+        // The cached table is valid for one day: fetch the new day's table
         loadSchedules(settings);
       }
 
-      if (schedule && settings.notificationsEnabled) {
-        const effectiveSchedule =
-          applyEmergencyOutageToSchedule(schedule, settings.activeEmergencyOutage, false) || schedule;
-        checkAndTriggerAdvanceAlert(
-          effectiveSchedule,
-          settings,
-          resolvedLang,
-          (record) => {
-            setActiveNotification(record);
-          }
-        );
+      if (settings.notificationsEnabled) {
+        const realNow = fromInstant(currentNow.getTime());
+        const snap = getOutageRepository().snapshot(settings, realNow);
+        checkAndTriggerPlannedAlerts(snap.outages, realNow, settings, resolvedLang, (record) => {
+          setActiveNotification(record);
+        });
       }
     };
 
@@ -265,7 +248,7 @@ export default function App() {
         document.removeEventListener('visibilitychange', handleVisibility);
       }
     };
-  }, [schedule, tomorrowSchedule, settings, resolvedLang, activeMode, phoneTab, loadSchedules]);
+  }, [settings, resolvedLang, activeMode, phoneTab, loadSchedules]);
 
   // Handle setting updates
   const handleUpdateSettings = (newSettings: UserSettings) => {
@@ -280,13 +263,15 @@ export default function App() {
   };
 
   const handleSendTestAlert = () => {
-    const slot = schedule?.slots.find(s => s.status === 'POWER_OFF');
+    const slot = snapshot.slotsFor(snapshot.today).find((s) => s.status === 'POWER_OFF');
     const record = createTestNotification(settings, resolvedLang, slot);
     setActiveNotification(record);
   };
 
   const handleResetDefaults = () => {
     clearNotifiedHistory();
+    getOutageStateStore().clearAll();
+    getScheduleCache().clear();
     setSettings(DEFAULT_SETTINGS);
     saveUserSettings(DEFAULT_SETTINGS);
   };
@@ -325,15 +310,75 @@ export default function App() {
     [effectiveNow.getHours(), effectiveNow.getMinutes()]
   );
 
-  const effectiveSchedule = React.useMemo(
-    () => (schedule ? applyEmergencyOutageToSchedule(schedule, settings.activeEmergencyOutage, false) || schedule : null),
-    [schedule, settings.activeEmergencyOutage]
+  // The Kyiv wall clock of the shown moment. With a time-of-day override the simulated local clock is used as is.
+  const nowLdt = React.useMemo<LocalDateTime>(() => {
+    if (timeOfDayOverride === 'auto') return fromInstant(now.getTime());
+    return (
+      localDateTimeOf(
+        effectiveNow.getFullYear(),
+        effectiveNow.getMonth() + 1,
+        effectiveNow.getDate(),
+        effectiveNow.getHours(),
+        effectiveNow.getMinutes(),
+        effectiveNow.getSeconds()
+      ) ?? fromInstant(now.getTime())
+    );
+  }, [now, effectiveNow, timeOfDayOverride]);
+
+  // One snapshot (local state only) feeds the main screen, the widgets and the roulette; dataVersion bumps after every refresh
+  const snapshot = React.useMemo(
+    () => getOutageRepository().snapshot(settings, nowLdt),
+    [settings, nowLdt, dataVersion]
   );
 
-  const effectiveTomorrowSchedule = React.useMemo(
-    () => applyEmergencyOutageToSchedule(tomorrowSchedule, settings.activeEmergencyOutage, true),
-    [tomorrowSchedule, settings.activeEmergencyOutage]
-  );
+  /** Workbench tool: writes a simulated emergency into the ledger (through the same reconcile the refresh uses) so the new pipeline shows and announces it. */
+  const handleSimulateEmergency = () => {
+    clearNotifiedHistory();
+    const nextSettings: UserSettings = {
+      ...settings,
+      queue: settings.queue || '2.2',
+      customQueueStatusText: undefined,
+      selectedAddress:
+        settings.selectedAddress ??
+        (resolvedLang === 'uk'
+          ? 'Житомирський РЕМ, м. Житомир,\nвул. Київська, буд. 37'
+          : 'Zhytomyr REM, Zhytomyr,\nKyivska St., bldg. 37'),
+      selectedAddressQuery: settings.selectedAddressQuery ?? {
+        remId: 'zhytomyr',
+        settlementId: 'zt_city',
+        streetId: 'zt_kyivska',
+        house: '37',
+      },
+    };
+    const repo = getOutageRepository();
+    const key = repo.addressKey(nextSettings.selectedAddressQuery);
+    if (key) {
+      const store = getOutageStateStore();
+      const at = fromInstant(Date.now());
+      const record: EmergencyRecord = {
+        id: SIMULATED_EMERGENCY_ID,
+        start: plusMinutes(at, -35),
+        estimatedEnd: plusMinutes(at, 125),
+        closedAt: null,
+        label: null,
+      };
+      const previous = store.ledger(key).filter((e) => e.id !== SIMULATED_EMERGENCY_ID);
+      const result = reconcile(previous, EmergencyFetch.Confirmed([record]), at);
+      store.saveLedger(key, result.entries);
+      triggerEmergencyEventAlerts(result.events, key, nextSettings, resolvedLang, at, (r) => setActiveNotification(r));
+    }
+    // the settings change below must not start a refresh right away: a live PowerOn answer would close the simulated entry
+    const refreshWouldRun =
+      nextSettings.queue !== settings.queue ||
+      nextSettings.selectedAddress !== settings.selectedAddress ||
+      nextSettings.selectedAddressQuery?.streetId !== settings.selectedAddressQuery?.streetId ||
+      nextSettings.selectedAddressQuery?.house !== settings.selectedAddressQuery?.house;
+    if (refreshWouldRun) skipNextSettingsRefresh.current = true;
+    setSettings(nextSettings);
+    saveUserSettings(nextSettings);
+    setPhoneTab('schedule');
+    setDataVersion((v) => v + 1);
+  };
 
   return (
     <div className="dark">
@@ -533,21 +578,20 @@ export default function App() {
 
         {/* Main Content Area */}
         <main className="flex-1 max-w-7xl mx-auto w-full p-4 md:p-8 flex flex-col justify-center">
-          {activeMode === 'app' && schedule && (
+          {activeMode === 'app' && (
             <div className="flex flex-col lg:flex-row items-center lg:items-start justify-center gap-8 py-2">
               
               {/* Left / Main: The Physical Phone Simulator */}
               <div className="w-full max-w-[420px] shrink-0">
                 <PhoneSimulator
-                  schedule={effectiveSchedule || schedule}
-                  tomorrowSchedule={effectiveTomorrowSchedule}
+                  snapshot={snapshot}
                   settings={settings}
                   lang={resolvedLang}
                   activeNotification={activeNotification}
                   onDismissNotification={() => setActiveNotification(null)}
                   onToggleNotifications={handleToggleNotifications}
                   onUpdateSettings={handleUpdateSettings}
-                  onRefresh={() => loadSchedules(settings)}
+                  onRefresh={() => loadSchedules(settings, true)}
                   isRefreshing={isRefreshing}
                   onSendTestAlert={handleSendTestAlert}
                   onResetDefaults={handleResetDefaults}
@@ -688,46 +732,14 @@ export default function App() {
                     <button
                       type="button"
                       data-testid="emulator-simulate-emergency-outage-kyivska-37"
-                      onClick={() => {
-                        clearNotifiedHistory();
-                        const kyivska37Emergency = getKyivska37DemoEmergencyOutage();
-                        const nextSettings: UserSettings = {
-                          ...settings,
-                          queue: '2.2',
-                          customQueueStatusText: undefined,
-                          selectedAddress:
-                            resolvedLang === 'uk'
-                              ? 'Житомирський РЕМ, м. Житомир,\nвул. Київська, буд. 37'
-                              : 'Zhytomyr REM, Zhytomyr,\nKyivska St., bldg. 37',
-                          selectedAddressQuery: {
-                            remId: 'zhytomyr',
-                            settlementId: 'zt_city',
-                            streetId: 'zt_kyivska',
-                            house: '37',
-                          },
-                          activeEmergencyOutage: kyivska37Emergency,
-                        };
-                        setSettings(nextSettings);
-                        saveUserSettings(nextSettings);
-                        setPhoneTab('schedule');
-                        loadSchedules(nextSettings);
-                        checkAndTriggerEmergencyOutageAlert(
-                          null,
-                          kyivska37Emergency,
-                          nextSettings,
-                          resolvedLang,
-                          (record) => {
-                            setActiveNotification(record);
-                          }
-                        );
-                      }}
+                      onClick={handleSimulateEmergency}
                       className="col-span-2 flex items-center justify-center gap-2 p-3 rounded-2xl bg-[#FF5E3A]/20 hover:bg-[#FF5E3A]/30 text-[#FF5E3A] font-bold text-xs transition-all border border-[#FF5E3A]/50 active:scale-95 shadow-md cursor-pointer"
                     >
                       <Zap className="w-4 h-4 fill-current" />
                       <span>
                         {resolvedLang === 'uk'
-                          ? 'Житомир, вул. Київська, 37 (Аварійне відключення)'
-                          : 'Zhytomyr, Kyivska St., 37 (Emergency Outage)'}
+                          ? 'Симулювати аварійне відключення (Житомир, Київська, 37)'
+                          : 'Simulate emergency outage (Zhytomyr, Kyivska St., 37)'}
                       </span>
                     </button>
                   </div>
@@ -872,16 +884,15 @@ export default function App() {
             />
           )}
 
-          {activeMode === 'widget' && schedule && (
+          {activeMode === 'widget' && (
             <div className="flex flex-col items-center justify-center">
               <WidgetSimulator
-                schedule={effectiveSchedule || schedule}
-                tomorrowSchedule={effectiveTomorrowSchedule}
+                snapshot={snapshot}
                 now={effectiveNow}
                 settings={settings}
                 lang={resolvedLang}
                 onToggleNotifications={handleToggleNotifications}
-                onRefresh={() => loadSchedules(settings)}
+                onRefresh={() => loadSchedules(settings, true)}
                 isRefreshing={isRefreshing}
                 onOpenApp={() => {
                   setActiveMode('app');

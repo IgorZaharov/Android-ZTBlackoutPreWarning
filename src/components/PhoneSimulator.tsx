@@ -9,7 +9,8 @@ import {
   Zap, 
   X
 } from 'lucide-react';
-import { DaySchedule, UserSettings, NotificationRecord } from '../types';
+import { UserSettings, NotificationRecord } from '../types';
+import type { OutageSnapshot } from '../services/outageRepository';
 import { translations } from '../services/i18n';
 import { getInterpolatedTimePalette } from '../services/timeOfDayPalette';
 import { MainView } from './MainView';
@@ -20,8 +21,8 @@ import { ZhytomyrRouletteModal } from './ZhytomyrRouletteModal';
 import { cacheQueueSlotsForRoulette } from '../services/rouletteGame';
 
 interface PhoneSimulatorProps {
-  schedule: DaySchedule;
-  tomorrowSchedule: DaySchedule | null;
+  /** One outage snapshot feeds the main screen and the three widgets (see OutageRepository.snapshot). */
+  snapshot: OutageSnapshot;
   settings: UserSettings;
   lang: 'uk' | 'en';
   activeNotification: NotificationRecord | null;
@@ -38,8 +39,7 @@ interface PhoneSimulatorProps {
 }
 
 export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
-  schedule,
-  tomorrowSchedule,
+  snapshot,
   settings,
   lang,
   activeNotification,
@@ -70,10 +70,12 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
   }, []);
 
   React.useEffect(() => {
-    if (schedule?.queue && schedule?.slots?.length) {
-      cacheQueueSlotsForRoulette(schedule.queue, schedule.slots);
+    // The roulette plays on today's 48 cells of the selected queue, the same cells the drum shows
+    const slots = snapshot.slotsFor(snapshot.today);
+    if (snapshot.queue && slots.length) {
+      cacheQueueSlotsForRoulette(snapshot.queue, slots);
     }
-  }, [schedule]);
+  }, [snapshot]);
 
   React.useEffect(() => {
     if (activeTab !== 'about') {
@@ -102,6 +104,7 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
   }, [activeTab]);
 
   const displayedNotification = imitatedNotification || activeNotification;
+  const hasFeaturedEmergency = React.useMemo(() => snapshot.featuredEmergency() !== null, [snapshot]);
 
   return (
     <div className="relative mx-auto w-[416px] max-w-full rounded-[52px] bg-[#07090E] p-3.5 shadow-[0_25px_60px_rgba(0,0,0,0.8)] ring-1 ring-white/10 select-none">
@@ -200,7 +203,7 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
           className={`flex-1 min-h-0 ${
             (!settings.queue || settings.queue.trim() === '') &&
             !settings.customQueueStatusText &&
-            !settings.activeEmergencyOutage &&
+            !hasFeaturedEmergency &&
             activeTab === 'schedule'
               ? 'overflow-hidden'
               : 'overflow-y-auto overscroll-contain scroll-smooth'
@@ -208,11 +211,9 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
         >
           {activeTab === 'schedule' && (
             <MainView
-              schedule={schedule}
-              tomorrowSchedule={tomorrowSchedule}
+              snapshot={snapshot}
               settings={settings}
               lang={lang}
-              now={now}
               onToggleNotifications={onToggleNotifications}
               onRefresh={onRefresh}
               isRefreshing={isRefreshing}
@@ -232,8 +233,7 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
 
           {activeTab === 'widget' && (
             <WidgetSimulator
-              schedule={schedule}
-              tomorrowSchedule={tomorrowSchedule}
+              snapshot={snapshot}
               now={now}
               settings={settings}
               lang={lang}
@@ -297,7 +297,7 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
             className={`absolute bottom-5 left-1/2 -translate-x-1/2 z-40 w-[84%] max-w-[320px] transition-all duration-300 ${
               (!settings.queue || settings.queue.trim() === '') &&
               !settings.customQueueStatusText &&
-              !settings.activeEmergencyOutage &&
+              !hasFeaturedEmergency &&
               activeTab === 'schedule'
                 ? 'opacity-15 brightness-50 pointer-events-none select-none'
                 : ''
@@ -311,7 +311,7 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
                 disabled={
                   (!settings.queue || settings.queue.trim() === '') &&
                   !settings.customQueueStatusText &&
-                  !settings.activeEmergencyOutage &&
+                  !hasFeaturedEmergency &&
                   activeTab === 'schedule'
                 }
                 className={`w-11 h-11 rounded-full flex items-center justify-center transition-all ${
@@ -330,7 +330,7 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
                 disabled={
                   (!settings.queue || settings.queue.trim() === '') &&
                   !settings.customQueueStatusText &&
-                  !settings.activeEmergencyOutage &&
+                  !hasFeaturedEmergency &&
                   activeTab === 'schedule'
                 }
                 className={`w-11 h-11 rounded-full flex items-center justify-center transition-all ${
@@ -349,7 +349,7 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
                 disabled={
                   (!settings.queue || settings.queue.trim() === '') &&
                   !settings.customQueueStatusText &&
-                  !settings.activeEmergencyOutage &&
+                  !hasFeaturedEmergency &&
                   activeTab === 'schedule'
                 }
                 className={`w-11 h-11 rounded-full flex items-center justify-center transition-all ${
@@ -368,7 +368,7 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
                 disabled={
                   (!settings.queue || settings.queue.trim() === '') &&
                   !settings.customQueueStatusText &&
-                  !settings.activeEmergencyOutage &&
+                  !hasFeaturedEmergency &&
                   activeTab === 'schedule'
                 }
                 className={`w-11 h-11 rounded-full flex items-center justify-center transition-all ${
@@ -383,6 +383,9 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
             </div>
           </div>
         )}
+
+        {/* Modal root: dialogs of the screens (address picker, queue help) render here, above the navigation dock */}
+        <div data-phone-modal-root className="pointer-events-none absolute inset-0 z-[55] [&>*]:pointer-events-auto" />
 
         {/* Android Gesture Bar */}
         <div className="shrink-0 flex justify-center pb-2 bg-transparent z-10">

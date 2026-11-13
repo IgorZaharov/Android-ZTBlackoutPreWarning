@@ -13,7 +13,10 @@ export interface BlackoutSlot {
   startTimeStr: string; // "14:00" or "14:30"
   endTimeStr: string; // "18:00" or "15:00"
   status: SlotStatus;
+  /** Part of an emergency outage (PowerOn). */
   isEmergency?: boolean;
+  /** Part of a planned outage (ztoe table or PowerOn planned works). A cell can be both planned and emergency. */
+  isPlanned?: boolean;
   rawLabel?: string;
 }
 
@@ -38,6 +41,10 @@ export interface SelectedAddressQuery {
   house: string;
 }
 
+/**
+ * @deprecated Legacy year-less emergency record. The 1.4.0 emergency state lives in the outage
+ * state store (core EmergencyLedger); this shape only remains for views that have not moved yet.
+ */
 export interface EmergencyOutageInfo {
   id: string;
   startTime: string; // e.g. "09.11.2026 06:35"
@@ -52,6 +59,7 @@ export interface UserSettings {
   customQueueStatusText?: string; // e.g. "В цей час не вимикається, за винятком випадків аварійних відключень" from ZTOE lookup table
   selectedAddress?: string; // e.g. "Житомирський РЕМ, м. Житомир,\nвул. Київська, буд. 104"
   selectedAddressQuery?: SelectedAddressQuery;
+  /** @deprecated retired in 1.4.0 (read but ignored); see OutageStateStore. */
   activeEmergencyOutage?: EmergencyOutageInfo | null;
   refreshIntervalMinutes: number; // default 30
   advanceNoticeMinutes: number; // default 15

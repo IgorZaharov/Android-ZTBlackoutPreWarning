@@ -2,50 +2,93 @@ package ua.blackout.prewarning.ui.screens
 
 import android.content.Intent
 import android.net.Uri
-import androidx.compose.animation.core.*
+import android.provider.Settings
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
+import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Alarm
+import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.NotificationsOff
 import androidx.compose.material.icons.filled.OpenInNew
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Schedule
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
+import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.scale
-import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import ua.blackout.prewarning.R
+import ua.blackout.prewarning.core.IntervalStatus
+import ua.blackout.prewarning.core.Outage
+import ua.blackout.prewarning.core.OutageKind
+import ua.blackout.prewarning.data.KYIV_ZONE
 import ua.blackout.prewarning.data.model.BlackoutSlot
 import ua.blackout.prewarning.data.model.SlotStatus
-import ua.blackout.prewarning.data.parser.ZtoeAddressLookup
-import ua.blackout.prewarning.data.repository.ScheduleRepository
+import ua.blackout.prewarning.data.repository.OutageSnapshot
+import ua.blackout.prewarning.data.repository.ScheduleStatusInfo
 import ua.blackout.prewarning.ui.AppStrings
+import ua.blackout.prewarning.ui.components.GlassCard
+import ua.blackout.prewarning.ui.components.OutageRowFormat
+import ua.blackout.prewarning.ui.components.SiteNoticeCard
+import ua.blackout.prewarning.ui.components.SiteStatusBanner
+import ua.blackout.prewarning.ui.components.SiteStatusChipRow
+import ua.blackout.prewarning.ui.components.SiteStatusModel
 import ua.blackout.prewarning.ui.components.TimelineBar
-import ua.blackout.prewarning.ui.components.floatingShadow
+import ua.blackout.prewarning.ui.theme.ZtColors
+import ua.blackout.prewarning.ui.theme.ZtMinTouch
+import ua.blackout.prewarning.ui.theme.ZtShapes
+import ua.blackout.prewarning.ui.theme.ZtType
+import java.time.LocalDateTime
 import java.time.LocalTime
 import java.time.format.DateTimeFormatter
-import ua.blackout.prewarning.data.KYIV_ZONE
+
+// Small text sits on a translucent card: the secondary and tertiary text alphas are raised from the
+// 0xB3 / 0x99 tokens so the contrast stays above 4.5:1 on bright backgrounds (docs/review/UI_PROPOSALS.md 4.9, #2).
+private val TextSecondary = Color(0xE6BAE6FD)
+private val TextTertiary = Color(0xCCBAE6FD)
+private val InkOnAccent = Color(0xFF0B0B0A)
+private val TabIdle = Color(0xCCBAE6FD)
+
+private const val TAB_TODAY = "today"
+private const val TAB_TOMORROW = "tomorrow"
 
 private fun formatAddressAfterCity(address: String?): String? {
     if (address.isNullOrBlank()) return null
@@ -61,24 +104,73 @@ private fun formatAddressAfterCity(address: String?): String? {
     return trimmed
 }
 
+/** Limits the font scale of the content (the 44 sp countdown must not char-wrap); other text keeps the user's scale. */
+@Composable
+private fun CappedFontScale(max: Float, content: @Composable () -> Unit) {
+    val density = LocalDensity.current
+    CompositionLocalProvider(
+        LocalDensity provides Density(density.density, minOf(density.fontScale, max)),
+        content = content
+    )
+}
+
+/** False when the user turned system animations off (ANIMATOR_DURATION_SCALE == 0): decorative motion is skipped. */
+@Composable
+private fun rememberAnimationsEnabled(): Boolean {
+    val context = LocalContext.current
+    return remember {
+        try {
+            Settings.Global.getFloat(context.contentResolver, Settings.Global.ANIMATOR_DURATION_SCALE, 1f) != 0f
+        } catch (_: Exception) {
+            true
+        }
+    }
+}
+
+/** Status dot of the hero. The pulse is read inside graphicsLayer, so only this node redraws, never the screen. */
+@Composable
+private fun StatusDot(color: Color, pulsing: Boolean) {
+    val animate = pulsing && rememberAnimationsEnabled()
+    val scale: State<Float>? = if (animate) {
+        rememberInfiniteTransition(label = "pulse").animateFloat(
+            initialValue = 0.85f,
+            targetValue = 1.25f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(900, easing = FastOutSlowInEasing),
+                repeatMode = RepeatMode.Reverse
+            ),
+            label = "pulseScale"
+        )
+    } else {
+        null
+    }
+    Box(
+        modifier = Modifier
+            .size(10.dp)
+            .graphicsLayer {
+                val s = scale?.value ?: 1f
+                scaleX = s
+                scaleY = s
+            }
+            .clip(CircleShape)
+            .background(color)
+    )
+}
+
 @Composable
 fun MainScreen(
     queue: String = "",
     customQueueStatusText: String? = null,
     selectedAddress: String? = null,
-    emergencyOutageStartTime: String? = null,
-    emergencyOutageRestoreTime: String? = null,
-    emergencyOutageType: String? = null,
-    isBlackoutNow: Boolean = false,
-    countdownText: String = "01:35:12",
-    slotTimeText: String = "14:00 – 18:00",
-    slots: List<BlackoutSlot> = emptyList(),
-    tomorrowSlots: List<BlackoutSlot>? = null,
-    hasTomorrowSchedule: Boolean = false,
+    snapshot: OutageSnapshot,
+    statusInfo: ScheduleStatusInfo,
+    isRefreshing: Boolean = false,
+    exactAlarmMissing: Boolean = false,
+    onOpenExactAlarmSettings: () -> Unit = {},
     notificationsEnabled: Boolean = true,
     lastUpdated: String = "19:27",
     nextUpdated: String = "19:57",
-    currentTime: LocalTime = LocalTime.now(KYIV_ZONE),
+    @Suppress("UNUSED_PARAMETER") currentTime: LocalTime = LocalTime.now(KYIV_ZONE),
     lang: String = "uk",
     selectedLanguage: String = "SYSTEM",
     onToggleNotifications: () -> Unit = {},
@@ -87,11 +179,25 @@ fun MainScreen(
     onChangeLanguage: (String) -> Unit = {}
 ) {
     val context = LocalContext.current
-    val scheduleRepo = remember { ScheduleRepository(context.applicationContext) }
-    var selectedDayTab by remember { mutableStateOf("today") }
 
-    val hasEmergencyOutage = ZtoeAddressLookup.isValidOutageTimestamp(emergencyOutageStartTime) &&
-        ZtoeAddressLookup.isValidOutageTimestamp(emergencyOutageRestoreTime)
+    // Everything below is derived from one outage snapshot (see OutageRepository)
+    val isBlackoutNow = statusInfo.isBlackoutNow
+    val countdownText = statusInfo.countdownText
+    val slotTimeText = statusInfo.nextSlotTime
+    val todayDate = snapshot.today
+    val tomorrowDate = todayDate.plusDays(1)
+    val now = snapshot.now
+
+    var selectedDayTab by rememberSaveable { mutableStateOf(TAB_TODAY) }
+    val isTomorrowSelected = selectedDayTab == TAB_TOMORROW
+    val activeDate = if (isTomorrowSelected) tomorrowDate else todayDate
+
+    val activeView = remember(snapshot, activeDate) { snapshot.dayView(activeDate) }
+    val featuredEmergency = remember(snapshot) { snapshot.featuredEmergency() }
+    val siteBanner = remember(snapshot, lang) { SiteStatusModel.banner(snapshot, lang) }
+    val siteNotice = remember(snapshot) { SiteStatusModel.notice(snapshot) }
+
+    val hasEmergencyOutage = featuredEmergency != null
     val hasCustomNoQueueStatus = !customQueueStatusText.isNullOrBlank() && !hasEmergencyOutage
     val isQueueUnselected = queue.isBlank() && !hasCustomNoQueueStatus && !hasEmergencyOutage
     val formattedSelectedAddress = remember(selectedAddress) { formatAddressAfterCity(selectedAddress) }
@@ -115,59 +221,22 @@ fun MainScreen(
         }
     }
 
-    // Reset to "today" if tomorrow schedule is no longer available
-    LaunchedEffect(hasTomorrowSchedule, tomorrowSlots) {
-        if (!hasTomorrowSchedule || tomorrowSlots == null) {
-            selectedDayTab = "today"
-        }
+    // The ztoe table of the shown day is not known: the drum is grey, known emergency/repair outages are drawn on top
+    val isTodayUnclear = !hasCustomNoQueueStatus && queue.isNotBlank() && !snapshot.plannedKnown
+    val isTomorrowUnclear = !hasCustomNoQueueStatus && queue.isNotBlank() && !snapshot.tomorrowPublished
+    val activeUnclear = if (isTomorrowSelected) isTomorrowUnclear else isTodayUnclear
+
+    val activeSlots: List<BlackoutSlot> = remember(snapshot, activeDate, hasCustomNoQueueStatus) {
+        if (hasCustomNoQueueStatus) lightNoOutageSlots else snapshot.slotsFor(activeDate)
     }
 
-    val isTomorrowSelected = selectedDayTab == "tomorrow" && hasTomorrowSchedule && tomorrowSlots != null
-    val activeSlots = when {
-        hasCustomNoQueueStatus && !hasEmergencyOutage -> lightNoOutageSlots
-        isTomorrowSelected -> tomorrowSlots!!
-        else -> slots
-    }
-    val isUnclear = activeSlots.isEmpty() || isQueueUnselected
-    val isStatusUnclear = (slots.isEmpty() && !hasCustomNoQueueStatus) || isQueueUnselected
-    val activeSlotsSignature = activeSlots.joinToString("") {
-        val statusChar = if (it.status == SlotStatus.POWER_OFF) "1" else "0"
-        val emgChar = if (it.isEmergency) "E" else "S"
-        "$statusChar$emgChar"
-    }
+    val isStatusUnclear = (snapshot.isUnclear && !hasCustomNoQueueStatus) || isQueueUnselected
+    val rows = activeView.rows
+    val showOutageList = !isQueueUnselected && (rows.isNotEmpty() || (!activeUnclear && activeSlots.isNotEmpty()))
 
-    // Compute continuous blackout intervals with exact 30-min resolution using hoisted ScheduleRepository
-    val intervals = remember(queue, selectedDayTab, activeSlotsSignature) {
-        scheduleRepo.getDetailedIntervals(activeSlots)
-    }
-
-    // Pulse animation for status dot — only active during an active blackout to avoid 60fps idle CPU/battery drain
-    val pulseScale = if (!isStatusUnclear && isBlackoutNow) {
-        val infiniteTransition = rememberInfiniteTransition(label = "pulse")
-        val scale by infiniteTransition.animateFloat(
-            initialValue = 0.85f,
-            targetValue = 1.25f,
-            animationSpec = infiniteRepeatable(
-                animation = tween(900, easing = FastOutSlowInEasing),
-                repeatMode = RepeatMode.Reverse
-            ),
-            label = "pulseScale"
-        )
-        scale
-    } else {
-        1f
-    }
-
-    var entryRefreshTick by remember { mutableStateOf(0) }
-    LaunchedEffect(Unit) {
-        entryRefreshTick++
-    }
-
-    val kyivNow = remember(countdownText, currentTime, entryRefreshTick) {
-        LocalTime.now(KYIV_ZONE)
-    }
-    val currentTimeStr = remember(kyivNow.hour, kyivNow.minute) {
-        kyivNow.format(DateTimeFormatter.ofPattern("HH:mm"))
+    val clock = now.toLocalTime()
+    val currentTimeStr = remember(clock.hour, clock.minute) {
+        clock.format(DateTimeFormatter.ofPattern("HH:mm"))
     }
 
     Box(modifier = Modifier.fillMaxSize()) {
@@ -177,7 +246,10 @@ fun MainScreen(
                 .statusBarsPadding()
                 .then(
                     if (isQueueUnselected) {
-                        Modifier.alpha(0.15f)
+                        // The overlay below is the only interactive thing: hide this layer from TalkBack too
+                        Modifier
+                            .clearAndSetSemantics {}
+                            .alpha(0.15f)
                     } else {
                         Modifier.verticalScroll(rememberScrollState())
                     }
@@ -185,173 +257,73 @@ fun MainScreen(
                 .padding(horizontal = 16.dp, vertical = 12.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            // 1. Top Header: Queue title + Sleek pill toggle switch (NO text)
+            // 1. Top Header: Queue title + sleek pill toggle switch (no text)
             Row(
                 modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 if (isQueueUnselected || hasCustomNoQueueStatus || queue.isBlank()) {
-                    Box(modifier = Modifier.weight(1f).defaultMinSize(minHeight = 44.dp))
+                    Box(modifier = Modifier.weight(1f).defaultMinSize(minHeight = ZtMinTouch))
                 } else {
                     Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
                         Text(
                             text = "${AppStrings.queue(lang)} $queue",
-                            fontSize = 24.sp,
-                            fontWeight = FontWeight.Bold,
+                            style = ZtType.title,
                             color = Color.White
                         )
                         Text(
-                            text = formattedSelectedAddress ?: "Житомиробленерго (ZTOE)",
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Medium,
-                            color = Color(0xB3BAE6FD),
-                            lineHeight = 16.sp
+                            text = formattedSelectedAddress ?: AppStrings.mainUtilityName(),
+                            style = ZtType.caption,
+                            color = TextSecondary,
+                            maxLines = 3,
+                            overflow = TextOverflow.Ellipsis
                         )
                     }
                 }
 
-                // Enlarged Pill Switch matching emulator exactly
-                Box(
-                    modifier = Modifier
-                        .size(width = 58.dp, height = 34.dp)
-                        .clip(CircleShape)
-                        .background(if (notificationsEnabled) Color(0xFFFF5E3A) else Color(0x26FFFFFF))
-                        .clickable(enabled = !isQueueUnselected) { onToggleNotifications() }
-                        .padding(4.dp),
-                    contentAlignment = if (notificationsEnabled) Alignment.CenterEnd else Alignment.CenterStart
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(26.dp)
-                            .clip(CircleShape)
-                            .background(Color.White),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Icon(
-                            imageVector = if (notificationsEnabled) Icons.Default.Notifications else Icons.Default.NotificationsOff,
-                            contentDescription = null,
-                            tint = if (notificationsEnabled) Color(0xFFFF5E3A) else Color(0xFF6B7280),
-                            modifier = Modifier.size(16.dp)
-                        )
-                    }
-                }
+                NotificationPill(
+                    enabled = notificationsEnabled,
+                    interactive = !isQueueUnselected,
+                    lang = lang,
+                    onToggle = onToggleNotifications
+                )
             }
 
-            // 1c. Active Emergency Outage ("Аварійне відключення") Banner with Start & Estimated Restore Times — matching Workbench MainView.tsx
-            if (!isQueueUnselected && hasEmergencyOutage) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .floatingShadow(color = Color(0xB3000000), borderRadius = 24.dp, blurRadius = 22.dp, offsetY = 8.dp)
-                        .shadow(10.dp, RoundedCornerShape(24.dp), ambientColor = Color(0x66000000), spotColor = Color(0x80000000))
-                        .clip(RoundedCornerShape(24.dp))
-                        .background(Color(0xBF141A29))
-                        .border(1.dp, Color(0x26FFFFFF), RoundedCornerShape(24.dp))
-                        .padding(16.dp)
-                ) {
-                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Text(
-                            text = if (lang == "uk" && !emergencyOutageType.isNullOrBlank()) {
-                                emergencyOutageType
-                            } else {
-                                AppStrings.emergencyOutageTitle(lang)
-                            },
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Color(0xFFFF5E3A),
-                            lineHeight = 19.sp
-                        )
-                        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text(
-                                    text = AppStrings.emergencyStartLabel(lang),
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.Medium,
-                                    color = Color(0xB3BAE6FD)
-                                )
-                                Text(
-                                    text = emergencyOutageStartTime ?: "--:--",
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    fontFamily = FontFamily.Monospace,
-                                    color = Color.White,
-                                    textAlign = TextAlign.End
-                                )
-                            }
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text(
-                                    text = AppStrings.emergencyRestoreLabel(lang),
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.Medium,
-                                    color = Color(0xB3BAE6FD)
-                                )
-                                Text(
-                                    text = emergencyOutageRestoreTime ?: "--:--",
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    fontFamily = FontFamily.Monospace,
-                                    color = Color.White,
-                                    textAlign = TextAlign.End
-                                )
-                            }
-                        }
-                    }
-                }
+            // 1a. Featured emergency outage (active, overdue or the next upcoming one); finished ones never show here
+            if (!isQueueUnselected && featuredEmergency != null) {
+                EmergencyBanner(outage = featuredEmergency, now = now, lang = lang)
             }
 
-            // 1b. Custom ZTOE Queue/House Status Message Bar — exact same style/color/placement as Workbench MainView.tsx
+            // 1b. Exact alarms are not allowed (Android 12+): warnings may arrive late
+            if (!isQueueUnselected && exactAlarmMissing) {
+                ExactAlarmCard(lang = lang, onOpenSettings = onOpenExactAlarmSettings)
+            }
+
+            // 1c. Site is degraded (no table / unreachable / no internet), persistent
+            if (!isQueueUnselected && siteBanner != null) {
+                SiteStatusBanner(siteBanner)
+            }
+
+            // 1c'. ztoe is up but publishes a notice instead of the table: quote it to the user
+            if (siteNotice != null) {
+                SiteNoticeCard(text = siteNotice, lang = lang)
+            }
+
+            // 1d. Custom ZTOE queue/house status message
             if (!isQueueUnselected && !customQueueStatusText.isNullOrBlank()) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .floatingShadow(color = Color(0xB3000000), borderRadius = 24.dp, blurRadius = 22.dp, offsetY = 8.dp)
-                        .shadow(10.dp, RoundedCornerShape(24.dp), ambientColor = Color(0x66000000), spotColor = Color(0x80000000))
-                        .clip(RoundedCornerShape(24.dp))
-                        .background(Color(0xBF141A29))
-                        .border(1.dp, Color(0x26FFFFFF), RoundedCornerShape(24.dp))
-                        .padding(16.dp)
-                ) {
+                GlassCard(modifier = Modifier.fillMaxWidth()) {
                     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         if (!formattedSelectedAddress.isNullOrBlank()) {
-                            Text(
-                                text = formattedSelectedAddress,
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Medium,
-                                color = Color(0xB3BAE6FD),
-                                lineHeight = 16.sp
-                            )
+                            Text(text = formattedSelectedAddress, style = ZtType.caption, color = TextSecondary)
                         }
-                        Text(
-                            text = customQueueStatusText ?: "",
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Color.White,
-                            lineHeight = 19.sp
-                        )
+                        Text(text = customQueueStatusText, style = ZtType.subhead, color = Color.White)
                     }
                 }
             }
 
-            // 2. Hero Outage Status Card (Translucent Frosted Glass)
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .floatingShadow(color = Color(0xB3000000), borderRadius = 24.dp, blurRadius = 22.dp, offsetY = 8.dp)
-                    .shadow(10.dp, RoundedCornerShape(24.dp), ambientColor = Color(0x66000000), spotColor = Color(0x80000000))
-                    .clip(RoundedCornerShape(24.dp))
-                    .background(Color(0xBF141A29))
-                    .border(1.dp, Color(0x26FFFFFF), RoundedCornerShape(24.dp))
-                    .padding(18.dp)
-            ) {
+            // 2. Hero outage status card
+            GlassCard(modifier = Modifier.fillMaxWidth(), contentPadding = PaddingValues(18.dp)) {
                 if (hasCustomNoQueueStatus && !hasEmergencyOutage) {
                     Box(
                         modifier = Modifier
@@ -359,38 +331,37 @@ fun MainScreen(
                             .padding(vertical = 16.dp),
                         contentAlignment = Alignment.Center
                     ) {
-                        Text(
-                            text = "--:--:--",
-                            fontSize = 44.sp,
-                            fontWeight = FontWeight.Black,
-                            fontFamily = FontFamily.Monospace,
-                            color = Color.White
-                        )
+                        CappedFontScale(1.15f) {
+                            Text(
+                                text = "--:--:--",
+                                style = ZtType.display,
+                                color = Color.White,
+                                maxLines = 1,
+                                softWrap = false
+                            )
+                        }
                     }
                 } else {
+                    val off = !isStatusUnclear && isBlackoutNow
                     Column {
-                        // Status Line
+                        // Status line
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
                             Row(
+                                modifier = Modifier.weight(1f).padding(end = 8.dp),
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(10.dp)
-                                        .scale(if (!isStatusUnclear && isBlackoutNow) pulseScale else 1f)
-                                        .clip(CircleShape)
-                                        .background(
-                                            when {
-                                                isStatusUnclear -> Color(0xFF9CA3AF)
-                                                isBlackoutNow -> Color(0xFFFF5E3A)
-                                                else -> Color(0xFF34D399)
-                                            }
-                                        )
+                                StatusDot(
+                                    color = when {
+                                        isStatusUnclear -> ZtColors.ChipGreyText
+                                        isBlackoutNow -> ZtColors.Accent
+                                        else -> ZtColors.ChipGreenText
+                                    },
+                                    pulsing = off
                                 )
                                 Text(
                                     text = when {
@@ -398,9 +369,10 @@ fun MainScreen(
                                         isBlackoutNow -> AppStrings.powerOff(lang)
                                         else -> AppStrings.powerOn(lang)
                                     },
-                                    fontSize = 13.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = Color.White
+                                    style = ZtType.label.copy(fontWeight = FontWeight.Bold),
+                                    color = Color.White,
+                                    maxLines = 2,
+                                    modifier = Modifier.weight(1f)
                                 )
                             }
 
@@ -411,72 +383,73 @@ fun MainScreen(
                                 Icon(
                                     Icons.Default.Schedule,
                                     contentDescription = null,
-                                    tint = Color(0xB3BAE6FD),
+                                    tint = TextSecondary,
                                     modifier = Modifier.size(14.dp)
                                 )
                                 Text(
                                     text = currentTimeStr,
-                                    fontSize = 12.sp,
-                                    fontFamily = FontFamily.Monospace,
-                                    fontWeight = FontWeight.Bold,
-                                    color = Color(0xB3BAE6FD)
+                                    style = ZtType.captionMono,
+                                    color = TextSecondary,
+                                    maxLines = 1,
+                                    softWrap = false
                                 )
                             }
                         }
 
                         Spacer(modifier = Modifier.height(14.dp))
 
-                        // Big Countdown Digits
+                        // Big countdown digits (font scale capped on this node only)
                         Column(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalAlignment = Alignment.CenterHorizontally
                         ) {
                             Text(
-                                text = if (!isStatusUnclear && isBlackoutNow) AppStrings.powerOnIn(lang) else AppStrings.powerOffIn(lang),
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                color = Color(0xB3BAE6FD)
+                                text = if (off) AppStrings.powerOnIn(lang) else AppStrings.powerOffIn(lang),
+                                style = ZtType.caption,
+                                color = TextSecondary,
+                                textAlign = TextAlign.Center
                             )
                             Spacer(modifier = Modifier.height(4.dp))
-                            Text(
-                                text = countdownText,
-                                fontSize = 44.sp,
-                                fontWeight = FontWeight.Black,
-                                fontFamily = FontFamily.Monospace,
-                                color = Color.White
-                            )
+                            CappedFontScale(1.15f) {
+                                Text(
+                                    text = countdownText,
+                                    style = ZtType.display,
+                                    color = Color.White,
+                                    maxLines = 1,
+                                    softWrap = false,
+                                    textAlign = TextAlign.Center
+                                )
+                            }
                         }
 
-                        val effectiveSlotTimeText = when {
-                            isStatusUnclear -> "--:-- - --:--"
-                            else -> slotTimeText
-                        }
+                        val effectiveSlotTimeText = if (isStatusUnclear) "--:-- - --:--" else slotTimeText
                         if (effectiveSlotTimeText.isNotEmpty() && effectiveSlotTimeText != "Відключень немає") {
                             Spacer(modifier = Modifier.height(14.dp))
-                            Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(Color(0x1AFFFFFF)))
+                            Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(ZtColors.Divider))
                             Spacer(modifier = Modifier.height(10.dp))
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Text(
-                                    text = if (!isStatusUnclear && isBlackoutNow) AppStrings.outagePeriod(lang) else AppStrings.nextPeriod(lang),
-                                    fontSize = 13.sp,
-                                    color = Color(0xB3BAE6FD)
+                                    text = if (off) AppStrings.outagePeriod(lang) else AppStrings.nextPeriod(lang),
+                                    style = ZtType.caption,
+                                    color = TextSecondary,
+                                    modifier = Modifier.weight(1f)
                                 )
                                 Box(
                                     modifier = Modifier
-                                        .clip(RoundedCornerShape(10.dp))
+                                        .clip(ZtShapes.Badge)
                                         .background(Color(0x26FFFFFF))
                                         .padding(horizontal = 10.dp, vertical = 4.dp)
                                 ) {
                                     Text(
                                         text = effectiveSlotTimeText,
-                                        fontSize = 14.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        fontFamily = FontFamily.Monospace,
-                                        color = Color.White
+                                        style = ZtType.label.copy(fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold),
+                                        color = Color.White,
+                                        maxLines = 1,
+                                        softWrap = false
                                     )
                                 }
                             }
@@ -485,198 +458,66 @@ fun MainScreen(
                 }
             }
 
-            // 3. Day Selector (Today / Tomorrow)
-            if (hasTomorrowSchedule && tomorrowSlots != null && !hasCustomNoQueueStatus) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .floatingShadow(color = Color(0x8C000000), borderRadius = 16.dp, blurRadius = 16.dp, offsetY = 6.dp)
-                        .shadow(8.dp, RoundedCornerShape(16.dp), ambientColor = Color(0x55000000), spotColor = Color(0x66000000))
-                        .clip(RoundedCornerShape(16.dp))
-                        .background(Color(0x80141A29))
-                        .padding(4.dp)
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .weight(1f)
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(if (selectedDayTab == "today") Color(0x33FFFFFF) else Color.Transparent)
-                            .clickable(enabled = !isQueueUnselected) { selectedDayTab = "today" }
-                            .padding(vertical = 10.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            text = AppStrings.today(lang),
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = if (selectedDayTab == "today") Color.White else Color(0x99BAE6FD)
-                        )
-                    }
-                    Box(
-                        modifier = Modifier
-                            .weight(1f)
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(if (selectedDayTab == "tomorrow") Color(0x33FFFFFF) else Color.Transparent)
-                            .clickable(enabled = !isQueueUnselected) { selectedDayTab = "tomorrow" }
-                            .padding(vertical = 10.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(
-                            text = AppStrings.tomorrow(lang),
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = if (selectedDayTab == "tomorrow") Color.White else Color(0x99BAE6FD)
-                        )
-                    }
-                }
-            } else {
-                // Centered "Today" button
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth(),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .floatingShadow(color = Color(0x8C000000), borderRadius = 16.dp, blurRadius = 16.dp, offsetY = 6.dp)
-                            .shadow(8.dp, RoundedCornerShape(16.dp), ambientColor = Color(0x55000000), spotColor = Color(0x66000000))
-                            .clip(RoundedCornerShape(16.dp))
-                            .background(Color(0x80141A29))
-                            .padding(horizontal = 24.dp, vertical = 10.dp)
-                    ) {
-                        Text(
-                            text = AppStrings.today(lang),
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Color.White
-                        )
-                    }
+            // 3. Day selector: Tomorrow is always there; before ztoe publishes it, it shows the grey drum plus a notice
+            DayTabs(
+                isTomorrow = isTomorrowSelected,
+                enabled = !isQueueUnselected,
+                lang = lang,
+                onSelect = { selectedDayTab = if (it) TAB_TOMORROW else TAB_TODAY }
+            )
+
+            if (isTomorrowSelected && isTomorrowUnclear && !isQueueUnselected) {
+                GlassCard(modifier = Modifier.fillMaxWidth()) {
+                    Text(
+                        text = AppStrings.tomorrowNotPublished(lang),
+                        style = ZtType.subhead,
+                        color = Color.White
+                    )
                 }
             }
 
-            // 4. Schedule Card with 24h Timeline matching user screenshot
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .floatingShadow(color = Color(0xB3000000), borderRadius = 24.dp, blurRadius = 24.dp, offsetY = 10.dp)
-                    .shadow(10.dp, RoundedCornerShape(24.dp), ambientColor = Color(0x66000000), spotColor = Color(0x80000000))
-                    .clip(RoundedCornerShape(24.dp))
-                    .background(Color(0xBF141A29))
-                    .padding(18.dp)
-            ) {
-                key(queue, selectedDayTab, activeSlotsSignature) {
-                    Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                        // 24-Hour Timeline Bar (automatically refreshed on main screen entry and every minute)
-                        key(kyivNow.hour, kyivNow.minute, entryRefreshTick) {
-                            TimelineBar(
-                                slots = activeSlots,
-                                currentHour = kyivNow.hour,
-                                currentMinute = kyivNow.minute,
-                                showNeedle = selectedDayTab == "today",
-                                lang = lang
+            // 4. Schedule card with the 24 h drum and the list of outages of the shown day
+            GlassCard(modifier = Modifier.fillMaxWidth(), contentPadding = PaddingValues(18.dp)) {
+                Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                    TimelineBar(
+                        slots = activeSlots,
+                        currentHour = clock.hour,
+                        currentMinute = clock.minute,
+                        showNeedle = !isTomorrowSelected,
+                        lang = lang,
+                        unclearBase = activeUnclear
+                    )
+
+                    if (showOutageList) {
+                        Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(ZtColors.Divider))
+
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text(
+                                text = if (isTomorrowSelected) AppStrings.blackoutHoursForTomorrowHeader(lang) else AppStrings.blackoutHoursForDayHeader(lang),
+                                style = ZtType.label,
+                                color = TextSecondary
                             )
-                        }
 
-                        // List of Outage Hours for this day (removed when outages are unclear)
-                        if (!isUnclear) {
-                            Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(Color(0x1AFFFFFF)))
-
-                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                Text(
-                                    text = if (isTomorrowSelected) AppStrings.blackoutHoursForTomorrowHeader(lang) else AppStrings.blackoutHoursForDayHeader(lang),
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = Color(0xB3BAE6FD)
-                                )
-
-                                if (intervals.isNotEmpty()) {
-                                    intervals.forEach { interval ->
-                                        val start = interval.startStr
-                                        val end = interval.endStr
-                                        val dur = interval.durationHours
-                                        val durStr = if (dur % 1.0 == 0.0) "${dur.toInt()} ${AppStrings.hourShort(lang)}" else "${String.format(java.util.Locale.US, "%.1f", dur)} ${AppStrings.hourShort(lang)}"
-                                        Row(
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .clip(RoundedCornerShape(14.dp))
-                                                .background(Color(0x14FFFFFF))
-                                                .padding(horizontal = 14.dp, vertical = 10.dp),
-                                            horizontalArrangement = Arrangement.SpaceBetween,
-                                            verticalAlignment = Alignment.CenterVertically
-                                        ) {
-                                            Row(
-                                                verticalAlignment = Alignment.CenterVertically,
-                                                horizontalArrangement = Arrangement.spacedBy(10.dp)
-                                            ) {
-                                                // Fixed 20x20dp leading indicator slot so text start X is 100% identical
-                                                Box(
-                                                    modifier = Modifier.size(20.dp),
-                                                    contentAlignment = Alignment.Center
-                                                ) {
-                                                    if (interval.isEmergency) {
-                                                        Box(
-                                                            modifier = Modifier
-                                                                .size(20.dp)
-                                                                .clip(CircleShape)
-                                                                .background(Color(0xFFFF5E3A)),
-                                                            contentAlignment = Alignment.Center
-                                                        ) {
-                                                            Text(
-                                                                text = "!",
-                                                                fontSize = 12.sp,
-                                                                fontWeight = FontWeight.Black,
-                                                                color = Color.White
-                                                            )
-                                                        }
-                                                    } else {
-                                                        Box(
-                                                            modifier = Modifier
-                                                                .size(10.dp)
-                                                                .clip(CircleShape)
-                                                                .background(Color(0xFFFF5E3A))
-                                                        )
-                                                    }
-                                                }
-                                                Text(
-                                                    text = "$start – $end",
-                                                    fontSize = 15.sp,
-                                                    fontWeight = FontWeight.Bold,
-                                                    fontFamily = FontFamily.Monospace,
-                                                    color = Color.White
-                                                )
-                                            }
-
-                                            Box(
-                                                modifier = Modifier
-                                                    .clip(RoundedCornerShape(8.dp))
-                                                    .background(Color(0x26FF5E3A))
-                                                    .padding(horizontal = 8.dp, vertical = 3.dp)
-                                            ) {
-                                                Text(
-                                                    text = durStr,
-                                                    fontSize = 11.sp,
-                                                    fontWeight = FontWeight.Bold,
-                                                    fontFamily = FontFamily.Monospace,
-                                                    color = Color(0xFFFF5E3A)
-                                                )
-                                            }
-                                        }
+                            if (rows.isNotEmpty()) {
+                                rows.forEachIndexed { index, row ->
+                                    key(index, row.outage.id) {
+                                        OutageRowItem(text = OutageRowFormat.format(lang, row), lang = lang)
                                     }
-                                } else {
-                                    Box(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .clip(RoundedCornerShape(14.dp))
-                                            .background(Color(0x14FFFFFF))
-                                            .padding(14.dp),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Text(
-                                            text = AppStrings.noBlackoutsScheduled(lang),
-                                            fontSize = 13.sp,
-                                            color = Color(0xB3BAE6FD)
-                                        )
-                                    }
+                                }
+                            } else {
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(ZtShapes.Row)
+                                        .background(ZtColors.InnerRow)
+                                        .padding(14.dp),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Text(
+                                        text = AppStrings.noBlackoutsScheduled(lang),
+                                        style = ZtType.caption,
+                                        color = TextSecondary
+                                    )
                                 }
                             }
                         }
@@ -684,198 +525,77 @@ fun MainScreen(
                 }
             }
 
-            // 5. Last Updated & Circular Refresh Button Card
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .floatingShadow(color = Color(0xB3000000), borderRadius = 20.dp, blurRadius = 22.dp, offsetY = 8.dp)
-                    .clip(RoundedCornerShape(20.dp))
-                    .background(Color(0xBF141A29))
-                    .padding(14.dp)
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            Text(AppStrings.lastUpdated(lang), fontSize = 11.sp, color = Color(0x99BAE6FD))
-                            Text(lastUpdated, fontSize = 11.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace, color = Color.White)
-                        }
-                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            Text(AppStrings.nextUpdated(lang), fontSize = 11.sp, color = Color(0x99BAE6FD))
-                            Text(nextUpdated, fontSize = 11.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace, color = Color.White)
-                        }
-                    }
-
-                    // Circular white refresh button with feedback
-                    Box(
-                        modifier = Modifier
-                            .size(42.dp)
-                            .clip(CircleShape)
-                            .background(Color.White)
-                            .clickable(enabled = !isQueueUnselected) {
-                                onRefresh()
-                            },
-                        contentAlignment = Alignment.Center
+            // 5. Last updated, site status chips and the circular refresh button
+            GlassCard(modifier = Modifier.fillMaxWidth(), contentPadding = PaddingValues(14.dp)) {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.Refresh,
-                            contentDescription = "Оновити",
-                            tint = Color.Black,
-                            modifier = Modifier.size(20.dp)
+                        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            LabelledValue(AppStrings.lastUpdated(lang), lastUpdated)
+                            LabelledValue(AppStrings.nextUpdated(lang), nextUpdated)
+                        }
+                        RefreshButton(
+                            enabled = !isQueueUnselected,
+                            isRefreshing = isRefreshing,
+                            lang = lang,
+                            onRefresh = onRefresh
                         )
                     }
+                    SiteStatusChipRow(snapshot = snapshot, lang = lang)
                 }
             }
 
-            // 6. Emergency Outages Info Link (right after refresh block, styled like AboutScreen links with site icon)
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .floatingShadow(color = Color(0xB3000000), borderRadius = 24.dp, blurRadius = 22.dp, offsetY = 8.dp)
-                    .clip(RoundedCornerShape(24.dp))
-                    .background(Color(0xBF141A29))
-                    .padding(14.dp)
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(14.dp))
-                        .background(Color(0x14FFFFFF))
-                        .clickable(enabled = !isQueueUnselected) {
-                            try {
-                                val intent = Intent(Intent.ACTION_VIEW, Uri.parse(AppStrings.EMERGENCY_OUTAGES_URL))
-                                context.startActivity(intent)
-                            } catch (_: Exception) {}
-                        }
-                        .padding(12.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(36.dp)
-                                .clip(RoundedCornerShape(10.dp))
-                                .background(Color(0xFF1877F2)),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            // Facebook vector logo (replaces generic Icons.Default.Language globe)
-                            Icon(
-                                painter = painterResource(id = R.drawable.ic_facebook),
-                                contentDescription = "Facebook",
-                                tint = Color.White,
-                                modifier = Modifier.size(20.dp)
-                            )
-                        }
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = AppStrings.emergencyOutagesLabel(lang),
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Color.White,
-                                softWrap = true
-                            )
-                            Text(
-                                text = AppStrings.EMERGENCY_OUTAGES_URL,
-                                fontSize = 10.sp,
-                                fontFamily = FontFamily.Monospace,
-                                color = Color(0x99BAE6FD),
-                                maxLines = 1,
-                                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
-                            )
-                        }
+            // 6. Emergency outages info link (Facebook)
+            LinkCard(
+                title = AppStrings.emergencyOutagesLabel(lang),
+                url = AppStrings.EMERGENCY_OUTAGES_URL,
+                tileColor = Color(0xFF1877F2),
+                enabled = !isQueueUnselected,
+                onClick = {
+                    try {
+                        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(AppStrings.EMERGENCY_OUTAGES_URL)))
+                    } catch (_: Exception) {
                     }
-                    Icon(
-                        imageVector = Icons.Default.OpenInNew,
-                        contentDescription = null,
-                        tint = Color(0x99BAE6FD),
-                        modifier = Modifier.size(16.dp)
-                    )
                 }
-            }
-
-            // 7. Blackout Schedules on ZTOE Website Link ("Графіки відключень на сайті") at very bottom after Facebook link
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .floatingShadow(color = Color(0xB3000000), borderRadius = 24.dp, blurRadius = 22.dp, offsetY = 8.dp)
-                    .clip(RoundedCornerShape(24.dp))
-                    .background(Color(0xBF141A29))
-                    .padding(14.dp)
             ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(14.dp))
-                        .background(Color(0x14FFFFFF))
-                        .clickable(enabled = !isQueueUnselected) {
-                            try {
-                                val intent = Intent(Intent.ACTION_VIEW, Uri.parse(AppStrings.SITE_SCHEDULES_URL))
-                                context.startActivity(intent)
-                            } catch (_: Exception) {}
-                        }
-                        .padding(12.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(36.dp)
-                                .clip(RoundedCornerShape(10.dp))
-                                .background(Color(0xFFFF5E3A)),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Language,
-                                contentDescription = "Графіки відключень на сайті",
-                                tint = Color.White,
-                                modifier = Modifier.size(20.dp)
-                            )
-                        }
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = AppStrings.siteSchedulesLabel(lang),
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Color.White,
-                                softWrap = true
-                            )
-                            Text(
-                                text = AppStrings.SITE_SCHEDULES_URL,
-                                fontSize = 10.sp,
-                                fontFamily = FontFamily.Monospace,
-                                color = Color(0x99BAE6FD),
-                                maxLines = 1,
-                                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
-                            )
-                        }
-                    }
-                    Icon(
-                        imageVector = Icons.Default.OpenInNew,
-                        contentDescription = null,
-                        tint = Color(0x99BAE6FD),
-                        modifier = Modifier.size(16.dp)
-                    )
-                }
+                // Facebook vector logo
+                Icon(
+                    painter = painterResource(id = R.drawable.ic_facebook),
+                    contentDescription = null,
+                    tint = Color.White,
+                    modifier = Modifier.size(20.dp)
+                )
             }
 
-            // Extra spacing so floating navigation dock does not overlap bottom card
+            // 7. Blackout schedules on the ZTOE website, at the very bottom after the Facebook link
+            LinkCard(
+                title = AppStrings.siteSchedulesLabel(lang),
+                url = AppStrings.SITE_SCHEDULES_URL,
+                tileColor = ZtColors.Accent,
+                enabled = !isQueueUnselected,
+                onClick = {
+                    try {
+                        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(AppStrings.SITE_SCHEDULES_URL)))
+                    } catch (_: Exception) {
+                    }
+                }
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Language,
+                    contentDescription = null,
+                    tint = Color.White,
+                    modifier = Modifier.size(20.dp)
+                )
+            }
+
+            // Extra spacing so the floating navigation dock does not overlap the bottom card
             Spacer(modifier = Modifier.height(96.dp))
         }
 
-        // First-launch / Unselected Queue Overlay: dark dimming + centered #FF5E3A "Виберіть чергу" button with subtitle + 3-segment language switch
+        // First launch / unselected queue overlay: dark dim, centred accent "Виберіть чергу" button, language switch
         if (isQueueUnselected) {
             Box(
                 modifier = Modifier
@@ -891,11 +611,11 @@ fun MainScreen(
                 ) {
                     Box(
                         modifier = Modifier
-                            .defaultMinSize(minWidth = 260.dp)
-                            .clip(RoundedCornerShape(24.dp))
-                            .background(Color(0xFFFF5E3A))
-                            .border(1.dp, Color(0x40FFFFFF), RoundedCornerShape(24.dp))
-                            .clickable { onOpenQueueSelection() }
+                            .defaultMinSize(minWidth = 260.dp, minHeight = ZtMinTouch)
+                            .clip(ZtShapes.Card)
+                            .background(ZtColors.Accent)
+                            .border(1.dp, Color(0x40FFFFFF), ZtShapes.Card)
+                            .clickable(role = Role.Button) { onOpenQueueSelection() }
                             .padding(horizontal = 32.dp, vertical = 20.dp),
                         contentAlignment = Alignment.Center
                     ) {
@@ -903,61 +623,447 @@ fun MainScreen(
                             horizontalAlignment = Alignment.CenterHorizontally,
                             verticalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
+                            // Dark label on the accent fill: 6.9:1, where white would be 3.0:1
                             Text(
                                 text = AppStrings.selectQueueAction(lang),
-                                fontSize = 24.sp,
-                                fontWeight = FontWeight.ExtraBold,
-                                color = Color.White,
+                                style = ZtType.title.copy(fontWeight = FontWeight.ExtraBold),
+                                color = InkOnAccent,
                                 textAlign = TextAlign.Center
                             )
                             Text(
-                                text = "Житомиробленерго (ZTOE)",
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                color = Color(0xE6FFFFFF),
+                                text = AppStrings.mainUtilityName(),
+                                style = ZtType.label,
+                                color = InkOnAccent,
                                 textAlign = TextAlign.Center
                             )
                         }
                     }
 
-                    Row(
+                    LanguageSwitch(
+                        selectedLanguage = selectedLanguage,
+                        lang = lang,
+                        onChangeLanguage = onChangeLanguage
+                    )
+                }
+            }
+        }
+    }
+}
+
+// -------------------------------------------------------------------------------------------------
+// Pieces
+// -------------------------------------------------------------------------------------------------
+
+/** 58 x 34 pill switch for the notifications; the touch target is 48 dp tall without changing the look. */
+@Composable
+private fun NotificationPill(enabled: Boolean, interactive: Boolean, lang: String, onToggle: () -> Unit) {
+    val label = AppStrings.notifications(lang)
+    val stateText = if (enabled) AppStrings.switchOn(lang) else AppStrings.switchOff(lang)
+    Box(
+        modifier = Modifier
+            .minimumInteractiveComponentSize()
+            .size(width = 58.dp, height = 34.dp)
+            .clip(CircleShape)
+            .background(if (enabled) ZtColors.Accent else Color(0x26FFFFFF))
+            .semantics {
+                contentDescription = label
+                stateDescription = stateText
+            }
+            .toggleable(
+                value = enabled,
+                enabled = interactive,
+                role = Role.Switch,
+                onValueChange = { onToggle() }
+            )
+            .padding(4.dp),
+        contentAlignment = if (enabled) Alignment.CenterEnd else Alignment.CenterStart
+    ) {
+        Box(
+            modifier = Modifier
+                .size(26.dp)
+                .clip(CircleShape)
+                .background(Color.White),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                imageVector = if (enabled) Icons.Default.Notifications else Icons.Default.NotificationsOff,
+                contentDescription = null,
+                tint = if (enabled) ZtColors.Accent else Color(0xFF6B7280),
+                modifier = Modifier.size(16.dp)
+            )
+        }
+    }
+}
+
+@Composable
+private fun EmergencyBanner(outage: Outage, now: LocalDateTime, lang: String) {
+    val format = remember { DateTimeFormatter.ofPattern("dd.MM.yyyy HH:mm") }
+    val status = outage.statusAt(now)
+    val title = when {
+        lang == "uk" && !outage.label.isNullOrBlank() -> outage.label
+        status == IntervalStatus.UPCOMING -> AppStrings.emergencyUpcomingTitle(lang)
+        else -> AppStrings.emergencyOutageTitle(lang)
+    }
+    val restoreText = if (outage.overdue || !outage.end.isAfter(outage.start)) "--:--" else outage.end.format(format)
+
+    GlassCard(modifier = Modifier.fillMaxWidth()) {
+        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Text(text = title, style = ZtType.subhead, color = ZtColors.Accent)
+            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                BannerLine(AppStrings.emergencyStartLabel(lang), outage.start.format(format))
+                BannerLine(AppStrings.emergencyRestoreLabel(lang), restoreText)
+                if (status == IntervalStatus.OVERDUE) {
+                    Text(text = AppStrings.rowOverdue(lang), style = ZtType.caption, color = TextSecondary)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun BannerLine(label: String, value: String) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text(text = label, style = ZtType.caption, color = TextSecondary, modifier = Modifier.weight(1f))
+        Text(
+            text = value,
+            style = ZtType.captionMono,
+            color = Color.White,
+            maxLines = 1,
+            softWrap = false,
+            textAlign = TextAlign.End
+        )
+    }
+}
+
+/** Exact alarms are off: explains why warnings can be late and opens the system screen where they are allowed. */
+@Composable
+private fun ExactAlarmCard(lang: String, onOpenSettings: () -> Unit) {
+    GlassCard(modifier = Modifier.fillMaxWidth()) {
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp), verticalAlignment = Alignment.Top) {
+            Box(
+                modifier = Modifier
+                    .size(36.dp)
+                    .clip(CircleShape)
+                    .background(ZtColors.ChipAmber),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Alarm,
+                    contentDescription = null,
+                    tint = ZtColors.ChipAmberText,
+                    modifier = Modifier.size(20.dp)
+                )
+            }
+            Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text(text = AppStrings.exactAlarmTitle(lang), style = ZtType.subhead, color = ZtColors.ChipAmberText)
+                Text(text = AppStrings.exactAlarmBody(lang), style = ZtType.body, color = TextSecondary)
+                Spacer(modifier = Modifier.height(2.dp))
+                Box(
+                    modifier = Modifier
+                        .defaultMinSize(minHeight = ZtMinTouch)
+                        .clip(ZtShapes.Control)
+                        .background(ZtColors.Accent)
+                        .clickable(role = Role.Button, onClick = onOpenSettings)
+                        .padding(horizontal = 20.dp, vertical = 10.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    // Dark label on the accent fill (6.9:1)
+                    Text(
+                        text = AppStrings.exactAlarmButton(lang),
+                        style = ZtType.label.copy(fontWeight = FontWeight.Bold),
+                        color = InkOnAccent,
+                        textAlign = TextAlign.Center
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun DayTabs(isTomorrow: Boolean, enabled: Boolean, lang: String, onSelect: (Boolean) -> Unit) {
+    GlassCard(
+        modifier = Modifier.fillMaxWidth(),
+        shape = ZtShapes.Control,
+        cornerRadius = 16.dp,
+        background = Color(0x80141A29),
+        borderColor = null,
+        contentPadding = PaddingValues(4.dp)
+    ) {
+        Row(modifier = Modifier.fillMaxWidth().selectableGroup()) {
+            DayTab(AppStrings.today(lang), selected = !isTomorrow, enabled = enabled, lang = lang, modifier = Modifier.weight(1f)) {
+                onSelect(false)
+            }
+            DayTab(AppStrings.tomorrow(lang), selected = isTomorrow, enabled = enabled, lang = lang, modifier = Modifier.weight(1f)) {
+                onSelect(true)
+            }
+        }
+    }
+}
+
+@Composable
+private fun DayTab(text: String, selected: Boolean, enabled: Boolean, lang: String, modifier: Modifier, onClick: () -> Unit) {
+    val selectedText = AppStrings.tabSelected(lang)
+    Box(
+        modifier = modifier
+            .heightIn(min = ZtMinTouch)
+            .clip(ZtShapes.Chip)
+            .background(if (selected) Color(0x33FFFFFF) else Color.Transparent)
+            .semantics { if (selected) stateDescription = selectedText }
+            .selectable(selected = selected, enabled = enabled, role = Role.Tab, onClick = onClick)
+            .padding(horizontal = 8.dp, vertical = 8.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text = text,
+            style = ZtType.label.copy(fontWeight = FontWeight.Bold),
+            color = if (selected) Color.White else TabIdle,
+            maxLines = 1,
+            textAlign = TextAlign.Center
+        )
+    }
+}
+
+/** One outage of the day: marker, full span, tags and the full duration chip. Finished rows are dimmed to 55 %. */
+@Composable
+private fun OutageRowItem(text: OutageRowFormat.RowText, lang: String) {
+    val tags = listOfNotNull(text.kindTag, text.originTag, text.statusTag, text.continueTag).joinToString(" · ")
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .alpha(if (text.isFinished) 0.55f else 1f)
+            .clip(ZtShapes.Row)
+            .background(ZtColors.InnerRow)
+            .clearAndSetSemantics { contentDescription = text.contentDescription }
+            .padding(horizontal = 14.dp, vertical = 10.dp),
+        horizontalArrangement = Arrangement.spacedBy(10.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        // Fixed 20x20dp leading indicator slot so the text start X is identical in every row
+        Box(modifier = Modifier.size(20.dp), contentAlignment = Alignment.Center) {
+            when {
+                text.isEmergency -> {
+                    Box(
                         modifier = Modifier
-                            .width(260.dp)
-                            .clip(RoundedCornerShape(16.dp))
-                            .background(Color(0xE6141A29))
-                            .border(1.dp, Color(0x33FFFFFF), RoundedCornerShape(16.dp))
-                            .padding(6.dp),
-                        horizontalArrangement = Arrangement.spacedBy(4.dp),
-                        verticalAlignment = Alignment.CenterVertically
+                            .size(20.dp)
+                            .clip(CircleShape)
+                            .background(ZtColors.Accent),
+                        contentAlignment = Alignment.Center
                     ) {
-                        val langOptions = listOf(
-                            "SYSTEM" to "Auto",
-                            "en" to "English",
-                            "uk" to "Українська"
-                        )
-                        langOptions.forEach { (code, label) ->
-                            val isActive = selectedLanguage.equals(code, ignoreCase = true)
-                            Box(
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .clip(RoundedCornerShape(12.dp))
-                                    .background(if (isActive) Color.White else Color.Transparent)
-                                    .clickable { onChangeLanguage(code) }
-                                    .padding(horizontal = 8.dp, vertical = 8.dp),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Text(
-                                    text = label,
-                                    fontSize = 12.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = if (isActive) Color.Black else Color(0xCCBAE6FD),
-                                    maxLines = 1
-                                )
-                            }
+                        // The glyph does not scale with the font size: the circle is fixed at 20 dp
+                        CappedFontScale(1f) {
+                            Text(
+                                text = "!",
+                                style = ZtType.overline.copy(fontWeight = FontWeight.Black, letterSpacing = androidx.compose.ui.unit.TextUnit.Unspecified),
+                                color = Color.White
+                            )
                         }
                     }
                 }
+                text.isRepair -> Icon(
+                    imageVector = Icons.Default.Build,
+                    contentDescription = null,
+                    tint = ZtColors.Accent,
+                    modifier = Modifier.size(18.dp)
+                )
+                else -> Box(
+                    modifier = Modifier
+                        .size(10.dp)
+                        .clip(CircleShape)
+                        .background(ZtColors.Accent)
+                )
             }
+        }
+
+        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            Text(text = text.timeText, style = ZtType.timeMono, color = Color.White, maxLines = 2)
+            if (tags.isNotEmpty()) {
+                Text(
+                    text = tags,
+                    style = ZtType.caption,
+                    color = if (text.isEmergency && !text.isFinished) ZtColors.Accent else TextSecondary
+                )
+            }
+        }
+
+        if (text.durationText != null) {
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(Color(0x26FF5E3A))
+                    .padding(horizontal = 8.dp, vertical = 3.dp)
+            ) {
+                Text(
+                    text = text.durationText,
+                    style = ZtType.captionMono,
+                    color = ZtColors.Accent,
+                    maxLines = 1,
+                    softWrap = false
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun LabelledValue(label: String, value: String) {
+    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text(
+            text = label,
+            style = ZtType.caption,
+            color = TextTertiary,
+            modifier = Modifier.weight(1f, fill = false)
+        )
+        Text(
+            text = value,
+            style = ZtType.captionMono,
+            color = Color.White,
+            maxLines = 1,
+            softWrap = false
+        )
+    }
+}
+
+/** 42 dp white refresh disc; 48 dp touch target; shows a spinner while a refresh runs. */
+@Composable
+private fun RefreshButton(enabled: Boolean, isRefreshing: Boolean, lang: String, onRefresh: () -> Unit) {
+    val label = AppStrings.refreshBtn(lang)
+    val busyText = AppStrings.refreshing(lang)
+    Box(
+        modifier = Modifier
+            .minimumInteractiveComponentSize()
+            .size(42.dp)
+            .clip(CircleShape)
+            .background(Color.White)
+            .semantics {
+                contentDescription = label
+                if (isRefreshing) stateDescription = busyText
+            }
+            .clickable(enabled = enabled && !isRefreshing, role = Role.Button) { onRefresh() },
+        contentAlignment = Alignment.Center
+    ) {
+        if (isRefreshing) {
+            CircularProgressIndicator(
+                modifier = Modifier.size(20.dp),
+                strokeWidth = 2.dp,
+                color = Color.Black
+            )
+        } else {
+            Icon(
+                imageVector = Icons.Default.Refresh,
+                contentDescription = null,
+                tint = Color.Black,
+                modifier = Modifier.size(20.dp)
+            )
+        }
+    }
+}
+
+/** Card with one tappable link row: icon tile, title and the full URL (wraps to two lines instead of a dead ellipsis). */
+@Composable
+private fun LinkCard(
+    title: String,
+    url: String,
+    tileColor: Color,
+    enabled: Boolean,
+    onClick: () -> Unit,
+    icon: @Composable () -> Unit
+) {
+    GlassCard(modifier = Modifier.fillMaxWidth(), contentPadding = PaddingValues(14.dp)) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(ZtShapes.Row)
+                .background(ZtColors.InnerRow)
+                .clickable(enabled = enabled, role = Role.Button, onClick = onClick)
+                .padding(12.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(36.dp)
+                    .clip(ZtShapes.Badge)
+                    .background(tileColor),
+                contentAlignment = Alignment.Center
+            ) {
+                icon()
+            }
+            Column(modifier = Modifier.weight(1f)) {
+                Text(text = title, style = ZtType.label.copy(fontWeight = FontWeight.Bold), color = Color.White)
+                Text(
+                    text = url,
+                    style = ZtType.captionMono.copy(fontWeight = FontWeight.Normal),
+                    color = TextTertiary,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+            Icon(
+                imageVector = Icons.Default.OpenInNew,
+                contentDescription = null,
+                tint = TextTertiary,
+                modifier = Modifier.size(16.dp)
+            )
+        }
+    }
+}
+
+/** 3-segment language switch of the first-launch overlay; stacks vertically at large font scales instead of clipping. */
+@Composable
+private fun LanguageSwitch(selectedLanguage: String, lang: String, onChangeLanguage: (String) -> Unit) {
+    val options = listOf(
+        "SYSTEM" to AppStrings.mainLangAuto(lang),
+        "en" to "English",
+        "uk" to "Українська"
+    )
+    val stacked = LocalDensity.current.fontScale > 1.15f
+
+    @Composable
+    fun Segment(code: String, label: String, modifier: Modifier) {
+        val isActive = selectedLanguage.equals(code, ignoreCase = true)
+        Box(
+            modifier = modifier
+                .heightIn(min = ZtMinTouch)
+                .clip(ZtShapes.Chip)
+                .background(if (isActive) Color.White else Color.Transparent)
+                .selectable(selected = isActive, role = Role.RadioButton) { onChangeLanguage(code) }
+                .padding(horizontal = 8.dp, vertical = 8.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                text = label,
+                style = ZtType.label.copy(fontWeight = FontWeight.Bold),
+                color = if (isActive) Color.Black else Color(0xE6BAE6FD),
+                maxLines = 1,
+                textAlign = TextAlign.Center
+            )
+        }
+    }
+
+    val containerModifier = Modifier
+        .fillMaxWidth(0.9f)
+        .clip(ZtShapes.Control)
+        .background(Color(0xE6141A29))
+        .border(1.dp, Color(0x33FFFFFF), ZtShapes.Control)
+        .padding(6.dp)
+        .selectableGroup()
+
+    if (stacked) {
+        Column(modifier = containerModifier, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            options.forEach { (code, label) -> Segment(code, label, Modifier.fillMaxWidth()) }
+        }
+    } else {
+        Row(
+            modifier = containerModifier,
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            options.forEach { (code, label) -> Segment(code, label, Modifier.weight(1f)) }
         }
     }
 }

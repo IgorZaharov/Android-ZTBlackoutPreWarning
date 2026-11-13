@@ -6,8 +6,8 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Exact pre-warnings need the "Alarms & reminders" special access (granted by the user, see ExactAlarmGate) -->
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
-    <uses-permission android:name="android.permission.USE_EXACT_ALARM" />
     <uses-permission android:name="android.permission.VIBRATE" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
@@ -44,6 +44,17 @@
             <intent-filter>
                 <action android:name="ua.blackout.prewarning.ACTION_TRIGGER_BLACKOUT_ALERT" />
                 <action android:name="ua.blackout.prewarning.ACTION_WIDGET_TRANSITION_UPDATE" />
+                <action android:name="ua.blackout.prewarning.ACTION_MIDNIGHT_SYNC" />
+            </intent-filter>
+        </receiver>
+
+        <!-- The user granted or revoked exact alarms: plan the alerts again -->
+        <receiver
+            android:name=".notification.ExactAlarmPermissionReceiver"
+            android:enabled="true"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.app.action.SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED" />
             </intent-filter>
         </receiver>
 
@@ -65,7 +76,7 @@
         <receiver
             android:name=".widget.WidgetToggleReceiver"
             android:enabled="true"
-            android:exported="true">
+            android:exported="false">
             <intent-filter>
                 <action android:name="ua.blackout.prewarning.ACTION_TOGGLE_WIDGET_NOTIFICATIONS" />
             </intent-filter>
@@ -97,6 +108,20 @@
             <meta-data
                 android:name="android.appwidget.provider"
                 android:resource="@xml/blackout_widget_big_info" />
+        </receiver>
+
+        <!-- Glance Home Screen Strip (4x1) AppWidget Receiver: drum chart with needle only -->
+        <receiver
+            android:name=".widget.BlackoutStripWidgetReceiver"
+            android:label="@string/widget_strip_name"
+            android:enabled="true"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/blackout_widget_strip_info" />
         </receiver>
 
     </application>

@@ -145,4 +145,172 @@ object AppStrings {
     fun rouletteSoundLabel(lang: String = "uk") = if (lang == "uk") "Звук" else "Sound"
     fun rouletteMusicLabel(lang: String = "uk") = if (lang == "uk") "Музика" else "Music"
     fun rouletteLoadingText(lang: String) = if (lang == "uk") "Роздача білетів..." else "Dealing tickets..."
+
+    // =========================================================================================
+    // v1.4.0: ZTOE site status, outage rows, notifications, exact alarms.
+    // Wording is mirrored in src/services/i18n.ts and listed in spec/NOTIFICATIONS.md and spec/SITE_STATE.md.
+    // =========================================================================================
+    private const val NBSP = " "
+
+    fun siteStateWithTable(lang: String) = if (lang == "uk") "Сайт ZTOE доступний, графік опубліковано" else "ZTOE site online, schedule published"
+    fun siteStateNoTable(lang: String) = if (lang == "uk") "Сайт ZTOE доступний, але графіка немає" else "ZTOE site online, but no schedule table"
+    fun siteStateUnreachable(lang: String) = if (lang == "uk") "Сайт ZTOE недоступний, інтернет є" else "ZTOE site unreachable, your internet works"
+    fun siteStateNoInternet(lang: String) = if (lang == "uk") "Немає інтернету" else "No internet connection"
+    fun siteStateChecking(lang: String) = if (lang == "uk") "Перевірка сайту ZTOE…" else "Checking the ZTOE site…"
+    fun siteStateHintNoTable(lang: String) = if (lang == "uk") "Графік ще не опубліковано або сторінка змінилась." else "The schedule is not published yet or the page has changed."
+    fun siteStateHintUnreachable(lang: String) = if (lang == "uk") "Застосунок повторить спробу сам." else "The app will retry on its own."
+    fun siteStateHintNoInternet(lang: String) = if (lang == "uk") "Перевірте з'єднання з Інтернетом." else "Check your internet connection."
+    fun staleDataSince(lang: String, hhmm: String) = if (lang == "uk") "Показано збережений графік (дані за $hhmm)" else "Showing the saved schedule (data from $hhmm)"
+    fun tomorrowPublished(lang: String) = if (lang == "uk") "Графік на завтра: опубліковано" else "Tomorrow's schedule: published"
+    fun tomorrowNotPublishedShort(lang: String) = if (lang == "uk") "Графік на завтра: ще немає" else "Tomorrow's schedule: not yet"
+    fun tomorrowNotPublished(lang: String) = if (lang == "uk") "Графік на завтра ще не опубліковано на сайті" else "Tomorrow's schedule is not published on the site yet"
+    /** Title of the card that repeats the notice ztoe shows instead of the schedule table. */
+    fun siteNoticeTitle(lang: String) = if (lang == "uk") "Повідомлення з сайту ztoe.com.ua" else "Notice from ztoe.com.ua"
+    fun siteNoticeA11y(lang: String) = if (lang == "uk") "Повідомлення Житомиробленерго" else "Zhytomyroblenergo notice"
+    fun poweronUnavailable(lang: String) = if (lang == "uk") "Аварійні відключення: дані недоступні" else "Emergency outages: data unavailable"
+
+    fun kindPlanned(lang: String) = if (lang == "uk") "Планове" else "Planned"
+    fun kindRepair(lang: String) = if (lang == "uk") "Планові роботи" else "Planned works"
+    fun kindEmergency(lang: String) = if (lang == "uk") "Аварійне" else "Emergency"
+    fun rowFinished(lang: String) = if (lang == "uk") "завершено" else "finished"
+    fun rowOverdue(lang: String) = if (lang == "uk") "очікується відновлення" else "restoration pending"
+    fun rowFromEarlier(lang: String, whenText: String) = if (lang == "uk") "з $whenText" else "from $whenText"
+    fun rowUntilLater(lang: String, whenText: String) = if (lang == "uk") "до $whenText" else "until $whenText"
+    fun rowMayContinue(lang: String) = if (lang == "uk") "можливе продовження" else "may continue"
+    fun tomorrowWord(lang: String) = if (lang == "uk") "завтра" else "tomorrow"
+    fun yesterdayWord(lang: String) = if (lang == "uk") "вчора" else "yesterday"
+
+    /** "2 год", "1 год 30 хв", "45 хв" with non-breaking spaces so a value never splits across lines. */
+    fun durationText(lang: String, totalMinutes: Long): String {
+        val m = totalMinutes.coerceAtLeast(0L)
+        val h = m / 60
+        val mm = m % 60
+        val hUnit = if (lang == "uk") "год" else "h"
+        val mUnit = if (lang == "uk") "хв" else "min"
+        return when {
+            h > 0 && mm > 0 -> "$h$NBSP$hUnit $mm$NBSP$mUnit"
+            h > 0 -> "$h$NBSP$hUnit"
+            else -> "$mm$NBSP$mUnit"
+        }
+    }
+
+    // --- planned alert (one per merged span) ---
+    fun plannedAlertTitle(lang: String) = if (lang == "uk") "Попередження: відключення світла" else "Heads-up: power outage"
+    fun plannedAlertBody(
+        lang: String,
+        queue: String,
+        start: String,
+        end: String,
+        minutesLeft: Long,
+        durationMinutes: Long,
+        mayContinue: Boolean
+    ): String {
+        val dur = durationText(lang, durationMinutes)
+        val uk = lang == "uk"
+        val q = if (queue.isBlank()) "" else if (uk) "Черга $queue: " else "Queue $queue: "
+        val head = when {
+            minutesLeft > 0 && uk -> "${q}відключення о $start (через $minutesLeft${NBSP}хв)"
+            minutesLeft > 0 -> "${q}outage at $start (in $minutesLeft${NBSP}min)"
+            uk -> "${q}відключення розпочинається зараз, о $start"
+            else -> "${q}outage is starting now, at $start"
+        }
+        val tail = when {
+            mayContinue && uk -> ", орієнтовно до $end ($dur), можливе продовження."
+            mayContinue -> ", expected until $end ($dur), may continue."
+            uk -> ", орієнтовно до $end ($dur)."
+            else -> ", expected until $end ($dur)."
+        }
+        return head + tail
+    }
+
+    // --- emergency events ---
+    fun emergencyStartTitle(lang: String) = if (lang == "uk") "Аварійне відключення" else "Emergency outage"
+    fun emergencyUpcomingTitle(lang: String) = if (lang == "uk") "Заплановано аварійне відключення" else "Emergency outage scheduled"
+    fun emergencyStartBody(lang: String, start: String, eta: String?) = when {
+        lang == "uk" && eta != null -> "Початок: $start. Орієнтовне відновлення: $eta."
+        lang == "uk" -> "Початок: $start. Час відновлення невідомий."
+        eta != null -> "Start: $start. Estimated restoration: $eta."
+        else -> "Start: $start. Restoration time unknown."
+    }
+    fun emergencyChangedTitle(lang: String) = if (lang == "uk") "Змінився час відновлення" else "Restoration time changed"
+    fun emergencyChangedBody(lang: String, eta: String) = if (lang == "uk") "Нове орієнтовне відновлення: $eta." else "New estimated restoration: $eta."
+    fun emergencyEndTitle(lang: String) = if (lang == "uk") "Аварійне відключення завершено" else "Emergency outage ended"
+    fun emergencyEndBody(lang: String, start: String) =
+        if (lang == "uk") "Електропостачання за вашою адресою відновлено (початок був: $start)." else "Power supply at your address has been restored (started: $start)."
+    /** END before the estimated restore: PowerOn can not tell "restored early" from "cancelled" (spec/NOTIFICATIONS.md 2.5). */
+    fun emergencyEarlyEndTitle(lang: String) = if (lang == "uk") "Аварійне відключення скасовано" else "Emergency outage cancelled"
+    fun emergencyEarlyEndBody(lang: String, eta: String) =
+        if (lang == "uk") "Відключення зникло зі списку до $eta: світло, імовірно, вже є." else "The outage left the list before $eta: power is probably back."
+
+    // --- exact alarm permission (Android 12+) ---
+    fun exactAlarmTitle(lang: String) = if (lang == "uk") "Дозвольте точні сповіщення" else "Allow exact alerts"
+    fun exactAlarmBody(lang: String) = if (lang == "uk") {
+        "Щоб попередження приходили вчасно, увімкніть для застосунку дозвіл «Будильники й нагадування» в налаштуваннях телефону. Без нього сповіщення можуть запізнюватись."
+    } else {
+        "To get warnings on time, turn on the \"Alarms & reminders\" permission for this app in the phone settings. Without it alerts can arrive late."
+    }
+    fun exactAlarmButton(lang: String) = if (lang == "uk") "Відкрити налаштування" else "Open settings"
+
+    // --- main screen v1.4.0 ---
+    fun mainUtilityName() = "Житомиробленерго (ZTOE)"
+    fun mainLangAuto(lang: String) = if (lang == "uk") "Авто" else "Auto"
+    fun switchOn(lang: String) = if (lang == "uk") "Увімкнено" else "On"
+    fun switchOff(lang: String) = if (lang == "uk") "Вимкнено" else "Off"
+    fun refreshing(lang: String) = if (lang == "uk") "Оновлення…" else "Refreshing…"
+    fun staleChip(lang: String, hhmm: String) = if (lang == "uk") "дані за $hhmm" else "data from $hhmm"
+    fun drumTitle(lang: String) = if (lang == "uk") "Шкала доби" else "Day timeline"
+    fun drumNoOutages(lang: String) = if (lang == "uk") "відключень немає" else "no outages"
+    fun drumPowerOffAt(lang: String, spans: String) = if (lang == "uk") "без світла: $spans" else "no power: $spans"
+    fun drumEmergencyMark(lang: String) = if (lang == "uk") "аварійне" else "emergency"
+    fun tabSelected(lang: String) = if (lang == "uk") "Обрано" else "Selected"
+    // --- end main screen v1.4.0 ---
+
+    // --- widget v1.4.0 ---
+    fun widgetNoOutages(lang: String) = if (lang == "uk") "Відключень немає" else "No outages"
+    fun widgetNoMoreOutages(lang: String) = if (lang == "uk") "Сьогодні більше немає" else "None more today"
+    fun widgetTomorrowPrefix(lang: String) = if (lang == "uk") "Завтра" else "Tomorrow"
+    // --- end widget v1.4.0 ---
+
+    // --- settings v1.4.0 ---
+    // Address picker (full-screen searchable list)
+    fun pickerSearchHint(lang: String) = if (lang == "uk") "Пошук" else "Search"
+    fun pickerNothingFound(lang: String) = if (lang == "uk") "Нічого не знайдено" else "Nothing found"
+    fun pickerLoading(lang: String) = if (lang == "uk") "Завантаження…" else "Loading…"
+    fun pickerLoadError(lang: String) = if (lang == "uk") "Не вдалося завантажити список" else "Could not load the list"
+    fun pickerRetry(lang: String) = if (lang == "uk") "Повторити" else "Retry"
+    fun pickerClearSearch(lang: String) = if (lang == "uk") "Очистити пошук" else "Clear search"
+    fun pickerClose(lang: String) = if (lang == "uk") "Закрити" else "Close"
+    fun pickerSelected(lang: String) = if (lang == "uk") "Обрано" else "Selected"
+    fun pickerChooseFirst(lang: String) = if (lang == "uk") "Спочатку оберіть попереднє поле" else "Choose the previous field first"
+
+    // Address lookup modal ("?")
+    fun addrFindTitle(lang: String) = if (lang == "uk") "Пошук черги за адресою" else "Find Queue by Address"
+    fun addrRemLabel(lang: String) = if (lang == "uk") "РЕМ" else "District (РЕМ)"
+    fun addrCityLabel(lang: String) = if (lang == "uk") "Населений пункт" else "City / Settlement"
+    fun addrStreetLabel(lang: String) = if (lang == "uk") "Вулиця" else "Street"
+    fun addrHouseLabel(lang: String) = if (lang == "uk") "Будинок" else "House Number"
+    fun addrRemPlaceholder(lang: String) = if (lang == "uk") "Оберіть РЕМ" else "Select district"
+    fun addrCityPlaceholder(lang: String) = if (lang == "uk") "Оберіть населений пункт" else "Select settlement"
+    fun addrStreetPlaceholder(lang: String) = if (lang == "uk") "Оберіть вулицю" else "Select street"
+    fun addrHousePlaceholder(lang: String) = if (lang == "uk") "Оберіть будинок" else "Select house"
+    fun addrHousePrefix(lang: String) = if (lang == "uk") "буд." else "bldg."
+    fun addrChecking(lang: String) = if (lang == "uk") "Перевіряємо адресу на сайті…" else "Checking the address on the site…"
+    fun addrCheckFailed(lang: String) = if (lang == "uk") "Не вдалося перевірити адресу на сайті. Показано збережені дані." else "Could not check the address on the site. Showing saved data."
+    fun addrConfirm(lang: String) = if (lang == "uk") "Підтвердити вибір" else "Confirm selection"
+    fun addrSaved(lang: String) = if (lang == "uk") "Адресу збережено" else "Address saved"
+
+    // Settings cards
+    fun noQueueNotDisconnected(lang: String) = if (lang == "uk") "Черга відсутня (не вимикається)" else "No queue (not disconnected)"
+    fun testAlertSent(lang: String) = if (lang == "uk") "Тестове сповіщення надіслано" else "Test alert dispatched"
+    fun settingsReset(lang: String) = if (lang == "uk") "Налаштування скинуто" else "Settings reset"
+    fun langSystem(lang: String) = if (lang == "uk") "Системна" else "System"
+    fun rangeMinutes(lang: String, from: Int, to: Int) = "$from–$to${NBSP}${minShort(lang)}"
+    fun notificationsHint(lang: String) =
+        if (lang == "uk") "Попередження за графіком: за вибраний час до початку відключення" else "Schedule alerts: shortly before a planned outage starts"
+    fun emergencyHint(lang: String) = if (lang == "uk") "Аварійні сповіщення працюють окремо від планових" else "Emergency alerts work separately from planned ones"
+    fun soundVibrationHint(lang: String) = if (lang == "uk") "Звук і вібрація діють для всіх сповіщень" else "Sound and vibration apply to all alerts"
+    fun advanceNoticeHint(lang: String) = if (lang == "uk") "Для планових сповіщень" else "For planned alerts"
+    fun refreshFloorHint(lang: String) =
+        if (lang == "uk") "Android перевіряє не частіше ніж раз на 15 хв" else "Android checks at most once every 15 min"
+    // --- end settings v1.4.0 ---
 }

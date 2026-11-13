@@ -1,442 +1,358 @@
-import React, { useState, useMemo } from 'react';
-import { 
-  Bell, 
-  BellOff, 
-  RefreshCw,
-  Layers
-} from 'lucide-react';
-import { DaySchedule, UserSettings } from '../types';
-import {
-  applyEmergencyOutageToSchedule,
-  calculateOutageCountdown,
-  getBlackoutIntervals,
-  getChartHalfHourBlocks
-} from '../services/ztoeParser';
+import React, { useMemo, useState } from 'react';
+import { Bell, BellOff, RefreshCw, Layers } from 'lucide-react';
+import { BlackoutSlot, UserSettings } from '../types';
 import { translations } from '../services/i18n';
+import type { OutageSnapshot } from '../services/outageRepository';
+import { formatSpan, spans } from '../core/outageEngine';
+import { hourOf, minuteOf, toLocalDate } from '../core/localTime';
+import { DrumBitmap, drumSignature } from './DrumChart';
+import { formatHhmm } from './siteStatus';
+import { staleChip } from '../services/i18n';
 
 interface WidgetSimulatorProps {
-  schedule: DaySchedule;
-  tomorrowSchedule?: DaySchedule | null;
-  now?: Date;
+  snapshot: OutageSnapshot;
   settings: UserSettings;
   lang: 'uk' | 'en';
+  /** Wall clock for the faux home screen clock (the widgets themselves use snapshot.now). */
+  now?: Date;
   onToggleNotifications: () => void;
   onRefresh?: () => void;
   isRefreshing?: boolean;
   onOpenApp: () => void;
+  /** Initial gallery selection. */
+  initialSize?: WidgetSize;
 }
 
+export type WidgetSize = '2x1' | '3x2' | '4x1' | 'all';
+
+/** Everything the three widget layouts show, derived from one OutageSnapshot (port of BlackoutGlanceWidget.buildWidgetModel). */
+export interface WidgetModel {
+  queueHeader: string;
+  isUnclear: boolean;
+  isOffNow: boolean;
+  countdown: string;
+  /** Current outage when off, otherwise the next one: full "HH:mm – HH:mm" (end may be past midnight). */
+  period: string;
+  nextOutage: string;
+  /** The 48 half-hour cells of today (empty when unclear): the same states the main timeline draws. */
+  slots: BlackoutSlot[];
+  nowHour: number;
+  nowMinute: number;
+  /** Small "data from HH:mm" caption when the cached schedule is shown because the site failed. */
+  staleCaption: string | null;
+}
+
+/** "HHг. MMхв." (uk) / "HHhr. MMm." (en); no seconds. */
+export function formatWidgetCountdown(raw: string, lang: 'uk' | 'en'): string {
+  const matches = raw.match(/(\d{1,2}|--)/g) ?? [];
+  if (matches.length >= 2) {
+    const m0 = matches[0] ?? '--';
+    const m1 = matches[1] ?? '--';
+    const hh = m0 === '--' ? '--' : m0.padStart(2, '0');
+    const mm = m1 === '--' ? '--' : m1.padStart(2, '0');
+    return lang === 'en' ? `${hh}hr. ${mm}m.` : `${hh}г. ${mm}хв.`;
+  }
+  return raw;
+}
+
+export function buildWidgetModel(settings: UserSettings, snapshot: OutageSnapshot, lang: 'uk' | 'en'): WidgetModel {
+  const t = translations[lang];
+  const now = snapshot.now;
+  const nowHour = hourOf(now);
+  const nowMinute = minuteOf(now);
+  const queue = settings.queue || '';
+  const noQueueHouse = Boolean(settings.customQueueStatusText && settings.customQueueStatusText.trim() !== '');
+  const queueHeader = noQueueHouse
+    ? lang === 'uk' ? 'Черга відсутня' : 'No queue'
+    : queue.trim() === ''
+    ? lang === 'uk' ? 'Черга —' : 'Queue —'
+    : `${t.queue} ${queue}`;
+  const notConfigured = queue.trim() === '' && !noQueueHouse && !snapshot.hasAddress;
+  if (notConfigured || snapshot.isUnclear) {
+    return {
+      queueHeader,
+      isUnclear: true,
+      isOffNow: false,
+      countdown: formatWidgetCountdown('--:--:--', lang),
+      period: '--:-- - --:--',
+      nextOutage: '--:-- - --:--',
+      slots: [],
+      nowHour,
+      nowMinute,
+      staleCaption: null,
+    };
+  }
+
+  const st = snapshot.status();
+  const period = !st.isOffNow && st.nextSpan === null ? t.widgetNoOutages : st.nextSlotTime;
+  // The next outage after the current moment, from the same merged spans the countdown uses
+  const next = spans(snapshot.outages.filter((o) => !o.stale)).find((sp) => sp.start > now) ?? null;
+  const nextText =
+    next === null
+      ? t.widgetNoMoreOutages
+      : toLocalDate(next.start) === snapshot.today
+      ? formatSpan(next)
+      : `${t.widgetTomorrowPrefix} ${formatSpan(next)}`;
+  const staleCaption = snapshot.isStale && snapshot.site?.lastSuccessMs ? staleChip(lang, formatHhmm(snapshot.site.lastSuccessMs)) : null;
+  return {
+    queueHeader,
+    isUnclear: false,
+    isOffNow: st.isOffNow,
+    countdown: formatWidgetCountdown(st.countdownText, lang),
+    period,
+    nextOutage: nextText,
+    slots: snapshot.slotsFor(snapshot.today),
+    nowHour,
+    nowMinute,
+    staleCaption,
+  };
+}
+
+const RoundButton: React.FC<{
+  onClick: () => void;
+  title: string;
+  active?: boolean;
+  children: React.ReactNode;
+  testId?: string;
+  pressed?: boolean;
+}> = ({ onClick, title, active = false, children, testId, pressed }) => (
+  <button
+    type="button"
+    data-testid={testId}
+    aria-label={title}
+    aria-pressed={pressed}
+    title={title}
+    onClick={(e) => {
+      e.stopPropagation();
+      onClick();
+    }}
+    className={`flex h-10 w-10 shrink-0 cursor-pointer items-center justify-center rounded-full border backdrop-blur-xl transition-colors ${
+      active ? 'border-white bg-white text-[#FF5E3A] shadow-lg shadow-black/20' : 'border-white/20 bg-white/15 text-white hover:bg-white/25'
+    }`}
+  >
+    {children}
+  </button>
+);
+
 export const WidgetSimulator: React.FC<WidgetSimulatorProps> = ({
-  schedule,
-  tomorrowSchedule = null,
-  now = new Date(),
+  snapshot,
   settings,
   lang,
+  now = new Date(),
   onToggleNotifications,
   onRefresh,
   isRefreshing = false,
-  onOpenApp
+  onOpenApp,
+  initialSize = 'all',
 }) => {
   const t = translations[lang];
-  const [widgetSize, setWidgetSize] = useState<'2x1' | '3x2'>('2x1');
-
-  const hasActiveEmergencyOutage = Boolean(settings.activeEmergencyOutage);
-  const hasNoQueueMessage = Boolean(
-    settings.customQueueStatusText &&
-      (!settings.queue || settings.queue.trim() === '') &&
-      !hasActiveEmergencyOutage
-  );
-  const isQueueUnselected =
-    (!settings.queue || settings.queue.trim() === '') &&
-    !hasNoQueueMessage &&
-    !hasActiveEmergencyOutage;
-
-  const effectiveTodaySchedule = useMemo(
-    () => applyEmergencyOutageToSchedule(schedule, settings.activeEmergencyOutage, false) || schedule,
-    [schedule, settings.activeEmergencyOutage]
-  );
-
-  const effectiveTomorrowSchedule = useMemo(
-    () => applyEmergencyOutageToSchedule(tomorrowSchedule, settings.activeEmergencyOutage, true),
-    [tomorrowSchedule, settings.activeEmergencyOutage]
-  );
-
-  const countdown = useMemo(
-    () => calculateOutageCountdown(effectiveTodaySchedule, now, effectiveTomorrowSchedule),
-    [effectiveTodaySchedule, now, effectiveTomorrowSchedule]
-  );
-
-  const blackoutIntervals = useMemo(
-    () => getBlackoutIntervals(effectiveTodaySchedule.slots),
-    [effectiveTodaySchedule.slots]
-  );
-
-  const tomorrowBlackoutIntervals = useMemo(
-    () => (effectiveTomorrowSchedule ? getBlackoutIntervals(effectiveTomorrowSchedule.slots) : []),
-    [effectiveTomorrowSchedule]
-  );
-
-  const chartBlocks = useMemo(() => {
-    if (hasNoQueueMessage) {
-      return Array.from({ length: 24 }, (_, h) => ({
-        hour: h,
-        half1Off: false,
-        half2Off: false,
-      }));
-    }
-    return getChartHalfHourBlocks(effectiveTodaySchedule.slots);
-  }, [effectiveTodaySchedule.slots, hasNoQueueMessage]);
-
-  const currentHour = now.getHours();
-  const currentMinute = now.getMinutes();
-
-  // Strict 24-hour clock (no AM/PM anywhere)
-  const format24Time = (d: Date): string => {
-    const h = d.getHours().toString().padStart(2, '0');
-    const m = d.getMinutes().toString().padStart(2, '0');
-    return `${h}:${m}`;
-  };
-
   const isUk = lang === 'uk';
-  const isUnclear =
-    isQueueUnselected ||
-    (!hasNoQueueMessage &&
-      (effectiveTodaySchedule.slots.length === 0 ||
-        Boolean(effectiveTodaySchedule.isUnclear) ||
-        Boolean(countdown.isUnclear)));
-  const queueLabel = settings.queue
-    ? isUk
-      ? `Черга ${settings.queue}`
-      : `Queue ${settings.queue}`
-    : hasActiveEmergencyOutage
-    ? isUk
-      ? 'Аварійне відключення'
-      : 'Emergency Outage'
-    : hasNoQueueMessage
-    ? isUk
-      ? 'Без черги'
-      : 'No queue'
-    : isUk
-    ? 'Виберіть чергу'
-    : 'Queue not selected';
-  const statusLabel = isUnclear
-    ? t.statusUnclear
-    : hasNoQueueMessage
-    ? (isUk ? 'СВІТЛО Є' : 'POWER ON')
-    : countdown.isCurrentlyBlackout 
-    ? (isUk ? 'СВІТЛА НЕМАЄ' : 'POWER OFF')
-    : (isUk ? 'СВІТЛО Є' : 'POWER ON');
-  const statusColorClass = isUnclear
-    ? 'text-zinc-400'
-    : hasNoQueueMessage
-    ? 'text-emerald-400'
-    : countdown.isCurrentlyBlackout
-    ? 'text-[#FF5E3A]'
-    : 'text-emerald-400';
-  
-  const countdownLabel = !isUnclear && !hasNoQueueMessage && countdown.isCurrentlyBlackout
-    ? (isUk ? 'До увімкнення:' : 'Power on in:')
-    : (isUk ? 'До відключення:' : 'Time to blackout:');
+  const [widgetSize, setWidgetSize] = useState<WidgetSize>(initialSize);
 
-  const formatWidgetCountdown = (raw: string): string => {
-    if (hasNoQueueMessage || !raw || raw === '--:--:--') {
-      return '--:--:--';
-    }
-    const parts = raw.split(':');
-    if (parts.length >= 2) {
-      const hh = parts[0].trim();
-      const mm = parts[1].trim();
-      if (hh === '--' || mm === '--') {
-        return '--:--:--';
-      }
-      return isUk ? `${hh}г. ${mm}хв.` : `${hh}hr. ${mm}m.`;
-    }
-    return raw;
-  };
+  const model = useMemo(() => buildWidgetModel(settings, snapshot, lang), [settings, snapshot, lang]);
+  const signature = useMemo(() => drumSignature(model.slots), [model.slots]);
 
-  const widgetCountdownText = formatWidgetCountdown(countdown.formattedTimeLeft);
-
+  const statusLabel = model.isUnclear ? t.statusUnclear : model.isOffNow ? (isUk ? 'СВІТЛА НЕМАЄ' : 'POWER OFF') : isUk ? 'СВІТЛО Є' : 'POWER ON';
+  const statusColorClass = model.isUnclear ? 'text-[#9CA3AF]' : model.isOffNow ? 'text-[#FF5E3A]' : 'text-[#34D399]';
+  const countdownLabel = !model.isUnclear && model.isOffNow ? (isUk ? 'До увімкнення:' : 'Power on in:') : isUk ? 'До відключення:' : 'Time to blackout:';
   const periodLabel = isUk ? 'Період' : 'Period';
   const nextBlackoutLabel = isUk ? 'Наступне відключення' : 'Next blackout';
-  const currentMinutes = currentHour * 60 + currentMinute;
-  const nextUpcomingInterval =
-    blackoutIntervals.find((iv) => {
-      const [h, m] = iv.start.split(':').map(Number);
-      return h * 60 + m > currentMinutes;
-    }) || tomorrowBlackoutIntervals[0];
-  const nextBlackoutText = isUnclear || hasNoQueueMessage
-    ? '--:-- - --:--'
-    : nextUpcomingInterval
-    ? `${nextUpcomingInterval.start} – ${nextUpcomingInterval.end}`
-    : blackoutIntervals.length === 0
-      ? (isUk ? 'Відключень немає' : 'No blackouts')
-      : (isUk ? 'Сьогодні більше немає' : 'No more today');
+  const nowStr = `${String(model.nowHour).padStart(2, '0')}:${String(model.nowMinute).padStart(2, '0')}`;
+  const stripDescription = model.isUnclear ? t.outagesUnclear : `${model.queueHeader}. ${model.isOffNow ? (isUk ? 'СВІТЛА НЕМАЄ' : 'POWER OFF') : isUk ? 'СВІТЛО Є' : 'POWER ON'}`;
+
+  const refreshTitle = t.refreshBtn;
+  const toggleTitle = settings.notificationsEnabled ? (isUk ? 'Вимкнути сповіщення' : 'Mute alerts') : isUk ? 'Увімкнути сповіщення' : 'Enable alerts';
+
+  const buttons = (
+    <div className="flex items-center gap-2">
+      <RoundButton testId="widget-refresh" onClick={() => onRefresh?.()} title={refreshTitle}>
+        <RefreshCw className={`h-4 w-4 ${isRefreshing ? 'animate-spin' : ''}`} aria-hidden="true" />
+      </RoundButton>
+      <RoundButton testId="widget-toggle-alerts" onClick={onToggleNotifications} title={toggleTitle} active={settings.notificationsEnabled} pressed={settings.notificationsEnabled}>
+        {settings.notificationsEnabled ? <Bell className="h-4 w-4 fill-current" aria-hidden="true" /> : <BellOff className="h-4 w-4 stroke-[2]" aria-hidden="true" />}
+      </RoundButton>
+    </div>
+  );
+
+  const small = (
+    <div key="small" data-testid="widget-small" className="flex flex-col gap-1.5">
+      <div className="text-center text-xs font-semibold text-sky-200/80">{t.widgetSmallName}</div>
+      <div
+        role="button"
+        tabIndex={0}
+        onClick={onOpenApp}
+        onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && onOpenApp()}
+        aria-label={`${model.queueHeader}. ${statusLabel}. ${countdownLabel} ${model.countdown}`}
+        className="w-full max-w-[340px] cursor-pointer rounded-3xl border border-white/25 bg-[#141A29]/80 p-4 text-white shadow-[0_12px_40px_rgba(0,0,0,0.5)] backdrop-blur-2xl transition-colors hover:border-white/40"
+      >
+        <div className="mb-2 flex items-center justify-between gap-2">
+          <span className="text-base font-bold tracking-tight text-white">{model.queueHeader}</span>
+          <span data-testid="widget-small-status" className={`text-xs font-bold ${statusColorClass}`}>
+            {statusLabel}
+          </span>
+        </div>
+        <div className="flex items-center justify-between border-t border-white/15 pt-2.5">
+          <div className="min-w-0 pr-2">
+            <div className="text-xs font-semibold leading-tight text-[#BAE6FD]/80">{countdownLabel}</div>
+            <div data-testid="widget-small-countdown" className="whitespace-nowrap font-mono text-base font-black text-white">
+              {model.countdown}
+            </div>
+          </div>
+          {buttons}
+        </div>
+      </div>
+    </div>
+  );
+
+  const big = (
+    <div key="big" data-testid="widget-big" className="flex flex-col gap-1.5">
+      <div className="text-center text-xs font-semibold text-sky-200/80">{t.widgetBigName}</div>
+      <div
+        role="button"
+        tabIndex={0}
+        onClick={onOpenApp}
+        onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && onOpenApp()}
+        aria-label={`${model.queueHeader}. ${statusLabel}`}
+        className="flex w-full max-w-[360px] cursor-pointer flex-col gap-3 rounded-3xl border border-white/25 bg-[#141A29]/80 p-5 text-white shadow-[0_12px_40px_rgba(0,0,0,0.5)] backdrop-blur-2xl transition-colors hover:border-white/40"
+      >
+        <div className="flex items-center justify-between gap-2">
+          <div className="min-w-0">
+            <span className="text-lg font-bold tracking-tight text-white">{model.queueHeader}</span>
+            <div className="flex items-center gap-1.5">
+              <span data-testid="widget-big-status" className={`shrink-0 whitespace-nowrap text-xs font-bold ${statusColorClass}`}>
+                {statusLabel}
+              </span>
+              {model.staleCaption && (
+                <span data-testid="widget-stale-caption" className="truncate text-xs font-medium text-[#FFB020]">
+                  {model.staleCaption}
+                </span>
+              )}
+            </div>
+          </div>
+          {buttons}
+        </div>
+
+        <div className="flex items-center justify-between rounded-2xl border border-white/10 bg-black/30 p-3 backdrop-blur-md">
+          <div>
+            <div className="text-xs font-semibold text-[#BAE6FD]/80">{countdownLabel}</div>
+            <div data-testid="widget-big-countdown" className="whitespace-nowrap font-mono text-xl font-black text-white">
+              {model.countdown}
+            </div>
+          </div>
+          <div className="text-right">
+            <div className="text-xs text-[#BAE6FD]/80">{periodLabel}</div>
+            <div className="font-mono text-sm font-bold text-white">{model.period}</div>
+          </div>
+        </div>
+
+        {/* 24-hour drum chart: 720 x 132 bitmap drawn 52 px high like Glance FillBounds (the strip widget uses the same) */}
+        <DrumBitmap
+          testId="widget-big-drum"
+          slots={model.slots}
+          currentHour={model.nowHour}
+          currentMinute={model.nowMinute}
+          lang={lang}
+          height={132}
+          fill
+          className="h-[52px]"
+          label={model.isUnclear ? t.outagesUnclear : isUk ? '24-годинний графік відключень' : '24-hour outage chart'}
+        />
+
+        <div className="flex items-center justify-between rounded-lg bg-black/25 px-2 py-1 font-mono text-sm">
+          <span className="font-bold text-white">{model.nextOutage}</span>
+          <span className="font-sans text-xs font-bold text-[#FF5E3A]">{nextBlackoutLabel}</span>
+        </div>
+      </div>
+    </div>
+  );
+
+  // Third widget (4x1): only the drum chart with the black needle. No text, buttons or switches; a tap opens the app.
+  const strip = (
+    <div key="strip" data-testid="widget-strip" className="flex flex-col gap-1.5">
+      <div className="text-center text-xs font-semibold text-sky-200/80">{t.widgetStripName}</div>
+      <div
+        role="button"
+        tabIndex={0}
+        onClick={onOpenApp}
+        onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && onOpenApp()}
+        aria-label={stripDescription}
+        className="flex w-full max-w-[360px] cursor-pointer items-center rounded-[20px] border border-white/25 bg-[#141A29]/80 p-1.5 shadow-[0_12px_40px_rgba(0,0,0,0.5)] backdrop-blur-2xl transition-colors hover:border-white/40"
+      >
+        {/* Same drum as the big widget: 720 x 132 bitmap drawn 52 px high */}
+        <DrumBitmap
+          testId="widget-strip-drum"
+          slots={model.slots}
+          currentHour={model.nowHour}
+          currentMinute={model.nowMinute}
+          lang={lang}
+          height={132}
+          fill
+          className="h-[52px]"
+          label={stripDescription}
+        />
+      </div>
+    </div>
+  );
+
+  const sizes: { id: WidgetSize; label: string }[] = [
+    { id: '2x1', label: t.widgetSize2x1 },
+    { id: '3x2', label: t.widgetSize3x2 },
+    { id: '4x1', label: t.widgetSize4x1 },
+    { id: 'all', label: t.widgetSizeAll },
+  ];
 
   return (
-    <div className="flex flex-col gap-4 max-w-lg mx-auto select-none">
-      
-      {/* Header & Size Switcher */}
-      <div className="bg-[#141A29]/75 backdrop-blur-2xl rounded-2xl p-4 border border-white/15 shadow-xl flex flex-col gap-3">
-        <div className="flex items-center justify-between">
+    <div className="mx-auto flex max-w-lg select-none flex-col gap-4" data-widget-signature={signature}>
+      {/* Header & size switcher */}
+      <div className="flex flex-col gap-3 rounded-2xl border border-white/15 bg-[#141A29]/75 p-4 shadow-xl backdrop-blur-2xl">
+        <div className="flex items-center justify-between gap-2">
           <div className="flex items-center gap-2">
-            <Layers className="w-4 h-4 text-[#FF5E3A]" />
-            <h2 className="text-xs font-bold text-white uppercase tracking-wider">
-              {t.widgetPreviewTitle}
-            </h2>
+            <Layers className="h-4 w-4 text-[#FF5E3A]" aria-hidden="true" />
+            <h2 className="text-xs font-bold uppercase tracking-wider text-white">{t.widgetPreviewTitle}</h2>
           </div>
-          <span className="text-[10px] px-2.5 py-0.5 rounded-full bg-white/10 text-sky-200 font-mono border border-white/10">
+          <span className="rounded-full border border-white/10 bg-white/10 px-2.5 py-0.5 font-mono text-xs text-sky-200">
             {isUk ? 'Віджет Android Glance' : 'Android Glance Widget'}
           </span>
         </div>
 
-        {/* Size Selector */}
-        <div className="flex items-center gap-2 p-1 bg-black/30 rounded-xl border border-white/10">
-          <button
-            onClick={() => setWidgetSize('2x1')}
-            className={`flex-1 py-2 px-3 rounded-lg text-xs font-bold transition-all ${
-              widgetSize === '2x1'
-                ? 'bg-white text-black shadow-md'
-                : 'text-sky-200/60 hover:text-white'
-            }`}
-          >
-            {t.widgetSize2x1}
-          </button>
-          <button
-            onClick={() => setWidgetSize('3x2')}
-            className={`flex-1 py-2 px-3 rounded-lg text-xs font-bold transition-all ${
-              widgetSize === '3x2'
-                ? 'bg-white text-black shadow-md'
-                : 'text-sky-200/60 hover:text-white'
-            }`}
-          >
-            {t.widgetSize3x2}
-          </button>
+        <div role="radiogroup" aria-label={t.widgetPreviewTitle} className="grid grid-cols-2 gap-1 rounded-xl border border-white/10 bg-black/30 p-1 sm:grid-cols-4">
+          {sizes.map((s) => (
+            <button
+              key={s.id}
+              type="button"
+              role="radio"
+              aria-checked={widgetSize === s.id}
+              data-testid={`widget-size-${s.id}`}
+              onClick={() => setWidgetSize(s.id)}
+              className={`min-h-11 cursor-pointer rounded-lg px-2 py-2 text-xs font-bold leading-tight transition-colors ${
+                widgetSize === s.id ? 'bg-white text-black shadow-md' : 'text-sky-200/70 hover:text-white'
+              }`}
+            >
+              {s.label}
+            </button>
+          ))}
         </div>
       </div>
 
-      {/* Simulated Android Wallpaper Canvas with Windows 11 Flowing Blue Silk Effect */}
-      <div className="relative rounded-3xl p-6 overflow-hidden bg-[#0A0D14] border border-white/15 shadow-2xl flex flex-col items-center justify-center min-h-[400px]">
-        
-        {/* Windows 11 Style Azure Silk Ribbon Gradients */}
-        <div className="absolute top-1/4 -left-16 w-64 h-64 rounded-full bg-blue-600/35 blur-3xl pointer-events-none" />
-        <div className="absolute -bottom-10 right-0 w-80 h-80 rounded-full bg-sky-500/30 blur-3xl pointer-events-none" />
-        <div className="absolute top-1/2 left-1/4 w-48 h-48 rounded-full bg-cyan-400/25 blur-3xl pointer-events-none" />
+      {/* Simulated Android wallpaper with the widgets */}
+      <div className="relative flex min-h-[400px] flex-col items-center justify-center gap-5 overflow-hidden rounded-3xl border border-white/15 bg-[#0A0D14] p-6 shadow-2xl">
+        <div className="pointer-events-none absolute top-1/4 -left-16 h-64 w-64 rounded-full bg-blue-600/35 blur-3xl" />
+        <div className="pointer-events-none absolute right-0 -bottom-10 h-80 w-80 rounded-full bg-sky-500/30 blur-3xl" />
+        <div className="pointer-events-none absolute top-1/2 left-1/4 h-48 w-48 rounded-full bg-cyan-400/25 blur-3xl" />
 
-        {/* Ambient Clock in strict 24-hour format */}
-        <div className="text-center mb-6 pointer-events-none z-10">
-          <div className="text-4xl font-light text-white tracking-widest font-sans drop-shadow-lg">
-            {format24Time(now)}
-          </div>
-          <div className="text-xs text-sky-200/80 drop-shadow-sm font-medium mt-0.5">
+        {/* Ambient clock in strict 24-hour format */}
+        <div className="pointer-events-none z-10 text-center">
+          <div className="font-sans text-4xl font-light tracking-widest text-white drop-shadow-lg">{nowStr}</div>
+          <div className="mt-0.5 text-xs font-medium text-sky-200/80">
             {now.toLocaleDateString(isUk ? 'uk-UA' : 'en-US', { weekday: 'short', month: 'short', day: 'numeric' })}
           </div>
         </div>
 
-        {/* ----------------- 2x1 SMALL WIDGET ----------------- */}
-        {widgetSize === '2x1' ? (
-          <div
-            onClick={onOpenApp}
-            className="w-full max-w-[340px] z-10 bg-[#141A29]/80 backdrop-blur-2xl text-white rounded-3xl p-4.5 border border-white/25 shadow-[0_12px_40px_rgba(0,0,0,0.5)] cursor-pointer hover:border-white/40 transition-all group"
-          >
-            {/* Top row: Localized Queue + Status */}
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-base font-bold text-white tracking-tight drop-shadow-sm">
-                {queueLabel}
-              </span>
-
-              <span className={`text-xs font-bold drop-shadow-sm ${statusColorClass}`}>
-                {statusLabel}
-              </span>
-            </div>
-
-            {/* Bottom row: Countdown + Round Refresh Button + Round Notification Toggle */}
-            <div className="flex items-center justify-between pt-2.5 border-t border-white/15">
-              <div className="min-w-0 pr-2">
-                <div className="text-[10px] uppercase tracking-wider text-sky-200/70 font-semibold leading-tight">
-                  {countdownLabel}
-                </div>
-                <div className="text-base font-black font-mono text-white drop-shadow-md whitespace-nowrap">
-                  {widgetCountdownText}
-                </div>
-              </div>
-
-              <div className="flex items-center gap-2">
-                {/* Round Refresh Button */}
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    if (onRefresh) onRefresh();
-                  }}
-                  className="w-10 h-10 rounded-full flex items-center justify-center transition-all backdrop-blur-xl bg-white/15 text-white hover:bg-white/25 border border-white/20 cursor-pointer"
-                  title={isUk ? 'Оновити дані' : 'Refresh data'}
-                >
-                  <RefreshCw className={`w-4 h-4 ${isRefreshing ? 'animate-spin' : ''}`} />
-                </button>
-
-                {/* Round Notification Toggle Button */}
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onToggleNotifications();
-                  }}
-                  className={`w-10 h-10 rounded-full flex items-center justify-center transition-all backdrop-blur-xl border cursor-pointer ${
-                    settings.notificationsEnabled
-                      ? 'bg-white text-[#FF5E3A] shadow-lg shadow-black/20 border-white'
-                      : 'bg-white/15 text-white/80 hover:text-white border-white/20 hover:bg-white/25'
-                  }`}
-                  title={settings.notificationsEnabled ? (isUk ? 'Вимкнути сповіщення' : 'Mute alerts') : (isUk ? 'Увімкнути сповіщення' : 'Enable alerts')}
-                >
-                  {settings.notificationsEnabled ? (
-                    <Bell className="w-4 h-4 fill-current" />
-                  ) : (
-                    <BellOff className="w-4 h-4 stroke-[2]" />
-                  )}
-                </button>
-              </div>
-            </div>
-          </div>
-        ) : (
-          /* ----------------- 3x2 BIG WIDGET ----------------- */
-          <div
-            onClick={onOpenApp}
-            className="w-full max-w-[360px] z-10 bg-[#141A29]/80 backdrop-blur-2xl text-white rounded-3xl p-5 border border-white/25 shadow-[0_12px_40px_rgba(0,0,0,0.5)] cursor-pointer hover:border-white/40 transition-all flex flex-col gap-3.5 group"
-          >
-            {/* Header: Localized Queue + Round Refresh Button + Round Notification Toggle */}
-            <div className="flex items-center justify-between">
-              <div>
-                <span className="text-lg font-bold text-white tracking-tight drop-shadow-sm">
-                  {queueLabel}
-                </span>
-                <div className={`text-xs font-bold ${statusColorClass}`}>
-                  {statusLabel}
-                </div>
-              </div>
-
-              <div className="flex items-center gap-2">
-                {/* Round Refresh Button */}
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    if (onRefresh) onRefresh();
-                  }}
-                  className="w-10 h-10 rounded-full flex items-center justify-center transition-all backdrop-blur-xl bg-white/15 text-white hover:bg-white/25 border border-white/20 cursor-pointer"
-                  title={isUk ? 'Оновити дані' : 'Refresh data'}
-                >
-                  <RefreshCw className={`w-4 h-4 ${isRefreshing ? 'animate-spin' : ''}`} />
-                </button>
-
-                {/* Round Notification Toggle */}
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onToggleNotifications();
-                  }}
-                  className={`w-10 h-10 rounded-full flex items-center justify-center transition-all backdrop-blur-xl border cursor-pointer ${
-                    settings.notificationsEnabled
-                      ? 'bg-white text-[#FF5E3A] shadow-lg shadow-black/20 border-white'
-                      : 'bg-white/15 text-white/80 hover:text-white border-white/20 hover:bg-white/25'
-                  }`}
-                  title={settings.notificationsEnabled ? (isUk ? 'Вимкнути сповіщення' : 'Mute alerts') : (isUk ? 'Увімкнути сповіщення' : 'Enable alerts')}
-                >
-                  {settings.notificationsEnabled ? (
-                    <Bell className="w-4 h-4 fill-current" />
-                  ) : (
-                    <BellOff className="w-4 h-4 stroke-[2]" />
-                  )}
-                </button>
-              </div>
-            </div>
-
-            {/* Countdown Banner in Frosted Glass */}
-            <div className="p-3.5 rounded-2xl bg-black/30 backdrop-blur-md border border-white/10 flex items-center justify-between">
-              <div>
-                <div className="text-[10px] uppercase text-sky-200/70 font-semibold">
-                  {countdownLabel}
-                </div>
-                <div className="text-xl font-black font-mono text-white drop-shadow-md whitespace-nowrap">
-                  {widgetCountdownText}
-                </div>
-              </div>
-              <div className="text-right">
-                <div className="text-[10px] text-sky-200/70">{periodLabel}</div>
-                <div className="text-xs font-mono font-bold text-white">
-                  {isUnclear || hasNoQueueMessage ? '--:-- - --:--' : countdown.slotDescription}
-                </div>
-              </div>
-            </div>
-
-            {/* 24-Hour Timeline Bar matching MainView analog electricity meter style */}
-            <div className="bg-gradient-to-b from-[#DFDDD0] via-[#D4D1C1] to-[#C6C2B0] rounded-xl px-2.5 pt-3 pb-2.5 border-2 border-[#7A7768] shadow-[inset_0_2px_5px_rgba(0,0,0,0.3)]">
-              <div className="bg-[#4E514E] p-1 rounded-md border border-[#6E716B] shadow-[inset_0_2px_4px_rgba(0,0,0,0.85)]">
-                {isUnclear ? (
-                  <div
-                    data-testid="widget-drum-chart-unclear"
-                    className="relative flex w-full h-4 items-center justify-center bg-gradient-to-b from-[#7E8287] via-[#94989E] to-[#6E7277] rounded-[2px] overflow-visible"
-                  >
-                    <span className="text-[10px] font-extrabold tracking-wide text-white drop-shadow-[0_1px_2px_rgba(0,0,0,0.8)] z-10 leading-none">
-                      {t.outagesUnclear}
-                    </span>
-                    <div
-                      className="absolute -top-[9px] -bottom-[9px] w-[2.5px] bg-[#0B0B0A] rounded-full shadow-[0_0_2px_rgba(255,255,255,0.9)] pointer-events-none z-20 -translate-x-1/2"
-                      style={{ left: `${((currentHour * 60 + currentMinute) / 1440) * 100}%` }}
-                    />
-                  </div>
-                ) : (
-                  <div className="flex w-full items-center justify-between gap-[1.5px] bg-[#C8C6BC] rounded-[2px] overflow-visible">
-                    {chartBlocks.map(({ hour: h, half1Off, half2Off }) => {
-                      const isCurrentH = h === currentHour;
-                      return (
-                        <div key={`widget_hour_${h}`} className="relative flex-1 flex items-center gap-0">
-                          <div
-                            className={`flex-1 h-4 ${
-                              half1Off
-                                ? 'bg-gradient-to-b from-[#9E1E18] via-[#D62E26] to-[#8C1914]'
-                                : 'bg-gradient-to-b from-[#D8D6CC] via-[#FCFBF7] to-[#CCC9BE]'
-                            }`}
-                          />
-                          <div
-                            className={`flex-1 h-4 ${
-                              half2Off
-                                ? 'bg-gradient-to-b from-[#9E1E18] via-[#D62E26] to-[#8C1914]'
-                                : 'bg-gradient-to-b from-[#D8D6CC] via-[#FCFBF7] to-[#CCC9BE]'
-                            }`}
-                          />
-                          {isCurrentH && (
-                            <div
-                              className="absolute -top-[9px] -bottom-[9px] w-[2.5px] bg-[#0B0B0A] rounded-full shadow-[0_0_2px_rgba(255,255,255,0.9)] pointer-events-none z-20 -translate-x-1/2"
-                              style={{ left: `${(currentMinute / 60) * 100}%` }}
-                            />
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-
-              {/* 24-Hour Stamped Markers */}
-              <div className="flex justify-between text-[9px] font-mono text-[#1C1B18] font-bold mt-2 px-0.5">
-                <span>00</span>
-                <span>06</span>
-                <span>12</span>
-                <span>18</span>
-                <span>24</span>
-              </div>
-            </div>
-
-            {/* Upcoming Outage Interval ("Наступне відключення") */}
-            <div className="pt-2 border-t border-white/10 flex flex-col gap-1.5">
-              <div className="flex items-center justify-between text-xs py-1.5 px-3 rounded-xl bg-black/30 backdrop-blur-md border border-white/10 font-mono">
-                <span className="font-bold text-white">{nextBlackoutText}</span>
-                <span className="text-[11px] text-[#FF5E3A] font-bold font-sans">{nextBlackoutLabel}</span>
-              </div>
-            </div>
-          </div>
-        )}
+        <div className="z-10 flex w-full flex-col items-center gap-5">
+          {(widgetSize === '2x1' || widgetSize === 'all') && small}
+          {(widgetSize === '3x2' || widgetSize === 'all') && big}
+          {(widgetSize === '4x1' || widgetSize === 'all') && strip}
+        </div>
       </div>
     </div>
   );

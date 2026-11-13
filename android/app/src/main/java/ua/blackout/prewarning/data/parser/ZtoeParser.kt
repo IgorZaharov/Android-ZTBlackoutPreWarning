@@ -15,6 +15,12 @@ import java.net.ConnectException
 import java.time.LocalDate
 import java.time.format.DateTimeFormatter
 import ua.blackout.prewarning.data.KYIV_ZONE
+import ua.blackout.prewarning.core.FetchFailure
+import ua.blackout.prewarning.core.SiteNotice
+import ua.blackout.prewarning.core.SiteState
+import ua.blackout.prewarning.core.SiteStateResolver
+import ua.blackout.prewarning.data.net.NetworkProbe
+import javax.net.ssl.SSLException
 
 enum class FetchStatus {
     SUCCESS,
@@ -26,7 +32,16 @@ data class ScheduleFetchResult(
     val todaySlots: List<BlackoutSlot>,
     val tomorrowSlots: List<BlackoutSlot>?,
     val hasTomorrowSchedule: Boolean,
-    val status: FetchStatus = FetchStatus.SUCCESS
+    val status: FetchStatus = FetchStatus.SUCCESS,
+    /** What the user is told about the site; derived from [status] unless set explicitly. */
+    val siteState: SiteState = when (status) {
+        FetchStatus.SUCCESS -> SiteState.AVAILABLE_WITH_TABLE
+        FetchStatus.NO_QUEUES_FOUND -> SiteState.AVAILABLE_NO_TABLE
+        FetchStatus.NO_INTERNET -> SiteState.SITE_UNREACHABLE
+    },
+    val failure: FetchFailure = FetchFailure.NONE,
+    /** Text of the "УВАГА! ВАЖЛИВА ІНФОРМАЦІЯ!" notice when the page has no schedule table (core/SiteNotice). */
+    val notice: String? = null
 )
 
 // =========================================================================================
@@ -123,14 +138,29 @@ object ZtoeParser {
             null
         }
 
+        // A failed refresh never erases a schedule that is still valid for today: alarms and screens keep
+        // using it and the site state tells the user why it was not refreshed (spec/SITE_STATE.md).
+        fun failed(failure: FetchFailure, status: FetchStatus): ScheduleFetchResult = ScheduleFetchResult(
+            todaySlots = emptyList(),
+            tomorrowSlots = null,
+            hasTomorrowSchedule = false,
+            status = status,
+            siteState = SiteStateResolver.resolve(failure, hasTodayTable = false, networkValidated = NetworkProbe.isValidated(context)),
+            failure = failure
+        )
+
+        fun noTable(doc: Document? = null): ScheduleFetchResult = ScheduleFetchResult(
+            todaySlots = emptyList(),
+            tomorrowSlots = null,
+            hasTomorrowSchedule = false,
+            status = FetchStatus.NO_QUEUES_FOUND,
+            siteState = SiteState.AVAILABLE_NO_TABLE,
+            notice = doc?.let { d -> runCatching { SiteNotice.extract(d.outerHtml()) }.getOrNull() }
+        )
+
         if (!isValidUrl(url, context)) {
-            repo?.clearScheduleCache()
-            return ScheduleFetchResult(
-                todaySlots = emptyList(),
-                tomorrowSlots = null,
-                hasTomorrowSchedule = false,
-                status = FetchStatus.NO_QUEUES_FOUND
-            )
+            repo?.clearScheduleCache() // a schedule from a non-whitelisted source is meaningless
+            return noTable()
         }
 
         val trimmedQueue = queue.trim()
@@ -171,15 +201,7 @@ object ZtoeParser {
                 )
             }
 
-            val effectiveDoc = doc ?: run {
-                repo?.clearScheduleCache()
-                return ScheduleFetchResult(
-                    todaySlots = emptyList(),
-                    tomorrowSlots = null,
-                    hasTomorrowSchedule = false,
-                    status = FetchStatus.NO_QUEUES_FOUND
-                )
-            }
+            val effectiveDoc = doc ?: return noTable()
 
             // Single-pass DOM table lookup for all 12 queues + single batched asynchronous SharedPreferences write
             val allQueueResults = parseAllQueuesSinglePass(effectiveDoc, today)
@@ -192,60 +214,37 @@ object ZtoeParser {
                 } catch (_: Exception) {}
             }
 
+            val hasTable = allQueueResults.isNotEmpty()
+            if (!hasTable) return noTable(effectiveDoc)
+
             if (trimmedQueue.isEmpty()) {
                 return ScheduleFetchResult(
                     todaySlots = emptyList(),
                     tomorrowSlots = null,
                     hasTomorrowSchedule = false,
-                    status = if (allQueueResults.isNotEmpty()) FetchStatus.SUCCESS else FetchStatus.NO_QUEUES_FOUND
+                    status = FetchStatus.SUCCESS
                 )
             }
 
             val finalRes = allQueueResults[trimmedQueue] ?: parseDocumentFull(effectiveDoc, trimmedQueue, today)
-            if (finalRes.status != FetchStatus.SUCCESS) {
-                repo?.clearScheduleCache()
-            }
-            finalRes
+            // The page and its table are there even when this queue's row is missing
+            finalRes.copy(siteState = SiteState.AVAILABLE_WITH_TABLE)
         } catch (e: UnknownHostException) {
-            repo?.clearScheduleCache()
-            ScheduleFetchResult(
-                todaySlots = emptyList(),
-                tomorrowSlots = null,
-                hasTomorrowSchedule = false,
-                status = FetchStatus.NO_INTERNET
-            )
+            failed(FetchFailure.DNS, FetchStatus.NO_INTERNET)
         } catch (e: ConnectException) {
-            repo?.clearScheduleCache()
-            ScheduleFetchResult(
-                todaySlots = emptyList(),
-                tomorrowSlots = null,
-                hasTomorrowSchedule = false,
-                status = FetchStatus.NO_INTERNET
-            )
+            failed(FetchFailure.CONNECT, FetchStatus.NO_INTERNET)
         } catch (e: SocketTimeoutException) {
-            repo?.clearScheduleCache()
-            ScheduleFetchResult(
-                todaySlots = emptyList(),
-                tomorrowSlots = null,
-                hasTomorrowSchedule = false,
-                status = FetchStatus.NO_INTERNET
-            )
+            failed(FetchFailure.TIMEOUT, FetchStatus.NO_INTERNET)
+        } catch (e: SSLException) {
+            failed(FetchFailure.TLS, FetchStatus.NO_INTERNET)
         } catch (e: IOException) {
-            repo?.clearScheduleCache()
-            ScheduleFetchResult(
-                todaySlots = emptyList(),
-                tomorrowSlots = null,
-                hasTomorrowSchedule = false,
-                status = FetchStatus.NO_INTERNET
+            failed(
+                if (e.message?.startsWith("HTTP") == true) FetchFailure.HTTP_ERROR else FetchFailure.OTHER,
+                FetchStatus.NO_INTERNET
             )
         } catch (e: Exception) {
-            repo?.clearScheduleCache()
-            ScheduleFetchResult(
-                todaySlots = emptyList(),
-                tomorrowSlots = null,
-                hasTomorrowSchedule = false,
-                status = FetchStatus.NO_QUEUES_FOUND
-            )
+            // The page arrived but could not be read as a schedule
+            noTable()
         }
     }
 

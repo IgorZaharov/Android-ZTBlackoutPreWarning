@@ -15,23 +15,34 @@ The repo holds **two implementations that must stay in logic/UI/text parity**:
 Web / Node (root):
 ```bash
 npm install
-npm test          # tsx tests/unit.test.ts — invariants + changelog enforcement
+npm test          # tsx tests/unit.test.ts (invariants + changelog enforcement) and tests/spec-vectors.test.ts (golden vectors + src/core purity gate)
 npm run lint      # tsc --noEmit
 npm run dev       # Vite on :3000 (/proxy-ztoe proxies to ztoe.com.ua)
 npm run build
 ```
 
-Android (JDK 17, SDK 35, Gradle 8.11.1; run from `android/`):
+Android (JDK 17, compile/target SDK 36, Gradle 8.11.1; run from `android/`):
 ```bash
 gradle testDebugUnitTest
 gradle testDebugUnitTest --tests "ua.blackout.prewarning.ZtoeParserTest"
 gradle assembleDebug
 ```
-CI (`.github/workflows/build-apk.yml`) runs `npm test`, then Gradle tests, debug/release APK and AAB; pushing a `v*` tag publishes a GitHub Release and rewrites the version badge in `README.md`.
+CI (`.github/workflows/build-apk.yml`) runs `npm test`, then Gradle tests, debug/release APK and AAB. The "Publish GitHub Release" step runs on a `v*` tag, **and on every push to `main`/`master`** (and `workflow_dispatch`): never push to `main` casually, work on a branch and open a PR (PR runs build and test but skip the publish step). Release signing falls back to the debug key when the upload-keystore secrets are missing.
 
 ## Architecture (Android)
 
-Data flow: `ZtoeParser` (validates URL against `valid-urls.json`, fetches with ETag/gzip, parses slots) → `ScheduleRepository` (persists today/tomorrow slots in SharedPreferences, merges contiguous POWER_OFF slots into `DetailedInterval`s, computes countdown incl. cross-midnight and tomorrow's first outage) → consumers: Compose UI (`ui/screens`, 1s lifecycle ticker), `AlarmScheduler`/`AlarmReceiver` (RTC_WAKEUP, one alert per contiguous block, deduped by `AlertRegistry`), and `BlackoutGlanceWidget`. `ScheduleSyncWorker` (WorkManager) refreshes periodically; `BootCompletedReceiver` reschedules after reboot. UI and widgets observe SharedPreferences listeners so widget toggles update the open app.
+Since 1.4.0 there is one source of truth for "what is off and when": the pure package `core/` (`java.time` only, no Android imports; mirrored in `src/core/*.ts`):
+
+- `OutageEngine` works on a two-day window (yesterday's tail, today, tomorrow) of absolute Kyiv `LocalDateTime`s. Outage kinds PLANNED (ztoe table), REPAIR (PowerOn planned works, folded into Planned) and EMERGENCY (PowerOn). Overlapping or touching outages merge into spans, so a block over midnight is ONE span with its full duration and ONE alert. Finished spans never alert; an emergency still listed after its estimated end stays active for a 60 minute grace, then goes stale.
+- `EmergencyLedger` keeps a per-address record of seen emergencies (PowerOn has no history); a failed fetch (`EmergencyFetch.Unavailable`) is never "no outage". Events START / ETA_CHANGED / END feed notifications.
+- `StreetKey` / `HouseKey` merge duplicate streets and compare houses (`spec/ADDRESS_KEY.md`).
+- `SiteState` (AVAILABLE_WITH_TABLE / AVAILABLE_NO_TABLE / SITE_UNREACHABLE / NO_INTERNET) is shown on the main screen; a failure never clears the cached schedule.
+
+Data flow: `ZtoeParser` (validates URL against `valid-urls.json`, fetches with ETag/gzip, parses slots) and `PowerOnClient` (`data/poweron`, per-address JSON queries) → `OutageRepository` (`refresh()` does the network, `snapshot()` is local only; state in `OutageStateStore` and `ScheduleRepository`) → consumers: Compose UI (`ui/screens`), `AlarmScheduler`/`AlarmReceiver` (one alert per span from `OutageEngine.planAlerts`, today + tomorrow, exact alarms through `ExactAlarmGate`, request codes from `AlarmCodes`), and `BlackoutGlanceWidget`. `ScheduleSyncWorker` (WorkManager) refreshes periodically; `BootCompletedReceiver` reschedules after reboot.
+
+## Spec and parity
+
+`spec/` is the contract between Android, the web simulator and the iOS port. `spec/vectors/*.json` are golden cases run by `SpecVectorsTest.kt` and `tests/spec-vectors.test.ts` (iOS XCTest will read the same files). Change behaviour by editing the spec and a vector first, then both implementations. The iOS app lives in the separate repo `IgorZaharov/iOS-ZTPreBlackoutNotification`; `docs/ios/IOS_HANDOVER_v1.4.0.md` has the file mapping and port plan. PowerOn quirks (timestamps are Kyiv wall-clock labelled `+00:00`; only dotted filters like `street.id[]` work; `pagination=false`) are in `spec/POWERON_API.md`.
 
 ## Invariants enforced by tests (do not change unless the owner asks)
 
@@ -47,9 +58,9 @@ Asserted in `tests/unit.test.ts` and `android/app/src/test/.../ZtoeParserTest.kt
 ## Synced / generated files
 
 - `valid-urls.json` and `donations.json` at root are canonical; copies live in `public/` and `android/app/src/main/assets/`. Keep all three in sync.
-- `src/data/androidProjectFiles.ts` embeds Android sources for the web code explorer. `scripts/generate_android_project.cjs` **overwrites `android/` from it** — don't run it unless that file is up to date.
+- `src/data/androidProjectFiles.ts` embeds Android sources for the web code explorer. `scripts/generate_android_project.cjs` refreshes that file from `android/` but **re-creates any file that is missing from `android/` out of its stale TS copy** — delete the entries of removed Android files from the TS data first, and never run it from a state where `android/` is incomplete.
 - After changing `android/`, rebuild the downloadable archive: `python3 -m zipfile -c public/Android-ZTBlackoutPreWarning.zip android`.
-- `android/app/keystore/debug.keystore` is intentionally committed (stable signature for in-place upgrades); `versionCode = (GITHUB_RUN_NUMBER ?: 5) + 100`.
+- `android/app/keystore/debug.keystore` is intentionally committed (stable signature for in-place upgrades); `versionCode = (GITHUB_RUN_NUMBER ?: 300) + 300`. Do not change `.github/`, the keystore or the signing/`versionCode` blocks without the owner.
 
 ## Releasing vX.Y.Z
 

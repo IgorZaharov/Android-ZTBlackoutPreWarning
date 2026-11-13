@@ -1,5 +1,29 @@
 # Changelog
 
+## [1.4.0] - 2026-11-13
+
+### Added
+- **One outage engine for planned and emergency outages** (`core/OutageEngine.kt`, `core/EmergencyLedger.kt`, `src/core/*.ts`): planned outages come from the ztoe.com.ua table, emergency outages and repair works from the PowerOn API (`data/poweron/PowerOnClient.kt`, `poweronClient.ts`). The engine works on a two-day window, so an outage over midnight (for example 23:00 → 01:00) is one block with its full duration and one alert. Repair works are folded into Planned. A finished outage never alerts; an emergency still listed after its estimated end stays active for 60 minutes, then goes stale.
+- **Emergency outages on the drum and in the list** (`TimelineBar.kt`, `DrumChart.tsx`, `MainScreen.kt`, `MainView.tsx`, `OutageRowFormat.kt`, `outageRowFormat.ts`): amber with 45° stripes, crimson with amber stripes where they overlap a planned outage. Rows show "Аварійне" / "Планові роботи" tags, finished rows are dimmed with "завершено", and midnight rows show the date on the far side.
+- **ZTOE site status** (`SiteStatusIndicator.kt`, `siteStatus.ts`): four states (site works with a table, site works without a table, site unreachable, no internet) as chips in the "Last updated" card and a banner above the hero. A failure keeps the saved schedule and marks it "дані за HH:mm". The banner is compact (`MainView.tsx`): the title and each message line keep to one line, so the usual banner takes two lines; text that does not fit becomes up to 15 % smaller, then wraps.
+- **Notice from ztoe.com.ua** (`core/SiteNotice.kt`, `src/core/siteNotice.ts`, `SiteStatusIndicator.kt`, `MainScreen.kt`, `MainView.tsx`): when the site answers without a schedule table but shows "УВАГА! ВАЖЛИВА ІНФОРМАЦІЯ!", the text of that notice is shown in a card on the main screen, also when no queue is selected. The card replaces the "site works, no table" banner (`siteStatus.ts`); the status chip below still shows the state.
+- **Searchable address picker** (`SearchablePickerField.kt`, `PickerSearch.kt`, `SearchablePickerField.tsx`, `pickerSearch.ts`, `SettingsScreen.kt`, `SettingsView.tsx`): REM, settlement, street and house are chosen in a full-screen list with search that ignores case, apostrophe variants and street-type prefixes.
+- **Third widget: 4×1 drum strip** (`BlackoutGlanceWidget.kt`, `BlackoutWidgetReceiver.kt`, `WidgetSimulator.tsx`, `widget_preview_strip.xml`, `blackout_widget_strip_info.xml`): only the 24-hour drum and the needle, no buttons or switches; tap opens the app. The drum has the same height as on the big widget (52 dp), centred vertically.
+- **Exact alarms through "Alarms & reminders"** (`ExactAlarmGate.kt`, `ExactAlarmPermissionReceiver.kt`, `SettingsScreen.kt`, `BlackoutAppNavigation.kt`): `SCHEDULE_EXACT_ALARM` replaces `USE_EXACT_ALARM`; an instruction card with a button opens the system screen while the permission is missing.
+- `spec/` with golden vectors run by both `SpecVectorsTest.kt` and `tests/spec-vectors.test.ts`, the iOS handover `docs/ios/IOS_HANDOVER_v1.4.0.md`, the reviews in `docs/review/` and the multi-address draft in `docs/design/`.
+
+### Changed
+- **Duplicate streets merged** (`ZtoeAddressLookup.kt`, `ZtoeStaticDirectory.kt`, `ztoeAddressLookup.ts`, `core/AddressKeys.kt`): streets that differ only in apostrophe, case or spaces are one option that keeps every ztoe and PowerOn id; houses are the union. City and street names match exactly (no more `contains`).
+- **Main screen and widgets** (`MainScreen.kt`, `MainView.tsx`, `BlackoutGlanceWidget.kt`, `WidgetSimulator.tsx`, `PhoneSimulator.tsx`, `ModalPortal.tsx`, `App.tsx`, `GlassCard.kt`, `GlassCard.tsx`, `ZtTokens.kt`, `AppStrings.kt`, `i18n.ts`): the Tomorrow tab is always shown, text sizes follow one type scale (minimum 12 sp), cards share one `GlassCard`, all strings come from `AppStrings` / `i18n.ts` in Ukrainian and English, and widgets draw from the saved snapshot with a "stale" caption.
+- **Settings** (`SettingsScreen.kt`, `SettingsView.tsx`): refresh presets are 15/30/60/120/180/240 minutes (WorkManager cannot run more often than every 15 minutes); Settings and About load their network data only when visible (`BlackoutAppNavigation.kt`).
+- **Notifications** (`AlarmScheduler.kt`, `AlarmReceiver.kt`, `NotificationHelper.kt`, `alertManager.ts`): one alert per outage, for today and tomorrow; emergency events START, ETA_CHANGED and END come from the local ledger, a failed fetch is never "power restored", and an emergency that leaves the list before its estimated end reads "Аварійне відключення скасовано". A planned outage starting at midnight reads "о 00:00".
+- The background worker isolates each source and never reverts a setting the user changed meanwhile (`ScheduleSyncWorker.kt`). Caches, alarm ids and notified flags are excluded from backup. `WidgetToggleReceiver.kt` is no longer exported.
+- Privacy policy names the PowerOn host `api-ztoe-poweron.inneti.net` (`PRIVACY_POLICY.md`, `public/privacy.html`).
+- Version `1.4.0` in `package.json`, `vite.config.ts`, `android/app/build.gradle.kts`, `AboutScreen.kt`, `AboutView.tsx` and `README.md`.
+
+### Removed
+- The demo emergency outage at вул. Київська 37, the fake default house lists and the old ztoe HTML emergency table parser.
+
 ## [1.3.5] - 2026-11-11
 
 ### Changed

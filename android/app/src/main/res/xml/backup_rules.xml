@@ -1,4 +1,11 @@
 <?xml version="1.0" encoding="utf-8"?>
 <full-backup-content>
     <include domain="sharedpref" path="."/>
+    <!-- Caches, alarm bookkeeping and outage state are rebuilt from the network; restoring them on another device would show stale data or suppress alerts -->
+    <exclude domain="sharedpref" path="zt_schedule_cache_v2.xml"/>
+    <exclude domain="sharedpref" path="zt_address_index_cache_v1.xml"/>
+    <exclude domain="sharedpref" path="zt_scheduled_alarms_v1.xml"/>
+    <exclude domain="sharedpref" path="zt_notified_blackouts_v1.xml"/>
+    <exclude domain="sharedpref" path="zt_outage_state_v1.xml"/>
+    <exclude domain="sharedpref" path="zt_alarm_codes_v1.xml"/>
 </full-backup-content>

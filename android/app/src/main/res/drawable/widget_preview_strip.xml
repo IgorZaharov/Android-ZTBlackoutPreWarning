@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="320dp"
+    android:height="90dp"
+    android:viewportWidth="320"
+    android:viewportHeight="90">
+
+    <!-- Outer rounded widget background (#141A29) -->
+    <path
+        android:fillColor="#141A29"
+        android:pathData="M22,4 L298,4 A18,18 0 0,1 316,22 L316,68 A18,18 0 0,1 298,86 L22,86 A18,18 0 0,1 4,68 L4,22 A18,18 0 0,1 22,4 Z" />
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#33FFFFFF"
+        android:strokeWidth="1.5"
+        android:pathData="M22,4 L298,4 A18,18 0 0,1 316,22 L316,68 A18,18 0 0,1 298,86 L22,86 A18,18 0 0,1 4,68 L4,22 A18,18 0 0,1 22,4 Z" />
+
+    <!-- Drum at the big widget's aspect (720 x 132): scaled to 52 high, centred -->
+    <group android:scaleY="0.79" android:pivotY="45">
+    <!-- Vintage analog counter faceplate (#D4D1C1) -->
+    <path
+        android:fillColor="#D4D1C1"
+        android:strokeColor="#7A7768"
+        android:strokeWidth="1.5"
+        android:pathData="M22,12 L298,12 A8,8 0 0,1 306,20 L306,70 A8,8 0 0,1 298,78 L22,78 A8,8 0 0,1 14,70 L14,20 A8,8 0 0,1 22,12 Z" />
+
+    <!-- Recessed drum window (#4E514E) -->
+    <path
+        android:fillColor="#4E514E"
+        android:pathData="M24,18 L296,18 A4,4 0 0,1 300,22 L300,52 A4,4 0 0,1 296,56 L24,56 A4,4 0 0,1 20,52 L20,22 A4,4 0 0,1 24,18 Z" />
+
+    <!-- Light power-on track (#FCFBF7) -->
+    <path
+        android:fillColor="#FCFBF7"
+        android:pathData="M24,22 L296,22 L296,52 L24,52 Z" />
+
+    <!-- Red blackout segments (#D62E26) -->
+    <path
+        android:fillColor="#D62E26"
+        android:pathData="M70,22 L115,22 L115,52 L70,52 Z" />
+    <path
+        android:fillColor="#D62E26"
+        android:pathData="M182,22 L238,22 L238,52 L182,52 Z" />
+
+    <!-- Emergency (amber) block -->
+    <path
+        android:fillColor="#F28A1B"
+        android:pathData="M250,22 L272,22 L272,52 L250,52 Z" />
+
+    <!-- Hour markers 00 06 12 18 24 -->
+    <path
+        android:fillColor="#1C1B18"
+        android:pathData="M24,63 L33,63 L33,68 L24,68 Z M88,63 L97,63 L97,68 L88,68 Z M156,63 L165,63 L165,68 L156,68 Z M224,63 L233,63 L233,68 L224,68 Z M287,63 L296,63 L296,68 L287,68 Z" />
+
+    <!-- Black current-time needle (#0B0B0A) with halo -->
+    <path
+        android:fillColor="#D9FFFFFF"
+        android:pathData="M145,14 L151,14 L151,60 L145,60 Z" />
+    <path
+        android:fillColor="#0B0B0A"
+        android:pathData="M146.5,14 L149.5,14 L149.5,60 L146.5,60 Z" />
+    </group>
+</vector>

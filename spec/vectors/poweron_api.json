@@ -1,0 +1,77 @@
+{
+  "_doc": "Golden vectors for PowerOn parsing (spec/POWERON_API.md). PowerOn timestamps carry '+00:00' but are Kyiv wall-clock time: the offset is dropped, never converted. Rows are reduced copies of real API rows. Emergency = switchSubReason != 2 (2 mirrors the hourly schedule). Repair works come from pw_accident_planeds.",
+  "timestamps": [
+    { "in": "2026-11-12T22:04:40+00:00", "out": "2026-11-12T22:04" },
+    { "in": "2026-11-13T00:04:00+00:00", "out": "2026-11-13T00:04" },
+    { "in": "2026-11-12T21:08:30Z", "out": "2026-11-12T21:08" },
+    { "in": "2026-11-12T08:00:00+02:00", "out": "2026-11-12T08:00" },
+    { "in": "2026-11-12 08:00:00", "out": "2026-11-12T08:00" },
+    { "in": "2026-11-12T08:00", "out": "2026-11-12T08:00" },
+    { "in": "2026-13-45T08:00:00+00:00", "out": null },
+    { "in": "garbage", "out": null },
+    { "in": "", "out": null }
+  ],
+  "emergencyMapping": [
+    {
+      "name": "real emergency on the street, house matched ignoring Latin/Cyrillic and case",
+      "house": "21A",
+      "rows": [
+        { "id": 412317791, "cityId": 15, "cityName": "Гальчин", "streetId": 1899, "streetName": "вул. Шевченка", "dateEvent": "2026-11-12T21:08:30+00:00", "datePlanIn": "2026-11-13T01:00:00+00:00", "koment": "МО", "switchSubReason": 0, "typeOff": 1, "buildingNames": "1, 10, 11, 12, 13, 14, 15, 16, 17, 2, 20, 21а, 22, 23" }
+      ],
+      "expect": [ { "id": "pw_2026-11-12T21:08", "start": "2026-11-12T21:08", "estimatedEnd": "2026-11-13T01:00", "label": "МО" } ]
+    },
+    {
+      "name": "rows that mirror the hourly schedule (switchSubReason 2) are not emergencies",
+      "house": "29",
+      "rows": [
+        { "id": 412305121, "cityId": 1, "cityName": "Андрушівка", "streetId": 2, "streetName": "вул. Житомирська", "dateEvent": "2026-11-12T22:04:40+00:00", "datePlanIn": "2026-11-13T00:04:00+00:00", "koment": "3,1", "switchSubReason": 2, "typeOff": 1, "buildingNames": "0, 1, 10, 11, 29, 3, 31" }
+      ],
+      "expect": []
+    },
+    {
+      "name": "a house that is not in buildingNames has no emergency",
+      "house": "30",
+      "rows": [
+        { "id": 1, "cityId": 1, "cityName": "Андрушівка", "streetId": 2, "streetName": "вул. Житомирська", "dateEvent": "2026-11-12T20:00:00+00:00", "datePlanIn": "2026-11-13T00:20:00+00:00", "koment": "", "switchSubReason": 0, "typeOff": 1, "buildingNames": "29, 31" }
+      ],
+      "expect": []
+    },
+    {
+      "name": "two rows for merged duplicate street ids with the same start keep the later estimate",
+      "house": "5",
+      "rows": [
+        { "id": 10, "cityId": 333, "cityName": "Житомир", "streetId": 33382, "streetName": "вул. Закам’янська", "dateEvent": "2026-11-12T20:00:00+00:00", "datePlanIn": "2026-11-12T23:00:00+00:00", "koment": "", "switchSubReason": 0, "typeOff": 1, "buildingNames": "5, 7" },
+        { "id": 11, "cityId": 333, "cityName": "Житомир", "streetId": 33565, "streetName": "вул. Закам'янська", "dateEvent": "2026-11-12T20:00:00+00:00", "datePlanIn": "2026-11-13T01:00:00+00:00", "koment": "МО", "switchSubReason": 0, "typeOff": 0, "buildingNames": "5, 9" }
+      ],
+      "expect": [ { "id": "pw_2026-11-12T20:00", "start": "2026-11-12T20:00", "estimatedEnd": "2026-11-13T01:00", "label": "МО" } ]
+    },
+    {
+      "name": "an estimate that is not after the start is dropped",
+      "house": "5",
+      "rows": [
+        { "id": 12, "cityId": 333, "cityName": "Житомир", "streetId": 1, "streetName": "вул. Київська", "dateEvent": "2026-11-12T20:00:00+00:00", "datePlanIn": "2026-11-12T19:00:00+00:00", "koment": "", "switchSubReason": 0, "typeOff": 1, "buildingNames": "5" }
+      ],
+      "expect": [ { "id": "pw_2026-11-12T20:00", "start": "2026-11-12T20:00", "estimatedEnd": null, "label": null } ]
+    }
+  ],
+  "repairMapping": [
+    {
+      "name": "planned repair works become a REPAIR outage for the house",
+      "house": "2", "today": "2026-11-12",
+      "rows": [
+        { "id": 4409, "cityId": 333, "cityName": "Житомир", "streetId": 62411, "streetName": "вул. Миру", "dateEvent": "2026-11-13T08:00:00+00:00", "datePlanIn": "2026-11-13T17:00:00+00:00", "koment": "", "switchSubReason": null, "typeOff": 3, "buildingNames": "2, 2/199" }
+      ],
+      "expect": [ { "id": "repair_2026-11-13T08:00", "start": "2026-11-13T08:00", "end": "2026-11-13T17:00", "label": null } ]
+    },
+    {
+      "name": "works dated beyond tomorrow, other houses and inverted ranges are dropped",
+      "house": "2", "today": "2026-11-12",
+      "rows": [
+        { "id": 1, "cityId": 333, "cityName": "Житомир", "streetId": 1, "streetName": "вул. Миру", "dateEvent": "2026-11-20T08:00:00+00:00", "datePlanIn": "2026-11-20T17:00:00+00:00", "koment": "", "switchSubReason": null, "typeOff": 3, "buildingNames": "2" },
+        { "id": 2, "cityId": 333, "cityName": "Житомир", "streetId": 1, "streetName": "вул. Миру", "dateEvent": "2026-11-13T08:00:00+00:00", "datePlanIn": "2026-11-13T17:00:00+00:00", "koment": "", "switchSubReason": null, "typeOff": 3, "buildingNames": "4, 6" },
+        { "id": 3, "cityId": 333, "cityName": "Житомир", "streetId": 1, "streetName": "вул. Миру", "dateEvent": "2026-11-13T17:00:00+00:00", "datePlanIn": "2026-11-13T08:00:00+00:00", "koment": "", "switchSubReason": null, "typeOff": 3, "buildingNames": "2" }
+      ],
+      "expect": []
+    }
+  ]
+}
