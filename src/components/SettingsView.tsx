@@ -1,24 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import {
-  AlertCircle,
-  AlertTriangle,
-  Bell,
-  ExternalLink,
-  Globe,
-  HelpCircle,
-  Loader2,
-  Pencil,
-  Plus,
-  RotateCcw,
-  Send,
-  Sliders,
-  Star,
-  Trash2,
-  Vibrate,
-  Volume2,
-  X,
-  Zap
-} from 'lucide-react';
+import { AlertCircle, AlertTriangle, Bell, ExternalLink, Globe, HelpCircle, Loader2, Pencil, Plus, RotateCcw, Send, Sliders, Star, Trash2, Vibrate, Volume2, X, Zap, RefreshCw } from 'lucide-react';
 import { Language, UserSettings } from '../types';
 import { QUEUES, DEFAULT_ZTOE_URL, verifyZtoeSiteAndData } from '../services/ztoeParser';
 import {
@@ -81,6 +62,8 @@ interface SettingsViewProps {
   onUpdateSettings: (newSettings: UserSettings) => void;
   onSendTestAlert: () => void;
   onForceRefresh: () => Promise<RefreshStatus | void> | void;
+  /** A refresh is running: the refresh button's icon rotates and taps are ignored. */
+  isRefreshing?: boolean;
   onResetDefaults: () => void;
   autoOpenQueueHelp?: boolean;
   onQueueHelpOpened?: () => void;
@@ -156,12 +139,17 @@ const ActionButton: React.FC<{
   subdued?: boolean;
   onClick: () => void;
   testId?: string;
-}> = ({ text, icon, filled = false, subdued = false, onClick, testId }) => (
+  /** Work is running: taps are ignored and [busyText] is announced (the caller spins the icon). */
+  busy?: boolean;
+  busyText?: string;
+}> = ({ text, icon, filled = false, subdued = false, onClick, testId, busy = false, busyText }) => (
   <button
     type="button"
     data-testid={testId}
     onClick={onClick}
-    className={`flex min-h-12 w-full cursor-pointer items-center justify-center gap-2 rounded-2xl px-3 py-2.5 text-center text-sm leading-5 transition-colors focus-visible:outline-2 focus-visible:outline-white ${
+    disabled={busy}
+    aria-busy={busy || undefined}
+    className={`flex min-h-12 disabled:cursor-default w-full cursor-pointer items-center justify-center gap-2 rounded-2xl px-3 py-2.5 text-center text-sm leading-5 transition-colors focus-visible:outline-2 focus-visible:outline-white ${
       filled
         ? 'bg-[#FF5E3A] font-bold text-white shadow-md shadow-[#FF5E3A]/20 hover:bg-[#ff4b24]'
         : subdued
@@ -171,6 +159,7 @@ const ActionButton: React.FC<{
   >
     {icon}
     <span>{text}</span>
+    {busy && busyText && <span className="sr-only">{busyText}</span>}
   </button>
 );
 
@@ -192,6 +181,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   onUpdateSettings,
   onSendTestAlert,
   onForceRefresh,
+  isRefreshing = false,
   onResetDefaults,
   autoOpenQueueHelp = false,
   onQueueHelpOpened,
@@ -610,9 +600,11 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           />
           <ActionButton
             text={t.refreshBtn}
-            icon={<Globe className="h-4 w-4" aria-hidden="true" />}
+            icon={<RefreshCw className={`h-4 w-4 ${isRefreshing ? 'animate-spin' : ''}`} aria-hidden="true" />}
             testId="settings-force-refresh"
             onClick={handleForceRefresh}
+            busy={isRefreshing}
+            busyText={t.refreshing}
           />
         </div>
         <ActionButton

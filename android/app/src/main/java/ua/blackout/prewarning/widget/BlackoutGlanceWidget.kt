@@ -26,6 +26,7 @@ import androidx.glance.LocalSize
 import androidx.glance.action.ActionParameters
 import androidx.glance.action.actionStartActivity
 import androidx.glance.action.clickable
+import androidx.glance.appwidget.CircularProgressIndicator
 import androidx.glance.appwidget.GlanceAppWidget
 import androidx.glance.appwidget.GlanceAppWidgetManager
 import androidx.glance.appwidget.SizeMode
@@ -80,6 +81,10 @@ open class BlackoutGlanceWidget(private val forceBigLayout: Boolean = false) : G
         val KEY_LANGUAGE = stringPreferencesKey("glance_language")
         /** Bumped on every redraw so Glance recomposes; the widget itself renders only live values. */
         val KEY_REFRESH_TICK = longPreferencesKey("glance_refresh_tick")
+        /** When the widget refresh button started a refresh (0 = idle); older than [REFRESH_BUSY_MAX_MS] counts as idle. */
+        val KEY_REFRESHING_SINCE = longPreferencesKey("glance_refreshing_since")
+        /** A refresh killed with the process must not leave the ring spinning: 2 clients x 8 s timeouts, plus margin. */
+        const val REFRESH_BUSY_MAX_MS = 30_000L
 
         private val COUNTDOWN_PART_REGEX = Regex("(\\d{1,2}|--)")
 
@@ -203,7 +208,7 @@ open class BlackoutGlanceWidget(private val forceBigLayout: Boolean = false) : G
          * Redraws every placed widget. The widgets render from [OutageRepository.snapshot] at draw time,
          * so nothing computed here is persisted: this only bumps a tick that makes Glance recompose.
          */
-        suspend fun syncAllWidgets(context: Context) {
+        suspend fun syncAllWidgets(context: Context, refreshing: Boolean? = null) {
             val appCtx = context.applicationContext
             val manager = GlanceAppWidgetManager(appCtx)
             val smallIds = manager.getGlanceIds(BlackoutGlanceWidget::class.java)
@@ -223,6 +228,7 @@ open class BlackoutGlanceWidget(private val forceBigLayout: Boolean = false) : G
                         this[KEY_QUEUE] = settings.queue
                         this[KEY_LANGUAGE] = resolvedLang
                         this[KEY_REFRESH_TICK] = nowMs
+                        if (refreshing != null) this[KEY_REFRESHING_SINCE] = if (refreshing) nowMs else 0L
                     }
                 }
             }
@@ -484,6 +490,8 @@ open class BlackoutGlanceWidget(private val forceBigLayout: Boolean = false) : G
             // Reading the tick subscribes this composition to the Glance state that syncAllWidgets bumps
             @Suppress("UNUSED_VARIABLE")
             val refreshTick = prefs[KEY_REFRESH_TICK] ?: 0L
+            val refreshingSince = prefs[KEY_REFRESHING_SINCE] ?: 0L
+            val isRefreshing = refreshingSince > 0L && System.currentTimeMillis() - refreshingSince < REFRESH_BUSY_MAX_MS
             val currentSettings = settingsRepo.getSettings()
             val model = buildWidgetModel(currentSettings, outageRepo.snapshot(currentSettings))
 
@@ -579,12 +587,20 @@ open class BlackoutGlanceWidget(private val forceBigLayout: Boolean = false) : G
                                         .clickable(actionRunCallback<RefreshWidgetActionCallback>()),
                                     contentAlignment = Alignment.Center
                                 ) {
-                                    Image(
-                                        provider = ImageProvider(R.drawable.ic_refresh),
-                                        contentDescription = "Оновити дані",
-                                        colorFilter = ColorFilter.tint(ColorProvider(Color.White)),
-                                        modifier = GlanceModifier.size(18.dp)
-                                    )
+                                    if (isRefreshing) {
+                                        // Glance cannot rotate an image; the platform progress ring animates on its own
+                                        CircularProgressIndicator(
+                                            color = ColorProvider(Color.White),
+                                            modifier = GlanceModifier.size(18.dp)
+                                        )
+                                    } else {
+                                        Image(
+                                            provider = ImageProvider(R.drawable.ic_refresh),
+                                            contentDescription = "Оновити дані",
+                                            colorFilter = ColorFilter.tint(ColorProvider(Color.White)),
+                                            modifier = GlanceModifier.size(18.dp)
+                                        )
+                                    }
                                 }
 
                                 Spacer(modifier = GlanceModifier.width(8.dp))
@@ -764,12 +780,20 @@ open class BlackoutGlanceWidget(private val forceBigLayout: Boolean = false) : G
                                         .clickable(actionRunCallback<RefreshWidgetActionCallback>()),
                                     contentAlignment = Alignment.Center
                                 ) {
-                                    Image(
-                                        provider = ImageProvider(R.drawable.ic_refresh),
-                                        contentDescription = "Оновити дані",
-                                        colorFilter = ColorFilter.tint(ColorProvider(Color.White)),
-                                        modifier = GlanceModifier.size(16.dp)
-                                    )
+                                    if (isRefreshing) {
+                                        // Glance cannot rotate an image; the platform progress ring animates on its own
+                                        CircularProgressIndicator(
+                                            color = ColorProvider(Color.White),
+                                            modifier = GlanceModifier.size(16.dp)
+                                        )
+                                    } else {
+                                        Image(
+                                            provider = ImageProvider(R.drawable.ic_refresh),
+                                            contentDescription = "Оновити дані",
+                                            colorFilter = ColorFilter.tint(ColorProvider(Color.White)),
+                                            modifier = GlanceModifier.size(16.dp)
+                                        )
+                                    }
                                 }
 
                                 Spacer(modifier = GlanceModifier.width(6.dp))
@@ -950,6 +974,13 @@ class RefreshWidgetActionCallback : ActionCallback {
         parameters: ActionParameters
     ) {
         val appContext = context.applicationContext
+        // Show the progress ring on the refresh buttons while the refresh runs
+        try {
+            BlackoutGlanceWidget.syncAllWidgets(appContext, refreshing = true)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+        }
         // Network refresh on IO through the one shared pipeline. A failed source keeps its previous data
         // (nothing is cleared); each call is bounded by the connection timeouts of the clients (8 s).
         try {
@@ -969,7 +1000,7 @@ class RefreshWidgetActionCallback : ActionCallback {
         } catch (_: Exception) {
         }
         try {
-            BlackoutGlanceWidget.syncAllWidgets(appContext)
+            BlackoutGlanceWidget.syncAllWidgets(appContext, refreshing = false)
         } catch (e: CancellationException) {
             throw e
         } catch (_: Exception) {

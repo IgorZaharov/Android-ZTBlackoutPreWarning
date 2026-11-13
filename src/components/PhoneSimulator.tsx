@@ -293,6 +293,7 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
               }}
               onSendTestAlert={onSendTestAlert}
               onForceRefresh={onRefresh}
+              isRefreshing={isRefreshing}
               onResetDefaults={onResetDefaults}
               autoOpenQueueHelp={autoOpenQueueHelp}
               onQueueHelpOpened={() => setAutoOpenQueueHelp(false)}

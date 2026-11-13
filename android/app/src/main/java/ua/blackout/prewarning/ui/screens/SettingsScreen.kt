@@ -104,6 +104,7 @@ import ua.blackout.prewarning.data.parser.ZtoeRemOption
 import ua.blackout.prewarning.data.parser.ZtoeSettlementOption
 import ua.blackout.prewarning.data.parser.ZtoeStreetOption
 import ua.blackout.prewarning.ui.AppStrings
+import ua.blackout.prewarning.ui.components.spinWhile
 import ua.blackout.prewarning.ui.components.GlassCard
 import ua.blackout.prewarning.ui.components.PickerItem
 import ua.blackout.prewarning.ui.components.PickerSearch
@@ -175,6 +176,8 @@ fun SettingsScreen(
     onLanguageSelected: (String) -> Unit = {},
     onSendTestAlert: () -> Unit = {},
     onForceRefresh: () -> Unit = {},
+    /** A refresh is running: the refresh button's icon rotates and taps are ignored. */
+    isRefreshing: Boolean = false,
     onResetDefaults: () -> Unit = {},
     onShowAppBanner: (String) -> Unit = {},
     exactAlarmMissing: Boolean = false,
@@ -514,10 +517,12 @@ fun SettingsScreen(
                 val refreshButton: @Composable (Modifier) -> Unit = { m ->
                     ActionButton(
                         text = AppStrings.refreshBtn(lang),
-                        icon = Icons.Default.Language,
+                        icon = Icons.Default.Refresh,
                         filled = false,
                         onClick = onForceRefresh,
-                        modifier = m
+                        modifier = m,
+                        busy = isRefreshing,
+                        busyText = AppStrings.refreshing(lang)
                     )
                 }
                 if (stackButtons) {
@@ -995,7 +1000,10 @@ private fun ActionButton(
     filled: Boolean,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
-    subdued: Boolean = false
+    subdued: Boolean = false,
+    /** Work is running: the icon rotates, taps are ignored and [busyText] is announced. */
+    busy: Boolean = false,
+    busyText: String? = null
 ) {
     val shape = ZtShapes.Control
     val contentColor = if (subdued) ZtColors.TextSecondary else Color.White
@@ -1010,7 +1018,8 @@ private fun ActionButton(
                     else -> Modifier.background(Color(0x1AFFFFFF)).border(1.dp, ZtColors.CardBorder, shape)
                 }
             )
-            .clickable(role = Role.Button, onClick = onClick)
+            .semantics { if (busy && busyText != null) stateDescription = busyText }
+            .clickable(enabled = !busy, role = Role.Button, onClick = onClick)
             .padding(horizontal = 12.dp, vertical = 10.dp),
         contentAlignment = Alignment.Center
     ) {
@@ -1018,7 +1027,7 @@ private fun ActionButton(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.CenterHorizontally)
         ) {
-            if (icon != null) Icon(icon, contentDescription = null, tint = contentColor, modifier = Modifier.size(16.dp))
+            if (icon != null) Icon(icon, contentDescription = null, tint = contentColor, modifier = Modifier.size(16.dp).spinWhile(busy))
             Text(
                 text = text,
                 style = ZtType.label,

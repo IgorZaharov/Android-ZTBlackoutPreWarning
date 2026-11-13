@@ -31,7 +31,6 @@ import androidx.compose.material.icons.filled.OpenInNew
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Star
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.material3.minimumInteractiveComponentSize
@@ -69,6 +68,7 @@ import ua.blackout.prewarning.data.model.SlotStatus
 import ua.blackout.prewarning.data.repository.OutageSnapshot
 import ua.blackout.prewarning.data.repository.ScheduleStatusInfo
 import ua.blackout.prewarning.ui.AppStrings
+import ua.blackout.prewarning.ui.components.spinWhile
 import ua.blackout.prewarning.ui.components.GlassCard
 import ua.blackout.prewarning.ui.components.OutageRowFormat
 import ua.blackout.prewarning.ui.components.SiteNoticeCard
@@ -1041,7 +1041,7 @@ private fun LabelledValue(label: String, value: String) {
     }
 }
 
-/** 42 dp white refresh disc; 48 dp touch target; shows a spinner while a refresh runs. */
+/** 42 dp white refresh disc; 48 dp touch target; the arrow rotates while a refresh runs. */
 @Composable
 private fun RefreshButton(enabled: Boolean, isRefreshing: Boolean, lang: String, onRefresh: () -> Unit) {
     val label = AppStrings.refreshBtn(lang)
@@ -1059,20 +1059,12 @@ private fun RefreshButton(enabled: Boolean, isRefreshing: Boolean, lang: String,
             .clickable(enabled = enabled && !isRefreshing, role = Role.Button) { onRefresh() },
         contentAlignment = Alignment.Center
     ) {
-        if (isRefreshing) {
-            CircularProgressIndicator(
-                modifier = Modifier.size(20.dp),
-                strokeWidth = 2.dp,
-                color = Color.Black
-            )
-        } else {
-            Icon(
-                imageVector = Icons.Default.Refresh,
-                contentDescription = null,
-                tint = Color.Black,
-                modifier = Modifier.size(20.dp)
-            )
-        }
+        Icon(
+            imageVector = Icons.Default.Refresh,
+            contentDescription = null,
+            tint = Color.Black,
+            modifier = Modifier.size(20.dp).spinWhile(isRefreshing)
+        )
     }
 }
 

@@ -721,6 +721,7 @@ fun BlackoutAppNavigation(
                         onForceRefresh = {
                             performManualRefresh()
                         },
+                        isRefreshing = isRefreshing,
                         onResetDefaults = {
                             // CRITICAL CONSTANTS — Default values: advanceMinutes = 15, refreshMinutes = 30
                             settingsRepo.resetAllAppDataToFirstLaunch()
