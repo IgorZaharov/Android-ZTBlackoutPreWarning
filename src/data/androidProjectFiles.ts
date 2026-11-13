@@ -13732,6 +13732,9 @@ object StreetKey {
         "майдан" to "майдан", "м-н" to "майдан"
     )
 
+    /** True for a street-type word of the table above (\`вул.\`, \`Провулок\`, \`б-р\` …), compared lower-case without trailing dots. */
+    fun isTypeWord(token: String): Boolean = TYPES.containsKey(token.lowercase().trimEnd('.'))
+
     /** Stable comparison key. See \`spec/ADDRESS_KEY.md\` for the step list. */
     fun of(raw: String): String {
         var s = TextNorm.decodeEntities(raw).lowercase()
@@ -15796,6 +15799,475 @@ object OutageRowFormat {
         android:pathData="M146.5,14 L149.5,14 L149.5,60 L146.5,60 Z" />
     </group>
 </vector>
+`
+  },
+  {
+    path: 'app/src/main/java/ua/blackout/prewarning/core/Subscriptions.kt',
+    language: 'kotlin',
+    description: 'Multi-address subscriptions: model, repair, store operations and migration (spec/SUBSCRIPTIONS.md)',
+    content: `package ua.blackout.prewarning.core
+
+/**
+ * Multi-address subscriptions, step 1: the stored model, its repair rules, the store operations and
+ * the migration from single-address settings. Specified in \`spec/SUBSCRIPTIONS.md\`, golden cases in
+ * \`spec/vectors/subscriptions.json\`, mirrored in \`src/core/subscriptions.ts\`.
+ *
+ * The model is exchanged as plain maps (\`toMap\` / \`fromMap\`) so this package needs no JSON library;
+ * the platform encodes the map as a string.
+ */
+
+enum class QueueSource { LOOKUP, MANUAL }
+
+data class SubscriptionAddress(
+    val remSlug: String,
+    val settlementId: String,
+    val streetId: String,
+    /** Display name resolved from [streetId] when the address was stored; may be empty. */
+    val streetName: String,
+    val house: String,
+    /** Full human readable line (1.4.0 \`selected_address\`); may be empty. */
+    val text: String
+) {
+    val isValid: Boolean
+        get() = remSlug.isNotBlank() && settlementId.isNotBlank() && streetId.isNotBlank() && house.isNotBlank()
+
+    /** The 1.4.0 address key of \`ledger_*\`, \`repair_*\`, \`ids_*\` and emergency alert keys. */
+    val key: String
+        get() = "$settlementId|\${StreetKey.of(streetName.ifBlank { streetId })}|\${HouseKey.of(house)}"
+}
+
+data class Subscription(
+    val id: String,
+    /** Cleaned user label; empty = automatic (see [Subscriptions.displayLabel]). */
+    val label: String = "",
+    val address: SubscriptionAddress? = null,
+    val queue: String? = null,
+    val queueSource: QueueSource = QueueSource.MANUAL,
+    val queueStatusText: String? = null,
+    val plannedAlerts: Boolean = true,
+    val emergencyAlerts: Boolean = true,
+    val createdAtMs: Long = 0L
+) {
+    /** \`a:<address key>\` or \`q:<queue>\`; two items with one identity are duplicates. */
+    val identity: String
+        get() = address?.let { "a:\${it.key}" } ?: "q:\${queue.orEmpty()}"
+}
+
+data class SubscriptionStore(
+    val primaryId: String? = null,
+    val items: List<Subscription> = emptyList()
+) {
+    val primary: Subscription? get() = items.firstOrNull { it.id == primaryId }
+
+    companion object {
+        val EMPTY = SubscriptionStore()
+    }
+}
+
+/** 1.4.0 single-address settings, plus the street name the platform resolved for [streetId]. */
+data class LegacySettings(
+    val queue: String,
+    val customQueueStatusText: String?,
+    val selectedAddress: String?,
+    val remSlug: String,
+    val settlementId: String,
+    val streetId: String,
+    val streetName: String?,
+    val house: String,
+    val notificationsEnabled: Boolean,
+    val emergencyNotificationsEnabled: Boolean
+)
+
+data class MigrationResult(val store: SubscriptionStore, val alertsMaster: Boolean)
+
+data class DroppedItem(val id: String?, val reason: String)
+
+data class RepairResult(val store: SubscriptionStore, val dropped: List<DroppedItem>)
+
+/** Either the new store or an error code from \`spec/SUBSCRIPTIONS.md\` section 4. */
+sealed class StoreResult {
+    data class Ok(val store: SubscriptionStore) : StoreResult()
+    data class Error(val code: String, val existingId: String? = null) : StoreResult()
+}
+
+object Subscriptions {
+    const val SCHEMA_VERSION = 1
+    const val MAX_ITEMS = 5
+    const val MAX_LABEL_LENGTH = 40
+
+    const val ERR_INVALID = "invalid"
+    const val ERR_DUPLICATE_ID = "duplicate_id"
+    const val ERR_DUPLICATE = "duplicate"
+    const val ERR_LIMIT = "limit_reached"
+    const val ERR_NOT_FOUND = "not_found"
+
+    private val ID = Regex("^[a-z0-9]{4,32}$")
+    private val QUEUE = Regex("^[1-6]\\\\.[12]$")
+    private val SPACES = Regex("[ \\\\t\\\\n\\\\u000B\\\\f\\\\r\\\\u00A0\\\\u200B]+")
+
+    fun isValidId(id: String?): Boolean = id != null && ID.matches(id)
+    fun isValidQueue(queue: String?): Boolean = queue != null && QUEUE.matches(queue)
+
+    private fun collapse(raw: String): String = SPACES.replace(raw, " ").trim(' ')
+
+    // ---------------------------------------------------------------------------------------------
+    // Labels
+    // ---------------------------------------------------------------------------------------------
+
+    fun cleanLabel(raw: String?): String {
+        val s = collapse(raw.orEmpty())
+        if (s.length <= MAX_LABEL_LENGTH) return s
+        var end = MAX_LABEL_LENGTH
+        if (Character.isHighSurrogate(s[end - 1])) end--
+        return s.substring(0, end)
+    }
+
+    fun defaultLabel(item: Subscription): String {
+        val a = item.address ?: return "Черга \${item.queue.orEmpty()}"
+        val house = collapse(a.house)
+        val street = collapse(TextNorm.decodeEntities(a.streetName))
+        if (street.isEmpty()) return "буд. $house"
+        val tokens = street.split(' ')
+        val core = if (tokens.size > 1 && StreetKey.isTypeWord(tokens[0])) tokens.drop(1) else tokens
+        return "\${core.joinToString(" ")} $house"
+    }
+
+    fun displayLabel(item: Subscription): String = item.label.ifEmpty { defaultLabel(item) }
+
+    // ---------------------------------------------------------------------------------------------
+    // Maps
+    // ---------------------------------------------------------------------------------------------
+
+    fun toMap(store: SubscriptionStore): Map<String, Any?> = linkedMapOf(
+        "schemaVersion" to SCHEMA_VERSION,
+        "primaryId" to store.primaryId,
+        "items" to store.items.map { itemToMap(it) }
+    )
+
+    fun itemToMap(item: Subscription): Map<String, Any?> = linkedMapOf(
+        "id" to item.id,
+        "label" to item.label,
+        "address" to item.address?.let {
+            linkedMapOf(
+                "remSlug" to it.remSlug,
+                "settlementId" to it.settlementId,
+                "streetId" to it.streetId,
+                "streetName" to it.streetName,
+                "house" to it.house,
+                "text" to it.text
+            )
+        },
+        "queue" to item.queue,
+        "queueSource" to item.queueSource.name,
+        "queueStatusText" to item.queueStatusText,
+        "plannedAlerts" to item.plannedAlerts,
+        "emergencyAlerts" to item.emergencyAlerts,
+        "createdAtMs" to item.createdAtMs
+    )
+
+    /**
+     * Lenient read: wrong types read as missing, nothing throws. Returns null ("absent") when the map
+     * is not a version-1 store, so the caller migrates again from the legacy keys. Call [repair] on
+     * the result before use.
+     */
+    fun fromMap(map: Map<*, *>?): SubscriptionStore? {
+        map ?: return null
+        val version = (map["schemaVersion"] as? Number)?.toInt() ?: return null
+        if (version != SCHEMA_VERSION) return null
+        val items = (map["items"] as? List<*>).orEmpty().mapNotNull { (it as? Map<*, *>)?.let(::itemFromMap) }
+        return SubscriptionStore(primaryId = map["primaryId"] as? String, items = items)
+    }
+
+    fun itemFromMap(m: Map<*, *>): Subscription {
+        val a = m["address"] as? Map<*, *>
+        return Subscription(
+            id = m["id"] as? String ?: "",
+            label = m["label"] as? String ?: "",
+            address = a?.let {
+                SubscriptionAddress(
+                    remSlug = it["remSlug"] as? String ?: "",
+                    settlementId = it["settlementId"] as? String ?: "",
+                    streetId = it["streetId"] as? String ?: "",
+                    streetName = it["streetName"] as? String ?: "",
+                    house = it["house"] as? String ?: "",
+                    text = it["text"] as? String ?: ""
+                )
+            },
+            queue = m["queue"] as? String,
+            queueSource = if (m["queueSource"] == QueueSource.LOOKUP.name) QueueSource.LOOKUP else QueueSource.MANUAL,
+            queueStatusText = m["queueStatusText"] as? String,
+            plannedAlerts = m["plannedAlerts"] as? Boolean ?: true,
+            emergencyAlerts = m["emergencyAlerts"] as? Boolean ?: true,
+            createdAtMs = (m["createdAtMs"] as? Number)?.toLong() ?: 0L
+        )
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // Repair
+    // ---------------------------------------------------------------------------------------------
+
+    /** Repair step 2: invalid queue or address -> null, label cleaned. */
+    fun normalize(item: Subscription): Subscription = item.copy(
+        label = cleanLabel(item.label),
+        address = item.address?.takeIf { it.isValid },
+        queue = item.queue?.takeIf { isValidQueue(it) }
+    )
+
+    fun repair(store: SubscriptionStore): RepairResult {
+        val dropped = ArrayList<DroppedItem>()
+        var items = store.items.filter { ok -> isValidId(ok.id).also { if (!it) dropped += DroppedItem(ok.id, "invalid_id") } }
+        items = items.map(::normalize)
+        items = items.filter { ok -> (ok.address != null || ok.queue != null).also { if (!it) dropped += DroppedItem(ok.id, "empty") } }
+        val ids = HashSet<String>()
+        items = items.filter { ok -> ids.add(ok.id).also { if (!it) dropped += DroppedItem(ok.id, "duplicate_id") } }
+        val identities = HashSet<String>()
+        items = items.filter { ok -> identities.add(ok.identity).also { if (!it) dropped += DroppedItem(ok.id, "duplicate_address") } }
+        if (items.size > MAX_ITEMS) {
+            items.drop(MAX_ITEMS).forEach { dropped += DroppedItem(it.id, "over_limit") }
+            items = items.take(MAX_ITEMS)
+        }
+        val primaryId = store.primaryId?.takeIf { p -> items.any { it.id == p } } ?: items.firstOrNull()?.id
+        return RepairResult(SubscriptionStore(primaryId, items), dropped)
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // Operations
+    // ---------------------------------------------------------------------------------------------
+
+    fun add(store: SubscriptionStore, candidate: Subscription): StoreResult {
+        if (!isValidId(candidate.id)) return StoreResult.Error(ERR_INVALID)
+        val item = normalize(candidate)
+        if (item.address == null && item.queue == null) return StoreResult.Error(ERR_INVALID)
+        if (store.items.any { it.id == item.id }) return StoreResult.Error(ERR_DUPLICATE_ID)
+        store.items.firstOrNull { it.identity == item.identity }?.let { return StoreResult.Error(ERR_DUPLICATE, it.id) }
+        if (store.items.size >= MAX_ITEMS) return StoreResult.Error(ERR_LIMIT)
+        return StoreResult.Ok(SubscriptionStore(store.primaryId ?: item.id, store.items + item))
+    }
+
+    fun remove(store: SubscriptionStore, id: String): StoreResult {
+        if (store.items.none { it.id == id }) return StoreResult.Error(ERR_NOT_FOUND)
+        val rest = store.items.filter { it.id != id }
+        val primaryId = if (store.primaryId != id && rest.any { it.id == store.primaryId }) {
+            store.primaryId
+        } else {
+            // minByOrNull keeps the first of equal values, which is the list-order tie rule
+            rest.minByOrNull { it.createdAtMs }?.id
+        }
+        return StoreResult.Ok(SubscriptionStore(primaryId, rest))
+    }
+
+    fun setPrimary(store: SubscriptionStore, id: String): StoreResult =
+        if (store.items.none { it.id == id }) StoreResult.Error(ERR_NOT_FOUND) else StoreResult.Ok(store.copy(primaryId = id))
+
+    fun setPlanned(store: SubscriptionStore, id: String, on: Boolean): StoreResult = update(store, id) { it.copy(plannedAlerts = on) }
+
+    fun setEmergency(store: SubscriptionStore, id: String, on: Boolean): StoreResult = update(store, id) { it.copy(emergencyAlerts = on) }
+
+    fun rename(store: SubscriptionStore, id: String, raw: String?): StoreResult = update(store, id) { it.copy(label = cleanLabel(raw)) }
+
+    private inline fun update(store: SubscriptionStore, id: String, change: (Subscription) -> Subscription): StoreResult {
+        if (store.items.none { it.id == id }) return StoreResult.Error(ERR_NOT_FOUND)
+        return StoreResult.Ok(store.copy(items = store.items.map { if (it.id == id) change(it) else it }))
+    }
+
+    // ---------------------------------------------------------------------------------------------
+    // Effective switches
+    // ---------------------------------------------------------------------------------------------
+
+    fun plannedActive(master: Boolean, item: Subscription): Boolean = master && item.plannedAlerts && item.queue != null
+
+    fun emergencyActive(master: Boolean, item: Subscription, poweronIdsKnown: Boolean): Boolean =
+        master && item.emergencyAlerts && item.address != null && poweronIdsKnown
+
+    fun anyAlertsEnabled(master: Boolean, store: SubscriptionStore): Boolean =
+        master && store.items.any { it.plannedAlerts || it.emergencyAlerts }
+
+    // ---------------------------------------------------------------------------------------------
+    // Migration
+    // ---------------------------------------------------------------------------------------------
+
+    fun migrate(legacy: LegacySettings, newId: String, nowMs: Long): MigrationResult {
+        val queue = legacy.queue.takeIf { isValidQueue(it) }
+        val address = SubscriptionAddress(
+            remSlug = legacy.remSlug,
+            settlementId = legacy.settlementId,
+            streetId = legacy.streetId,
+            streetName = legacy.streetName.orEmpty(),
+            house = legacy.house,
+            text = legacy.selectedAddress.orEmpty()
+        )
+        val item = when {
+            address.isValid -> Subscription(
+                id = newId,
+                address = address,
+                queue = queue,
+                queueSource = QueueSource.LOOKUP,
+                queueStatusText = legacy.customQueueStatusText?.takeIf { it.isNotBlank() },
+                createdAtMs = nowMs
+            )
+            queue != null -> Subscription(id = newId, queue = queue, queueSource = QueueSource.MANUAL, createdAtMs = nowMs)
+            else -> null
+        }?.copy(
+            plannedAlerts = legacy.notificationsEnabled,
+            emergencyAlerts = legacy.emergencyNotificationsEnabled
+        )
+        val store = if (item == null) SubscriptionStore.EMPTY else SubscriptionStore(item.id, listOf(item))
+        return MigrationResult(store, legacy.notificationsEnabled || legacy.emergencyNotificationsEnabled)
+    }
+}
+`
+  },
+  {
+    path: 'app/src/main/java/ua/blackout/prewarning/data/repository/SubscriptionRepository.kt',
+    language: 'kotlin',
+    description: 'Stores the multi-address subscriptions and the alerts master switch in the user settings',
+    content: `package ua.blackout.prewarning.data.repository
+
+import android.content.Context
+import android.content.SharedPreferences
+import org.json.JSONArray
+import org.json.JSONObject
+import ua.blackout.prewarning.core.LegacySettings
+import ua.blackout.prewarning.core.RepairResult
+import ua.blackout.prewarning.core.StoreResult
+import ua.blackout.prewarning.core.SubscriptionStore
+import ua.blackout.prewarning.core.Subscriptions
+import ua.blackout.prewarning.data.model.UserSettings
+import ua.blackout.prewarning.data.parser.ZtoeAddressLookup
+import java.security.SecureRandom
+
+/**
+ * Stores the multi-address subscriptions (\`spec/SUBSCRIPTIONS.md\`): the store as the JSON string
+ * [KEY_STORE] and the kill switch [KEY_MASTER], both in the user settings file so they travel with a
+ * device backup. The rules live in [Subscriptions]; this class only encodes, reads and writes.
+ *
+ * Step 1 of the feature: nothing calls this at runtime yet. The Settings UI (step 2) runs
+ * [ensureMigrated] on start and then treats the store as the source of truth. Running the migration
+ * earlier would freeze a copy of the 1.4.0 address that later settings changes would not update.
+ */
+class SubscriptionRepository(
+    private val prefs: SharedPreferences,
+    private val clock: () -> Long = System::currentTimeMillis,
+    private val random: () -> String = ::randomId
+) {
+    constructor(context: Context) : this(
+        context.applicationContext.getSharedPreferences(SETTINGS_PREFS, Context.MODE_PRIVATE)
+    )
+
+    companion object {
+        const val SETTINGS_PREFS = "zt_user_settings_v1"
+        const val KEY_STORE = "zt_subscriptions_v1"
+        const val KEY_MASTER = "alerts_master_enabled"
+
+        private val LOCK = Any()
+        private val RNG = SecureRandom()
+        private const val ID_CHARS = "abcdefghijklmnopqrstuvwxyz0123456789"
+
+        /** 8 random characters from \`[a-z0-9]\`. */
+        fun randomId(): String = buildString { repeat(8) { append(ID_CHARS[RNG.nextInt(ID_CHARS.length)]) } }
+
+        /** The 1.4.0 settings as migration input; [streetName] is resolved by the caller (see [resolveStreetName]). */
+        fun legacyFrom(settings: UserSettings, streetName: String?): LegacySettings {
+            val q = settings.selectedAddressQuery
+            return LegacySettings(
+                queue = settings.queue,
+                customQueueStatusText = settings.customQueueStatusText,
+                selectedAddress = settings.selectedAddress,
+                remSlug = q?.remId.orEmpty(),
+                settlementId = q?.settlementId.orEmpty(),
+                streetId = q?.streetId.orEmpty(),
+                streetName = streetName,
+                house = q?.house.orEmpty(),
+                notificationsEnabled = settings.notificationsEnabled,
+                emergencyNotificationsEnabled = settings.emergencyNotificationsEnabled
+            )
+        }
+
+        /** Same lookup as \`OutageRepository.addressKey\`, so the migrated address key matches 1.4.0. */
+        fun resolveStreetName(streetId: String?): String? {
+            if (streetId.isNullOrBlank()) return null
+            return try {
+                ZtoeAddressLookup.findStreetById(streetId)?.nameUk
+            } catch (_: Exception) {
+                null
+            }
+        }
+
+        // -----------------------------------------------------------------------------------------
+        // JSON <-> plain map. Written by hand because JSONObject(Map) drops null values in some
+        // org.json versions and keeps them in others; the stored text must not depend on that.
+        // -----------------------------------------------------------------------------------------
+
+        fun encode(store: SubscriptionStore): String = (toJson(Subscriptions.toMap(store)) as JSONObject).toString()
+
+        /** Returns null for missing, unreadable or non-version-1 text ("absent"). */
+        fun decode(text: String?): SubscriptionStore? {
+            if (text.isNullOrBlank()) return null
+            val parsed = try {
+                JSONObject(text)
+            } catch (_: Exception) {
+                return null
+            }
+            return Subscriptions.fromMap(fromJson(parsed) as Map<*, *>)
+        }
+
+        private fun toJson(v: Any?): Any = when (v) {
+            null -> JSONObject.NULL
+            is Map<*, *> -> JSONObject().also { o -> v.forEach { (k, x) -> o.put(k.toString(), toJson(x)) } }
+            is List<*> -> JSONArray().also { a -> v.forEach { a.put(toJson(it)) } }
+            else -> v
+        }
+
+        private fun fromJson(v: Any?): Any? = when (v) {
+            null, JSONObject.NULL -> null
+            is JSONObject -> v.keys().asSequence().associateWith { fromJson(v.opt(it)) }
+            is JSONArray -> (0 until v.length()).map { fromJson(v.opt(it)) }
+            is Int -> v.toLong()
+            else -> v
+        }
+    }
+
+    /** The repaired store, or null when it has never been written (or is unreadable): then migrate. */
+    fun read(): RepairResult? = decode(prefs.getString(KEY_STORE, null))?.let { Subscriptions.repair(it) }
+
+    fun store(): SubscriptionStore = read()?.store ?: SubscriptionStore.EMPTY
+
+    fun alertsMaster(): Boolean = prefs.getBoolean(KEY_MASTER, true)
+
+    fun setAlertsMaster(on: Boolean) {
+        prefs.edit().putBoolean(KEY_MASTER, on).apply()
+    }
+
+    /**
+     * Runs the one-time migration from the 1.4.0 settings when the store is absent and returns the
+     * store in use. [legacy] is only evaluated when a migration is needed.
+     */
+    fun ensureMigrated(legacy: () -> LegacySettings): SubscriptionStore = synchronized(LOCK) {
+        read()?.let { return it.store }
+        val result = Subscriptions.migrate(legacy(), random(), clock())
+        prefs.edit()
+            .putString(KEY_STORE, encode(result.store))
+            .putBoolean(KEY_MASTER, result.alertsMaster)
+            .apply()
+        result.store
+    }
+
+    /** Read-modify-write under one lock; writes only when [op] succeeds. */
+    fun mutate(op: (SubscriptionStore) -> StoreResult): StoreResult = synchronized(LOCK) {
+        val result = op(store())
+        if (result is StoreResult.Ok) prefs.edit().putString(KEY_STORE, encode(result.store)).apply()
+        result
+    }
+
+    /** A fresh id that no current item uses. */
+    fun newItemId(): String {
+        val used = store().items.map { it.id }.toSet()
+        while (true) {
+            val id = random()
+            if (id !in used && Subscriptions.isValidId(id)) return id
+        }
+    }
+}
 `
   }
 ];

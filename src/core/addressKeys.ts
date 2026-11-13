@@ -112,6 +112,10 @@ const TYPES: Readonly<Record<string, string>> = {
 const hasOwn = (o: object, k: string) => Object.prototype.hasOwnProperty.call(o, k);
 
 export const StreetKey = {
+  /** True for a street-type word of the table above (`вул.`, `Провулок`, `б-р` …), compared lower-case without trailing dots. */
+  isTypeWord(token: string): boolean {
+    return hasOwn(TYPES, token.toLowerCase().replace(/\.+$/, ''));
+  },
   /** Stable comparison key. See spec/ADDRESS_KEY.md for the step list. */
   of(raw: string): string {
     let s = decodeEntities(raw).toLowerCase();

@@ -1,0 +1,1046 @@
+{
+ "_doc": "Golden vectors for spec/SUBSCRIPTIONS.md (multi-address store, step 1). Stores are compared as plain maps after toMap: every item map has all nine fields, address maps all six. 'addressKey' is settlementId|StreetKey|HouseKey, identical to the 1.4.0 key of ledger_*, repair_*, ids_* and emergency alert keys.",
+ "labels": {
+  "defaultLabel": [
+   {
+    "streetName": "вул. Київська",
+    "house": "77",
+    "expect": "Київська 77"
+   },
+   {
+    "streetName": "ВУЛ. Київська",
+    "house": "77",
+    "expect": "Київська 77"
+   },
+   {
+    "streetName": "вулиця  В&#039;ячеслава   Липинського",
+    "house": "16А",
+    "expect": "В'ячеслава Липинського 16А"
+   },
+   {
+    "streetName": "1 пров. Мар'янівський",
+    "house": "5",
+    "expect": "1 пров. Мар'янівський 5"
+   },
+   {
+    "streetName": "майдан С.П. Корольова",
+    "house": "3",
+    "expect": "С.П. Корольова 3"
+   },
+   {
+    "streetName": "Київська",
+    "house": " 77 ",
+    "expect": "Київська 77"
+   },
+   {
+    "streetName": "вул.",
+    "house": "2",
+    "expect": "вул. 2"
+   },
+   {
+    "streetName": "просп. Миру",
+    "house": "1",
+    "expect": "Миру 1"
+   },
+   {
+    "streetName": "",
+    "house": " 14/а ",
+    "expect": "буд. 14/а"
+   },
+   {
+    "streetName": null,
+    "house": null,
+    "queue": "5.2",
+    "expect": "Черга 5.2"
+   }
+  ],
+  "cleanLabel": [
+   {
+    "raw": "  Дім  мами ",
+    "expect": "Дім мами"
+   },
+   {
+    "raw": "",
+    "expect": ""
+   },
+   {
+    "raw": " \t \n ",
+    "expect": ""
+   },
+   {
+    "raw": "Дім\n\tробота",
+    "expect": "Дім робота"
+   },
+   {
+    "raw": "Дача ​батьків",
+    "expect": "Дача батьків"
+   },
+   {
+    "raw": "ЖЖЖЖЖЖЖЖЖЖЖЖЖЖЖЖЖЖЖЖЖЖЖЖЖЖЖЖЖЖЖЖЖЖЖЖЖЖЖЖЖЖЖЖЖ",
+    "expect": "ЖЖЖЖЖЖЖЖЖЖЖЖЖЖЖЖЖЖЖЖЖЖЖЖЖЖЖЖЖЖЖЖЖЖЖЖЖЖЖЖ"
+   },
+   {
+    "raw": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa😀",
+    "expect": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+   },
+   {
+    "raw": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa😀",
+    "expect": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa😀"
+   }
+  ]
+ },
+ "migrate": [
+  {
+   "name": "full address with queue, both switches on",
+   "legacy": {
+    "queue": "5.2",
+    "customQueueStatusText": "",
+    "selectedAddress": "Житомирський РЕМ, м. Житомир, вул. Київська, буд. 77",
+    "remSlug": "zhytomyr",
+    "settlementId": "16657",
+    "streetId": "st_123",
+    "streetName": "вул. Київська",
+    "house": "77",
+    "notificationsEnabled": true,
+    "emergencyNotificationsEnabled": true
+   },
+   "id": "k3f9x2qd",
+   "nowMs": 1794500000000,
+   "expectMaster": true,
+   "expectDisplayLabel": "Київська 77",
+   "expectAddressKey": "16657|byл kиїbcьka|77",
+   "expect": {
+    "schemaVersion": 1,
+    "primaryId": "k3f9x2qd",
+    "items": [
+     {
+      "id": "k3f9x2qd",
+      "label": "",
+      "address": {
+       "remSlug": "zhytomyr",
+       "settlementId": "16657",
+       "streetId": "st_123",
+       "streetName": "вул. Київська",
+       "house": "77",
+       "text": "Житомирський РЕМ, м. Житомир, вул. Київська, буд. 77"
+      },
+      "queue": "5.2",
+      "queueSource": "LOOKUP",
+      "queueStatusText": null,
+      "plannedAlerts": true,
+      "emergencyAlerts": true,
+      "createdAtMs": 1794500000000
+     }
+    ]
+   }
+  },
+  {
+   "name": "address without a queue keeps the ZTOE status text; planned off, emergency on",
+   "legacy": {
+    "queue": "",
+    "customQueueStatusText": "Не підлягає відключенням",
+    "selectedAddress": "Житомирський РЕМ, м. Житомир, вул. Київська, буд. 77",
+    "remSlug": "zhytomyr",
+    "settlementId": "16657",
+    "streetId": "st_123",
+    "streetName": "вул. Київська",
+    "house": "77",
+    "notificationsEnabled": false,
+    "emergencyNotificationsEnabled": true
+   },
+   "id": "k3f9x2qd",
+   "nowMs": 1794500000000,
+   "expectMaster": true,
+   "expectDisplayLabel": "Київська 77",
+   "expect": {
+    "schemaVersion": 1,
+    "primaryId": "k3f9x2qd",
+    "items": [
+     {
+      "id": "k3f9x2qd",
+      "label": "",
+      "address": {
+       "remSlug": "zhytomyr",
+       "settlementId": "16657",
+       "streetId": "st_123",
+       "streetName": "вул. Київська",
+       "house": "77",
+       "text": "Житомирський РЕМ, м. Житомир, вул. Київська, буд. 77"
+      },
+      "queue": null,
+      "queueSource": "LOOKUP",
+      "queueStatusText": "Не підлягає відключенням",
+      "plannedAlerts": false,
+      "emergencyAlerts": true,
+      "createdAtMs": 1794500000000
+     }
+    ]
+   }
+  },
+  {
+   "name": "queue only",
+   "legacy": {
+    "queue": "3.1",
+    "customQueueStatusText": "",
+    "selectedAddress": "",
+    "remSlug": "",
+    "settlementId": "",
+    "streetId": "",
+    "streetName": null,
+    "house": "",
+    "notificationsEnabled": true,
+    "emergencyNotificationsEnabled": false
+   },
+   "id": "q1q1q1q1",
+   "nowMs": 1794500000000,
+   "expectMaster": true,
+   "expectDisplayLabel": "Черга 3.1",
+   "expect": {
+    "schemaVersion": 1,
+    "primaryId": "q1q1q1q1",
+    "items": [
+     {
+      "id": "q1q1q1q1",
+      "label": "",
+      "address": null,
+      "queue": "3.1",
+      "queueSource": "MANUAL",
+      "queueStatusText": null,
+      "plannedAlerts": true,
+      "emergencyAlerts": false,
+      "createdAtMs": 1794500000000
+     }
+    ]
+   }
+  },
+  {
+   "name": "nothing chosen",
+   "legacy": {
+    "queue": "",
+    "customQueueStatusText": "",
+    "selectedAddress": "",
+    "remSlug": "",
+    "settlementId": "",
+    "streetId": "",
+    "streetName": null,
+    "house": "",
+    "notificationsEnabled": true,
+    "emergencyNotificationsEnabled": true
+   },
+   "id": "q1q1q1q1",
+   "nowMs": 1794500000000,
+   "expectMaster": true,
+   "expect": {
+    "schemaVersion": 1,
+    "primaryId": null,
+    "items": []
+   }
+  },
+  {
+   "name": "both legacy switches off: master off, both item switches stay off (owner decision 8)",
+   "legacy": {
+    "queue": "5.2",
+    "customQueueStatusText": "",
+    "selectedAddress": "Житомирський РЕМ, м. Житомир, вул. Київська, буд. 77",
+    "remSlug": "zhytomyr",
+    "settlementId": "16657",
+    "streetId": "st_123",
+    "streetName": "вул. Київська",
+    "house": "77",
+    "notificationsEnabled": false,
+    "emergencyNotificationsEnabled": false
+   },
+   "id": "k3f9x2qd",
+   "nowMs": 1794500000000,
+   "expectMaster": false,
+   "expect": {
+    "schemaVersion": 1,
+    "primaryId": "k3f9x2qd",
+    "items": [
+     {
+      "id": "k3f9x2qd",
+      "label": "",
+      "address": {
+       "remSlug": "zhytomyr",
+       "settlementId": "16657",
+       "streetId": "st_123",
+       "streetName": "вул. Київська",
+       "house": "77",
+       "text": "Житомирський РЕМ, м. Житомир, вул. Київська, буд. 77"
+      },
+      "queue": "5.2",
+      "queueSource": "LOOKUP",
+      "queueStatusText": null,
+      "plannedAlerts": false,
+      "emergencyAlerts": false,
+      "createdAtMs": 1794500000000
+     }
+    ]
+   }
+  },
+  {
+   "name": "incomplete address and invalid queue give an empty store",
+   "legacy": {
+    "queue": "7.3",
+    "customQueueStatusText": "",
+    "selectedAddress": "Житомирський РЕМ, м. Житомир, вул. Київська, буд. 77",
+    "remSlug": "zhytomyr",
+    "settlementId": "16657",
+    "streetId": "st_123",
+    "streetName": "вул. Київська",
+    "house": "",
+    "notificationsEnabled": true,
+    "emergencyNotificationsEnabled": true
+   },
+   "id": "k3f9x2qd",
+   "nowMs": 1794500000000,
+   "expectMaster": true,
+   "expect": {
+    "schemaVersion": 1,
+    "primaryId": null,
+    "items": []
+   }
+  },
+  {
+   "name": "street name not resolved: key falls back to the street id, label to the house",
+   "legacy": {
+    "queue": "5.2",
+    "customQueueStatusText": "",
+    "selectedAddress": "Житомирський РЕМ, м. Житомир, вул. Київська, буд. 77",
+    "remSlug": "zhytomyr",
+    "settlementId": "16657",
+    "streetId": "st_999",
+    "streetName": null,
+    "house": "77",
+    "notificationsEnabled": true,
+    "emergencyNotificationsEnabled": true
+   },
+   "id": "k3f9x2qd",
+   "nowMs": 1794500000000,
+   "expectMaster": true,
+   "expectDisplayLabel": "буд. 77",
+   "expectAddressKey": "16657|st_999|77",
+   "expect": {
+    "schemaVersion": 1,
+    "primaryId": "k3f9x2qd",
+    "items": [
+     {
+      "id": "k3f9x2qd",
+      "label": "",
+      "address": {
+       "remSlug": "zhytomyr",
+       "settlementId": "16657",
+       "streetId": "st_999",
+       "streetName": "",
+       "house": "77",
+       "text": "Житомирський РЕМ, м. Житомир, вул. Київська, буд. 77"
+      },
+      "queue": "5.2",
+      "queueSource": "LOOKUP",
+      "queueStatusText": null,
+      "plannedAlerts": true,
+      "emergencyAlerts": true,
+      "createdAtMs": 1794500000000
+     }
+    ]
+   }
+  }
+ ],
+ "repair": [
+  {
+   "name": "every rule in one store",
+   "input": {
+    "schemaVersion": 1,
+    "primaryId": "zzzz9999",
+    "items": [
+     {
+      "id": "Bad Id!",
+      "queue": "1.1"
+     },
+     {
+      "id": "aaaa1111",
+      "label": "",
+      "address": {
+       "remSlug": "zhytomyr",
+       "settlementId": "16657",
+       "streetId": "st_123",
+       "streetName": "вул. Київська",
+       "house": "77",
+       "text": "Житомирський РЕМ, м. Житомир, вул. Київська, буд. 77"
+      },
+      "queue": "9.9",
+      "queueSource": "LOOKUP",
+      "createdAtMs": 10
+     },
+     {
+      "id": "aaaa1111",
+      "queue": "1.1"
+     },
+     {
+      "id": "bbbb2222"
+     },
+     {
+      "id": "cccc3333",
+      "address": {
+       "remSlug": "zhytomyr",
+       "settlementId": "16657",
+       "streetId": "st_777",
+       "streetName": "вулиця Київська",
+       "house": "77",
+       "text": ""
+      },
+      "queue": "5.2"
+     },
+     {
+      "id": "dddd4444",
+      "label": "  Дача  ",
+      "address": {
+       "remSlug": "zhytomyr",
+       "settlementId": "16657",
+       "streetId": "st_1",
+       "streetName": "вул. Лісова",
+       "house": "",
+       "text": ""
+      },
+      "queue": "2.1"
+     },
+     {
+      "id": "eeee5555",
+      "label": "ЖЖЖЖЖЖЖЖЖЖЖЖЖЖЖЖЖЖЖЖЖЖЖЖЖЖЖЖЖЖЖЖЖЖЖЖЖЖЖЖЖЖЖЖЖ",
+      "queue": "1.2",
+      "plannedAlerts": false
+     },
+     {
+      "id": "ffff6666",
+      "queue": "3.1",
+      "queueSource": "WHATEVER",
+      "emergencyAlerts": "yes",
+      "createdAtMs": "soon"
+     },
+     {
+      "id": "gggg7777",
+      "queue": "4.1"
+     },
+     {
+      "id": "hhhh8888",
+      "queue": "5.1"
+     }
+    ]
+   },
+   "expect": {
+    "schemaVersion": 1,
+    "primaryId": "aaaa1111",
+    "items": [
+     {
+      "id": "aaaa1111",
+      "label": "",
+      "address": {
+       "remSlug": "zhytomyr",
+       "settlementId": "16657",
+       "streetId": "st_123",
+       "streetName": "вул. Київська",
+       "house": "77",
+       "text": "Житомирський РЕМ, м. Житомир, вул. Київська, буд. 77"
+      },
+      "queue": null,
+      "queueSource": "LOOKUP",
+      "queueStatusText": null,
+      "plannedAlerts": true,
+      "emergencyAlerts": true,
+      "createdAtMs": 10
+     },
+     {
+      "id": "dddd4444",
+      "label": "Дача",
+      "address": null,
+      "queue": "2.1",
+      "queueSource": "MANUAL",
+      "queueStatusText": null,
+      "plannedAlerts": true,
+      "emergencyAlerts": true,
+      "createdAtMs": 0
+     },
+     {
+      "id": "eeee5555",
+      "label": "ЖЖЖЖЖЖЖЖЖЖЖЖЖЖЖЖЖЖЖЖЖЖЖЖЖЖЖЖЖЖЖЖЖЖЖЖЖЖЖЖ",
+      "address": null,
+      "queue": "1.2",
+      "queueSource": "MANUAL",
+      "queueStatusText": null,
+      "plannedAlerts": false,
+      "emergencyAlerts": true,
+      "createdAtMs": 0
+     },
+     {
+      "id": "ffff6666",
+      "label": "",
+      "address": null,
+      "queue": "3.1",
+      "queueSource": "MANUAL",
+      "queueStatusText": null,
+      "plannedAlerts": true,
+      "emergencyAlerts": true,
+      "createdAtMs": 0
+     },
+     {
+      "id": "gggg7777",
+      "label": "",
+      "address": null,
+      "queue": "4.1",
+      "queueSource": "MANUAL",
+      "queueStatusText": null,
+      "plannedAlerts": true,
+      "emergencyAlerts": true,
+      "createdAtMs": 0
+     }
+    ]
+   },
+   "expectDropped": [
+    {
+     "id": "Bad Id!",
+     "reason": "invalid_id"
+    },
+    {
+     "id": "bbbb2222",
+     "reason": "empty"
+    },
+    {
+     "id": "aaaa1111",
+     "reason": "duplicate_id"
+    },
+    {
+     "id": "cccc3333",
+     "reason": "duplicate_address"
+    },
+    {
+     "id": "hhhh8888",
+     "reason": "over_limit"
+    }
+   ]
+  },
+  {
+   "name": "items that is not an array",
+   "input": {
+    "schemaVersion": 1,
+    "primaryId": "abcd1234",
+    "items": "nope"
+   },
+   "expect": {
+    "schemaVersion": 1,
+    "primaryId": null,
+    "items": []
+   },
+   "expectDropped": []
+  },
+  {
+   "name": "non-object entries are skipped, missing primary becomes the first item",
+   "input": {
+    "schemaVersion": 1,
+    "items": [
+     42,
+     null,
+     "x",
+     {
+      "id": "abcd1234",
+      "queue": "6.2"
+     }
+    ]
+   },
+   "expect": {
+    "schemaVersion": 1,
+    "primaryId": "abcd1234",
+    "items": [
+     {
+      "id": "abcd1234",
+      "label": "",
+      "address": null,
+      "queue": "6.2",
+      "queueSource": "MANUAL",
+      "queueStatusText": null,
+      "plannedAlerts": true,
+      "emergencyAlerts": true,
+      "createdAtMs": 0
+     }
+    ]
+   },
+   "expectDropped": []
+  },
+  {
+   "name": "another schema version reads as absent",
+   "input": {
+    "schemaVersion": 2,
+    "primaryId": null,
+    "items": []
+   },
+   "expectAbsent": true
+  },
+  {
+   "name": "missing schema version reads as absent",
+   "input": {
+    "primaryId": null,
+    "items": []
+   },
+   "expectAbsent": true
+  }
+ ],
+ "ops": [
+  {
+   "name": "add, duplicates, limit, primary hand-over, switches, rename",
+   "start": {
+    "schemaVersion": 1,
+    "primaryId": null,
+    "items": []
+   },
+   "steps": [
+    {
+     "op": "add",
+     "item": {
+      "id": "aaaa0001",
+      "queue": "5.2",
+      "createdAtMs": 1
+     },
+     "expectError": null,
+     "expectPrimary": "aaaa0001"
+    },
+    {
+     "op": "add",
+     "item": {
+      "id": "aaaa0002",
+      "address": {
+       "remSlug": "zhytomyr",
+       "settlementId": "16657",
+       "streetId": "st_123",
+       "streetName": "вул. Київська",
+       "house": "77",
+       "text": "Житомирський РЕМ, м. Житомир, вул. Київська, буд. 77"
+      },
+      "queue": "5.2",
+      "queueSource": "LOOKUP",
+      "createdAtMs": 2
+     },
+     "expectError": null,
+     "expectPrimary": "aaaa0001"
+    },
+    {
+     "op": "add",
+     "item": {
+      "id": "aaaa0003",
+      "address": {
+       "remSlug": "zhytomyr",
+       "settlementId": "16657",
+       "streetId": "st_777",
+       "streetName": "вулиця Київська",
+       "house": "77",
+       "text": ""
+      },
+      "queue": "5.2",
+      "createdAtMs": 3
+     },
+     "expectError": "duplicate",
+     "expectExistingId": "aaaa0002"
+    },
+    {
+     "op": "add",
+     "item": {
+      "id": "aaaa0001",
+      "queue": "1.1",
+      "createdAtMs": 3
+     },
+     "expectError": "duplicate_id"
+    },
+    {
+     "op": "add",
+     "item": {
+      "id": "aaaa0004",
+      "queue": "1.1",
+      "createdAtMs": 4
+     },
+     "expectError": null
+    },
+    {
+     "op": "add",
+     "item": {
+      "id": "aaaa0005",
+      "queue": "1.2",
+      "createdAtMs": 5
+     },
+     "expectError": null
+    },
+    {
+     "op": "add",
+     "item": {
+      "id": "aaaa0006",
+      "queue": "2.1",
+      "createdAtMs": 6
+     },
+     "expectError": null
+    },
+    {
+     "op": "add",
+     "item": {
+      "id": "aaaa0007",
+      "queue": "2.2",
+      "createdAtMs": 7
+     },
+     "expectError": "limit_reached"
+    },
+    {
+     "op": "add",
+     "item": {
+      "id": "aaaa0009",
+      "queue": "2.1",
+      "createdAtMs": 9
+     },
+     "expectError": "duplicate",
+     "expectExistingId": "aaaa0006"
+    },
+    {
+     "op": "add",
+     "item": {
+      "id": "aaaa0010",
+      "createdAtMs": 10
+     },
+     "expectError": "invalid"
+    },
+    {
+     "op": "setPrimary",
+     "id": "aaaa0002",
+     "expectError": null,
+     "expectPrimary": "aaaa0002"
+    },
+    {
+     "op": "remove",
+     "id": "aaaa0002",
+     "expectError": null,
+     "expectPrimary": "aaaa0001"
+    },
+    {
+     "op": "setPlanned",
+     "id": "aaaa0004",
+     "on": false,
+     "expectError": null
+    },
+    {
+     "op": "setEmergency",
+     "id": "aaaa0004",
+     "on": false,
+     "expectError": null
+    },
+    {
+     "op": "rename",
+     "id": "aaaa0005",
+     "label": "  Дача  ",
+     "expectError": null
+    },
+    {
+     "op": "rename",
+     "id": "aaaa0006",
+     "label": "   ",
+     "expectError": null
+    },
+    {
+     "op": "remove",
+     "id": "nope0000",
+     "expectError": "not_found"
+    },
+    {
+     "op": "setPrimary",
+     "id": "nope0000",
+     "expectError": "not_found"
+    },
+    {
+     "op": "setPlanned",
+     "id": "nope0000",
+     "on": true,
+     "expectError": "not_found"
+    },
+    {
+     "op": "rename",
+     "id": "nope0000",
+     "label": "x",
+     "expectError": "not_found"
+    },
+    {
+     "op": "add",
+     "item": {
+      "id": "Bad!",
+      "queue": "3.2"
+     },
+     "expectError": "invalid"
+    }
+   ],
+   "expect": {
+    "schemaVersion": 1,
+    "primaryId": "aaaa0001",
+    "items": [
+     {
+      "id": "aaaa0001",
+      "label": "",
+      "address": null,
+      "queue": "5.2",
+      "queueSource": "MANUAL",
+      "queueStatusText": null,
+      "plannedAlerts": true,
+      "emergencyAlerts": true,
+      "createdAtMs": 1
+     },
+     {
+      "id": "aaaa0004",
+      "label": "",
+      "address": null,
+      "queue": "1.1",
+      "queueSource": "MANUAL",
+      "queueStatusText": null,
+      "plannedAlerts": false,
+      "emergencyAlerts": false,
+      "createdAtMs": 4
+     },
+     {
+      "id": "aaaa0005",
+      "label": "Дача",
+      "address": null,
+      "queue": "1.2",
+      "queueSource": "MANUAL",
+      "queueStatusText": null,
+      "plannedAlerts": true,
+      "emergencyAlerts": true,
+      "createdAtMs": 5
+     },
+     {
+      "id": "aaaa0006",
+      "label": "",
+      "address": null,
+      "queue": "2.1",
+      "queueSource": "MANUAL",
+      "queueStatusText": null,
+      "plannedAlerts": true,
+      "emergencyAlerts": true,
+      "createdAtMs": 6
+     }
+    ]
+   },
+   "expectDisplayLabels": {
+    "aaaa0001": "Черга 5.2",
+    "aaaa0005": "Дача",
+    "aaaa0006": "Черга 2.1"
+   }
+  },
+  {
+   "name": "removing the primary hands it to the oldest item, list order on ties",
+   "start": {
+    "schemaVersion": 1,
+    "primaryId": "bbbb0002",
+    "items": [
+     {
+      "id": "bbbb0001",
+      "label": "",
+      "address": null,
+      "queue": "1.1",
+      "queueSource": "MANUAL",
+      "queueStatusText": null,
+      "plannedAlerts": true,
+      "emergencyAlerts": true,
+      "createdAtMs": 50
+     },
+     {
+      "id": "bbbb0002",
+      "label": "",
+      "address": null,
+      "queue": "1.2",
+      "queueSource": "MANUAL",
+      "queueStatusText": null,
+      "plannedAlerts": true,
+      "emergencyAlerts": true,
+      "createdAtMs": 10
+     },
+     {
+      "id": "bbbb0003",
+      "label": "",
+      "address": null,
+      "queue": "2.1",
+      "queueSource": "MANUAL",
+      "queueStatusText": null,
+      "plannedAlerts": true,
+      "emergencyAlerts": true,
+      "createdAtMs": 20
+     },
+     {
+      "id": "bbbb0004",
+      "label": "",
+      "address": null,
+      "queue": "2.2",
+      "queueSource": "MANUAL",
+      "queueStatusText": null,
+      "plannedAlerts": true,
+      "emergencyAlerts": true,
+      "createdAtMs": 20
+     }
+    ]
+   },
+   "steps": [
+    {
+     "op": "remove",
+     "id": "bbbb0002",
+     "expectError": null,
+     "expectPrimary": "bbbb0003"
+    },
+    {
+     "op": "remove",
+     "id": "bbbb0003",
+     "expectError": null,
+     "expectPrimary": "bbbb0004"
+    },
+    {
+     "op": "remove",
+     "id": "bbbb0001",
+     "expectError": null,
+     "expectPrimary": "bbbb0004"
+    },
+    {
+     "op": "remove",
+     "id": "bbbb0004",
+     "expectError": null,
+     "expectPrimary": null
+    }
+   ],
+   "expect": {
+    "schemaVersion": 1,
+    "primaryId": null,
+    "items": []
+   }
+  }
+ ],
+ "effective": {
+  "items": [
+   {
+    "master": true,
+    "planned": true,
+    "emergency": true,
+    "queue": "5.2",
+    "address": true,
+    "poweronIdsKnown": true,
+    "expectPlanned": true,
+    "expectEmergency": true
+   },
+   {
+    "master": false,
+    "planned": true,
+    "emergency": true,
+    "queue": "5.2",
+    "address": true,
+    "poweronIdsKnown": true,
+    "expectPlanned": false,
+    "expectEmergency": false
+   },
+   {
+    "master": true,
+    "planned": false,
+    "emergency": true,
+    "queue": "5.2",
+    "address": true,
+    "poweronIdsKnown": true,
+    "expectPlanned": false,
+    "expectEmergency": true
+   },
+   {
+    "master": true,
+    "planned": true,
+    "emergency": false,
+    "queue": "5.2",
+    "address": true,
+    "poweronIdsKnown": true,
+    "expectPlanned": true,
+    "expectEmergency": false
+   },
+   {
+    "master": true,
+    "planned": true,
+    "emergency": true,
+    "queue": null,
+    "address": true,
+    "poweronIdsKnown": true,
+    "expectPlanned": false,
+    "expectEmergency": true
+   },
+   {
+    "master": true,
+    "planned": true,
+    "emergency": true,
+    "queue": "3.1",
+    "address": false,
+    "poweronIdsKnown": true,
+    "expectPlanned": true,
+    "expectEmergency": false
+   },
+   {
+    "master": true,
+    "planned": true,
+    "emergency": true,
+    "queue": "5.2",
+    "address": true,
+    "poweronIdsKnown": false,
+    "expectPlanned": true,
+    "expectEmergency": false
+   }
+  ],
+  "anyAlertsEnabled": [
+   {
+    "master": true,
+    "switches": [
+     [
+      false,
+      false
+     ],
+     [
+      true,
+      false
+     ]
+    ],
+    "expect": true
+   },
+   {
+    "master": true,
+    "switches": [
+     [
+      false,
+      false
+     ],
+     [
+      false,
+      true
+     ]
+    ],
+    "expect": true
+   },
+   {
+    "master": true,
+    "switches": [
+     [
+      false,
+      false
+     ],
+     [
+      false,
+      false
+     ]
+    ],
+    "expect": false
+   },
+   {
+    "master": false,
+    "switches": [
+     [
+      true,
+      true
+     ]
+    ],
+    "expect": false
+   },
+   {
+    "master": true,
+    "switches": [],
+    "expect": false
+   }
+  ]
+ }
+}

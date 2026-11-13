@@ -19,6 +19,20 @@ import {
   type PowerOnTarget,
 } from '../src/services/poweronClient';
 import { createMemoryStorage } from '../src/services/storage';
+import {
+  KEY_STORE as SUB_KEY_STORE,
+  SubscriptionRepository,
+  decode as subDecode,
+  encode as subEncode,
+  randomId as subRandomId,
+} from '../src/services/subscriptionStore';
+import {
+  add as subAdd,
+  makeSubscription,
+  type LegacySettings,
+  type SubscriptionAddress,
+  type SubscriptionStore,
+} from '../src/core/subscriptions';
 import { ScheduleCache } from '../src/services/scheduleCache';
 import { OutageStateStore } from '../src/services/outageStore';
 import { OutageRepository, type AddressResolver } from '../src/services/outageRepository';
@@ -853,6 +867,111 @@ test('legacy: applyEmergencyOutageToSchedule and calculateOutageCountdown are en
 test('core: fromInstant gives the Kyiv wall clock', () => {
   assert.equal(formatLocalDateTime(fromInstant(Date.parse('2026-11-12T21:57:00Z'))), '2026-11-12T23:57');
   assert.equal(formatLocalDateTime(fromInstant(Date.parse('2026-07-01T21:30:00Z'))), '2026-07-02T00:30'); // summer time, UTC+3
+});
+
+// -------------------------------------------------------------------------------------------------
+// Subscription store (mirrors SubscriptionRepositoryTest.kt)
+// -------------------------------------------------------------------------------------------------
+
+const SUB_ADDRESS: SubscriptionAddress = {
+  remSlug: 'zhytomyr',
+  settlementId: '16657',
+  streetId: 'st_123',
+  streetName: 'вул. Київська',
+  house: '77',
+  text: 'Житомирський РЕМ, м. Житомир, вул. Київська, буд. 77',
+};
+
+const subLegacy = (notif = true, emerg = true): LegacySettings => ({
+  queue: '5.2',
+  customQueueStatusText: null,
+  selectedAddress: SUB_ADDRESS.text,
+  remSlug: 'zhytomyr',
+  settlementId: '16657',
+  streetId: 'st_123',
+  streetName: 'вул. Київська',
+  house: '77',
+  notificationsEnabled: notif,
+  emergencyNotificationsEnabled: emerg,
+});
+
+const subIds = (...ids: string[]) => {
+  let i = 0;
+  return () => ids[i++];
+};
+
+test('subscriptions: absent store migrates once and writes both keys', () => {
+  const storage = createMemoryStorage();
+  const repo = new SubscriptionRepository(storage, () => 1000, subIds('k3f9x2qd', 'zzzzzzzz'));
+  assert.equal(repo.read(), null);
+  let legacyCalls = 0;
+  const store = repo.ensureMigrated(() => {
+    legacyCalls++;
+    return subLegacy(false, false);
+  });
+  assert.equal(store.primaryId, 'k3f9x2qd');
+  assert.equal(store.items.length, 1);
+  assert.equal(repo.alertsMaster(), false);
+  assert.notEqual(storage.getItem(SUB_KEY_STORE), null);
+  const again = repo.ensureMigrated(() => {
+    legacyCalls++;
+    return subLegacy();
+  });
+  assert.deepStrictEqual(again, store);
+  assert.equal(legacyCalls, 1);
+  assert.equal(repo.alertsMaster(), false);
+});
+
+test('subscriptions: unreadable or other-version text migrates again', () => {
+  for (const text of ['not json', '{"schemaVersion":2,"items":[]}', '[]', '']) {
+    const storage = createMemoryStorage();
+    storage.setItem(SUB_KEY_STORE, text);
+    const repo = new SubscriptionRepository(storage, () => 1, subIds('abcd1234'));
+    assert.equal(repo.read(), null, text);
+    assert.equal(repo.ensureMigrated(() => subLegacy()).primaryId, 'abcd1234', text);
+  }
+});
+
+test('subscriptions: encode/decode round trip keeps nulls', () => {
+  const store: SubscriptionStore = {
+    primaryId: 'aaaa0001',
+    items: [
+      makeSubscription('aaaa0001', {
+        address: SUB_ADDRESS,
+        queueSource: 'LOOKUP',
+        queueStatusText: 'Не підлягає відключенням',
+        createdAtMs: 1794500000000,
+      }),
+      makeSubscription('aaaa0002', { label: 'Дача', queue: '3.1', plannedAlerts: false }),
+    ],
+  };
+  const text = subEncode(store);
+  const json = JSON.parse(text);
+  assert.ok('queue' in json.items[0] && json.items[0].queue === null, 'null fields are written explicitly');
+  assert.equal(json.items[1].address, null);
+  assert.deepStrictEqual(subDecode(text), store);
+});
+
+test('subscriptions: mutate writes only on success', () => {
+  const storage = createMemoryStorage();
+  const repo = new SubscriptionRepository(storage, Date.now, subIds('q1q1q1q1'));
+  repo.ensureMigrated(() => subLegacy());
+  const before = storage.getItem(SUB_KEY_STORE);
+  const dup = repo.mutate((s) =>
+    subAdd(s, makeSubscription('bbbb0001', { address: { ...SUB_ADDRESS, streetName: 'вулиця Київська' }, queue: '5.2' })),
+  );
+  assert.deepStrictEqual(dup, { ok: false, code: 'duplicate', existingId: 'q1q1q1q1' });
+  assert.equal(storage.getItem(SUB_KEY_STORE), before);
+  const ok = repo.mutate((s) => subAdd(s, makeSubscription('bbbb0002', { queue: '1.1' })));
+  assert.equal(ok.ok, true);
+  assert.deepStrictEqual(repo.store().items.map((s) => s.id), ['q1q1q1q1', 'bbbb0002']);
+});
+
+test('subscriptions: newItemId skips ids in use and randomId has the id shape', () => {
+  const repo = new SubscriptionRepository(createMemoryStorage(), Date.now, subIds('aaaa0001', 'aaaa0001', 'BAD!', 'aaaa0002'));
+  repo.ensureMigrated(() => subLegacy());
+  assert.equal(repo.newItemId(), 'aaaa0002');
+  for (let i = 0; i < 50; i++) assert.match(subRandomId(), /^[a-z0-9]{8}$/);
 });
 
 // -------------------------------------------------------------------------------------------------

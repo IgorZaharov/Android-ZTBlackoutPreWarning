@@ -1,5 +1,10 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+- **Multi-address store, step 1 (not active yet)** (`core/Subscriptions.kt`, `src/core/subscriptions.ts`, `SubscriptionRepository.kt`, `subscriptionStore.ts`, `spec/SUBSCRIPTIONS.md`, `spec/vectors/subscriptions.json`): the model for up to 5 addresses, each with its own "Планові" / "Аварійні" switches, plus a master switch for both. Includes repair rules, add / remove / primary / rename operations, labels ("Київська 77", "Черга 5.2") and the one-time migration from the 1.4.0 single-address settings. Nothing reads the store at runtime yet; the Settings UI comes next. Golden vectors run on both Kotlin and TypeScript. `StreetKey.isTypeWord` is new in `core/AddressKeys.kt` and `addressKeys.ts`.
+
 ## [1.4.0] - 2026-11-13
 
 ### Added

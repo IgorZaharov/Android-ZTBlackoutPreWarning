@@ -22,6 +22,8 @@ Design rule: **toggles control notifications only, never what is shown.** A swit
 
 ## 2. Data model
 
+> **Implemented differently in step 1** (`spec/SUBSCRIPTIONS.md`, 2026-11-13): the address keeps what 1.4.0 really stores (`remSlug`, one canonical `streetId` plus its `streetName`, `house`, `text`); merged street ids resolve through the lookup, PowerOn ids stay in the outage state store (`ids_<address key>`), and `label` is empty for "automatic". The block below is the original draft.
+
 ```kotlin
 // pure model, lives in core/ (no Android types); mirrored in src/core and Swift Core/
 data class AddressRef(
@@ -253,7 +255,7 @@ When the store is absent on first run of the release that ships the feature:
 2. Address complete (all four ids) -> create **subscription #1** from it (`queueSource = LOOKUP`, `poweronStreetIds` empty until `PowerOnIdResolver` runs in the background). Only `queue` -> queue-only subscription labelled "Черга 5.2". Nothing -> empty store (queue-unselected state, as today).
 3. `plannedAlerts = notifications_enabled`, `emergencyAlerts = emergency_notifications_enabled`, `alertsMaster = notifications_enabled || emergency_notifications_enabled` (this is exactly today's `anyAlertsEnabled`, so behaviour is unchanged). Both legacy toggles off -> `alertsMaster = false` and both per-address toggles stay **off**, as the user left them (decision 8). Turning the master back on then shows the "no address has alerts" caption from section 8 instead of silently doing nothing.
 4. Sound, vibration, advance minutes, refresh interval: untouched.
-5. Subscription #1's id **must equal the fixed address id that 1.4.0 already uses** for the implicit single address in every alert key, ledger folder and registry entry (proposed constant `addr_default`). Otherwise the first run would see "new" alert keys and repeat alerts.
+5. ~~Subscription #1's id must equal a fixed address id (`addr_default`).~~ **Corrected in step 1:** 1.4.0 has no such id. Ledger, repairs, PowerOn ids and emergency alert keys are keyed by the address key `settlementId|StreetKey|HouseKey`, which the migrated item reproduces exactly, so they need no re-keying. Planned alert keys in 1.4.0 are `planned_<start>` without an address; the fan-out step must read those as belonging to the migrated item so no alert repeats.
 6. Cancel legacy alarms once (they carry `hashCode()` request codes from the old scheme), then re-plan through the registry.
 7. Keep writing the two legacy booleans from the primary for one release (rollback safety), then remove.
 

@@ -12,6 +12,7 @@ machine: every platform runs the same golden cases in `vectors/` and fails when 
 | [NOTIFICATIONS.md](NOTIFICATIONS.md) | Planned and emergency alert events, keys, channels, gating |
 | [UI_DRUM.md](UI_DRUM.md) | Drum chart cell states, emergency stripes, widget bitmap |
 | [PERSISTENCE.md](PERSISTENCE.md) | Field names, types and defaults every platform stores |
+| [SUBSCRIPTIONS.md](SUBSCRIPTIONS.md) | Multi-address store (step 1): model, repair, operations, migration from single-address settings |
 | [config.json](config.json) | Shared constants (grace, TTLs, timeouts, defaults) |
 | [rems.json](rems.json) | The 19 REMs with ztoe `rem_id` and PowerOn `otg.id` (two different id spaces) |
 | [design-tokens.json](design-tokens.json) | Colours, radii, type roles |

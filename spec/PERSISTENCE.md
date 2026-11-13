@@ -27,6 +27,10 @@ older iOS documents list different names (`refreshMinutes`, `advanceMinutes`) an
 | `theme_mode` | string | `SYSTEM` | persisted, no UI in 1.4.0 |
 | `language` | string | `SYSTEM` | `SYSTEM`, `UK`, `EN` |
 
+Reserved for multi-address (`SUBSCRIPTIONS.md`, not read at runtime yet): `zt_subscriptions_v1` (string,
+JSON store) and `alerts_master_enabled` (bool, kill switch for planned and emergency alerts). Both are
+written only by the one-time migration and the store operations.
+
 Retired in 1.4.0 (read but ignored, never written back with data): `active_emergency_outage_*`.
 The emergency state now lives in the outage state store below.
 

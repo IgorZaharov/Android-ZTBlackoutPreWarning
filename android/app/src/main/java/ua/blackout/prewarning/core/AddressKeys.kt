@@ -68,6 +68,9 @@ object StreetKey {
         "майдан" to "майдан", "м-н" to "майдан"
     )
 
+    /** True for a street-type word of the table above (`вул.`, `Провулок`, `б-р` …), compared lower-case without trailing dots. */
+    fun isTypeWord(token: String): Boolean = TYPES.containsKey(token.lowercase().trimEnd('.'))
+
     /** Stable comparison key. See `spec/ADDRESS_KEY.md` for the step list. */
     fun of(raw: String): String {
         var s = TextNorm.decodeEntities(raw).lowercase()

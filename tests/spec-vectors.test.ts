@@ -22,6 +22,7 @@ import { EmergencyFetch, eventKey, reconcile, type LedgerEntry } from '../src/co
 import { PowerOnMapper, type PowerOnRow } from '../src/core/poweronMapper';
 import { FETCH_FAILURES, SITE_STATES, SiteStateResolver, type FetchFailure, type SiteState } from '../src/core/siteState';
 import { extractSiteNotice } from '../src/core/siteNotice';
+import * as Sub from '../src/core/subscriptions';
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Json = any;
@@ -355,6 +356,123 @@ function siteNoticeVectors(): number {
 }
 
 // -------------------------------------------------------------------------------------------------
+// subscriptions.json (same comparisons as SubscriptionVectorsTest.kt)
+// -------------------------------------------------------------------------------------------------
+
+function subscriptionVectors(): number {
+  const v = load('subscriptions.json');
+  let n = 0;
+  const storeOf = (o: Json): Sub.SubscriptionStore => Sub.repair(Sub.fromMap(o)!).store;
+
+  for (const c of v.labels.defaultLabel) {
+    const item =
+      c.house === null
+        ? Sub.makeSubscription('test0000', { queue: c.queue })
+        : Sub.makeSubscription('test0000', {
+            address: { remSlug: 'zhytomyr', settlementId: '16657', streetId: 'st_1', streetName: c.streetName ?? '', house: c.house, text: '' },
+            queue: '1.1',
+          });
+    assert.equal(Sub.defaultLabel(item), c.expect, JSON.stringify(c));
+    n++;
+  }
+  for (const c of v.labels.cleanLabel) {
+    assert.equal(Sub.cleanLabel(c.raw), c.expect, JSON.stringify(c));
+    n++;
+  }
+
+  for (const c of v.migrate) {
+    const l = c.legacy;
+    const r = Sub.migrate(
+      {
+        queue: l.queue,
+        customQueueStatusText: optStr(l, 'customQueueStatusText'),
+        selectedAddress: optStr(l, 'selectedAddress'),
+        remSlug: l.remSlug,
+        settlementId: l.settlementId,
+        streetId: l.streetId,
+        streetName: optStr(l, 'streetName'),
+        house: l.house,
+        notificationsEnabled: l.notificationsEnabled,
+        emergencyNotificationsEnabled: l.emergencyNotificationsEnabled,
+      },
+      c.id,
+      c.nowMs,
+    );
+    assert.equal(r.alertsMaster, c.expectMaster, c.name);
+    assert.deepStrictEqual(Sub.toMap(r.store), c.expect, c.name);
+    assert.deepStrictEqual(Sub.repair(r.store).store, r.store, `${c.name}: migration output is already repaired`);
+    if (has(c, 'expectDisplayLabel')) assert.equal(Sub.displayLabel(r.store.items[0]), c.expectDisplayLabel, c.name);
+    if (has(c, 'expectAddressKey')) assert.equal(Sub.addressKey(r.store.items[0].address!), c.expectAddressKey, c.name);
+    n++;
+  }
+
+  for (const c of v.repair) {
+    const parsed = Sub.fromMap(c.input);
+    if (c.expectAbsent) {
+      assert.equal(parsed, null, c.name);
+    } else {
+      const r = Sub.repair(parsed!);
+      assert.deepStrictEqual(Sub.toMap(r.store), c.expect, c.name);
+      assert.deepStrictEqual(r.dropped, c.expectDropped, c.name);
+    }
+    n++;
+  }
+
+  for (const c of v.ops) {
+    let store = storeOf(c.start);
+    c.steps.forEach((s: Json, i: number) => {
+      const label = `${c.name}, step ${i} ${s.op}`;
+      let result: Sub.StoreResult;
+      switch (s.op) {
+        case 'add': result = Sub.add(store, Sub.itemFromMap(s.item)); break;
+        case 'remove': result = Sub.remove(store, s.id); break;
+        case 'setPrimary': result = Sub.setPrimary(store, s.id); break;
+        case 'setPlanned': result = Sub.setPlanned(store, s.id, s.on); break;
+        case 'setEmergency': result = Sub.setEmergency(store, s.id, s.on); break;
+        case 'rename': result = Sub.rename(store, s.id, s.label); break;
+        default: throw new Error(`unknown op in ${label}`);
+      }
+      const expectError = optStr(s, 'expectError');
+      if (result.ok) {
+        assert.equal(null, expectError, `${label}: expected error ${expectError}`);
+        store = result.store;
+      } else {
+        assert.equal(result.code, expectError, label);
+        assert.equal(result.existingId, optStr(s, 'expectExistingId'), label);
+      }
+      if (has(s, 'expectPrimary')) assert.equal(store.primaryId, optStr(s, 'expectPrimary'), label);
+      n++;
+    });
+    assert.deepStrictEqual(Sub.toMap(store), c.expect, c.name);
+    for (const [id, text] of Object.entries((c.expectDisplayLabels ?? {}) as Record<string, string>)) {
+      assert.equal(Sub.displayLabel(store.items.find((s) => s.id === id)!), text, `${c.name}: ${id}`);
+    }
+  }
+
+  for (const c of v.effective.items) {
+    const item = Sub.makeSubscription('test0000', {
+      address: c.address
+        ? { remSlug: 'zhytomyr', settlementId: '16657', streetId: 'st_1', streetName: 'вул. Лісова', house: '1', text: '' }
+        : null,
+      queue: c.queue,
+      plannedAlerts: c.planned,
+      emergencyAlerts: c.emergency,
+    });
+    assert.equal(Sub.plannedActive(c.master, item), c.expectPlanned, JSON.stringify(c));
+    assert.equal(Sub.emergencyActive(c.master, item, c.poweronIdsKnown), c.expectEmergency, JSON.stringify(c));
+    n++;
+  }
+  for (const c of v.effective.anyAlertsEnabled) {
+    const items = (c.switches as [boolean, boolean][]).map(([p, e], i) =>
+      Sub.makeSubscription(`item000${i}`, { queue: '1.1', plannedAlerts: p, emergencyAlerts: e }),
+    );
+    assert.equal(Sub.anyAlertsEnabled(c.master, { primaryId: items[0]?.id ?? null, items }), c.expect, JSON.stringify(c));
+    n++;
+  }
+  return n;
+}
+
+// -------------------------------------------------------------------------------------------------
 // Purity gate: src/core must stay platform-neutral
 // -------------------------------------------------------------------------------------------------
 
@@ -400,6 +518,7 @@ const suites: [string, () => number][] = [
   ['poweron_api.json', powerOnVectors],
   ['site_state.json', siteStateVectors],
   ['site_notice.json', siteNoticeVectors],
+  ['subscriptions.json', subscriptionVectors],
   ['src/core purity gate', coreSourceGate],
 ];
 
