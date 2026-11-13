@@ -2495,13 +2495,21 @@ open class BlackoutGlanceWidget(private val forceBigLayout: Boolean = false) : G
 class BlackoutBigGlanceWidget : BlackoutGlanceWidget(forceBigLayout = true)
 
 /**
- * Third widget (4x1): only the 24-hour drum chart with the current-time needle. No text, buttons or
- * switches; a tap opens the app. It draws from the same snapshot as the other two widgets, so the 48
- * half-hour states (including the emergency stripes) are identical.
+ * Third widget (4x1): the 24-hour drum chart with the current-time needle, no buttons or switches; a tap
+ * opens the app. It draws from the same snapshot as the other two widgets, so the 48 half-hour states
+ * (including the emergency stripes) are identical. When the launcher cell is at least [INFO_MIN_HEIGHT]
+ * tall (a usual portrait row is about 100 dp) one line with the queue, status and countdown sits above it.
  */
 class BlackoutStripGlanceWidget : GlanceAppWidget() {
 
     override val stateDefinition: GlanceStateDefinition<*> = PreferencesGlanceStateDefinition
+
+    override val sizeMode = SizeMode.Responsive(
+        setOf(
+            DpSize(250.dp, 40.dp),              // drum only
+            DpSize(250.dp, INFO_MIN_HEIGHT)     // info line + drum
+        )
+    )
 
     override suspend fun provideGlance(context: Context, id: GlanceId) {
         val appContext = context.applicationContext
@@ -2518,22 +2526,72 @@ class BlackoutStripGlanceWidget : GlanceAppWidget() {
             val chartBitmap = BlackoutGlanceWidget.renderAnalogCounterBitmap(
                 model.slots, model.nowHour, model.nowMinute, model.lang
             )
+            val statusText = when {
+                model.isUnclear -> AppStrings.powerUnclear(model.lang)
+                model.isOffNow -> "СВІТЛА НЕМАЄ"
+                else -> "СВІТЛО Є"
+            }
+            val statusColor = when {
+                model.isUnclear -> Color(0xFF9CA3AF)
+                model.isOffNow -> Color(0xFFFF5E3A)
+                else -> Color(0xFF34D399)
+            }
             val description = if (model.isUnclear) {
                 AppStrings.outagesUnclear(model.lang)
             } else {
                 "\${model.queueHeader}. \${if (model.isOffNow) "СВІТЛА НЕМАЄ" else "СВІТЛО Є"}"
             }
+            val showInfo = LocalSize.current.height >= INFO_MIN_HEIGHT
 
             GlanceTheme {
-                Box(
+                Column(
                     modifier = GlanceModifier
                         .fillMaxSize()
                         .cornerRadius(20.dp)
                         .background(ColorProvider(Color(0xCC141A29)))
                         .padding(6.dp)
                         .clickable(actionStartActivity<MainActivity>()),
-                    contentAlignment = Alignment.Center
+                    verticalAlignment = Alignment.Vertical.CenterVertically
                 ) {
+                    if (showInfo) {
+                        Row(
+                            modifier = GlanceModifier.fillMaxWidth().padding(horizontal = 6.dp),
+                            verticalAlignment = Alignment.Vertical.CenterVertically
+                        ) {
+                            Text(
+                                text = model.queueHeader,
+                                style = TextStyle(
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 12.sp,
+                                    color = ColorProvider(Color.White)
+                                ),
+                                maxLines = 1
+                            )
+                            Spacer(modifier = GlanceModifier.width(6.dp))
+                            Text(
+                                text = statusText,
+                                style = TextStyle(
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 10.sp,
+                                    color = ColorProvider(statusColor)
+                                ),
+                                maxLines = 1,
+                                modifier = GlanceModifier.defaultWeight()
+                            )
+                            if (!model.isUnclear) {
+                                Text(
+                                    text = model.countdown,
+                                    style = TextStyle(
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 12.sp,
+                                        color = ColorProvider(Color.White)
+                                    ),
+                                    maxLines = 1
+                                )
+                            }
+                        }
+                        Spacer(modifier = GlanceModifier.height(4.dp))
+                    }
                     Image(
                         provider = ImageProvider(chartBitmap),
                         contentDescription = description,
@@ -2550,6 +2608,8 @@ class BlackoutStripGlanceWidget : GlanceAppWidget() {
     private companion object {
         /** Drum height of the big widget, so both widgets show the drum at the same size. */
         val DRUM_HEIGHT = 52.dp
+        /** Smallest widget height with room for the info line: 52 drum + 12 padding + 4 gap + 16 line. */
+        val INFO_MIN_HEIGHT = 84.dp
     }
 }
 

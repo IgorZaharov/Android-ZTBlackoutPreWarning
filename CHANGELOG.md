@@ -3,6 +3,7 @@
 ## [Unreleased]
 
 ### Changed
+- **4x1 «Графік» widget: info line and simulator width** (`BlackoutGlanceWidget.kt`, `WidgetSimulator.tsx`): when the launcher cell is at least 84 dp tall (a usual portrait row is about 100 dp), one line with the queue, status and countdown sits above the drum; lower cells keep the drum only. In the web simulator the 4x1 card now has the same width as the big widget (both are 4 cells).
 - **Address switcher on the main screen (multi-address step 4)** (`MainScreen.kt`, `BlackoutAppNavigation.kt`, `MainActivity.kt`, `MainView.tsx`, `PhoneSimulator.tsx`, `App.tsx`, `OutageRepository.kt`, `OutageStateStore.kt`, `outageRepository.ts`, `outageStore.ts`, `NotificationHelper.kt`, `AlarmReceiver.kt`, `alertManager.ts`, `types.ts`, `spec/SUBSCRIPTIONS.md` section 9): with two or more addresses a row of chips (the primary with a star) sits under the global banners. Choosing one shows its queue, address, emergency banner, countdown, drum and rows, and the day tab goes back to Today. The choice lasts for the session; a cold start shows the primary (owner decision 5). With one address the main screen is unchanged.
   - The shown address is polled on PowerOn whatever its switches (they only gate notifications) and has its own PowerOn status. Widgets still show the primary (step 5).
   - Tapping an alert opens the main screen with its address: a merged planned alert opens its first address, an emergency the address it is for.

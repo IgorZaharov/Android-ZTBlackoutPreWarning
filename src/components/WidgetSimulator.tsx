@@ -207,7 +207,7 @@ export const WidgetSimulator: React.FC<WidgetSimulatorProps> = ({
   );
 
   const big = (
-    <div key="big" data-testid="widget-big" className="flex flex-col gap-1.5">
+    <div key="big" data-testid="widget-big" className="flex w-full max-w-[360px] flex-col gap-1.5">
       <div className="text-center text-xs font-semibold text-sky-200/80">{t.widgetBigName}</div>
       <div
         role="button"
@@ -268,18 +268,32 @@ export const WidgetSimulator: React.FC<WidgetSimulatorProps> = ({
     </div>
   );
 
-  // Third widget (4x1): only the drum chart with the black needle. No text, buttons or switches; a tap opens the app.
+  // Third widget (4x1): the drum chart with the black needle, no buttons or switches; a tap opens the app.
+  // Same width as the big widget (both are 4 cells). When the launcher cell is tall enough (Android: 84 dp,
+  // a usual portrait row is about 100 dp) one line with the queue, status and countdown sits above the drum;
+  // the simulator shows that usual case.
   const strip = (
-    <div key="strip" data-testid="widget-strip" className="flex flex-col gap-1.5">
+    <div key="strip" data-testid="widget-strip" className="flex w-full max-w-[360px] flex-col gap-1.5">
       <div className="text-center text-xs font-semibold text-sky-200/80">{t.widgetStripName}</div>
       <div
         role="button"
         tabIndex={0}
         onClick={onOpenApp}
         onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && onOpenApp()}
-        aria-label={stripDescription}
-        className="flex w-full max-w-[360px] cursor-pointer items-center rounded-[20px] border border-white/25 bg-[#141A29]/80 p-1.5 shadow-[0_12px_40px_rgba(0,0,0,0.5)] backdrop-blur-2xl transition-colors hover:border-white/40"
+        aria-label={model.isUnclear ? stripDescription : `${stripDescription}. ${countdownLabel} ${model.countdown}`}
+        className="flex w-full max-w-[360px] cursor-pointer flex-col gap-1 rounded-[20px] border border-white/25 bg-[#141A29]/80 p-1.5 text-white shadow-[0_12px_40px_rgba(0,0,0,0.5)] backdrop-blur-2xl transition-colors hover:border-white/40"
       >
+        <div data-testid="widget-strip-info" className="flex items-center gap-1.5 px-1.5 leading-4">
+          <span className="whitespace-nowrap text-xs font-bold text-white">{model.queueHeader}</span>
+          <span data-testid="widget-strip-status" className={`truncate text-[10px] font-bold ${statusColorClass}`}>
+            {statusLabel}
+          </span>
+          {!model.isUnclear && (
+            <span data-testid="widget-strip-countdown" className="ml-auto whitespace-nowrap font-mono text-xs font-bold text-white">
+              {model.countdown}
+            </span>
+          )}
+        </div>
         {/* Same drum as the big widget: 720 x 132 bitmap drawn 52 px high */}
         <DrumBitmap
           testId="widget-strip-drum"
