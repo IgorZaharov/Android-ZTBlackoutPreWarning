@@ -11,18 +11,18 @@ import androidx.compose.ui.unit.dp
 
 /**
  * Custom floating shadow modifier that draws a genuine hardware-accelerated
- * multi-step Gaussian drop-shadow behind the composable, matching the Web
- * workbench shadow-[0_16px_44px_rgba(0,0,0,0.55)].
+ * multi-step Gaussian drop-shadow behind the composable. The defaults are the soft glass-card shadow,
+ * matching the web `.zt-glass` box-shadow 0 4px 14px rgba(0,0,0,0.25).
  *
  * This renders reliably on all real physical devices and GPUs without depending
  * on unsupported platform mask filters that are ignored by Android HWUI/Skia.
  */
 fun Modifier.floatingShadow(
-    color: Color = Color(0xB3000000),
+    color: Color = Color(0x40000000),
     borderRadius: Dp = 24.dp,
-    blurRadius: Dp = 22.dp,
-    offsetY: Dp = 8.dp,
-    spread: Dp = 2.dp
+    blurRadius: Dp = 14.dp,
+    offsetY: Dp = 4.dp,
+    spread: Dp = 0.dp
 ): Modifier = this.drawBehind {
     val blurPx = blurRadius.toPx()
     val offsetYPx = offsetY.toPx()

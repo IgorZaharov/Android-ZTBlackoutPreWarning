@@ -1015,6 +1015,149 @@
      }
     ]
    }
+  },
+  {
+   "name": "move reorders the list, clamps the index and keeps the primary",
+   "start": {
+    "schemaVersion": 1,
+    "primaryId": "bbbb0002",
+    "items": [
+     {
+      "id": "aaaa0001",
+      "label": "",
+      "address": null,
+      "queue": "1.1",
+      "queueSource": "MANUAL",
+      "queueStatusText": null,
+      "plannedAlerts": true,
+      "emergencyAlerts": true,
+      "createdAtMs": 1
+     },
+     {
+      "id": "bbbb0002",
+      "label": "",
+      "address": null,
+      "queue": "1.2",
+      "queueSource": "MANUAL",
+      "queueStatusText": null,
+      "plannedAlerts": true,
+      "emergencyAlerts": true,
+      "createdAtMs": 2
+     },
+     {
+      "id": "cccc0003",
+      "label": "",
+      "address": null,
+      "queue": "2.1",
+      "queueSource": "MANUAL",
+      "queueStatusText": null,
+      "plannedAlerts": true,
+      "emergencyAlerts": true,
+      "createdAtMs": 3
+     },
+     {
+      "id": "dddd0004",
+      "label": "",
+      "address": null,
+      "queue": "2.2",
+      "queueSource": "MANUAL",
+      "queueStatusText": null,
+      "plannedAlerts": true,
+      "emergencyAlerts": true,
+      "createdAtMs": 4
+     }
+    ]
+   },
+   "steps": [
+    {
+     "op": "move",
+     "id": "dddd0004",
+     "toIndex": 0,
+     "expectError": null,
+     "expectPrimary": "bbbb0002"
+    },
+    {
+     "op": "move",
+     "id": "aaaa0001",
+     "toIndex": 3,
+     "expectError": null
+    },
+    {
+     "op": "move",
+     "id": "bbbb0002",
+     "toIndex": -5,
+     "expectError": null,
+     "expectPrimary": "bbbb0002"
+    },
+    {
+     "op": "move",
+     "id": "cccc0003",
+     "toIndex": 99,
+     "expectError": null
+    },
+    {
+     "op": "move",
+     "id": "bbbb0002",
+     "toIndex": 0,
+     "expectError": null
+    },
+    {
+     "op": "move",
+     "id": "nope0000",
+     "toIndex": 1,
+     "expectError": "not_found"
+    }
+   ],
+   "expect": {
+    "schemaVersion": 1,
+    "primaryId": "bbbb0002",
+    "items": [
+     {
+      "id": "bbbb0002",
+      "label": "",
+      "address": null,
+      "queue": "1.2",
+      "queueSource": "MANUAL",
+      "queueStatusText": null,
+      "plannedAlerts": true,
+      "emergencyAlerts": true,
+      "createdAtMs": 2
+     },
+     {
+      "id": "dddd0004",
+      "label": "",
+      "address": null,
+      "queue": "2.2",
+      "queueSource": "MANUAL",
+      "queueStatusText": null,
+      "plannedAlerts": true,
+      "emergencyAlerts": true,
+      "createdAtMs": 4
+     },
+     {
+      "id": "aaaa0001",
+      "label": "",
+      "address": null,
+      "queue": "1.1",
+      "queueSource": "MANUAL",
+      "queueStatusText": null,
+      "plannedAlerts": true,
+      "emergencyAlerts": true,
+      "createdAtMs": 1
+     },
+     {
+      "id": "cccc0003",
+      "label": "",
+      "address": null,
+      "queue": "2.1",
+      "queueSource": "MANUAL",
+      "queueStatusText": null,
+      "plannedAlerts": true,
+      "emergencyAlerts": true,
+      "createdAtMs": 3
+     }
+    ]
+   }
   }
  ],
  "effective": {

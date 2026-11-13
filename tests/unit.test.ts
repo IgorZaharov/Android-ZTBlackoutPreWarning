@@ -2225,7 +2225,7 @@ async function runUnitTestC_ZhytomyrRoulette() {
       settingsScreenKt.includes('AppStrings.testAlertBtn(lang)') &&
       settingsScreenKt.includes('AppStrings.refreshBtn(lang)') &&
       settingsScreenKt.includes('AppStrings.resetDefaultsBtn(lang)') &&
-      // 1.4.0: card and accent colours come from ZtTokens (ZtColors.Card = 0xBF141A29, ZtColors.Accent = 0xFFFF5E3A)
+      // 1.4.0: card and accent colours come from ZtTokens (ZtColors.Card = 0xA3141A29 since the glass look, ZtColors.Accent = 0xFFFF5E3A)
       settingsScreenKt.includes('GlassCard(') &&
       settingsScreenKt.includes('ZtColors.Accent') &&
       settingsScreenKt.includes('Icons.Default.Tune'),
@@ -2528,7 +2528,7 @@ async function runUnitTestE_AddressLookupAndUnsetQueue() {
       mainScreenKt.includes('SiteStatusModel.banner(snapshot, lang)') &&
       mainScreenKt.includes('SiteNoticeCard(') &&
       navScreenKt.includes('isQueueUnselected') &&
-      navScreenKt.includes('pagerState.animateScrollToPage(0)'),
+      navScreenKt.includes('pagerState.animateScrollToPage(0, animationSpec = PageGlide)'),
     'MainScreen.kt and BlackoutAppNavigation.kt must keep the first-launch flow, day headers, site status and the ztoe notice card'
   );
 

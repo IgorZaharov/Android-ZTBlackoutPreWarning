@@ -3,8 +3,9 @@
   "specVersion": 1,
   "color": {
     "accent": "#FF5E3A",
-    "card": "#BF141A29",
+    "card": "#A3141A29",
     "cardSolid": "#141A29",
+    "glass": { "sheenTop": "#1AFFFFFF", "sheenBottom": "#05FFFFFF", "rimTop": "#40FFFFFF", "rimBottom": "#14FFFFFF", "shadow": "#40000000", "shadowBlur": 14, "shadowOffsetY": 4, "webBackdropBlur": 40, "_doc": "Liquid-glass card: translucent card fill, vertical matte sheen, rim lit at the top, soft short shadow. Android has no backdrop blur, so only the web frosts what is behind the card." },
     "cardBorder": "#26FFFFFF",
     "innerRow": "#14FFFFFF",
     "inputBorder": "#33FFFFFF",

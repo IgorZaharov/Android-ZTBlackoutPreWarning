@@ -1,6 +1,7 @@
 package ua.blackout.prewarning.ui.theme
 
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontFamily
@@ -41,7 +42,8 @@ object ZtType {
 
 object ZtColors {
     val Accent = Color(0xFFFF5E3A)
-    val Card = Color(0xBF141A29)
+    /** Translucent card fill (64 %); the glass look adds [ZtGlass] on top. */
+    val Card = Color(0xA3141A29)
     val CardSolid = Color(0xFF141A29)
     val CardBorder = Color(0x26FFFFFF)
     val InnerRow = Color(0x14FFFFFF)
@@ -67,6 +69,16 @@ object ZtColors {
     val EmergencyAmberEnd = Color(0xFFC96A0B)
     val EmergencyStripeDark = Color(0x8C1A1208)
     val EmergencyStripeLight = Color(0xD9FFB020)
+}
+
+/**
+ * Liquid-glass card surface (spec/design-tokens.json "glass"): a matte sheen that fades from the top, a rim
+ * that is lit at the top and fades towards the bottom, and a soft short shadow.
+ */
+object ZtGlass {
+    val Sheen = Brush.verticalGradient(listOf(Color(0x1AFFFFFF), Color(0x05FFFFFF)))
+    val Rim = Brush.verticalGradient(listOf(Color(0x40FFFFFF), Color(0x14FFFFFF)))
+    val Shadow = Color(0x40000000)
 }
 
 object ZtShapes {

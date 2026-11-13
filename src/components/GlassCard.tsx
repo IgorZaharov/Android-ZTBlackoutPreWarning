@@ -1,6 +1,7 @@
 /**
- * Frosted glass card of the app, mirrored from android/.../ui/components/GlassCard.kt (card fill
- * #BF141A29, 24 radius, hairline border) and spec/design-tokens.json. Keeps the original web look.
+ * Liquid-glass card of the app, mirrored from android/.../ui/components/GlassCard.kt (fill #A3141A29 with a
+ * top sheen, lit rim, soft shadow, 24 radius) and spec/design-tokens.json "glass"; the look is the
+ * `.zt-glass` class in index.css.
  */
 import React from 'react';
 
@@ -16,7 +17,7 @@ const PADDING: Record<number, string> = { 4: 'p-1', 14: 'p-3.5', 16: 'p-4', 18: 
 export const GlassCard: React.FC<GlassCardProps> = ({ padding = 16, control = false, className = '', children, ...rest }) => (
   <div
     {...rest}
-    className={`bg-[#141A29]/75 backdrop-blur-2xl border border-white/15 shadow-[0_16px_40px_rgba(0,0,0,0.55)] ${
+    className={`zt-glass ${
       control ? 'rounded-2xl' : 'rounded-3xl'
     } ${PADDING[padding]} ${className}`}
   >

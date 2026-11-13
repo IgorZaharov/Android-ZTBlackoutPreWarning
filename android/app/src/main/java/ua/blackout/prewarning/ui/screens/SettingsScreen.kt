@@ -63,18 +63,30 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.zIndex
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.material.icons.filled.DragIndicator
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
@@ -169,6 +181,8 @@ fun SettingsScreen(
     onSetPlanned: (id: String, on: Boolean) -> Unit = { _, _ -> },
     onSetEmergency: (id: String, on: Boolean) -> Unit = { _, _ -> },
     onRenameSubscription: (id: String, label: String) -> Unit = { _, _ -> },
+    /** Moves an address to a new list position (spec/SUBSCRIPTIONS.md section 4, `move`). */
+    onMoveSubscription: (id: String, toIndex: Int) -> Unit = { _, _ -> },
     onToggleMaster: (Boolean) -> Unit = {},
     onSiteUrlChanged: (String) -> Unit = {},
     onAdvanceMinutesChanged: (Int) -> Unit = {},
@@ -290,6 +304,7 @@ fun SettingsScreen(
             lang = lang,
             onHelp = { showQueueHelpDialog = true },
             onAddQueueOnly = onAddQueueOnly,
+            onMove = onMoveSubscription,
             onRemove = { removeCandidate = it },
             onRename = { renameCandidate = it },
             onMakePrimary = onMakePrimary,
@@ -680,6 +695,7 @@ private fun MyAddressesCard(
     lang: String,
     onHelp: () -> Unit,
     onAddQueueOnly: (String) -> Unit,
+    onMove: (String, Int) -> Unit,
     onRemove: (Subscription) -> Unit,
     onRename: (Subscription) -> Unit,
     onMakePrimary: (String) -> Unit,
@@ -731,7 +747,70 @@ private fun MyAddressesCard(
             if (!alertsMaster && store.items.isNotEmpty()) {
                 Text(text = AppStrings.masterOffCaption(lang), style = ZtType.caption, color = ZtColors.ChipAmberText)
             }
-            store.items.forEach { item ->
+            // Drag the handle to reorder: a local order follows the finger, the store is written on release
+            val ids = store.items.map { it.id }
+            var order by remember { mutableStateOf(ids) }
+            var draggingId by remember { mutableStateOf<String?>(null) }
+            var dragOffset by remember { mutableFloatStateOf(0f) }
+            val heights = remember { mutableStateMapOf<String, Int>() }
+            val gapPx = with(LocalDensity.current) { 12.dp.toPx() }
+            val currentOnMove by rememberUpdatedState(onMove)
+            // the drag gesture outlives recompositions: read the newest store order through this
+            val currentIds by rememberUpdatedState(ids)
+            if (draggingId == null && order != ids) order = ids
+            val byId = store.items.associateBy { it.id }
+
+            fun dragBy(id: String, dy: Float) {
+                dragOffset += dy
+                val i = order.indexOf(id)
+                if (i < 0) return
+                if (dragOffset > 0f && i < order.lastIndex) {
+                    val step = (heights[order[i + 1]] ?: 0) + gapPx
+                    if (dragOffset > step / 2f) {
+                        order = order.toMutableList().apply { add(i + 1, removeAt(i)) }
+                        dragOffset -= step
+                    }
+                } else if (dragOffset < 0f && i > 0) {
+                    val step = (heights[order[i - 1]] ?: 0) + gapPx
+                    if (-dragOffset > step / 2f) {
+                        order = order.toMutableList().apply { add(i - 1, removeAt(i)) }
+                        dragOffset += step
+                    }
+                }
+            }
+
+            fun dropped(id: String) {
+                val to = order.indexOf(id)
+                draggingId = null
+                dragOffset = 0f
+                if (to >= 0 && to != currentIds.indexOf(id)) currentOnMove(id, to)
+            }
+
+            order.mapNotNull { byId[it] }.forEachIndexed { index, item ->
+                val label = Subscriptions.displayLabel(item)
+                val isDragging = draggingId == item.id
+                val handle = if (store.items.size < 2) null else Modifier
+                    .pointerInput(item.id) {
+                        detectDragGestures(
+                            onDragStart = {
+                                draggingId = item.id
+                                dragOffset = 0f
+                            },
+                            onDragEnd = { dropped(item.id) },
+                            onDragCancel = { dropped(item.id) },
+                            onDrag = { change, amount ->
+                                change.consume()
+                                dragBy(item.id, amount.y)
+                            }
+                        )
+                    }
+                    .semantics {
+                        contentDescription = "${AppStrings.reorderHandle(lang)}: $label"
+                        customActions = buildList {
+                            if (index > 0) add(CustomAccessibilityAction(AppStrings.moveUp(lang)) { currentOnMove(item.id, index - 1); true })
+                            if (index < store.items.lastIndex) add(CustomAccessibilityAction(AppStrings.moveDown(lang)) { currentOnMove(item.id, index + 1); true })
+                        }
+                    }
                 SubscriptionBlock(
                     item = item,
                     alertsMaster = alertsMaster,
@@ -742,7 +821,17 @@ private fun MyAddressesCard(
                     onRename = { onRename(item) },
                     onMakePrimary = { onMakePrimary(item.id) },
                     onSetPlanned = { onSetPlanned(item.id, it) },
-                    onSetEmergency = { onSetEmergency(item.id, it) }
+                    onSetEmergency = { onSetEmergency(item.id, it) },
+                    dragHandle = handle,
+                    modifier = Modifier
+                        .onSizeChanged { heights[item.id] = it.height }
+                        .zIndex(if (isDragging) 1f else 0f)
+                        .graphicsLayer {
+                            translationY = if (isDragging) dragOffset else 0f
+                            scaleX = if (isDragging) 1.02f else 1f
+                            scaleY = if (isDragging) 1.02f else 1f
+                        }
+                        .then(if (isDragging) Modifier.shadow(10.dp, RoundedCornerShape(16.dp)) else Modifier)
                 )
             }
 
@@ -790,12 +879,15 @@ private fun SubscriptionBlock(
     onRename: () -> Unit,
     onMakePrimary: () -> Unit,
     onSetPlanned: (Boolean) -> Unit,
-    onSetEmergency: (Boolean) -> Unit
+    onSetEmergency: (Boolean) -> Unit,
+    /** Gesture and accessibility actions of the reorder handle; null hides it (one address). */
+    dragHandle: Modifier? = null,
+    modifier: Modifier = Modifier
 ) {
     val shape = RoundedCornerShape(16.dp)
     val label = Subscriptions.displayLabel(item)
     Column(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .clip(shape)
             .background(Color(0x14FFFFFF))
@@ -804,6 +896,12 @@ private fun SubscriptionBlock(
         verticalArrangement = Arrangement.spacedBy(6.dp)
     ) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            if (dragHandle != null) {
+                // 48 dp grip: press and drag up or down; TalkBack offers "move up" / "move down"
+                Box(modifier = Modifier.size(ZtMinTouch).then(dragHandle), contentAlignment = Alignment.Center) {
+                    Icon(Icons.Default.DragIndicator, contentDescription = null, tint = ZtColors.TextSecondary, modifier = Modifier.size(22.dp))
+                }
+            }
             @OptIn(ExperimentalLayoutApi::class)
             FlowRow(
                 modifier = Modifier.weight(1f),

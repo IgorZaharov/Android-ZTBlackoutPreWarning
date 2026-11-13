@@ -271,6 +271,16 @@ object Subscriptions {
 
     fun rename(store: SubscriptionStore, id: String, raw: String?): StoreResult = update(store, id) { it.copy(label = cleanLabel(raw)) }
 
+    /** Moves the item to [toIndex] (clamped); the primary and the fields stay unchanged (spec section 4). */
+    fun move(store: SubscriptionStore, id: String, toIndex: Int): StoreResult {
+        val from = store.items.indexOfFirst { it.id == id }
+        if (from < 0) return StoreResult.Error(ERR_NOT_FOUND)
+        val to = toIndex.coerceIn(0, store.items.size - 1)
+        val items = store.items.toMutableList()
+        items.add(to, items.removeAt(from))
+        return StoreResult.Ok(store.copy(items = items))
+    }
+
     /** Result of a ZTOE lookup for an address item (`spec/SUBSCRIPTIONS.md` section 4). */
     fun setQueueInfo(store: SubscriptionStore, id: String, queue: String?, statusText: String?, addressText: String?): StoreResult {
         val item = store.items.firstOrNull { it.id == id } ?: return StoreResult.Error(ERR_NOT_FOUND)

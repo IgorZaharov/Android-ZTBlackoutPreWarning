@@ -3623,17 +3623,17 @@ fun MainScreen(
                             horizontalAlignment = Alignment.CenterHorizontally,
                             verticalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
-                            // Dark label on the accent fill: 6.9:1, where white would be 3.0:1
+                            // White label on the accent fill (owner request; 3.0:1, large bold title)
                             Text(
                                 text = AppStrings.selectQueueAction(lang),
                                 style = ZtType.title.copy(fontWeight = FontWeight.ExtraBold),
-                                color = InkOnAccent,
+                                color = Color.White,
                                 textAlign = TextAlign.Center
                             )
                             Text(
                                 text = AppStrings.mainUtilityName(),
-                                style = ZtType.label,
-                                color = InkOnAccent,
+                                style = ZtType.label.copy(fontWeight = FontWeight.Bold),
+                                color = Color.White,
                                 textAlign = TextAlign.Center
                             )
                         }
@@ -4210,18 +4210,30 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.zIndex
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.material.icons.filled.DragIndicator
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.CustomAccessibilityAction
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
@@ -4316,6 +4328,8 @@ fun SettingsScreen(
     onSetPlanned: (id: String, on: Boolean) -> Unit = { _, _ -> },
     onSetEmergency: (id: String, on: Boolean) -> Unit = { _, _ -> },
     onRenameSubscription: (id: String, label: String) -> Unit = { _, _ -> },
+    /** Moves an address to a new list position (spec/SUBSCRIPTIONS.md section 4, \`move\`). */
+    onMoveSubscription: (id: String, toIndex: Int) -> Unit = { _, _ -> },
     onToggleMaster: (Boolean) -> Unit = {},
     onSiteUrlChanged: (String) -> Unit = {},
     onAdvanceMinutesChanged: (Int) -> Unit = {},
@@ -4437,6 +4451,7 @@ fun SettingsScreen(
             lang = lang,
             onHelp = { showQueueHelpDialog = true },
             onAddQueueOnly = onAddQueueOnly,
+            onMove = onMoveSubscription,
             onRemove = { removeCandidate = it },
             onRename = { renameCandidate = it },
             onMakePrimary = onMakePrimary,
@@ -4827,6 +4842,7 @@ private fun MyAddressesCard(
     lang: String,
     onHelp: () -> Unit,
     onAddQueueOnly: (String) -> Unit,
+    onMove: (String, Int) -> Unit,
     onRemove: (Subscription) -> Unit,
     onRename: (Subscription) -> Unit,
     onMakePrimary: (String) -> Unit,
@@ -4878,7 +4894,70 @@ private fun MyAddressesCard(
             if (!alertsMaster && store.items.isNotEmpty()) {
                 Text(text = AppStrings.masterOffCaption(lang), style = ZtType.caption, color = ZtColors.ChipAmberText)
             }
-            store.items.forEach { item ->
+            // Drag the handle to reorder: a local order follows the finger, the store is written on release
+            val ids = store.items.map { it.id }
+            var order by remember { mutableStateOf(ids) }
+            var draggingId by remember { mutableStateOf<String?>(null) }
+            var dragOffset by remember { mutableFloatStateOf(0f) }
+            val heights = remember { mutableStateMapOf<String, Int>() }
+            val gapPx = with(LocalDensity.current) { 12.dp.toPx() }
+            val currentOnMove by rememberUpdatedState(onMove)
+            // the drag gesture outlives recompositions: read the newest store order through this
+            val currentIds by rememberUpdatedState(ids)
+            if (draggingId == null && order != ids) order = ids
+            val byId = store.items.associateBy { it.id }
+
+            fun dragBy(id: String, dy: Float) {
+                dragOffset += dy
+                val i = order.indexOf(id)
+                if (i < 0) return
+                if (dragOffset > 0f && i < order.lastIndex) {
+                    val step = (heights[order[i + 1]] ?: 0) + gapPx
+                    if (dragOffset > step / 2f) {
+                        order = order.toMutableList().apply { add(i + 1, removeAt(i)) }
+                        dragOffset -= step
+                    }
+                } else if (dragOffset < 0f && i > 0) {
+                    val step = (heights[order[i - 1]] ?: 0) + gapPx
+                    if (-dragOffset > step / 2f) {
+                        order = order.toMutableList().apply { add(i - 1, removeAt(i)) }
+                        dragOffset += step
+                    }
+                }
+            }
+
+            fun dropped(id: String) {
+                val to = order.indexOf(id)
+                draggingId = null
+                dragOffset = 0f
+                if (to >= 0 && to != currentIds.indexOf(id)) currentOnMove(id, to)
+            }
+
+            order.mapNotNull { byId[it] }.forEachIndexed { index, item ->
+                val label = Subscriptions.displayLabel(item)
+                val isDragging = draggingId == item.id
+                val handle = if (store.items.size < 2) null else Modifier
+                    .pointerInput(item.id) {
+                        detectDragGestures(
+                            onDragStart = {
+                                draggingId = item.id
+                                dragOffset = 0f
+                            },
+                            onDragEnd = { dropped(item.id) },
+                            onDragCancel = { dropped(item.id) },
+                            onDrag = { change, amount ->
+                                change.consume()
+                                dragBy(item.id, amount.y)
+                            }
+                        )
+                    }
+                    .semantics {
+                        contentDescription = "\${AppStrings.reorderHandle(lang)}: $label"
+                        customActions = buildList {
+                            if (index > 0) add(CustomAccessibilityAction(AppStrings.moveUp(lang)) { currentOnMove(item.id, index - 1); true })
+                            if (index < store.items.lastIndex) add(CustomAccessibilityAction(AppStrings.moveDown(lang)) { currentOnMove(item.id, index + 1); true })
+                        }
+                    }
                 SubscriptionBlock(
                     item = item,
                     alertsMaster = alertsMaster,
@@ -4889,7 +4968,17 @@ private fun MyAddressesCard(
                     onRename = { onRename(item) },
                     onMakePrimary = { onMakePrimary(item.id) },
                     onSetPlanned = { onSetPlanned(item.id, it) },
-                    onSetEmergency = { onSetEmergency(item.id, it) }
+                    onSetEmergency = { onSetEmergency(item.id, it) },
+                    dragHandle = handle,
+                    modifier = Modifier
+                        .onSizeChanged { heights[item.id] = it.height }
+                        .zIndex(if (isDragging) 1f else 0f)
+                        .graphicsLayer {
+                            translationY = if (isDragging) dragOffset else 0f
+                            scaleX = if (isDragging) 1.02f else 1f
+                            scaleY = if (isDragging) 1.02f else 1f
+                        }
+                        .then(if (isDragging) Modifier.shadow(10.dp, RoundedCornerShape(16.dp)) else Modifier)
                 )
             }
 
@@ -4937,12 +5026,15 @@ private fun SubscriptionBlock(
     onRename: () -> Unit,
     onMakePrimary: () -> Unit,
     onSetPlanned: (Boolean) -> Unit,
-    onSetEmergency: (Boolean) -> Unit
+    onSetEmergency: (Boolean) -> Unit,
+    /** Gesture and accessibility actions of the reorder handle; null hides it (one address). */
+    dragHandle: Modifier? = null,
+    modifier: Modifier = Modifier
 ) {
     val shape = RoundedCornerShape(16.dp)
     val label = Subscriptions.displayLabel(item)
     Column(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .clip(shape)
             .background(Color(0x14FFFFFF))
@@ -4951,6 +5043,12 @@ private fun SubscriptionBlock(
         verticalArrangement = Arrangement.spacedBy(6.dp)
     ) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            if (dragHandle != null) {
+                // 48 dp grip: press and drag up or down; TalkBack offers "move up" / "move down"
+                Box(modifier = Modifier.size(ZtMinTouch).then(dragHandle), contentAlignment = Alignment.Center) {
+                    Icon(Icons.Default.DragIndicator, contentDescription = null, tint = ZtColors.TextSecondary, modifier = Modifier.size(22.dp))
+                }
+            }
             @OptIn(ExperimentalLayoutApi::class)
             FlowRow(
                 modifier = Modifier.weight(1f),
@@ -7461,7 +7559,7 @@ import kotlinx.coroutines.withContext
 import ua.blackout.prewarning.BuildConfig
 import ua.blackout.prewarning.data.repository.DonationsRepository
 import ua.blackout.prewarning.ui.AppStrings
-import ua.blackout.prewarning.ui.components.floatingShadow
+import ua.blackout.prewarning.ui.components.glassSurface
 
 @Composable
 fun AboutScreen(
@@ -7526,10 +7624,7 @@ fun AboutScreen(
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .floatingShadow(color = Color(0xB3000000), borderRadius = 24.dp, blurRadius = 24.dp, offsetY = 10.dp)
-                .shadow(10.dp, RoundedCornerShape(24.dp), ambientColor = Color(0x66000000), spotColor = Color(0x80000000))
-                .clip(RoundedCornerShape(24.dp))
-                .background(Color(0xBF141A29))
+                .glassSurface(RoundedCornerShape(24.dp), 24.dp)
                 .padding(20.dp)
         ) {
             Column(
@@ -7596,10 +7691,7 @@ fun AboutScreen(
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .floatingShadow(color = Color(0xB3000000), borderRadius = 24.dp, blurRadius = 24.dp, offsetY = 10.dp)
-                .shadow(10.dp, RoundedCornerShape(24.dp), ambientColor = Color(0x66000000), spotColor = Color(0x80000000))
-                .clip(RoundedCornerShape(24.dp))
-                .background(Color(0xBF141A29))
+                .glassSurface(RoundedCornerShape(24.dp), 24.dp)
                 .padding(18.dp)
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -7637,10 +7729,7 @@ fun AboutScreen(
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .floatingShadow(color = Color(0xB3000000), borderRadius = 24.dp, blurRadius = 24.dp, offsetY = 10.dp)
-                .shadow(10.dp, RoundedCornerShape(24.dp), ambientColor = Color(0x66000000), spotColor = Color(0x80000000))
-                .clip(RoundedCornerShape(24.dp))
-                .background(Color(0xBF141A29))
+                .glassSurface(RoundedCornerShape(24.dp), 24.dp)
                 .padding(18.dp)
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -7762,10 +7851,7 @@ fun AboutScreen(
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .floatingShadow(color = Color(0xB3000000), borderRadius = 24.dp, blurRadius = 24.dp, offsetY = 10.dp)
-                .shadow(10.dp, RoundedCornerShape(24.dp), ambientColor = Color(0x66000000), spotColor = Color(0x80000000))
-                .clip(RoundedCornerShape(24.dp))
-                .background(Color(0xBF141A29))
+                .glassSurface(RoundedCornerShape(24.dp), 24.dp)
                 .padding(18.dp)
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -7843,10 +7929,7 @@ fun AboutScreen(
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .floatingShadow(color = Color(0xB3000000), borderRadius = 24.dp, blurRadius = 24.dp, offsetY = 10.dp)
-                .shadow(10.dp, RoundedCornerShape(24.dp), ambientColor = Color(0x66000000), spotColor = Color(0x80000000))
-                .clip(RoundedCornerShape(24.dp))
-                .background(Color(0xBF141A29))
+                .glassSurface(RoundedCornerShape(24.dp), 24.dp)
                 .clickable {
                     if (onOpenRoulette != null) {
                         onOpenRoulette()
@@ -7876,10 +7959,7 @@ fun AboutScreen(
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .floatingShadow(color = Color(0xB3000000), borderRadius = 24.dp, blurRadius = 24.dp, offsetY = 10.dp)
-                .shadow(10.dp, RoundedCornerShape(24.dp), ambientColor = Color(0x66000000), spotColor = Color(0x80000000))
-                .clip(RoundedCornerShape(24.dp))
-                .background(Color(0xBF141A29))
+                .glassSurface(RoundedCornerShape(24.dp), 24.dp)
                 .padding(18.dp)
         ) {
             Row(
@@ -7925,6 +8005,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.PagerDefaults
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -7945,6 +8026,7 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
@@ -7973,7 +8055,12 @@ import ua.blackout.prewarning.notification.AlarmScheduler
 import ua.blackout.prewarning.notification.ExactAlarmGate
 import ua.blackout.prewarning.notification.NotificationHelper
 import ua.blackout.prewarning.ui.AppStrings
-import ua.blackout.prewarning.ui.components.floatingShadow
+import ua.blackout.prewarning.ui.components.glassSurface
+import ua.blackout.prewarning.ui.components.PageGlide
+import ua.blackout.prewarning.ui.components.ambientBreath
+import ua.blackout.prewarning.ui.components.ambientDrift
+import ua.blackout.prewarning.ui.components.reducedMotion
+import ua.blackout.prewarning.ui.components.rememberAmbientSeconds
 import ua.blackout.prewarning.ui.theme.TimeOfDayPalette
 import ua.blackout.prewarning.widget.BlackoutGlanceWidget
 import java.time.Instant
@@ -8378,6 +8465,10 @@ fun BlackoutAppNavigation(
     val bgColors = remember(currentMinuteOfDay) {
         TimeOfDayPalette.getInterpolatedColors(LocalTime.now(KYIV_ZONE))
     }
+    // Very slow warp of the background orbs, and a slight parallax with the pager (read in the draw
+    // phase only, so neither recomposes the screens). Both stop under reduced motion.
+    val ambient = rememberAmbientSeconds()
+    val reduceMotion = remember { reducedMotion(appContext) }
 
     Box(
         modifier = Modifier
@@ -8387,6 +8478,10 @@ fun BlackoutAppNavigation(
                 val w = size.width.coerceAtLeast(1f)
                 val h = size.height.coerceAtLeast(1f)
                 val maxDim = maxOf(w, h)
+                val t = ambient.value
+                // the orbs move a little against the swipe: 3 % of the width per page
+                val parallax = if (reduceMotion) Offset.Zero
+                else Offset(-(pagerState.currentPage + pagerState.currentPageOffsetFraction) * w * 0.03f, 0f)
 
                 // 1. Primary (60%) & Secondary (30%) full-canvas radial atmospheric base matching PhoneSimulator.tsx
                 drawRect(
@@ -8406,8 +8501,8 @@ fun BlackoutAppNavigation(
                     brush = smoothGaussianRadialBrush(
                         color = bgColors.secondary,
                         maxAlpha = 0.68f,
-                        center = Offset(w * 0.88f, h * 0.08f),
-                        radius = w * 0.98f
+                        center = Offset(w * 0.88f, h * 0.08f) + ambientDrift(t, 0, w, h) + parallax,
+                        radius = w * 0.98f * ambientBreath(t, 0)
                     )
                 )
 
@@ -8416,8 +8511,8 @@ fun BlackoutAppNavigation(
                     brush = smoothGaussianRadialBrush(
                         color = bgColors.supporting,
                         maxAlpha = 0.62f,
-                        center = Offset(w * 0.12f, h * 0.06f),
-                        radius = w * 0.92f
+                        center = Offset(w * 0.12f, h * 0.06f) + ambientDrift(t, 1, w, h) + parallax,
+                        radius = w * 0.92f * ambientBreath(t, 1)
                     )
                 )
 
@@ -8426,8 +8521,8 @@ fun BlackoutAppNavigation(
                     brush = smoothGaussianRadialBrush(
                         color = bgColors.secondary,
                         maxAlpha = 0.58f,
-                        center = Offset(w * 0.08f, h * 0.68f),
-                        radius = w * 0.98f
+                        center = Offset(w * 0.08f, h * 0.68f) + ambientDrift(t, 2, w, h) + parallax,
+                        radius = w * 0.98f * ambientBreath(t, 2)
                     )
                 )
 
@@ -8436,8 +8531,8 @@ fun BlackoutAppNavigation(
                     brush = smoothGaussianRadialBrush(
                         color = bgColors.accent,
                         maxAlpha = 0.52f,
-                        center = Offset(w * 0.82f, h * 0.84f),
-                        radius = w * 0.82f
+                        center = Offset(w * 0.82f, h * 0.84f) + ambientDrift(t, 3, w, h) + parallax,
+                        radius = w * 0.82f * ambientBreath(t, 3)
                     )
                 )
 
@@ -8468,8 +8563,23 @@ fun BlackoutAppNavigation(
             state = pagerState,
             beyondViewportPageCount = 2,
             userScrollEnabled = !isRouletteOpen && !isQueueUnselected,
+            flingBehavior = PagerDefaults.flingBehavior(state = pagerState, snapAnimationSpec = PageGlide),
             modifier = Modifier.fillMaxSize()
         ) { page ->
+          // While swiping, the page leaving dims and recedes a little (only fades under reduced motion)
+          Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .graphicsLayer {
+                    val away = kotlin.math.abs((pagerState.currentPage - page) + pagerState.currentPageOffsetFraction).coerceIn(0f, 1f)
+                    alpha = 1f - 0.35f * away
+                    if (!reduceMotion) {
+                        val scale = 1f - 0.05f * away
+                        scaleX = scale
+                        scaleY = scale
+                    }
+                }
+          ) {
             when (page) {
                 0 -> {
                     val other = otherShownItem()
@@ -8486,7 +8596,7 @@ fun BlackoutAppNavigation(
                         shownAddressId = Subscriptions.viewItem(subscriptions, shownSubscriptionId)?.id,
                         onSelectAddress = { shownSubscriptionId = it },
                         showNoAlertsCaption = Subscriptions.noAlertsCaption(alertsMaster, subscriptions),
-                        onOpenSettings = { coroutineScope.launch { pagerState.animateScrollToPage(1) } },
+                        onOpenSettings = { coroutineScope.launch { pagerState.animateScrollToPage(1, animationSpec = PageGlide) } },
                         snapshot = snapshot,
                         statusInfo = statusInfo,
                         isRefreshing = isRefreshing,
@@ -8517,7 +8627,7 @@ fun BlackoutAppNavigation(
                         onOpenQueueSelection = {
                             autoOpenQueueHelp = true
                             coroutineScope.launch {
-                                pagerState.animateScrollToPage(1)
+                                pagerState.animateScrollToPage(1, animationSpec = PageGlide)
                             }
                         },
                         onChangeLanguage = { newLang ->
@@ -8555,19 +8665,20 @@ fun BlackoutAppNavigation(
                             if (ok) {
                                 showAppBanner(AppStrings.addressAdded(resolvedLang))
                                 // the first address becomes the primary: show it on the main screen
-                                if (wasEmpty) coroutineScope.launch { pagerState.animateScrollToPage(0) }
+                                if (wasEmpty) coroutineScope.launch { pagerState.animateScrollToPage(0, animationSpec = PageGlide) }
                             }
                         },
                         onAddQueueOnly = { newQueue ->
                             val wasEmpty = subscriptions.items.isEmpty()
                             val ok = onStoreResult(subscriptionSync.addQueueOnly(newQueue))
-                            if (ok && wasEmpty) coroutineScope.launch { pagerState.animateScrollToPage(0) }
+                            if (ok && wasEmpty) coroutineScope.launch { pagerState.animateScrollToPage(0, animationSpec = PageGlide) }
                         },
                         onRemoveSubscription = { id -> onStoreResult(subscriptionSync.change { Subscriptions.remove(it, id) }) },
                         onMakePrimary = { id -> onStoreResult(subscriptionSync.change { Subscriptions.setPrimary(it, id) }) },
                         onSetPlanned = { id, on -> onStoreResult(subscriptionSync.change { Subscriptions.setPlanned(it, id, on) }) },
                         onSetEmergency = { id, on -> onStoreResult(subscriptionSync.change { Subscriptions.setEmergency(it, id, on) }) },
                         onRenameSubscription = { id, label -> onStoreResult(subscriptionSync.change { Subscriptions.rename(it, id, label) }) },
+                        onMoveSubscription = { id, to -> onStoreResult(subscriptionSync.change { Subscriptions.move(it, id, to) }) },
                         onSiteUrlChanged = { newUrl ->
                             siteUrl = newUrl
                             val current = settingsRepo.getSettings()
@@ -8641,7 +8752,7 @@ fun BlackoutAppNavigation(
                             // CRITICAL CONSTANTS — Default values: advanceMinutes = 15, refreshMinutes = 30
                             settingsRepo.resetAllAppDataToFirstLaunch()
                             coroutineScope.launch {
-                                pagerState.animateScrollToPage(0)
+                                pagerState.animateScrollToPage(0, animationSpec = PageGlide)
                             }
                             coroutineScope.launch(Dispatchers.IO) {
                                 try {
@@ -8672,6 +8783,7 @@ fun BlackoutAppNavigation(
                     )
                 }
             }
+          }
         }
 
         if (isRouletteOpen) {
@@ -8739,9 +8851,7 @@ fun BlackoutAppNavigation(
             ) {
                 Box(
                     modifier = Modifier
-                        .floatingShadow(color = Color(0xB3000000), borderRadius = 32.dp, blurRadius = 24.dp, offsetY = 8.dp)
-                        .clip(CircleShape)
-                        .background(Color(0xCC141A29))
+                        .glassSurface(CircleShape, 32.dp, background = Color(0xB8141A29))
                         .padding(6.dp)
                 ) {
                     Row(
@@ -8756,7 +8866,7 @@ fun BlackoutAppNavigation(
                                 .clip(CircleShape)
                                 .background(if (isSchedule) Color.White else Color.Transparent)
                                 .clickable(enabled = !isQueueUnselected) {
-                                    coroutineScope.launch { pagerState.animateScrollToPage(0) }
+                                    coroutineScope.launch { pagerState.animateScrollToPage(0, animationSpec = PageGlide) }
                                 },
                             contentAlignment = Alignment.Center
                         ) {
@@ -8776,7 +8886,7 @@ fun BlackoutAppNavigation(
                                 .clip(CircleShape)
                                 .background(if (isSettings) Color.White else Color.Transparent)
                                 .clickable(enabled = !isQueueUnselected) {
-                                    coroutineScope.launch { pagerState.animateScrollToPage(1) }
+                                    coroutineScope.launch { pagerState.animateScrollToPage(1, animationSpec = PageGlide) }
                                 },
                             contentAlignment = Alignment.Center
                         ) {
@@ -8796,7 +8906,7 @@ fun BlackoutAppNavigation(
                                 .clip(CircleShape)
                                 .background(if (isAbout) Color.White else Color.Transparent)
                                 .clickable(enabled = !isQueueUnselected) {
-                                    coroutineScope.launch { pagerState.animateScrollToPage(2) }
+                                    coroutineScope.launch { pagerState.animateScrollToPage(2, animationSpec = PageGlide) }
                                 },
                             contentAlignment = Alignment.Center
                         ) {
@@ -13636,18 +13746,18 @@ import androidx.compose.ui.unit.dp
 
 /**
  * Custom floating shadow modifier that draws a genuine hardware-accelerated
- * multi-step Gaussian drop-shadow behind the composable, matching the Web
- * workbench shadow-[0_16px_44px_rgba(0,0,0,0.55)].
+ * multi-step Gaussian drop-shadow behind the composable. The defaults are the soft glass-card shadow,
+ * matching the web \`.zt-glass\` box-shadow 0 4px 14px rgba(0,0,0,0.25).
  *
  * This renders reliably on all real physical devices and GPUs without depending
  * on unsupported platform mask filters that are ignored by Android HWUI/Skia.
  */
 fun Modifier.floatingShadow(
-    color: Color = Color(0xB3000000),
+    color: Color = Color(0x40000000),
     borderRadius: Dp = 24.dp,
-    blurRadius: Dp = 22.dp,
-    offsetY: Dp = 8.dp,
-    spread: Dp = 2.dp
+    blurRadius: Dp = 14.dp,
+    offsetY: Dp = 4.dp,
+    spread: Dp = 0.dp
 ): Modifier = this.drawBehind {
     val blurPx = blurRadius.toPx()
     val offsetYPx = offsetY.toPx()
@@ -15445,18 +15555,19 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import ua.blackout.prewarning.ui.theme.ZtColors
+import ua.blackout.prewarning.ui.theme.ZtGlass
 import ua.blackout.prewarning.ui.theme.ZtShapes
 
 /**
- * The frosted dark card used by every block of the app: floating shadow, 24 dp corners, 75 % dark
- * glass and (by default) the 1 dp light border. One implementation so border, radius and shadow
- * cannot drift apart between screens.
+ * The glass card used by every block of the app: soft floating shadow, 24 dp corners, translucent
+ * matte fill with a top sheen and (by default) the lit glass rim. One implementation so border,
+ * radius and shadow cannot drift apart between screens; [glassSurface] gives the same look to
+ * surfaces that are not a GlassCard (About blocks, bottom navigation).
  */
 @Composable
 fun GlassCard(
@@ -15470,16 +15581,33 @@ fun GlassCard(
 ) {
     Box(
         modifier = modifier
-            .floatingShadow(color = Color(0xB3000000), borderRadius = cornerRadius, blurRadius = 22.dp, offsetY = 8.dp)
-            .shadow(10.dp, shape, ambientColor = Color(0x66000000), spotColor = Color(0x80000000))
-            .clip(shape)
-            .background(background)
-            .then(if (borderColor != null) Modifier.border(1.dp, borderColor, shape) else Modifier)
+            .glassSurface(shape, cornerRadius, background, rim = false)
+            .then(
+                when (borderColor) {
+                    null -> Modifier
+                    // the default border is the lit glass rim; a custom colour (warning cards) stays solid
+                    ZtColors.CardBorder -> Modifier.border(1.dp, ZtGlass.Rim, shape)
+                    else -> Modifier.border(1.dp, borderColor, shape)
+                }
+            )
             .padding(contentPadding)
     ) {
         content()
     }
 }
+
+/** Liquid-glass surface: soft shadow, translucent fill, matte top sheen and (when [rim]) the lit rim. */
+fun Modifier.glassSurface(
+    shape: Shape,
+    cornerRadius: Dp,
+    background: Color = ZtColors.Card,
+    rim: Boolean = true
+): Modifier = this
+    .floatingShadow(color = ZtGlass.Shadow, borderRadius = cornerRadius)
+    .clip(shape)
+    .background(background)
+    .background(ZtGlass.Sheen)
+    .then(if (rim) Modifier.border(1.dp, ZtGlass.Rim, shape) else Modifier)
 `
   },
   {
@@ -16801,6 +16929,16 @@ object Subscriptions {
     fun setEmergency(store: SubscriptionStore, id: String, on: Boolean): StoreResult = update(store, id) { it.copy(emergencyAlerts = on) }
 
     fun rename(store: SubscriptionStore, id: String, raw: String?): StoreResult = update(store, id) { it.copy(label = cleanLabel(raw)) }
+
+    /** Moves the item to [toIndex] (clamped); the primary and the fields stay unchanged (spec section 4). */
+    fun move(store: SubscriptionStore, id: String, toIndex: Int): StoreResult {
+        val from = store.items.indexOfFirst { it.id == id }
+        if (from < 0) return StoreResult.Error(ERR_NOT_FOUND)
+        val to = toIndex.coerceIn(0, store.items.size - 1)
+        val items = store.items.toMutableList()
+        items.add(to, items.removeAt(from))
+        return StoreResult.Ok(store.copy(items = items))
+    }
 
     /** Result of a ZTOE lookup for an address item (\`spec/SUBSCRIPTIONS.md\` section 4). */
     fun setQueueInfo(store: SubscriptionStore, id: String, queue: String?, statusText: String?, addressText: String?): StoreResult {

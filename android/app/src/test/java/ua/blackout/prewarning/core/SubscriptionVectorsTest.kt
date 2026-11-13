@@ -127,6 +127,7 @@ class SubscriptionVectorsTest {
                     "setPlanned" -> Subscriptions.setPlanned(store, s.getString("id"), s.getBoolean("on"))
                     "setEmergency" -> Subscriptions.setEmergency(store, s.getString("id"), s.getBoolean("on"))
                     "rename" -> Subscriptions.rename(store, s.getString("id"), s.getString("label"))
+                    "move" -> Subscriptions.move(store, s.getString("id"), s.getInt("toIndex"))
                     "setQueueInfo" -> Subscriptions.setQueueInfo(
                         store, s.getString("id"), s.optStr("queue"), s.optStr("statusText"), s.optStr("addressText")
                     )

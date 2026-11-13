@@ -326,6 +326,17 @@ function update(store: SubscriptionStore, id: string, change: (s: Subscription) 
 export const setPrimary = (store: SubscriptionStore, id: string): StoreResult =>
   store.items.some((s) => s.id === id) ? ok({ ...store, primaryId: id }) : fail(ERR_NOT_FOUND);
 
+/** Moves the item to `toIndex` (clamped); the primary and the fields stay unchanged (spec section 4). */
+export function move(store: SubscriptionStore, id: string, toIndex: number): StoreResult {
+  const from = store.items.findIndex((s) => s.id === id);
+  if (from < 0) return fail(ERR_NOT_FOUND);
+  const to = Math.max(0, Math.min(store.items.length - 1, toIndex));
+  const items = [...store.items];
+  const [moved] = items.splice(from, 1);
+  items.splice(to, 0, moved);
+  return ok({ ...store, items });
+}
+
 export const setPlanned = (store: SubscriptionStore, id: string, on: boolean): StoreResult =>
   update(store, id, (s) => ({ ...s, plannedAlerts: on }));
 

@@ -430,6 +430,7 @@ function subscriptionVectors(): number {
         case 'setPlanned': result = Sub.setPlanned(store, s.id, s.on); break;
         case 'setEmergency': result = Sub.setEmergency(store, s.id, s.on); break;
         case 'rename': result = Sub.rename(store, s.id, s.label); break;
+        case 'move': result = Sub.move(store, s.id, s.toIndex); break;
         case 'setQueueInfo': result = Sub.setQueueInfo(store, s.id, optStr(s, 'queue'), optStr(s, 'statusText'), optStr(s, 'addressText')); break;
         default: throw new Error(`unknown op in ${label}`);
       }

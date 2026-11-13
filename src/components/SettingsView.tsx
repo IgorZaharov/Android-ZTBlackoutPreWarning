@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { AlertCircle, AlertTriangle, Bell, ExternalLink, Globe, HelpCircle, Loader2, Pencil, Plus, RotateCcw, Send, Sliders, Star, Trash2, Vibrate, Volume2, X, Zap, RefreshCw } from 'lucide-react';
+import { AlertCircle, AlertTriangle, Bell, ExternalLink, Globe, HelpCircle, Loader2, Pencil, Plus, RotateCcw, Send, Sliders, Star, Trash2, Vibrate, Volume2, X, Zap, RefreshCw, GripVertical } from 'lucide-react';
 import { Language, UserSettings } from '../types';
 import { QUEUES, DEFAULT_ZTOE_URL, verifyZtoeSiteAndData } from '../services/ztoeParser';
 import {
@@ -30,6 +30,7 @@ import {
   displayLabel,
   remove as removeItem,
   rename as renameItem,
+  move as moveItem,
   setEmergency,
   setPlanned,
   setPrimary,
@@ -249,6 +250,46 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     else if (result.code === ERR_LIMIT) showToast(addressLimitReached(lang, MAX_ITEMS));
     return false;
   };
+  // Drag the grip to reorder (spec/SUBSCRIPTIONS.md section 4, `move`): a local order follows the pointer,
+  // the store is written on release. Arrow keys on the grip move one place.
+  const [drag, setDrag] = useState<{ id: string; order: string[]; offset: number } | null>(null);
+  const dragLastY = useRef<number | null>(null);
+  const itemEls = useRef(new Map<string, HTMLDivElement>());
+  const storeIds = store.items.map((i) => i.id);
+  const moveTo = (id: string, to: number) => applySync(sync.change(settings, (st) => moveItem(st, id, to)));
+  const dragStep = (d: { id: string; order: string[]; offset: number }, dy: number) => {
+    let offset = d.offset + dy;
+    let order = d.order;
+    const i = order.indexOf(d.id);
+    const el = itemEls.current.get(d.id);
+    const gap = el?.parentElement ? parseFloat(getComputedStyle(el.parentElement).rowGap) || 12 : 12;
+    const height = (id: string) => itemEls.current.get(id)?.offsetHeight ?? 0;
+    if (offset > 0 && i < order.length - 1) {
+      const step = height(order[i + 1]) + gap;
+      if (offset > step / 2) {
+        order = [...order];
+        order.splice(i + 1, 0, ...order.splice(i, 1));
+        offset -= step;
+      }
+    } else if (offset < 0 && i > 0) {
+      const step = height(order[i - 1]) + gap;
+      if (-offset > step / 2) {
+        order = [...order];
+        order.splice(i - 1, 0, ...order.splice(i, 1));
+        offset += step;
+      }
+    }
+    return { ...d, order, offset };
+  };
+  const finishDrag = () => {
+    if (!drag) return;
+    const to = drag.order.indexOf(drag.id);
+    const id = drag.id;
+    setDrag(null);
+    dragLastY.current = null;
+    if (to >= 0 && to !== storeIds.indexOf(id)) moveTo(id, to);
+  };
+  const shownIds = drag ? drag.order : storeIds;
   const isSiteVerified = !verification.isChecking && verification.status === 'SUCCESS';
   const minShort = t.minShort;
 
@@ -312,17 +353,60 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             {t.masterOffCaption}
           </p>
         )}
-        {store.items.map((item) => {
+        {shownIds.map((id, index) => {
+          const item = store.items.find((i) => i.id === id);
+          if (!item) return null;
           const isPrimary = item.id === store.primaryId;
+          const isDragging = drag?.id === item.id;
           const label = displayLabel(item);
           const caption = item.address ? (item.address.text.trim() ? item.address.text : null) : t.queueOnlyCaption;
           return (
             <div
               key={item.id}
+              ref={(el) => {
+                if (el) itemEls.current.set(item.id, el);
+                else itemEls.current.delete(item.id);
+              }}
               data-testid={`subscription-${item.id}`}
-              className={`flex flex-col gap-1.5 rounded-2xl border bg-white/[0.08] px-3.5 py-3 ${isPrimary ? 'border-[#FF5E3A]/35' : 'border-white/10'}`}
+              style={isDragging ? { transform: `translateY(${drag.offset}px) scale(1.02)` } : undefined}
+              className={`relative flex flex-col gap-1.5 rounded-2xl border bg-white/[0.08] px-3.5 py-3 ${isPrimary ? 'border-[#FF5E3A]/35' : 'border-white/10'} ${
+                isDragging ? 'z-10 bg-[#1b2234] shadow-lg shadow-black/40' : ''
+              }`}
             >
               <div className="flex items-center gap-1.5">
+                {store.items.length >= 2 && (
+                  <button
+                    type="button"
+                    data-testid={`subscription-drag-${item.id}`}
+                    aria-label={`${t.reorderHandle}: ${label}`}
+                    title={`${t.reorderHandle} (↑ ↓)`}
+                    onPointerDown={(e) => {
+                      e.currentTarget.setPointerCapture(e.pointerId);
+                      dragLastY.current = e.clientY;
+                      setDrag({ id: item.id, order: storeIds, offset: 0 });
+                    }}
+                    onPointerMove={(e) => {
+                      if (dragLastY.current === null) return;
+                      const dy = e.clientY - dragLastY.current;
+                      dragLastY.current = e.clientY;
+                      setDrag((d) => (d && d.id === item.id ? dragStep(d, dy) : d));
+                    }}
+                    onPointerUp={finishDrag}
+                    onPointerCancel={finishDrag}
+                    onKeyDown={(e) => {
+                      if (e.key === 'ArrowUp' && index > 0) {
+                        e.preventDefault();
+                        moveTo(item.id, index - 1);
+                      } else if (e.key === 'ArrowDown' && index < store.items.length - 1) {
+                        e.preventDefault();
+                        moveTo(item.id, index + 1);
+                      }
+                    }}
+                    className="-ml-2 flex h-12 w-10 shrink-0 cursor-grab touch-none items-center justify-center text-[#BAE6FD]/70 active:cursor-grabbing"
+                  >
+                    <GripVertical className="h-5 w-5" aria-hidden="true" />
+                  </button>
+                )}
                 <div className="flex min-w-0 flex-1 flex-wrap gap-1.5">
                   {/* a queue-only item already says "Черга X" in its label */}
                   {item.address !== null && (

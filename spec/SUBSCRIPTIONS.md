@@ -99,6 +99,7 @@ Each returns either the new store or an error code; the input store is never cha
 | `setPrimary(id)` | `not_found` | |
 | `setPlanned(id, on)`, `setEmergency(id, on)` | `not_found` | |
 | `rename(id, raw)` | `not_found` | stores `cleanLabel(raw)`; empty -> automatic |
+| `move(id, toIndex)` | `not_found` | moves the item to position `toIndex` (clamped to `0 .. items.size - 1`) and shifts the others; the primary and every field stay unchanged. The list order is the order of the Settings card, the main-screen chips (section 9) and the widget configure list (section 10) |
 | `setQueueInfo(id, queue, statusText, addressText)` | `not_found`, `invalid` (item has no address) | result of a ZTOE lookup for an address item: `queue` (invalid -> null), `queueStatusText` (blank -> null); `address.text` = `addressText` when that is not blank, else unchanged. `queueSource` is unchanged |
 
 ## 5. Effective switches (derived)

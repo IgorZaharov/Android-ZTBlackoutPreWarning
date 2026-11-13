@@ -16,7 +16,7 @@ Vocabulary used below: **span** = merged outage interval (planned ∪ repair ∪
 | Global master switch stays a kill switch; sound and vibration stay global | Per-address sound, vibration, advance time or quiet hours |
 | One alarm per (scope, span) no matter how many addresses share it | Server, accounts, push (plan 5.4 option C is a separate decision) |
 | Planned side costs **zero extra network** for more addresses (one ZTOE page holds all 12 queues) | Sharing subscriptions between devices, import/export |
-| Same model on Android, web simulator and iOS | Reordering, groups of addresses, per-address widgets beyond the binding in section 7 |
+| Same model on Android, web simulator and iOS | Groups of addresses, per-address widgets beyond the binding in section 7 (reordering was added after step 5 at the owner's request: `move` in `spec/SUBSCRIPTIONS.md` section 4) |
 
 Design rule: **toggles control notifications only, never what is shown.** A switched-off address still has its schedule, drum and emergency banner on screen.
 

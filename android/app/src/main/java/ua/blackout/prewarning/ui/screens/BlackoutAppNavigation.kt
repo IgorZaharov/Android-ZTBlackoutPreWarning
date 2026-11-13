@@ -10,6 +10,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.PagerDefaults
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -30,6 +31,7 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
@@ -58,7 +60,12 @@ import ua.blackout.prewarning.notification.AlarmScheduler
 import ua.blackout.prewarning.notification.ExactAlarmGate
 import ua.blackout.prewarning.notification.NotificationHelper
 import ua.blackout.prewarning.ui.AppStrings
-import ua.blackout.prewarning.ui.components.floatingShadow
+import ua.blackout.prewarning.ui.components.glassSurface
+import ua.blackout.prewarning.ui.components.PageGlide
+import ua.blackout.prewarning.ui.components.ambientBreath
+import ua.blackout.prewarning.ui.components.ambientDrift
+import ua.blackout.prewarning.ui.components.reducedMotion
+import ua.blackout.prewarning.ui.components.rememberAmbientSeconds
 import ua.blackout.prewarning.ui.theme.TimeOfDayPalette
 import ua.blackout.prewarning.widget.BlackoutGlanceWidget
 import java.time.Instant
@@ -463,6 +470,10 @@ fun BlackoutAppNavigation(
     val bgColors = remember(currentMinuteOfDay) {
         TimeOfDayPalette.getInterpolatedColors(LocalTime.now(KYIV_ZONE))
     }
+    // Very slow warp of the background orbs, and a slight parallax with the pager (read in the draw
+    // phase only, so neither recomposes the screens). Both stop under reduced motion.
+    val ambient = rememberAmbientSeconds()
+    val reduceMotion = remember { reducedMotion(appContext) }
 
     Box(
         modifier = Modifier
@@ -472,6 +483,10 @@ fun BlackoutAppNavigation(
                 val w = size.width.coerceAtLeast(1f)
                 val h = size.height.coerceAtLeast(1f)
                 val maxDim = maxOf(w, h)
+                val t = ambient.value
+                // the orbs move a little against the swipe: 3 % of the width per page
+                val parallax = if (reduceMotion) Offset.Zero
+                else Offset(-(pagerState.currentPage + pagerState.currentPageOffsetFraction) * w * 0.03f, 0f)
 
                 // 1. Primary (60%) & Secondary (30%) full-canvas radial atmospheric base matching PhoneSimulator.tsx
                 drawRect(
@@ -491,8 +506,8 @@ fun BlackoutAppNavigation(
                     brush = smoothGaussianRadialBrush(
                         color = bgColors.secondary,
                         maxAlpha = 0.68f,
-                        center = Offset(w * 0.88f, h * 0.08f),
-                        radius = w * 0.98f
+                        center = Offset(w * 0.88f, h * 0.08f) + ambientDrift(t, 0, w, h) + parallax,
+                        radius = w * 0.98f * ambientBreath(t, 0)
                     )
                 )
 
@@ -501,8 +516,8 @@ fun BlackoutAppNavigation(
                     brush = smoothGaussianRadialBrush(
                         color = bgColors.supporting,
                         maxAlpha = 0.62f,
-                        center = Offset(w * 0.12f, h * 0.06f),
-                        radius = w * 0.92f
+                        center = Offset(w * 0.12f, h * 0.06f) + ambientDrift(t, 1, w, h) + parallax,
+                        radius = w * 0.92f * ambientBreath(t, 1)
                     )
                 )
 
@@ -511,8 +526,8 @@ fun BlackoutAppNavigation(
                     brush = smoothGaussianRadialBrush(
                         color = bgColors.secondary,
                         maxAlpha = 0.58f,
-                        center = Offset(w * 0.08f, h * 0.68f),
-                        radius = w * 0.98f
+                        center = Offset(w * 0.08f, h * 0.68f) + ambientDrift(t, 2, w, h) + parallax,
+                        radius = w * 0.98f * ambientBreath(t, 2)
                     )
                 )
 
@@ -521,8 +536,8 @@ fun BlackoutAppNavigation(
                     brush = smoothGaussianRadialBrush(
                         color = bgColors.accent,
                         maxAlpha = 0.52f,
-                        center = Offset(w * 0.82f, h * 0.84f),
-                        radius = w * 0.82f
+                        center = Offset(w * 0.82f, h * 0.84f) + ambientDrift(t, 3, w, h) + parallax,
+                        radius = w * 0.82f * ambientBreath(t, 3)
                     )
                 )
 
@@ -553,8 +568,23 @@ fun BlackoutAppNavigation(
             state = pagerState,
             beyondViewportPageCount = 2,
             userScrollEnabled = !isRouletteOpen && !isQueueUnselected,
+            flingBehavior = PagerDefaults.flingBehavior(state = pagerState, snapAnimationSpec = PageGlide),
             modifier = Modifier.fillMaxSize()
         ) { page ->
+          // While swiping, the page leaving dims and recedes a little (only fades under reduced motion)
+          Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .graphicsLayer {
+                    val away = kotlin.math.abs((pagerState.currentPage - page) + pagerState.currentPageOffsetFraction).coerceIn(0f, 1f)
+                    alpha = 1f - 0.35f * away
+                    if (!reduceMotion) {
+                        val scale = 1f - 0.05f * away
+                        scaleX = scale
+                        scaleY = scale
+                    }
+                }
+          ) {
             when (page) {
                 0 -> {
                     val other = otherShownItem()
@@ -571,7 +601,7 @@ fun BlackoutAppNavigation(
                         shownAddressId = Subscriptions.viewItem(subscriptions, shownSubscriptionId)?.id,
                         onSelectAddress = { shownSubscriptionId = it },
                         showNoAlertsCaption = Subscriptions.noAlertsCaption(alertsMaster, subscriptions),
-                        onOpenSettings = { coroutineScope.launch { pagerState.animateScrollToPage(1) } },
+                        onOpenSettings = { coroutineScope.launch { pagerState.animateScrollToPage(1, animationSpec = PageGlide) } },
                         snapshot = snapshot,
                         statusInfo = statusInfo,
                         isRefreshing = isRefreshing,
@@ -602,7 +632,7 @@ fun BlackoutAppNavigation(
                         onOpenQueueSelection = {
                             autoOpenQueueHelp = true
                             coroutineScope.launch {
-                                pagerState.animateScrollToPage(1)
+                                pagerState.animateScrollToPage(1, animationSpec = PageGlide)
                             }
                         },
                         onChangeLanguage = { newLang ->
@@ -640,19 +670,20 @@ fun BlackoutAppNavigation(
                             if (ok) {
                                 showAppBanner(AppStrings.addressAdded(resolvedLang))
                                 // the first address becomes the primary: show it on the main screen
-                                if (wasEmpty) coroutineScope.launch { pagerState.animateScrollToPage(0) }
+                                if (wasEmpty) coroutineScope.launch { pagerState.animateScrollToPage(0, animationSpec = PageGlide) }
                             }
                         },
                         onAddQueueOnly = { newQueue ->
                             val wasEmpty = subscriptions.items.isEmpty()
                             val ok = onStoreResult(subscriptionSync.addQueueOnly(newQueue))
-                            if (ok && wasEmpty) coroutineScope.launch { pagerState.animateScrollToPage(0) }
+                            if (ok && wasEmpty) coroutineScope.launch { pagerState.animateScrollToPage(0, animationSpec = PageGlide) }
                         },
                         onRemoveSubscription = { id -> onStoreResult(subscriptionSync.change { Subscriptions.remove(it, id) }) },
                         onMakePrimary = { id -> onStoreResult(subscriptionSync.change { Subscriptions.setPrimary(it, id) }) },
                         onSetPlanned = { id, on -> onStoreResult(subscriptionSync.change { Subscriptions.setPlanned(it, id, on) }) },
                         onSetEmergency = { id, on -> onStoreResult(subscriptionSync.change { Subscriptions.setEmergency(it, id, on) }) },
                         onRenameSubscription = { id, label -> onStoreResult(subscriptionSync.change { Subscriptions.rename(it, id, label) }) },
+                        onMoveSubscription = { id, to -> onStoreResult(subscriptionSync.change { Subscriptions.move(it, id, to) }) },
                         onSiteUrlChanged = { newUrl ->
                             siteUrl = newUrl
                             val current = settingsRepo.getSettings()
@@ -726,7 +757,7 @@ fun BlackoutAppNavigation(
                             // CRITICAL CONSTANTS — Default values: advanceMinutes = 15, refreshMinutes = 30
                             settingsRepo.resetAllAppDataToFirstLaunch()
                             coroutineScope.launch {
-                                pagerState.animateScrollToPage(0)
+                                pagerState.animateScrollToPage(0, animationSpec = PageGlide)
                             }
                             coroutineScope.launch(Dispatchers.IO) {
                                 try {
@@ -757,6 +788,7 @@ fun BlackoutAppNavigation(
                     )
                 }
             }
+          }
         }
 
         if (isRouletteOpen) {
@@ -824,9 +856,7 @@ fun BlackoutAppNavigation(
             ) {
                 Box(
                     modifier = Modifier
-                        .floatingShadow(color = Color(0xB3000000), borderRadius = 32.dp, blurRadius = 24.dp, offsetY = 8.dp)
-                        .clip(CircleShape)
-                        .background(Color(0xCC141A29))
+                        .glassSurface(CircleShape, 32.dp, background = Color(0xB8141A29))
                         .padding(6.dp)
                 ) {
                     Row(
@@ -841,7 +871,7 @@ fun BlackoutAppNavigation(
                                 .clip(CircleShape)
                                 .background(if (isSchedule) Color.White else Color.Transparent)
                                 .clickable(enabled = !isQueueUnselected) {
-                                    coroutineScope.launch { pagerState.animateScrollToPage(0) }
+                                    coroutineScope.launch { pagerState.animateScrollToPage(0, animationSpec = PageGlide) }
                                 },
                             contentAlignment = Alignment.Center
                         ) {
@@ -861,7 +891,7 @@ fun BlackoutAppNavigation(
                                 .clip(CircleShape)
                                 .background(if (isSettings) Color.White else Color.Transparent)
                                 .clickable(enabled = !isQueueUnselected) {
-                                    coroutineScope.launch { pagerState.animateScrollToPage(1) }
+                                    coroutineScope.launch { pagerState.animateScrollToPage(1, animationSpec = PageGlide) }
                                 },
                             contentAlignment = Alignment.Center
                         ) {
@@ -881,7 +911,7 @@ fun BlackoutAppNavigation(
                                 .clip(CircleShape)
                                 .background(if (isAbout) Color.White else Color.Transparent)
                                 .clickable(enabled = !isQueueUnselected) {
-                                    coroutineScope.launch { pagerState.animateScrollToPage(2) }
+                                    coroutineScope.launch { pagerState.animateScrollToPage(2, animationSpec = PageGlide) }
                                 },
                             contentAlignment = Alignment.Center
                         ) {

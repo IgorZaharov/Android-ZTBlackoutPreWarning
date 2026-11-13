@@ -313,9 +313,9 @@ export const MainView: React.FC<MainViewProps> = ({
             onClick={onOpenQueueSelection}
             className="flex min-h-12 min-w-[260px] cursor-pointer flex-col items-center justify-center gap-1.5 rounded-3xl border border-white/25 bg-[#FF5E3A] px-8 py-5 text-center shadow-[0_20px_50px_rgba(255,94,58,0.5)] transition-transform hover:bg-[#ff4b24] active:scale-95 motion-reduce:transition-none motion-reduce:active:scale-100"
           >
-            {/* Dark label on the accent fill: 6.9:1, where white would be 3.0:1 */}
-            <span className="text-2xl font-extrabold leading-[30px] tracking-tight text-[#0B0B0A]">{t.selectQueueAction}</span>
-            <span className="text-sm font-semibold leading-5 text-[#0B0B0A]">{t.mainUtilityName}</span>
+            {/* White label on the accent fill (owner request; 3.0:1, large bold title) */}
+            <span className="text-2xl font-extrabold leading-[30px] tracking-tight text-white">{t.selectQueueAction}</span>
+            <span className="text-sm font-bold leading-5 text-white">{t.mainUtilityName}</span>
           </button>
 
           <div

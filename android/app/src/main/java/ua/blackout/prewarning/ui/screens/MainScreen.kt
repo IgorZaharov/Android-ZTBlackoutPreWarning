@@ -656,17 +656,17 @@ fun MainScreen(
                             horizontalAlignment = Alignment.CenterHorizontally,
                             verticalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
-                            // Dark label on the accent fill: 6.9:1, where white would be 3.0:1
+                            // White label on the accent fill (owner request; 3.0:1, large bold title)
                             Text(
                                 text = AppStrings.selectQueueAction(lang),
                                 style = ZtType.title.copy(fontWeight = FontWeight.ExtraBold),
-                                color = InkOnAccent,
+                                color = Color.White,
                                 textAlign = TextAlign.Center
                             )
                             Text(
                                 text = AppStrings.mainUtilityName(),
-                                style = ZtType.label,
-                                color = InkOnAccent,
+                                style = ZtType.label.copy(fontWeight = FontWeight.Bold),
+                                color = Color.White,
                                 textAlign = TextAlign.Center
                             )
                         }
