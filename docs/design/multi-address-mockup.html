@@ -439,8 +439,8 @@ td small { display: block; font-size: 13px; line-height: 18px; color: var(--text
               <h1 class="title24">Черга 5.2</h1>
               <p class="cap13">Житомирський РЕМ, м. Житомир, вул. Київська, буд. 77</p>
             </div>
-            <!-- bell = «Планові» of the selected address -->
-            <button type="button" class="pill-hit" aria-pressed="true" aria-label="Планові сповіщення для адреси Київська 77">
+            <!-- bell = master switch for all addresses (owner decision 4) -->
+            <button type="button" class="pill-hit" aria-pressed="true" aria-label="Усі сповіщення">
               <span class="pill on" aria-hidden="true"><span class="thumb"><svg class="i"><use href="#i-bell"/></svg></span></span>
             </button>
           </div>
@@ -523,7 +523,7 @@ td small { display: block; font-size: 13px; line-height: 18px; color: var(--text
       </div>
       <ul class="note">
         <li><b>Перемикач адрес</b> — рядок чипів (до 5, прокручується). Вибір змінює чергу, вкладки «Сьогодні/Завтра», шкалу й відлік. З однією адресою рядок не показується.</li>
-        <li><b>Дзвіночок</b> у шапці — «Планові» вибраної адреси. Основна адреса (зірка) визначає старт і віджет за замовчуванням.</li>
+        <li><b>Дзвіночок</b> у шапці — головний вимикач усіх сповіщень для всіх адрес; «Планові» й «Аварійні» кожної адреси — у налаштуваннях. Основна адреса (зірка) визначає старт і віджет за замовчуванням.</li>
         <li><b>Шкала:</b> аварійні — бурштинові смуги під 45°; де вони накладаються на планове, лишається малинова основа зі смугами.</li>
       </ul>
     </figure>
@@ -614,6 +614,7 @@ td small { display: block; font-size: 13px; line-height: 18px; color: var(--text
       </div>
       <ul class="note">
         <li>Ідентифікатор сповіщення = адреса + тип + відключення. Підпис адреси — у тексті, групи й теми окремі для кожної адреси.</li>
+        <li>Кілька адрес на одній черзі з однаковим відключенням — <b>одне</b> спільне сповіщення: «Київська 77 · Соборна 3 — Відключення о 23:00…».</li>
         <li>Два канали: <b>Планові відключення</b> і <b>Аварійні відключення</b>. Звук і вібрація — спільні.</li>
       </ul>
     </figure>

@@ -1,6 +1,6 @@
 # Multi-address subscriptions — logic draft
 
-Status: **draft, not implemented.** v1.4.0 builds only the foundations listed in [section 13](#13-what-v140-builds-and-what-comes-later); the feature itself is a later release (plan M6 for iOS, a matching Android release before or with it).
+Status: **draft, not implemented; owner decisions recorded 2026-11-13** ([section 14](#14-owner-decisions-2026-11-13)). v1.4.0 builds only the foundations listed in [section 13](#13-what-v140-builds-and-what-comes-later); the feature itself is a later release (plan M6 for iOS, a matching Android release before or with it).
 Look: [`multi-address-mockup.html`](multi-address-mockup.html) (screenshot: [`multi-address-mockup.png`](multi-address-mockup.png)).
 Owner brief: *"Draft the logic and a UI mockup for subscribing to several addresses, each with separate notification toggles. Example: all notifications for address A, only emergency for address B."*
 
@@ -96,9 +96,9 @@ A queue-only subscription (or one whose PowerOn ids cannot be resolved) shows th
 
 | Today (`UserSettings`, prefs key) | Multi-address | Notes |
 |---|---|---|
-| `notificationsEnabled` (`notifications_enabled`) | `Subscription#1.plannedAlerts` | Main-header bell becomes "Планові" of the selected address |
+| `notificationsEnabled` (`notifications_enabled`) | `Subscription#1.plannedAlerts` | the Main-header bell moves to `alertsMaster` (decision 4) |
 | `emergencyNotificationsEnabled` (`emergency_notifications_enabled`) | `Subscription#1.emergencyAlerts` | |
-| *(new)* | `alertsMaster` (`alerts_master_enabled`) | the "Увімкнути сповіщення" row of the existing master card; kill switch for **all** alerts, planned and emergency |
+| *(new)* | `alertsMaster` (`alerts_master_enabled`) | the "Увімкнути сповіщення" row of the existing master card and the Main-header bell; kill switch for **all** alerts, planned and emergency (decision 1) |
 | `soundEnabled`, `vibrationEnabled`, `prev_*` | unchanged, global | choose the channel variant exactly as now |
 | `advanceNoticeMinutes` (15), `refreshIntervalMinutes` (30) | unchanged, global | CLAUDE.md invariants |
 
@@ -124,7 +124,7 @@ Setup: master on. **A** = Київська 77, queue 5.2, planned on, emergency 
 | Emergency at B's street/house | no | **Yes** — "Європейська 12 — Аварійне відключення" | `emergencyActive(B)` |
 | Master switch off | no | no | kill switch, per-address values kept |
 
-Variant to cover the shared-queue case: if B were also on queue 5.2 with planned off, the alarm would still exist (A wants it), the fan-out would skip B, and only A is notified.
+Variant to cover the shared-queue case: if B were also on queue 5.2 with planned off, the alarm would still exist (A wants it), the fan-out would skip B, and only A is notified. With planned **on** for both, one merged alert is posted: "Київська 77 · Європейська 12 — Відключення о 23:00, орієнтовно до 01:00 (2 год)" (decision 3, section 5).
 
 ## 4. Alarm design
 
@@ -138,7 +138,7 @@ AlarmKey = kind | scope | startInstant(Kyiv, minute precision)
 ```
 * A REPAIR key is dropped when its start lies inside or touches a SCHEDULE span of the same queue (the merged span is alerted once from the schedule start, text computed from the merged span). Same rule as "planned + emergency overlap keeps the planned alert" (plan 5.1).
 * Emergencies never get alarms (no known future start); they come from polling.
-* The *alert* identity is separate and finer: `planned_{addressId}_{spanStartInstant}` in `AlertRegistry`. Alarm = per scope, alert = per address.
+* The *alert* identity is separate and finer: `planned_{addressId}_{spanStartInstant}` in `AlertRegistry`. Alarm = per scope, dedupe = per address, notification = per merge group (section 5).
 
 ### 4.2 Registry instead of `hashCode()`
 `AlarmRegistry` (JSON file `alarm_registry_v1.json`, **excluded from backup**) maps `AlarmKey -> requestCode`, allocated from a monotonic counter and freed on cancel or fire. Today's code derives request codes with `blockId.hashCode()` / `transitionId.hashCode()`; a collision silently overwrites one alarm, which with 5 addresses is no longer negligible. Belt and braces: the `PendingIntent`'s `Intent` carries a unique data URI `alert://SCHEDULE/q:5.2/202611132300` (identity by `filterEquals`, not by request code alone), flags `IMMUTABLE | UPDATE_CURRENT`.
@@ -156,7 +156,7 @@ flowchart LR
   AM -->|"fires with kind, scope, start"| RX["AlarmReceiver"]
   RX --> F["fan-out: subscriptions on scope<br/>master AND plannedAlerts"]
   F --> V["engine re-check:<br/>span exists and is unfinished"]
-  V --> N["post one notification per address<br/>dedupe in AlertRegistry"]
+  V --> N["merge addresses with the same span<br/>post one notification per group<br/>dedupe per address in AlertRegistry"]
 ```
 
 `AlertPlanner.plan(subscriptions, models, now)` is pure and returns the *desired set*; applying it is an idempotent diff against the registry (cancel what is no longer wanted: address removed, toggle off, schedule changed, queue changed). It runs on app start, any settings change, each successful fetch, boot, the exact-alarm permission-state broadcast and the midnight re-sync alarm. The receiver never trusts the alarm payload alone: it re-asks the engine, so "never warn about a finished slot" (plan 5.1) holds per address.
@@ -184,8 +184,8 @@ Unchanged from plan 5.1: one global `ExactAlarmGate`; when missing, every alarm 
 * **Group** = one per address: `setGroup("addr_{addressId}")` plus a summary notification (id key `summary|{addressId}`), `GROUP_ALERT_CHILDREN`. How the system renders a one-child group is to be verified on the emulator in the implementing phase.
 * **Text** carries the address label first: `"{label} — Відключення о {HH:mm}, орієнтовно до {HH:mm} ({N} год)"`; emergency: `"{label} — Аварійне відключення"` with body "Початок {HH:mm}, відновлення орієнтовно о {HH:mm}". Midnight spans print the full duration (plan 5.3). Body minutes are computed at fire time.
 * **Channels** stay per *kind and sound variant*, not per address (5 addresses x 8 variants would be unusable in system settings): the existing four planned channels (sound+vibration, sound, vibration, silent) and a separate set of four emergency channels (plan 5.1), shown under two `NotificationChannelGroup`s "Планові відключення" and "Аварійні відключення".
-* **Same queue, two addresses** (both planned on): two notifications, one per address, each in its own group; only the first is audible (`setSilent(true)` on the others). Owner decision in section 14.
-* Tap action opens Main with that address selected (`EXTRA_SUBSCRIPTION_ID`).
+* **Same queue, several addresses** (decision 3): **one merged planned notification.** At fire time the fan-out collects the subscriptions that are `plannedActive` on the alarm's scope *and* whose engine span has the same start and end (a REPAIR span can extend one address' span; then that address gets its own notification). Order: primary first, then `createdAt`. Text: `"{label1} · {label2} — Відключення о …"`; with three or more, `"{label1} · {label2} +{N}"` in the title and the full list in the expanded body. Id key `n|{firstAddressId}|planned|{spanStartInstant}`; group = the first address' group. Posted only if at least one listed address has no `planned_{addressId}_{spanStartInstant}` in `AlertRegistry`; every listed address is then marked, so removing one address later never re-alerts the others. Emergencies are never merged (they are per house).
+* Tap action opens Main with that address selected (`EXTRA_SUBSCRIPTION_ID`; for a merged alert, the first listed address).
 
 ## 6. Emergency polling
 
@@ -217,8 +217,8 @@ flowchart TD
 ## 8. Main screen behaviour
 
 * **Address switcher**: chip row above the day tabs (mockup frame 2), only when there are 2 or more subscriptions; with one address Main looks exactly as today. Up to 5 chips, horizontal scroll, 48 px high; the primary has a star. A dropdown is the fallback if a font scale of 2.0 makes chips unusable.
-* Selecting an address changes queue title, address caption, hero countdown, drum, rows and the **Today/Tomorrow tabs** (tab resets to Today). Selected id is session state; cold start shows the primary (open question 5).
-* Header bell = `plannedAlerts` of the selected address; emergency has no header shortcut (it is in Settings).
+* Selecting an address changes queue title, address caption, hero countdown, drum, rows and the **Today/Tomorrow tabs** (tab resets to Today). Selected id is session state; cold start always shows the primary (decision 5).
+* Header bell = `alertsMaster` (decision 4): one tap silences or restores every alert for every address, as the bell does today for the single address. Per-address "Планові" / "Аварійні" live in Settings only. If the master is on while no address has any toggle on, the bell shows its "on" state with a caption "Для жодної адреси сповіщення не ввімкнені" and a link to Settings, so "on" never silently means nothing.
 * Site status chip row ("Сайт ZTOE доступний, графік опубліковано") is global (one site); the PowerOn line under it is per selected address.
 * The exact-alarm banner and permission banners are global and appear above the switcher.
 
@@ -251,7 +251,7 @@ When the store is absent on first run of the release that ships the feature:
 
 1. Read legacy keys: `queue`, `selected_address`, `selected_rem`, `selected_settlement`, `selected_street`, `selected_house`, `custom_queue_status_text`, `notifications_enabled`, `emergency_notifications_enabled`.
 2. Address complete (all four ids) -> create **subscription #1** from it (`queueSource = LOOKUP`, `poweronStreetIds` empty until `PowerOnIdResolver` runs in the background). Only `queue` -> queue-only subscription labelled "Черга 5.2". Nothing -> empty store (queue-unselected state, as today).
-3. `plannedAlerts = notifications_enabled`, `emergencyAlerts = emergency_notifications_enabled`, `alertsMaster = notifications_enabled || emergency_notifications_enabled` (this is exactly today's `anyAlertsEnabled`, so behaviour is unchanged). **Exception:** both legacy toggles off -> `alertsMaster = false` and both per-address toggles set to **on**, so turning the master back on gives alerts instead of silence (decision; question 1).
+3. `plannedAlerts = notifications_enabled`, `emergencyAlerts = emergency_notifications_enabled`, `alertsMaster = notifications_enabled || emergency_notifications_enabled` (this is exactly today's `anyAlertsEnabled`, so behaviour is unchanged). Both legacy toggles off -> `alertsMaster = false` and both per-address toggles stay **off**, as the user left them (decision 8). Turning the master back on then shows the "no address has alerts" caption from section 8 instead of silently doing nothing.
 4. Sound, vibration, advance minutes, refresh interval: untouched.
 5. Subscription #1's id **must equal the fixed address id that 1.4.0 already uses** for the implicit single address in every alert key, ledger folder and registry entry (proposed constant `addr_default`). Otherwise the first run would see "new" alert keys and repeat alerts.
 6. Cancel legacy alarms once (they carry `hashCode()` request codes from the old scheme), then re-plan through the registry.
@@ -261,7 +261,7 @@ When the store is absent on first run of the release that ships the feature:
 
 | Case | Behaviour |
 |---|---|
-| Two addresses on one queue | one alarm per span; fan-out posts per address; second one silent; both groups visible (question 3) |
+| Two addresses on one queue | one alarm per span; one merged notification when the spans are equal, separate ones when a repair span differs (decision 3) |
 | Address removed while an alarm is pending | one transaction: remove item, re-plan (cancels alarms nobody else needs), cancel posted notifications of group `addr_{id}`, delete ledger folder, widget fallback. If a stale alarm fires anyway, fan-out finds no subscriber, does nothing, frees its registry entry |
 | Primary removed | oldest remaining becomes primary; none left -> empty state |
 | `POST_NOTIFICATIONS` denied (Android 13+) | per-address toggles keep their values; global banner "Сповіщення вимкнені в системі" with a settings button; nothing is flipped silently |
@@ -278,7 +278,7 @@ When the store is absent on first run of the release that ships the feature:
 ## 12. iOS notes (plan section 9, M3 and M6)
 
 * **Budget**: iOS keeps 64 pending local notifications. Rolling window of **40**, filled nearest-first across *all* subscriptions, rebuilt on launch, foreground, `BGAppRefreshTask` and on every settings change. 24 slots of headroom for emergency and one-offs.
-* **No fire-time hook**: a local notification runs no app code when it fires, so the Android fan-out-at-fire-time idea does not exist. iOS fans out at **schedule time**: one `UNNotificationRequest` per (address, span), identifier `planned_{addressId}_{startInstant}` (a stable id makes re-planning a replace). Same `AlertPlan = [(key, fireAt, title, body)]` from `core/`, keys already carry the address id (plan 5.4 #5).
+* **No fire-time hook**: a local notification runs no app code when it fires, so the Android fan-out-at-fire-time idea does not exist. iOS fans out at **schedule time**: one `UNNotificationRequest` per merge group (addresses with the same span, decision 3; usually a single address), identifier `planned_{firstAddressId}_{startInstant}` (a stable id makes re-planning a replace; the group's membership is recomputed on every re-plan). Same `AlertPlan = [(key, fireAt, title, body)]` from `core/`, keys already carry the address id (plan 5.4 #5).
 * Grouping: `threadIdentifier = addressId`; interruption level `.timeSensitive` for emergency (needs the capability and App Review justification); no per-kind channels, so "Планові/Аварійні" are categories plus the in-app toggles.
 * Storage: `subscriptions_v1.json` in the App Group container (the widget extension reads it); same schema and invariants (`spec/PERSISTENCE.md`). Large data (index, ledger) as files, not `UserDefaults`.
 * Widgets: WidgetKit `AppIntentConfiguration` with an `AppEntity` "address" (default = primary) replaces the Android configure activity; timelines come from `transitions(window)` of the bound subscription.
@@ -300,22 +300,24 @@ Built now (plan 4 and 5.4), so the feature is additive later:
 
 Later: `SubscriptionStore` + migration, Settings card and picker integration, Main switcher, fan-out receiver, widget configure activity, web parity, then iOS M6. Suggested order: store and migration, Settings UI, planner/fan-out, Main switcher, widgets.
 
-## 14. Open questions for the owner
+## 14. Owner decisions (2026-11-13)
 
-1. **Master vs emergency.** Today `notificationsEnabled` is both "master" and "planned" and emergency is independent of it. This draft makes the master a true kill switch for *both* kinds (matches plan section 4). Keep, or leave emergency independent as today?
-2. **Limit of 5** — enough? (Cost of more is small: alarms scale with queues, polling with distinct streets.)
-3. **Two addresses on one queue**: two notifications (default, one audible) or one merged "Київська 77 · Соборна 3 — …"?
-4. **Header bell on Main**: "Планові" of the selected address (default) or the master switch?
-5. **Cold start**: always the primary (default) or the last selected address?
-6. **Widget default**: follow primary (default) or fixed to the address that was primary when added?
-7. **Advance notice (15 min)** stays global; is a per-address value ever wanted?
-8. **Both legacy toggles off at migration**: set both per-address toggles on (default, section 10 step 3) or keep them off?
-9. **Queue-only subscriptions** (no address shared, so no emergency): allowed (default) or require an address?
-10. **Labels**: auto from street + house, editable (default), or always user-typed?
+| # | Question | Decision | vs draft default |
+|---|---|---|---|
+| 1 | Master vs emergency | Master is a kill switch for **both** planned and emergency | same |
+| 2 | Address limit | **5** | same |
+| 3 | Two addresses on one queue | **One merged notification** ("Київська 77 · Соборна 3 — …"), section 5 | **changed** (draft: two, one audible) |
+| 4 | Header bell on Main | **Master switch** (`alertsMaster`), section 8 | **changed** (draft: selected address' Планові) |
+| 5 | Cold start | Always the **primary** | same |
+| 6 | Widget default | **Follow primary** | same |
+| 7 | Advance notice | Stays **global** (15 min default) | same |
+| 8 | Both legacy toggles off at migration | **Keep both per-address toggles off**, master off, section 10 step 3 | **changed** (draft: set both on) |
+| 9 | Queue-only subscriptions | **Allowed**; Аварійні disabled with the reason | same |
+| 10 | Labels | **Auto** from street + house, **editable** | same |
 
 ## 15. Gaps in the plan this draft had to decide
 
-* Plan 4 says the master is a kill switch, plan 5.1 says emergency is independent of it "as today" -> question 1.
+* Plan 4 says the master is a kill switch, plan 5.1 says emergency is independent of it "as today" -> decision 1: kill switch for both.
 * Plan 4 keys alarms by (queue, block); PowerOn **repair works are address-level**, so a second scope `a:{addressId}` is added (4.1).
 * Plan 4: "notification id = address id + kind + interval id"; plan 5.1/5.4 key emergencies by start instant and event -> unified as one key format (section 5).
 * "12 queues x ~24 = 288" does not state what 24 is; with at most 5 subscriptions the real bound is 5 queues (4.4).
