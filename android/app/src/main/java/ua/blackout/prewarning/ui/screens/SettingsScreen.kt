@@ -33,6 +33,8 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Bolt
+import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.AlarmOff
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
@@ -63,6 +65,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -189,6 +192,10 @@ fun SettingsScreen(
     onRefreshMinutesChanged: (Int) -> Unit = {},
     onToggleSound: (Boolean) -> Unit = {},
     onToggleVibration: (Boolean) -> Unit = {},
+    emergencyEtaAlerts: Boolean = true,
+    emergencyEndAlerts: Boolean = true,
+    onToggleEmergencyEtaAlerts: (Boolean) -> Unit = {},
+    onToggleEmergencyEndAlerts: (Boolean) -> Unit = {},
     onLanguageSelected: (String) -> Unit = {},
     onSendTestAlert: () -> Unit = {},
     onForceRefresh: () -> Unit = {},
@@ -456,6 +463,36 @@ fun SettingsScreen(
                     style = ZtType.caption,
                     color = ZtColors.TextTertiary,
                     modifier = Modifier.padding(top = 2.dp)
+                )
+            }
+        }
+
+        // 4b. Emergency follow-ups for all addresses: restoration time changes and restoration. The start is
+        // always announced (spec/NOTIFICATIONS.md 2.4). Locked and shown off while the master is off.
+        GlassCard(modifier = Modifier.fillMaxWidth(), contentPadding = PaddingValues18) {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(text = AppStrings.emergencyAlertsTitle(lang), style = ZtType.overline, color = Color.White)
+                Text(text = AppStrings.emergencyAlertsDesc(lang), style = ZtType.caption, color = ZtColors.TextSecondary)
+                SwitchRow(
+                    icon = Icons.Default.Schedule,
+                    iconTint = if (alertsMaster) ZtColors.EmergencyAmberStart else Color(0x4DBAE6FD),
+                    title = AppStrings.emergencyEtaAlertsTitle(lang),
+                    hint = AppStrings.emergencyEtaAlertsHint(lang),
+                    checked = alertsMaster && emergencyEtaAlerts,
+                    onCheckedChange = onToggleEmergencyEtaAlerts,
+                    lang = lang,
+                    enabled = alertsMaster
+                )
+                Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(ZtColors.Divider))
+                SwitchRow(
+                    icon = Icons.Default.Bolt,
+                    iconTint = if (alertsMaster) ZtColors.ChipGreenText else Color(0x4DBAE6FD),
+                    title = AppStrings.emergencyEndAlertsTitle(lang),
+                    hint = AppStrings.emergencyEndAlertsHint(lang),
+                    checked = alertsMaster && emergencyEndAlerts,
+                    onCheckedChange = onToggleEmergencyEndAlerts,
+                    lang = lang,
+                    enabled = alertsMaster
                 )
             }
         }
@@ -787,6 +824,9 @@ private fun MyAddressesCard(
             }
 
             order.mapNotNull { byId[it] }.forEachIndexed { index, item ->
+              // key: when the order changes the block keeps its own composition, so the drag gesture in
+              // progress is not handed to another block and cancelled (the card then "hung" mid-drag)
+              key(item.id) {
                 val label = Subscriptions.displayLabel(item)
                 val isDragging = draggingId == item.id
                 val handle = if (store.items.size < 2) null else Modifier
@@ -833,6 +873,7 @@ private fun MyAddressesCard(
                         }
                         .then(if (isDragging) Modifier.shadow(10.dp, RoundedCornerShape(16.dp)) else Modifier)
                 )
+              }
             }
 
             if (canAdd) {

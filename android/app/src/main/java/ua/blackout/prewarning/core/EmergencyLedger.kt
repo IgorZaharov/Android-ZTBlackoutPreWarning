@@ -69,12 +69,39 @@ object EmergencyLedger {
         val events = ArrayList<EmergencyEvent>()
         val out = LinkedHashMap<String, LedgerEntry>()
         val seen = HashSet<String>()
+        // Open entries PowerOn stopped listing: a listed record overlapping one is the same outage
+        // re-registered under a new start (continuation, spec/NOTIFICATIONS.md 2.2)
+        val listed = fetch.records.map { it.id }.toHashSet()
+        val vanished = pruned.filter { it.closedAt == null && it.id !in listed }
+        val absorbed = HashSet<String>()
 
         for (rec in fetch.records) {
             if (!seen.add(rec.id)) continue
             val resolved = OutageEngine.resolveEmergency(rec.copy(closedAt = null), now, graceMinutes)
             val old = byId[rec.id]
+            val continued = if (old == null) vanished.firstOrNull { it.id !in absorbed && overlaps(it, rec) } else null
             when {
+                continued != null -> {
+                    absorbed.add(continued.id)
+                    var e = newEntry(rec, now, announced = continued.endEmitted).copy(
+                        firstSeen = continued.firstSeen,
+                        startEmitted = continued.startEmitted,
+                        lastEmittedEta = continued.lastEmittedEta
+                    )
+                    if (!resolved.stale && e.startEmitted && !e.endEmitted) {
+                        val newEta = rec.estimatedEnd
+                        val last = continued.lastEmittedEta
+                        if (newEta != null && last == null) {
+                            e = e.copy(lastEmittedEta = newEta)
+                        } else if (newEta != null && last != null &&
+                            abs(ChronoUnit.MINUTES.between(last, newEta)) >= OutageConfig.ETA_CHANGE_MIN_DELTA_MINUTES
+                        ) {
+                            events.add(EmergencyEvent(EmergencyEventKind.ETA_CHANGED, rec.id, rec.start, newEta))
+                            e = e.copy(lastEmittedEta = newEta)
+                        }
+                    }
+                    out[rec.id] = e
+                }
                 old == null -> {
                     if (resolved.stale) {
                         out[rec.id] = newEntry(rec, now, announced = true)
@@ -116,6 +143,8 @@ object EmergencyLedger {
                 out[old.id] = old
                 continue
             }
+            // Taken over by a new record, or covered by a listed one: the outage goes on, nothing ended
+            if (old.id in absorbed || fetch.records.any { overlaps(old, it) }) continue
             val est = old.estimatedEnd
             val wasStale = est != null && ChronoUnit.MINUTES.between(est, now) > graceMinutes
             val silent = old.endEmitted || wasStale || !old.startEmitted
@@ -125,6 +154,13 @@ object EmergencyLedger {
             }
         }
         return LedgerResult(out.values.toList(), events)
+    }
+
+    /** The entry's time and the record's time overlap or touch; a missing estimate is open-ended. */
+    private fun overlaps(e: LedgerEntry, r: EmergencyRecord): Boolean {
+        val eEnd = e.estimatedEnd
+        val rEnd = r.estimatedEnd
+        return (rEnd == null || !e.start.isAfter(rEnd)) && (eEnd == null || !r.start.isAfter(eEnd))
     }
 
     private fun newEntry(rec: EmergencyRecord, now: LocalDateTime, announced: Boolean) = LedgerEntry(

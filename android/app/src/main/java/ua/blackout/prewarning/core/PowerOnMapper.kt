@@ -61,7 +61,29 @@ object PowerOnMapper {
                 )
             }
         }
-        return byId.values.sortedBy { it.start }
+        return mergeOverlapping(byId.values.sortedBy { it.start })
+    }
+
+    /**
+     * Records whose times overlap or touch are one outage (spec/POWERON_API.md 5.1 step 7): operators
+     * re-register an ongoing outage as a new row when its estimate runs out. The merged record keeps the
+     * id and start of the earliest and the latest estimate; a record without an estimate is open-ended.
+     */
+    private fun mergeOverlapping(sorted: List<EmergencyRecord>): List<EmergencyRecord> {
+        val out = ArrayList<EmergencyRecord>(sorted.size)
+        for (rec in sorted) {
+            val last = out.lastOrNull()
+            val lastEnd = last?.estimatedEnd
+            if (last != null && (lastEnd == null || !rec.start.isAfter(lastEnd))) {
+                out[out.lastIndex] = last.copy(
+                    estimatedEnd = listOfNotNull(lastEnd, rec.estimatedEnd).maxOrNull(),
+                    label = last.label ?: rec.label
+                )
+            } else {
+                out.add(rec)
+            }
+        }
+        return out
     }
 
     /** Planned repair works for [house]; treated as planned outages. Rows beyond tomorrow are dropped. */

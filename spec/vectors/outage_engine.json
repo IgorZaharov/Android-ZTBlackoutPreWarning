@@ -1,5 +1,5 @@
 {
-  "_doc": "Golden vectors for the outage engine (spec/OUTAGE_ENGINE.md). Expected values were derived by hand, never by running an implementation. Times are Kyiv wall-clock ISO local date-times. 'planned' ranges are HH:MM-HH:MM (end may be 24:00) and mark ztoe half-hour cells as off. Only the keys present under 'expect' are compared. Row 'kind' is PLANNED | REPAIR | EMERGENCY, status is FINISHED | ACTIVE | UPCOMING | OVERDUE. 'spans' are the union of all non-stale outages; 'alerts' are planned/repair spans only.",
+  "_doc": "Golden vectors for the outage engine (spec/OUTAGE_ENGINE.md). Expected values were derived by hand, never by running an implementation. Times are Kyiv wall-clock ISO local date-times. 'planned' ranges are HH:MM-HH:MM (end may be 24:00) and mark ztoe half-hour cells as off. Only the keys present under 'expect' are compared. Row 'kind' is PLANNED | REPAIR | EMERGENCY, status is FINISHED | ACTIVE | UPCOMING | OVERDUE. 'spans' are the union of all non-stale outages; 'alerts' are planned/repair spans only. 'emergencyDelivery' (spec/NOTIFICATIONS.md 2.4a): SEND, PROLONG or DROP for one emergency event given the address's planned spans.",
   "cases": [
     {
       "name": "finished planned outage at 18:00 produces no alert and is listed as finished",
@@ -238,6 +238,309 @@
         "status": { "isOffNow": false, "countdownText": "--:--:--", "nextSlotTime": "Відключень немає" },
         "spans": [], "alerts": []
       }
+    },
+    {
+      "name": "a scheduled block that starts during an emergency gets no pre-warning: one continuous outage",
+      "today": "2026-11-13",
+      "now": "2026-11-13T20:00",
+      "advanceMinutes": 15,
+      "planned": {
+        "today": [
+          "22:00-24:00"
+        ]
+      },
+      "emergencies": [
+        {
+          "id": "pw_2026-11-13T19:30",
+          "start": "2026-11-13T19:30",
+          "estimatedEnd": "2026-11-13T23:00"
+        }
+      ],
+      "expect": {
+        "alerts": []
+      }
+    },
+    {
+      "name": "an emergency that ends exactly when the scheduled block starts makes one continuous outage",
+      "today": "2026-11-13",
+      "now": "2026-11-13T20:00",
+      "advanceMinutes": 15,
+      "planned": {
+        "today": [
+          "22:00-24:00"
+        ]
+      },
+      "emergencies": [
+        {
+          "id": "pw_2026-11-13T19:30",
+          "start": "2026-11-13T19:30",
+          "estimatedEnd": "2026-11-13T22:00"
+        }
+      ],
+      "expect": {
+        "alerts": []
+      }
+    },
+    {
+      "name": "an emergency that ends before the scheduled block leaves its pre-warning",
+      "today": "2026-11-13",
+      "now": "2026-11-13T20:00",
+      "advanceMinutes": 15,
+      "planned": {
+        "today": [
+          "22:00-24:00"
+        ]
+      },
+      "emergencies": [
+        {
+          "id": "pw_2026-11-13T19:30",
+          "start": "2026-11-13T19:30",
+          "estimatedEnd": "2026-11-13T21:00"
+        }
+      ],
+      "expect": {
+        "alerts": [
+          {
+            "key": "planned_2026-11-13T22:00",
+            "fireAt": "2026-11-13T21:45",
+            "spanEnd": "2026-11-14T00:00",
+            "durationMinutes": 120
+          }
+        ]
+      }
+    },
+    {
+      "name": "an emergency starting at the same moment as the scheduled block does not take its pre-warning away",
+      "today": "2026-11-13",
+      "now": "2026-11-13T20:00",
+      "advanceMinutes": 15,
+      "planned": {
+        "today": [
+          "22:00-24:00"
+        ]
+      },
+      "emergencies": [
+        {
+          "id": "pw_2026-11-13T22:00",
+          "start": "2026-11-13T22:00",
+          "estimatedEnd": "2026-11-13T23:00"
+        }
+      ],
+      "expect": {
+        "alerts": [
+          {
+            "key": "planned_2026-11-13T22:00",
+            "fireAt": "2026-11-13T21:45",
+            "spanEnd": "2026-11-14T00:00",
+            "durationMinutes": 120
+          }
+        ]
+      }
+    }
+  ],
+  "emergencyDelivery": [
+    {
+      "name": "start with no scheduled outage around it",
+      "now": "2026-11-13T19:35",
+      "plannedSpans": [],
+      "plannedAlertsOn": true,
+      "event": {
+        "kind": "START",
+        "start": "2026-11-13T19:30",
+        "eta": "2026-11-13T23:00"
+      },
+      "expect": "SEND"
+    },
+    {
+      "name": "start inside a warned scheduled outage and ending within it",
+      "now": "2026-11-13T22:35",
+      "plannedSpans": [
+        {
+          "start": "2026-11-13T22:00",
+          "end": "2026-11-14T00:00"
+        }
+      ],
+      "plannedAlertsOn": true,
+      "event": {
+        "kind": "START",
+        "start": "2026-11-13T22:30",
+        "eta": "2026-11-13T23:30"
+      },
+      "expect": "DROP"
+    },
+    {
+      "name": "start inside a warned scheduled outage that lasts longer than it: a prolongation",
+      "now": "2026-11-13T23:05",
+      "plannedSpans": [
+        {
+          "start": "2026-11-13T22:00",
+          "end": "2026-11-14T00:00"
+        }
+      ],
+      "plannedAlertsOn": true,
+      "event": {
+        "kind": "START",
+        "start": "2026-11-13T23:00",
+        "eta": "2026-11-14T01:00"
+      },
+      "expect": "PROLONG"
+    },
+    {
+      "name": "start at the same moment as the scheduled outage (its pre-warning was the start)",
+      "now": "2026-11-13T22:00",
+      "plannedSpans": [
+        {
+          "start": "2026-11-13T22:00",
+          "end": "2026-11-14T00:00"
+        }
+      ],
+      "plannedAlertsOn": true,
+      "event": {
+        "kind": "START",
+        "start": "2026-11-13T22:00",
+        "eta": "2026-11-13T23:00"
+      },
+      "expect": "DROP"
+    },
+    {
+      "name": "start inside a scheduled outage the user is not warned about",
+      "now": "2026-11-13T22:35",
+      "plannedSpans": [
+        {
+          "start": "2026-11-13T22:00",
+          "end": "2026-11-14T00:00"
+        }
+      ],
+      "plannedAlertsOn": false,
+      "event": {
+        "kind": "START",
+        "start": "2026-11-13T22:30",
+        "eta": "2026-11-13T23:30"
+      },
+      "expect": "SEND"
+    },
+    {
+      "name": "start without an estimate inside a warned scheduled outage",
+      "now": "2026-11-13T22:35",
+      "plannedSpans": [
+        {
+          "start": "2026-11-13T22:00",
+          "end": "2026-11-14T00:00"
+        }
+      ],
+      "plannedAlertsOn": true,
+      "event": {
+        "kind": "START",
+        "start": "2026-11-13T22:30",
+        "eta": null
+      },
+      "expect": "DROP"
+    },
+    {
+      "name": "start exactly at the end of the scheduled outage continues it",
+      "now": "2026-11-14T00:05",
+      "plannedSpans": [
+        {
+          "start": "2026-11-13T22:00",
+          "end": "2026-11-14T00:00"
+        }
+      ],
+      "plannedAlertsOn": true,
+      "event": {
+        "kind": "START",
+        "start": "2026-11-14T00:00",
+        "eta": "2026-11-14T01:00"
+      },
+      "expect": "PROLONG"
+    },
+    {
+      "name": "end while the scheduled outage is still on: power is still off",
+      "now": "2026-11-13T23:00",
+      "plannedSpans": [
+        {
+          "start": "2026-11-13T19:30",
+          "end": "2026-11-13T19:30"
+        },
+        {
+          "start": "2026-11-13T22:00",
+          "end": "2026-11-14T00:00"
+        }
+      ],
+      "plannedAlertsOn": true,
+      "event": {
+        "kind": "END",
+        "start": "2026-11-13T19:30",
+        "eta": "2026-11-13T23:00"
+      },
+      "expect": "DROP"
+    },
+    {
+      "name": "end after the scheduled outage is over",
+      "now": "2026-11-14T00:30",
+      "plannedSpans": [
+        {
+          "start": "2026-11-13T22:00",
+          "end": "2026-11-14T00:00"
+        }
+      ],
+      "plannedAlertsOn": true,
+      "event": {
+        "kind": "END",
+        "start": "2026-11-13T23:00",
+        "eta": "2026-11-14T01:00"
+      },
+      "expect": "SEND"
+    },
+    {
+      "name": "end while a scheduled outage is on, also when its alerts are off",
+      "now": "2026-11-13T23:00",
+      "plannedSpans": [
+        {
+          "start": "2026-11-13T22:00",
+          "end": "2026-11-14T00:00"
+        }
+      ],
+      "plannedAlertsOn": false,
+      "event": {
+        "kind": "END",
+        "start": "2026-11-13T19:30",
+        "eta": "2026-11-13T23:00"
+      },
+      "expect": "DROP"
+    },
+    {
+      "name": "end exactly when the scheduled outage ends",
+      "now": "2026-11-14T00:00",
+      "plannedSpans": [
+        {
+          "start": "2026-11-13T22:00",
+          "end": "2026-11-14T00:00"
+        }
+      ],
+      "plannedAlertsOn": true,
+      "event": {
+        "kind": "END",
+        "start": "2026-11-13T19:30",
+        "eta": "2026-11-14T00:00"
+      },
+      "expect": "SEND"
+    },
+    {
+      "name": "a changed estimate is always delivered",
+      "now": "2026-11-13T22:35",
+      "plannedSpans": [
+        {
+          "start": "2026-11-13T22:00",
+          "end": "2026-11-14T00:00"
+        }
+      ],
+      "plannedAlertsOn": true,
+      "event": {
+        "kind": "ETA_CHANGED",
+        "start": "2026-11-13T19:30",
+        "eta": "2026-11-14T02:00"
+      },
+      "expect": "SEND"
     }
   ]
 }

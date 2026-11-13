@@ -665,19 +665,11 @@ fun BlackoutAppNavigation(
                         autoOpenQueueHelp = autoOpenQueueHelp,
                         onAutoOpenQueueHelpHandled = { autoOpenQueueHelp = false },
                         onAddAddress = { resolvedQueue, statusText, addressLabel, query ->
-                            val wasEmpty = subscriptions.items.isEmpty()
                             val ok = onStoreResult(subscriptionSync.addFromLookup(resolvedQueue, statusText, addressLabel, query))
-                            if (ok) {
-                                showAppBanner(AppStrings.addressAdded(resolvedLang))
-                                // the first address becomes the primary: show it on the main screen
-                                if (wasEmpty) coroutineScope.launch { pagerState.animateScrollToPage(0, animationSpec = PageGlide) }
-                            }
+                            // the user stays in Settings (owner request): the address is added in place
+                            if (ok) showAppBanner(AppStrings.addressAdded(resolvedLang))
                         },
-                        onAddQueueOnly = { newQueue ->
-                            val wasEmpty = subscriptions.items.isEmpty()
-                            val ok = onStoreResult(subscriptionSync.addQueueOnly(newQueue))
-                            if (ok && wasEmpty) coroutineScope.launch { pagerState.animateScrollToPage(0, animationSpec = PageGlide) }
-                        },
+                        onAddQueueOnly = { newQueue -> onStoreResult(subscriptionSync.addQueueOnly(newQueue)) },
                         onRemoveSubscription = { id -> onStoreResult(subscriptionSync.change { Subscriptions.remove(it, id) }) },
                         onMakePrimary = { id -> onStoreResult(subscriptionSync.change { Subscriptions.setPrimary(it, id) }) },
                         onSetPlanned = { id, on -> onStoreResult(subscriptionSync.change { Subscriptions.setPlanned(it, id, on) }) },
@@ -725,6 +717,14 @@ fun BlackoutAppNavigation(
                             vibrationEnabled = it
                             val current = settingsRepo.getSettings()
                             settingsRepo.saveSettings(current.copy(vibrationEnabled = it, prevVibrationEnabled = it))
+                        },
+                        emergencyEtaAlerts = currentSettings.emergencyEtaAlerts,
+                        emergencyEndAlerts = currentSettings.emergencyEndAlerts,
+                        onToggleEmergencyEtaAlerts = { on ->
+                            settingsRepo.saveSettings(settingsRepo.getSettings().copy(emergencyEtaAlerts = on))
+                        },
+                        onToggleEmergencyEndAlerts = { on ->
+                            settingsRepo.saveSettings(settingsRepo.getSettings().copy(emergencyEndAlerts = on))
                         },
                         onLanguageSelected = {
                             currentLanguage = it

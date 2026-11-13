@@ -458,6 +458,10 @@ data class UserSettings(
     val vibrationEnabled: Boolean = true,
     val prevSoundEnabled: Boolean = true,
     val prevVibrationEnabled: Boolean = true,
+    /** Notify when the estimated restoration of an emergency moves (ETA_CHANGED), all addresses (spec/NOTIFICATIONS.md 2.4). */
+    val emergencyEtaAlerts: Boolean = true,
+    /** Notify when an emergency ends (END), all addresses. The start always notifies. */
+    val emergencyEndAlerts: Boolean = true,
     val themeMode: String = "SYSTEM", // "SYSTEM", "DARK", "LIGHT"
     val language: String = "SYSTEM" // "SYSTEM", "UK", "EN"
 )`
@@ -1160,7 +1164,10 @@ import androidx.core.app.NotificationManagerCompat
 import ua.blackout.prewarning.MainActivity
 import ua.blackout.prewarning.R
 import ua.blackout.prewarning.core.EmergencyEvent
+import ua.blackout.prewarning.core.EmergencyDelivery
 import ua.blackout.prewarning.core.EmergencyEventKind
+import ua.blackout.prewarning.core.OutageEngine
+import ua.blackout.prewarning.core.Span
 import ua.blackout.prewarning.data.KYIV_ZONE
 import ua.blackout.prewarning.data.model.UserSettings
 import ua.blackout.prewarning.data.repository.AlertRegistry
@@ -1315,7 +1322,11 @@ object NotificationHelper {
         addressLine: String? = settings.selectedAddress,
         enabled: Boolean = settings.emergencyNotificationsEnabled,
         // The subscription a tap shows on the main screen (spec/SUBSCRIPTIONS.md 9)
-        subscriptionId: String? = null
+        subscriptionId: String? = null,
+        // The address's planned spans and whether it is warned about them: one continuous outage is
+        // announced once (spec/NOTIFICATIONS.md 2.4a)
+        plannedSpans: List<Span> = emptyList(),
+        plannedAlertsOn: Boolean = false
     ) {
         if (!enabled || events.isEmpty()) return
         val appContext = context.applicationContext
@@ -1328,10 +1339,17 @@ object NotificationHelper {
             val key = ev.key(addressKey)
             if (registry.hasFired(key)) continue
             registry.markFired(key)
+            // One continuous outage, one announcement (spec/NOTIFICATIONS.md 2.4a)
+            val delivery = OutageEngine.emergencyDelivery(ev.kind, ev.start, ev.eta, LocalDateTime.now(KYIV_ZONE), plannedSpans, plannedAlertsOn)
+            if (delivery == EmergencyDelivery.DROP) continue
+            // Follow-ups the user turned off are dropped, never replayed later (spec/NOTIFICATIONS.md 2.4)
+            val asKind = if (delivery == EmergencyDelivery.PROLONG) EmergencyEventKind.ETA_CHANGED else ev.kind
+            if (asKind == EmergencyEventKind.ETA_CHANGED && !settings.emergencyEtaAlerts) continue
+            if (asKind == EmergencyEventKind.END && !settings.emergencyEndAlerts) continue
 
             val start = formatWhen(lang, ev.start, today)
             val eta = ev.eta?.let { formatWhen(lang, it, today) }
-            val (title, body) = when (ev.kind) {
+            val (title, body) = when (asKind) {
                 EmergencyEventKind.START -> {
                     val t = if (ev.upcoming) AppStrings.emergencyUpcomingTitle(lang) else AppStrings.emergencyStartTitle(lang)
                     t to AppStrings.emergencyStartBody(lang, start, eta)
@@ -2085,10 +2103,11 @@ open class BlackoutGlanceWidget(private val forceBigLayout: Boolean = false) : G
                 val textYCenter = (trackTop + trackBottom) / 2f - (unclearTextPaint.descent() + unclearTextPaint.ascent()) / 2f
                 canvas.drawText(unclearText, textX, textYCenter, unclearTextPaint)
             } else {
-                // Emergency overlay, same recipe as the main drum: amber gradient with dark 45 degree stripes;
-                // where it overlaps a planned outage the crimson base stays and the stripes turn amber.
+                // Emergency overlay, same recipe as the main drum: the bottom half of the cell is amber with
+                // dark 45 degree stripes; the top half keeps the planned state (spec/UI_DRUM.md 1).
+                val trackMid = (trackTop + trackBottom) / 2f
                 val amberShader = LinearGradient(
-                    0f, trackTop, 0f, trackBottom,
+                    0f, trackMid, 0f, trackBottom,
                     intArrayOf(0xFFFFB020.toInt(), 0xFFF28A1B.toInt(), 0xFFC96A0B.toInt()),
                     floatArrayOf(0f, 0.5f, 1f),
                     Shader.TileMode.CLAMP
@@ -2097,7 +2116,7 @@ open class BlackoutGlanceWidget(private val forceBigLayout: Boolean = false) : G
                     style = Paint.Style.STROKE
                     strokeWidth = STRIPE_PX
                 }
-                val trackH = trackBottom - trackTop
+                val bandH = trackBottom - trackMid
                 val stripeStep = STRIPE_PX * 2f * 1.4142135f
 
                 for (idx in 0 until 48) {
@@ -2109,21 +2128,22 @@ open class BlackoutGlanceWidget(private val forceBigLayout: Boolean = false) : G
 
                     paint.shader = when (kind) {
                         1, 3 -> offShader
-                        2 -> amberShader
                         else -> onShader
                     }
                     canvas.drawRect(left, trackTop, right, trackBottom, paint)
 
                     if (kind >= 2) {
-                        stripePaint.color = if (kind == 3) 0xD9FFB020.toInt() else 0x8C1A1208.toInt()
+                        paint.shader = amberShader
+                        canvas.drawRect(left, trackMid, right, trackBottom, paint)
+                        stripePaint.color = 0x8C1A1208.toInt()
                         canvas.save()
-                        canvas.clipRect(left, trackTop, right, trackBottom)
+                        canvas.clipRect(left, trackMid, right, trackBottom)
                         // Global phase (anchored at trackLeft) keeps the stripes continuous across cells
                         var n = Math.floor(((left - trackLeft) / stripeStep).toDouble()).toInt()
                         while (true) {
-                            val u = trackLeft - trackH + n * stripeStep
+                            val u = trackLeft - bandH + n * stripeStep
                             if (u >= right) break
-                            canvas.drawLine(u, trackBottom, u + trackH, trackTop, stripePaint)
+                            canvas.drawLine(u, trackBottom, u + bandH, trackMid, stripePaint)
                             n++
                         }
                         canvas.restore()
@@ -4180,6 +4200,8 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Bolt
+import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.AlarmOff
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
@@ -4210,6 +4232,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -4336,6 +4359,10 @@ fun SettingsScreen(
     onRefreshMinutesChanged: (Int) -> Unit = {},
     onToggleSound: (Boolean) -> Unit = {},
     onToggleVibration: (Boolean) -> Unit = {},
+    emergencyEtaAlerts: Boolean = true,
+    emergencyEndAlerts: Boolean = true,
+    onToggleEmergencyEtaAlerts: (Boolean) -> Unit = {},
+    onToggleEmergencyEndAlerts: (Boolean) -> Unit = {},
     onLanguageSelected: (String) -> Unit = {},
     onSendTestAlert: () -> Unit = {},
     onForceRefresh: () -> Unit = {},
@@ -4603,6 +4630,36 @@ fun SettingsScreen(
                     style = ZtType.caption,
                     color = ZtColors.TextTertiary,
                     modifier = Modifier.padding(top = 2.dp)
+                )
+            }
+        }
+
+        // 4b. Emergency follow-ups for all addresses: restoration time changes and restoration. The start is
+        // always announced (spec/NOTIFICATIONS.md 2.4). Locked and shown off while the master is off.
+        GlassCard(modifier = Modifier.fillMaxWidth(), contentPadding = PaddingValues18) {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(text = AppStrings.emergencyAlertsTitle(lang), style = ZtType.overline, color = Color.White)
+                Text(text = AppStrings.emergencyAlertsDesc(lang), style = ZtType.caption, color = ZtColors.TextSecondary)
+                SwitchRow(
+                    icon = Icons.Default.Schedule,
+                    iconTint = if (alertsMaster) ZtColors.EmergencyAmberStart else Color(0x4DBAE6FD),
+                    title = AppStrings.emergencyEtaAlertsTitle(lang),
+                    hint = AppStrings.emergencyEtaAlertsHint(lang),
+                    checked = alertsMaster && emergencyEtaAlerts,
+                    onCheckedChange = onToggleEmergencyEtaAlerts,
+                    lang = lang,
+                    enabled = alertsMaster
+                )
+                Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(ZtColors.Divider))
+                SwitchRow(
+                    icon = Icons.Default.Bolt,
+                    iconTint = if (alertsMaster) ZtColors.ChipGreenText else Color(0x4DBAE6FD),
+                    title = AppStrings.emergencyEndAlertsTitle(lang),
+                    hint = AppStrings.emergencyEndAlertsHint(lang),
+                    checked = alertsMaster && emergencyEndAlerts,
+                    onCheckedChange = onToggleEmergencyEndAlerts,
+                    lang = lang,
+                    enabled = alertsMaster
                 )
             }
         }
@@ -4934,6 +4991,9 @@ private fun MyAddressesCard(
             }
 
             order.mapNotNull { byId[it] }.forEachIndexed { index, item ->
+              // key: when the order changes the block keeps its own composition, so the drag gesture in
+              // progress is not handed to another block and cancelled (the card then "hung" mid-drag)
+              key(item.id) {
                 val label = Subscriptions.displayLabel(item)
                 val isDragging = draggingId == item.id
                 val handle = if (store.items.size < 2) null else Modifier
@@ -4980,6 +5040,7 @@ private fun MyAddressesCard(
                         }
                         .then(if (isDragging) Modifier.shadow(10.dp, RoundedCornerShape(16.dp)) else Modifier)
                 )
+              }
             }
 
             if (canAdd) {
@@ -6026,7 +6087,8 @@ object ZtoeAddressLookup {
     const val DEFAULT_SITE_URL = "https://www.ztoe.com.ua/unhooking-search.php"
 
     /** Bumped to 2 when merged street ids were introduced; caches of other versions are discarded. */
-    internal const val CACHE_VERSION = 2
+    /** 3: drops street house lists that were cut to ztoe's first page of 10 records (per-street request without all=1). */
+    internal const val CACHE_VERSION = 3
     private const val PREFS_NAME = "zt_address_index_cache_v1"
     private const val KEY_INDEX_JSON = "address_index_json_v1"
     private const val MAX_PERSISTED_HOUSE_STREETS = 50
@@ -6787,7 +6849,9 @@ object ZtoeAddressLookup {
     fun parseZtoeSettlementHousesTableHtml(
         settlementId: String,
         streets: List<ZtoeStreetOption>,
-        html: String
+        html: String,
+        /** False for a one-street page: the caller unites the rows of all ids of the street first. */
+        cache: Boolean = true
     ): Map<String, List<ZtoeHouseLookupResult>> {
         if (html.isBlank() || streets.isEmpty()) return emptyMap()
 
@@ -6873,8 +6937,10 @@ object ZtoeAddressLookup {
             if (map.isEmpty()) continue
             val sorted = sortHouses(map.values)
             result[streetId] = sorted
-            cachedHousesByStreet[streetId] = sorted
-            houseCacheUpdatedAtByStreet[streetId] = System.currentTimeMillis()
+            if (cache) {
+                cachedHousesByStreet[streetId] = sorted
+                houseCacheUpdatedAtByStreet[streetId] = System.currentTimeMillis()
+            }
         }
         return result
     }
@@ -7092,7 +7158,12 @@ object ZtoeAddressLookup {
     /**
      * Houses of one (merged) street straight from the site: one request per ztoe id of the street,
      * results united and de-duplicated by [HouseKey]. Null when no request succeeded.
-     * Note: all=1 is not passed here, because with all=1 ZTOE ignores vulica_id.
+     *
+     * The request carries \`all=1\`: without it ztoe lists only the first 10 records of the street and a
+     * "показати ще N записів" button (vul. Київська in Zhytomyr: 21 of 127 houses). Rows are kept only
+     * when their street name has the street's [StreetKey], so a page that ignored \`vulica_id\` cannot
+     * add other streets. Only when no row carries the name (an unusual spelling) the first page is
+     * used unfiltered, as before.
      */
     private fun fetchStreetHouseRows(
         rem: ZtoeRemOption,
@@ -7103,13 +7174,17 @@ object ZtoeAddressLookup {
         var anyResponse = false
         val map = LinkedHashMap<String, ZtoeHouseLookupResult>()
         for (vulicaId in street.ztoeVulicaIds) {
-            val html = postZtoeForm(
-                "rem_id=\${rem.ztoeRemId}&naspunkt_id=\${settlement.ztoeNaspunktId}&vulica_id=$vulicaId",
-                siteUrl
-            )
+            val form = "rem_id=\${rem.ztoeRemId}&naspunkt_id=\${settlement.ztoeNaspunktId}&vulica_id=$vulicaId"
+            val html = postZtoeForm("$form&all=1", siteUrl)
             if (html.isNullOrBlank()) continue
             anyResponse = true
-            for (row in parseZtoeAddressLookupTableHtml(html)) putHouse(map, row)
+            val rows = parseZtoeSettlementHousesTableHtml(settlement.id, listOf(street), html, cache = false).values.flatten()
+            if (rows.isNotEmpty()) {
+                for (row in rows) putHouse(map, row)
+                continue
+            }
+            val firstPage = postZtoeForm(form, siteUrl) ?: continue
+            for (row in parseZtoeAddressLookupTableHtml(firstPage)) putHouse(map, row)
         }
         return if (anyResponse) sortHouses(map.values) else null
     }
@@ -8660,19 +8735,11 @@ fun BlackoutAppNavigation(
                         autoOpenQueueHelp = autoOpenQueueHelp,
                         onAutoOpenQueueHelpHandled = { autoOpenQueueHelp = false },
                         onAddAddress = { resolvedQueue, statusText, addressLabel, query ->
-                            val wasEmpty = subscriptions.items.isEmpty()
                             val ok = onStoreResult(subscriptionSync.addFromLookup(resolvedQueue, statusText, addressLabel, query))
-                            if (ok) {
-                                showAppBanner(AppStrings.addressAdded(resolvedLang))
-                                // the first address becomes the primary: show it on the main screen
-                                if (wasEmpty) coroutineScope.launch { pagerState.animateScrollToPage(0, animationSpec = PageGlide) }
-                            }
+                            // the user stays in Settings (owner request): the address is added in place
+                            if (ok) showAppBanner(AppStrings.addressAdded(resolvedLang))
                         },
-                        onAddQueueOnly = { newQueue ->
-                            val wasEmpty = subscriptions.items.isEmpty()
-                            val ok = onStoreResult(subscriptionSync.addQueueOnly(newQueue))
-                            if (ok && wasEmpty) coroutineScope.launch { pagerState.animateScrollToPage(0, animationSpec = PageGlide) }
-                        },
+                        onAddQueueOnly = { newQueue -> onStoreResult(subscriptionSync.addQueueOnly(newQueue)) },
                         onRemoveSubscription = { id -> onStoreResult(subscriptionSync.change { Subscriptions.remove(it, id) }) },
                         onMakePrimary = { id -> onStoreResult(subscriptionSync.change { Subscriptions.setPrimary(it, id) }) },
                         onSetPlanned = { id, on -> onStoreResult(subscriptionSync.change { Subscriptions.setPlanned(it, id, on) }) },
@@ -8720,6 +8787,14 @@ fun BlackoutAppNavigation(
                             vibrationEnabled = it
                             val current = settingsRepo.getSettings()
                             settingsRepo.saveSettings(current.copy(vibrationEnabled = it, prevVibrationEnabled = it))
+                        },
+                        emergencyEtaAlerts = currentSettings.emergencyEtaAlerts,
+                        emergencyEndAlerts = currentSettings.emergencyEndAlerts,
+                        onToggleEmergencyEtaAlerts = { on ->
+                            settingsRepo.saveSettings(settingsRepo.getSettings().copy(emergencyEtaAlerts = on))
+                        },
+                        onToggleEmergencyEndAlerts = { on ->
+                            settingsRepo.saveSettings(settingsRepo.getSettings().copy(emergencyEndAlerts = on))
                         },
                         onLanguageSelected = {
                             currentLanguage = it
@@ -14089,8 +14164,12 @@ object OutageEngine {
         zone: ZoneId = KYIV_ZONE
     ): List<AlertSpec> {
         val plannedSpans = spans(outages.filter { !it.stale }, setOf(OutageKind.PLANNED, OutageKind.REPAIR))
+        val emergencies = outages.filter { it.kind == OutageKind.EMERGENCY && !it.stale }
         return plannedSpans.mapNotNull { sp ->
             if (!sp.start.isAfter(now)) return@mapNotNull null
+            // One continuous outage, one warning (spec/OUTAGE_ENGINE.md 6.2 step 2a): an emergency that started
+            // before the block and is still on at its start means power is already off
+            if (emergencies.any { it.start.isBefore(sp.start) && (it.overdue || !it.end.isBefore(sp.start)) }) return@mapNotNull null
             val fireAt = sp.start.minusMinutes(advanceMinutes.toLong())
             if (!fireAt.isAfter(now)) return@mapNotNull null
             AlertSpec(
@@ -14104,6 +14183,37 @@ object OutageEngine {
         }
     }
 
+    /** The planned and repair spans of an address (not stale): what its pre-warnings are about. */
+    fun plannedSpans(outages: List<Outage>): List<Span> =
+        spans(outages.filter { !it.stale }, setOf(OutageKind.PLANNED, OutageKind.REPAIR))
+
+    /**
+     * Whether an emergency event is announced when emergency and scheduled outages of one address form
+     * one continuous outage (spec/NOTIFICATIONS.md 2.4a): only its beginning is announced, a longer
+     * emergency inside a warned block becomes a prolongation, and the end is not "restored" while the
+     * schedule keeps the power off.
+     */
+    fun emergencyDelivery(
+        kind: EmergencyEventKind,
+        start: LocalDateTime,
+        eta: LocalDateTime?,
+        now: LocalDateTime,
+        plannedSpans: List<Span>,
+        plannedAlertsOn: Boolean
+    ): EmergencyDelivery = when (kind) {
+        EmergencyEventKind.ETA_CHANGED -> EmergencyDelivery.SEND
+        EmergencyEventKind.END ->
+            if (plannedSpans.any { !it.start.isAfter(now) && now.isBefore(it.end) }) EmergencyDelivery.DROP else EmergencyDelivery.SEND
+        EmergencyEventKind.START -> {
+            val holder = if (plannedAlertsOn) plannedSpans.firstOrNull { !it.start.isAfter(start) && !start.isAfter(it.end) } else null
+            when {
+                holder == null -> EmergencyDelivery.SEND
+                eta != null && eta.isAfter(holder.end) -> EmergencyDelivery.PROLONG
+                else -> EmergencyDelivery.DROP
+            }
+        }
+    }
+
     /** Instants where the power state flips (all kinds, stale excluded), inclusive of [from] and [to]. */
     fun transitions(outages: List<Outage>, from: LocalDateTime, to: LocalDateTime): List<Transition> =
         spans(outages.filter { !it.stale && !it.overdue })
@@ -14111,6 +14221,9 @@ object OutageEngine {
             .filter { !it.at.isBefore(from) && !it.at.isAfter(to) }
             .sortedBy { it.at }
 }
+
+/** How one emergency event is announced within a continuous outage (spec/NOTIFICATIONS.md 2.4a). */
+enum class EmergencyDelivery { SEND, PROLONG, DROP }
 `
   },
   {
@@ -14316,12 +14429,39 @@ object EmergencyLedger {
         val events = ArrayList<EmergencyEvent>()
         val out = LinkedHashMap<String, LedgerEntry>()
         val seen = HashSet<String>()
+        // Open entries PowerOn stopped listing: a listed record overlapping one is the same outage
+        // re-registered under a new start (continuation, spec/NOTIFICATIONS.md 2.2)
+        val listed = fetch.records.map { it.id }.toHashSet()
+        val vanished = pruned.filter { it.closedAt == null && it.id !in listed }
+        val absorbed = HashSet<String>()
 
         for (rec in fetch.records) {
             if (!seen.add(rec.id)) continue
             val resolved = OutageEngine.resolveEmergency(rec.copy(closedAt = null), now, graceMinutes)
             val old = byId[rec.id]
+            val continued = if (old == null) vanished.firstOrNull { it.id !in absorbed && overlaps(it, rec) } else null
             when {
+                continued != null -> {
+                    absorbed.add(continued.id)
+                    var e = newEntry(rec, now, announced = continued.endEmitted).copy(
+                        firstSeen = continued.firstSeen,
+                        startEmitted = continued.startEmitted,
+                        lastEmittedEta = continued.lastEmittedEta
+                    )
+                    if (!resolved.stale && e.startEmitted && !e.endEmitted) {
+                        val newEta = rec.estimatedEnd
+                        val last = continued.lastEmittedEta
+                        if (newEta != null && last == null) {
+                            e = e.copy(lastEmittedEta = newEta)
+                        } else if (newEta != null && last != null &&
+                            abs(ChronoUnit.MINUTES.between(last, newEta)) >= OutageConfig.ETA_CHANGE_MIN_DELTA_MINUTES
+                        ) {
+                            events.add(EmergencyEvent(EmergencyEventKind.ETA_CHANGED, rec.id, rec.start, newEta))
+                            e = e.copy(lastEmittedEta = newEta)
+                        }
+                    }
+                    out[rec.id] = e
+                }
                 old == null -> {
                     if (resolved.stale) {
                         out[rec.id] = newEntry(rec, now, announced = true)
@@ -14363,6 +14503,8 @@ object EmergencyLedger {
                 out[old.id] = old
                 continue
             }
+            // Taken over by a new record, or covered by a listed one: the outage goes on, nothing ended
+            if (old.id in absorbed || fetch.records.any { overlaps(old, it) }) continue
             val est = old.estimatedEnd
             val wasStale = est != null && ChronoUnit.MINUTES.between(est, now) > graceMinutes
             val silent = old.endEmitted || wasStale || !old.startEmitted
@@ -14372,6 +14514,13 @@ object EmergencyLedger {
             }
         }
         return LedgerResult(out.values.toList(), events)
+    }
+
+    /** The entry's time and the record's time overlap or touch; a missing estimate is open-ended. */
+    private fun overlaps(e: LedgerEntry, r: EmergencyRecord): Boolean {
+        val eEnd = e.estimatedEnd
+        val rEnd = r.estimatedEnd
+        return (rEnd == null || !e.start.isAfter(rEnd)) && (eEnd == null || !r.start.isAfter(eEnd))
     }
 
     private fun newEntry(rec: EmergencyRecord, now: LocalDateTime, announced: Boolean) = LedgerEntry(
@@ -14583,7 +14732,29 @@ object PowerOnMapper {
                 )
             }
         }
-        return byId.values.sortedBy { it.start }
+        return mergeOverlapping(byId.values.sortedBy { it.start })
+    }
+
+    /**
+     * Records whose times overlap or touch are one outage (spec/POWERON_API.md 5.1 step 7): operators
+     * re-register an ongoing outage as a new row when its estimate runs out. The merged record keeps the
+     * id and start of the earliest and the latest estimate; a record without an estimate is open-ended.
+     */
+    private fun mergeOverlapping(sorted: List<EmergencyRecord>): List<EmergencyRecord> {
+        val out = ArrayList<EmergencyRecord>(sorted.size)
+        for (rec in sorted) {
+            val last = out.lastOrNull()
+            val lastEnd = last?.estimatedEnd
+            if (last != null && (lastEnd == null || !rec.start.isAfter(lastEnd))) {
+                out[out.lastIndex] = last.copy(
+                    estimatedEnd = listOfNotNull(lastEnd, rec.estimatedEnd).maxOrNull(),
+                    label = last.label ?: rec.label
+                )
+            } else {
+                out.add(rec)
+            }
+        }
+        return out
     }
 
     /** Planned repair works for [house]; treated as planned outages. Rows beyond tomorrow are dropped. */
@@ -15174,7 +15345,12 @@ class OutageRepository(context: Context) {
             events = polled?.second.orEmpty()
             store.savePowerOn(poweronOk, nowMs)
             if (notify && events.isNotEmpty() && settings.emergencyNotificationsEnabled) {
-                NotificationHelper.postEmergencyEvents(appContext, settings, key, events, subscriptionId = subs?.first?.primaryId)
+                val primary = subs?.first?.primary
+                NotificationHelper.postEmergencyEvents(
+                    appContext, settings, key, events, subscriptionId = subs?.first?.primaryId,
+                    plannedSpans = OutageEngine.plannedSpans(outagesFor(settings.queue, key)),
+                    plannedAlertsOn = if (subs != null && primary != null) Subscriptions.plannedActive(subs.second, primary) else settings.notificationsEnabled
+                )
             }
         }
         if (subs != null) refreshOtherAddresses(settings, subs.first, subs.second, key, nowMs, notify, shownId)
@@ -15212,7 +15388,9 @@ class OutageRepository(context: Context) {
             if (polled == null) continue
             if (notify && alerts && polled.second.isNotEmpty()) {
                 NotificationHelper.postEmergencyEvents(
-                    appContext, settings, key, polled.second, addressLine(item), enabled = true, subscriptionId = item.id
+                    appContext, settings, key, polled.second, addressLine(item), enabled = true, subscriptionId = item.id,
+                    plannedSpans = OutageEngine.plannedSpans(outagesFor(item.queue, key)),
+                    plannedAlertsOn = Subscriptions.plannedActive(master, item)
                 )
             }
         }

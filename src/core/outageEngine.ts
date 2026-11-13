@@ -328,9 +328,13 @@ export function planAlerts(
     outages.filter((o) => !o.stale),
     PLANNED_KINDS
   );
+  const emergencies = outages.filter((o) => o.kind === 'EMERGENCY' && !o.stale);
   const out: AlertSpec[] = [];
   for (const sp of plannedSpans) {
     if (!(sp.start > now)) continue;
+    // One continuous outage, one warning (spec/OUTAGE_ENGINE.md 6.2 step 2a): an emergency that started before the
+    // block and is still on at its start means power is already off
+    if (emergencies.some((e) => e.start < sp.start && (e.overdue || e.end >= sp.start))) continue;
     const fireAt = plusMinutes(sp.start, -advanceMinutes);
     if (!(fireAt > now)) continue;
     out.push({
@@ -343,6 +347,34 @@ export function planAlerts(
     });
   }
   return out;
+}
+
+/** The planned and repair spans of an address (not stale): what its pre-warnings are about. */
+export function plannedSpans(outages: readonly Outage[]): Span[] {
+  return spans(outages.filter((o) => !o.stale), PLANNED_KINDS);
+}
+
+/** How one emergency event is announced within a continuous outage (spec/NOTIFICATIONS.md 2.4a). */
+export type EmergencyDelivery = 'SEND' | 'PROLONG' | 'DROP';
+
+/**
+ * Whether an emergency event is announced when emergency and scheduled outages of one address form one continuous
+ * outage (spec/NOTIFICATIONS.md 2.4a): only its beginning is announced, a longer emergency inside a warned block
+ * becomes a prolongation, and the end is not "restored" while the schedule keeps the power off.
+ */
+export function emergencyDelivery(
+  kind: 'START' | 'ETA_CHANGED' | 'END',
+  start: LocalDateTime,
+  eta: LocalDateTime | null,
+  now: LocalDateTime,
+  planned: readonly Span[],
+  plannedAlertsOn: boolean
+): EmergencyDelivery {
+  if (kind === 'ETA_CHANGED') return 'SEND';
+  if (kind === 'END') return planned.some((p) => p.start <= now && now < p.end) ? 'DROP' : 'SEND';
+  const holder = plannedAlertsOn ? planned.find((p) => p.start <= start && start <= p.end) : undefined;
+  if (holder === undefined) return 'SEND';
+  return eta !== null && eta > holder.end ? 'PROLONG' : 'DROP';
 }
 
 /** Instants where the power state flips (all kinds, stale excluded), inclusive of [from] and [to]. */

@@ -17,7 +17,10 @@ import androidx.core.app.NotificationManagerCompat
 import ua.blackout.prewarning.MainActivity
 import ua.blackout.prewarning.R
 import ua.blackout.prewarning.core.EmergencyEvent
+import ua.blackout.prewarning.core.EmergencyDelivery
 import ua.blackout.prewarning.core.EmergencyEventKind
+import ua.blackout.prewarning.core.OutageEngine
+import ua.blackout.prewarning.core.Span
 import ua.blackout.prewarning.data.KYIV_ZONE
 import ua.blackout.prewarning.data.model.UserSettings
 import ua.blackout.prewarning.data.repository.AlertRegistry
@@ -172,7 +175,11 @@ object NotificationHelper {
         addressLine: String? = settings.selectedAddress,
         enabled: Boolean = settings.emergencyNotificationsEnabled,
         // The subscription a tap shows on the main screen (spec/SUBSCRIPTIONS.md 9)
-        subscriptionId: String? = null
+        subscriptionId: String? = null,
+        // The address's planned spans and whether it is warned about them: one continuous outage is
+        // announced once (spec/NOTIFICATIONS.md 2.4a)
+        plannedSpans: List<Span> = emptyList(),
+        plannedAlertsOn: Boolean = false
     ) {
         if (!enabled || events.isEmpty()) return
         val appContext = context.applicationContext
@@ -185,10 +192,17 @@ object NotificationHelper {
             val key = ev.key(addressKey)
             if (registry.hasFired(key)) continue
             registry.markFired(key)
+            // One continuous outage, one announcement (spec/NOTIFICATIONS.md 2.4a)
+            val delivery = OutageEngine.emergencyDelivery(ev.kind, ev.start, ev.eta, LocalDateTime.now(KYIV_ZONE), plannedSpans, plannedAlertsOn)
+            if (delivery == EmergencyDelivery.DROP) continue
+            // Follow-ups the user turned off are dropped, never replayed later (spec/NOTIFICATIONS.md 2.4)
+            val asKind = if (delivery == EmergencyDelivery.PROLONG) EmergencyEventKind.ETA_CHANGED else ev.kind
+            if (asKind == EmergencyEventKind.ETA_CHANGED && !settings.emergencyEtaAlerts) continue
+            if (asKind == EmergencyEventKind.END && !settings.emergencyEndAlerts) continue
 
             val start = formatWhen(lang, ev.start, today)
             val eta = ev.eta?.let { formatWhen(lang, it, today) }
-            val (title, body) = when (ev.kind) {
+            val (title, body) = when (asKind) {
                 EmergencyEventKind.START -> {
                     val t = if (ev.upcoming) AppStrings.emergencyUpcomingTitle(lang) else AppStrings.emergencyStartTitle(lang)
                     t to AppStrings.emergencyStartBody(lang, start, eta)

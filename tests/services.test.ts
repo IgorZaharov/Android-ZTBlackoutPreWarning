@@ -8,7 +8,7 @@
 import assert from 'node:assert/strict';
 import { formatLocalDateTime, fromInstant, parseLocalDate, parseLocalDateTime, type LocalDateTime } from '../src/core/localTime';
 import { EmergencyFetch, eventKey, type EmergencyEvent } from '../src/core/emergencyLedger';
-import { makeOutage } from '../src/core/outageModels';
+import { makeOutage, type Span } from '../src/core/outageModels';
 import { buildPlanned } from '../src/core/outageEngine';
 import {
   POWERON_BASE_URL,
@@ -49,6 +49,7 @@ import {
 import {
   ZTOE_STREET_OPTIONS,
   checkAddressOnZtoeWebsite,
+  fetchHousesForStreet,
   getHousesForStreet,
   findStreetById,
   getStreetsForSettlement,
@@ -676,8 +677,38 @@ test('streets: checkAddressOnZtoeWebsite asks once per merged vulica id and unio
     assert.equal(res?.queue, '4.2');
     assert.equal(bodies.length, 2);
     assert.ok(bodies.some((b) => b.includes('vulica_id=111')) && bodies.some((b) => b.includes('vulica_id=222')));
-    assert.ok(bodies.every((b) => !b.includes('all=1')));
+    // all=1: without it ztoe lists only the first 10 records of a street
+    assert.ok(bodies.every((b) => b.includes('all=1')));
     assert.equal(res?.emergencyOutage, undefined);
+  } finally {
+    globalThis.fetch = realFetch;
+    resetAddressIndexCache(true);
+  }
+});
+
+test('streets: the street request asks for every record (all=1) and keeps only rows of that street', async () => {
+  resetAddressIndexCache(true);
+  seedAddressIndexForTests({
+    streetsBySettlementId: { zt_city: [{ id: 'st_173934', settlementId: 'zt_city', ztoeVulicaId: '173934', nameUk: 'вул. Київська', nameEn: 'k' }] },
+  });
+  const row = (street: string, houses: string, q: string, sub: string) =>
+    `<tr><td>Житомирський</td><td>місто Житомир</td><td>${street}</td><td>${houses}</td><td>${q}</td><td>${sub}</td><td>побутові споживачі</td></tr>`;
+  const head = '<table><tr><th>РЕМ</th><th>Населений пункт</th><th>Назва вулиці, провулка, тощо</th><th>Будинки</th><th>Черга</th><th>Підчерга</th><th>Примітка</th></tr>';
+  const bodies: string[] = [];
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = (async (_url: unknown, init?: { body?: string }) => {
+    const body = String(init?.body);
+    bodies.push(body);
+    // with all=1 the whole street (and, if ztoe ignored vulica_id, another street too); without it the first page only
+    const html = body.includes('all=1')
+      ? head + row('вул. Київська', '1, 3', '1', '2') + row('вул. Київська', '124, 99', '5', '1') + row('вул. Лесі Українки', '7', '2', '1') + '</table><p>Черга Будинки</p>'
+      : head + row('вул. Київська', '1, 3', '1', '2') + '</table><p>Черга Будинки</p>';
+    return { ok: true, arrayBuffer: async () => new TextEncoder().encode(html).buffer } as unknown as Response;
+  }) as typeof fetch;
+  try {
+    const houses = await fetchHousesForStreet('zhytomyr', 'zt_city', 'st_173934');
+    assert.deepEqual(houses.map((h) => h.house).sort(), ['1', '124', '3', '99'], 'every record of the street, none of another street');
+    assert.ok(bodies.length === 1 && bodies[0].includes('vulica_id=173934') && bodies[0].includes('all=1'));
   } finally {
     globalThis.fetch = realFetch;
     resetAddressIndexCache(true);
@@ -922,6 +953,56 @@ const ev = (kind: EmergencyEvent['kind'], start: string, eta: string | null, ext
   upcoming: false,
   earlyEnd: false,
   ...extra,
+});
+
+test('alerts: emergency and scheduled outages that join are one outage: only its start, its prolongation and its real end are announced', () => {
+  clearNotifiedHistory();
+  // scheduled 22:00-24:00 (the user is warned about it); emergencies around it
+  const planned: Span[] = [{ start: dt('2026-11-13T22:00'), end: dt('2026-11-14T00:00'), mayContinue: false, kinds: new Set(['PLANNED']) }];
+  const ctx = { plannedSpans: planned, plannedAlertsOn: true };
+  const send = (events: EmergencyEvent[], now: string) => triggerEmergencyEventAlerts(events, 'zt_city|key|50', alertSettings, 'uk', dt(now), undefined, ctx);
+
+  // an emergency starting inside the scheduled block and ending within it: nothing at all
+  assert.equal(send([ev('START', '2026-11-13T22:30', '2026-11-13T23:30')], '2026-11-13T22:35').length, 0);
+  // an emergency starting inside the block and lasting longer: one "restoration time changed" with its estimate
+  const longer = send([ev('START', '2026-11-13T23:00', '2026-11-14T01:30')], '2026-11-13T23:05');
+  assert.equal(longer.length, 1);
+  assert.equal(longer[0].title, 'Змінився час відновлення');
+  assert.match(longer[0].message, /01:30/);
+  // the same, with "restoration time changes" turned off: nothing
+  clearNotifiedHistory();
+  assert.equal(triggerEmergencyEventAlerts([ev('START', '2026-11-13T23:00', '2026-11-14T01:30')], 'zt_city|key|51', { ...alertSettings, emergencyEtaAlerts: false }, 'uk', dt('2026-11-13T23:05'), undefined, ctx).length, 0);
+  // an emergency ending while the scheduled block is on: no "restored", power is still off
+  assert.equal(send([ev('END', '2026-11-13T19:30', '2026-11-13T23:00')], '2026-11-13T23:00').length, 0);
+  // the same end after the block is over: announced
+  assert.equal(send([ev('END', '2026-11-13T23:30', '2026-11-14T01:00')], '2026-11-14T00:40').length, 1);
+  // an emergency before the block starts on its own: announced
+  assert.equal(send([ev('START', '2026-11-13T19:30', '2026-11-13T21:00')], '2026-11-13T19:35').length, 1);
+  clearNotifiedHistory();
+});
+
+test('alerts: no pre-warning for a scheduled block that starts while an emergency is on', () => {
+  const planned = planned14to16();
+  const emergency = makeOutage({ id: 'pw_2026-11-13T12:30', kind: 'EMERGENCY', start: dt('2026-11-13T12:30'), end: dt('2026-11-13T14:30') });
+  assert.deepEqual(planPreWarnings([...planned, emergency], dt('2026-11-13T13:00'), alertSettings), [], 'power is already off at 14:00');
+  const earlier = makeOutage({ id: 'pw_2026-11-13T12:00', kind: 'EMERGENCY', start: dt('2026-11-13T12:00'), end: dt('2026-11-13T13:20') });
+  assert.equal(planPreWarnings([...planned, earlier], dt('2026-11-13T13:00'), alertSettings).length, 1, 'the emergency is over before 14:00');
+});
+
+test('alerts: restoration-time changes and restoration can be turned off for all addresses; the start always notifies', () => {
+  clearNotifiedHistory();
+  const now = dt('2026-11-13T17:35');
+  const events = [ev('START', '2026-11-13T17:30', '2026-11-13T19:30'), ev('ETA_CHANGED', '2026-11-13T17:30', '2026-11-13T20:00'), ev('END', '2026-11-13T17:30', null)];
+  const off = { ...alertSettings, emergencyEtaAlerts: false, emergencyEndAlerts: false };
+  const fired = triggerEmergencyEventAlerts(events, 'zt_city|key|41', off, 'uk', now);
+  assert.deepEqual(fired.map((r) => r.title), [fired[0]?.title], 'only the start');
+  assert.equal(fired.length, 1);
+  // a dropped follow-up is not replayed when the switch is turned on later
+  assert.equal(triggerEmergencyEventAlerts(events, 'zt_city|key|41', alertSettings, 'uk', now).length, 0);
+  clearNotifiedHistory();
+  const onlyEnd = triggerEmergencyEventAlerts(events, 'zt_city|key|42', { ...alertSettings, emergencyEtaAlerts: false }, 'uk', now);
+  assert.equal(onlyEnd.length, 2, 'start and end, no restoration-time change');
+  clearNotifiedHistory();
 });
 
 test('alerts: emergency events use their own switch, dedupe keys and the Android texts', () => {

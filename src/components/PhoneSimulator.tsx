@@ -347,20 +347,8 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
             <SettingsView
               settings={settings}
               lang={lang}
-              onUpdateSettings={(newSettings) => {
-                const wasUnselected =
-                  (!settings.queue || settings.queue.trim() === '') &&
-                  !settings.customQueueStatusText &&
-                  !settings.selectedAddress;
-                const isNowSelected =
-                  Boolean(newSettings.queue && newSettings.queue.trim() !== '') ||
-                  Boolean(newSettings.customQueueStatusText) ||
-                  Boolean(newSettings.selectedAddress);
-                onUpdateSettings(newSettings);
-                if (wasUnselected && isNowSelected) {
-                  setActiveTab('schedule');
-                }
-              }}
+              // the first address keeps the user in Settings (owner request)
+              onUpdateSettings={onUpdateSettings}
               onSendTestAlert={onSendTestAlert}
               onForceRefresh={onRefresh}
               isRefreshing={isRefreshing}

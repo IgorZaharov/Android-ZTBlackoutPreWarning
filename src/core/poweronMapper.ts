@@ -66,7 +66,30 @@ function emergencyRecordsFor(rows: readonly PowerOnRow[], house: string): Emerge
       });
     }
   }
-  return Array.from(byId.values()).sort((a, b) => a.start - b.start);
+  return mergeOverlapping(Array.from(byId.values()).sort((a, b) => a.start - b.start));
+}
+
+/**
+ * Records whose times overlap or touch are one outage (spec/POWERON_API.md 5.1 step 7): operators re-register an
+ * ongoing outage as a new row when its estimate runs out. The merged record keeps the id and start of the earliest
+ * and the latest estimate; a record without an estimate is open-ended.
+ */
+function mergeOverlapping(sorted: EmergencyRecord[]): EmergencyRecord[] {
+  const out: EmergencyRecord[] = [];
+  for (const rec of sorted) {
+    const last = out.length > 0 ? out[out.length - 1] : null;
+    if (last !== null && (last.estimatedEnd === null || rec.start <= last.estimatedEnd)) {
+      const ends = [last.estimatedEnd, rec.estimatedEnd].filter((t): t is LocalDateTime => t !== null);
+      out[out.length - 1] = {
+        ...last,
+        estimatedEnd: ends.length === 0 ? null : (Math.max(...ends) as LocalDateTime),
+        label: last.label ?? rec.label,
+      };
+    } else {
+      out.push(rec);
+    }
+  }
+  return out;
 }
 
 /** Planned repair works for [house]; treated as planned outages. Rows beyond tomorrow are dropped. */

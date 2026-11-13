@@ -231,7 +231,12 @@ class OutageRepository(context: Context) {
             events = polled?.second.orEmpty()
             store.savePowerOn(poweronOk, nowMs)
             if (notify && events.isNotEmpty() && settings.emergencyNotificationsEnabled) {
-                NotificationHelper.postEmergencyEvents(appContext, settings, key, events, subscriptionId = subs?.first?.primaryId)
+                val primary = subs?.first?.primary
+                NotificationHelper.postEmergencyEvents(
+                    appContext, settings, key, events, subscriptionId = subs?.first?.primaryId,
+                    plannedSpans = OutageEngine.plannedSpans(outagesFor(settings.queue, key)),
+                    plannedAlertsOn = if (subs != null && primary != null) Subscriptions.plannedActive(subs.second, primary) else settings.notificationsEnabled
+                )
             }
         }
         if (subs != null) refreshOtherAddresses(settings, subs.first, subs.second, key, nowMs, notify, shownId)
@@ -269,7 +274,9 @@ class OutageRepository(context: Context) {
             if (polled == null) continue
             if (notify && alerts && polled.second.isNotEmpty()) {
                 NotificationHelper.postEmergencyEvents(
-                    appContext, settings, key, polled.second, addressLine(item), enabled = true, subscriptionId = item.id
+                    appContext, settings, key, polled.second, addressLine(item), enabled = true, subscriptionId = item.id,
+                    plannedSpans = OutageEngine.plannedSpans(outagesFor(item.queue, key)),
+                    plannedAlertsOn = Subscriptions.plannedActive(master, item)
                 )
             }
         }

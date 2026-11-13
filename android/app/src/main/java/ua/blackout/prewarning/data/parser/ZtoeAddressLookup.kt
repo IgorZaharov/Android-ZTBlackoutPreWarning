@@ -77,7 +77,8 @@ object ZtoeAddressLookup {
     const val DEFAULT_SITE_URL = "https://www.ztoe.com.ua/unhooking-search.php"
 
     /** Bumped to 2 when merged street ids were introduced; caches of other versions are discarded. */
-    internal const val CACHE_VERSION = 2
+    /** 3: drops street house lists that were cut to ztoe's first page of 10 records (per-street request without all=1). */
+    internal const val CACHE_VERSION = 3
     private const val PREFS_NAME = "zt_address_index_cache_v1"
     private const val KEY_INDEX_JSON = "address_index_json_v1"
     private const val MAX_PERSISTED_HOUSE_STREETS = 50
@@ -838,7 +839,9 @@ object ZtoeAddressLookup {
     fun parseZtoeSettlementHousesTableHtml(
         settlementId: String,
         streets: List<ZtoeStreetOption>,
-        html: String
+        html: String,
+        /** False for a one-street page: the caller unites the rows of all ids of the street first. */
+        cache: Boolean = true
     ): Map<String, List<ZtoeHouseLookupResult>> {
         if (html.isBlank() || streets.isEmpty()) return emptyMap()
 
@@ -924,8 +927,10 @@ object ZtoeAddressLookup {
             if (map.isEmpty()) continue
             val sorted = sortHouses(map.values)
             result[streetId] = sorted
-            cachedHousesByStreet[streetId] = sorted
-            houseCacheUpdatedAtByStreet[streetId] = System.currentTimeMillis()
+            if (cache) {
+                cachedHousesByStreet[streetId] = sorted
+                houseCacheUpdatedAtByStreet[streetId] = System.currentTimeMillis()
+            }
         }
         return result
     }
@@ -1143,7 +1148,12 @@ object ZtoeAddressLookup {
     /**
      * Houses of one (merged) street straight from the site: one request per ztoe id of the street,
      * results united and de-duplicated by [HouseKey]. Null when no request succeeded.
-     * Note: all=1 is not passed here, because with all=1 ZTOE ignores vulica_id.
+     *
+     * The request carries `all=1`: without it ztoe lists only the first 10 records of the street and a
+     * "показати ще N записів" button (vul. Київська in Zhytomyr: 21 of 127 houses). Rows are kept only
+     * when their street name has the street's [StreetKey], so a page that ignored `vulica_id` cannot
+     * add other streets. Only when no row carries the name (an unusual spelling) the first page is
+     * used unfiltered, as before.
      */
     private fun fetchStreetHouseRows(
         rem: ZtoeRemOption,
@@ -1154,13 +1164,17 @@ object ZtoeAddressLookup {
         var anyResponse = false
         val map = LinkedHashMap<String, ZtoeHouseLookupResult>()
         for (vulicaId in street.ztoeVulicaIds) {
-            val html = postZtoeForm(
-                "rem_id=${rem.ztoeRemId}&naspunkt_id=${settlement.ztoeNaspunktId}&vulica_id=$vulicaId",
-                siteUrl
-            )
+            val form = "rem_id=${rem.ztoeRemId}&naspunkt_id=${settlement.ztoeNaspunktId}&vulica_id=$vulicaId"
+            val html = postZtoeForm("$form&all=1", siteUrl)
             if (html.isNullOrBlank()) continue
             anyResponse = true
-            for (row in parseZtoeAddressLookupTableHtml(html)) putHouse(map, row)
+            val rows = parseZtoeSettlementHousesTableHtml(settlement.id, listOf(street), html, cache = false).values.flatten()
+            if (rows.isNotEmpty()) {
+                for (row in rows) putHouse(map, row)
+                continue
+            }
+            val firstPage = postZtoeForm(form, siteUrl) ?: continue
+            for (row in parseZtoeAddressLookupTableHtml(firstPage)) putHouse(map, row)
         }
         return if (anyResponse) sortHouses(map.values) else null
     }

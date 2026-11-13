@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { AlertCircle, AlertTriangle, Bell, ExternalLink, Globe, HelpCircle, Loader2, Pencil, Plus, RotateCcw, Send, Sliders, Star, Trash2, Vibrate, Volume2, X, Zap, RefreshCw, GripVertical } from 'lucide-react';
+import { AlertCircle, AlertTriangle, Bell, ExternalLink, Globe, HelpCircle, Loader2, Pencil, Plus, RotateCcw, Send, Sliders, Star, Trash2, Vibrate, Volume2, X, Zap, RefreshCw, GripVertical, Clock } from 'lucide-react';
 import { Language, UserSettings } from '../types';
 import { QUEUES, DEFAULT_ZTOE_URL, verifyZtoeSiteAndData } from '../services/ztoeParser';
 import {
@@ -495,8 +495,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               onChange={(e) => {
                 const q = e.target.value;
                 if (!q) return;
-                const wasEmpty = store.items.length === 0;
-                if (applySync(sync.addQueueOnly(settings, q)) && wasEmpty) onNavigateToMain?.();
+                applySync(sync.addQueueOnly(settings, q));
               }}
               className={fieldClass}
             >
@@ -637,6 +636,30 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         <p className={`pt-0.5 text-[13px] font-medium leading-[19px] ${TEXT_TERTIARY}`}>{t.soundVibrationHint}</p>
       </GlassCard>
 
+      {/* 4b. Emergency follow-ups for all addresses (spec/NOTIFICATIONS.md 2.4); the start is always announced */}
+      <GlassCard padding={18} className="flex flex-col gap-2" data-testid="emergency-alerts-card">
+        <Overline>{t.emergencyAlertsTitle}</Overline>
+        <p className={`text-[13px] font-medium leading-[19px] ${TEXT_SECONDARY}`}>{t.emergencyAlertsDesc}</p>
+        <SwitchRow
+          icon={<Clock className={`h-5 w-5 ${alertsMaster ? 'text-[#FFB020]' : 'text-[#BAE6FD]/30'}`} />}
+          title={t.emergencyEtaAlertsTitle}
+          hint={t.emergencyEtaAlertsHint}
+          checked={alertsMaster && settings.emergencyEtaAlerts !== false}
+          enabled={alertsMaster}
+          onToggle={() => onUpdateSettings({ ...settings, emergencyEtaAlerts: settings.emergencyEtaAlerts === false })}
+          testId="ios-switch-emergency-eta"
+        />
+        <SwitchRow
+          icon={<Zap className={`h-5 w-5 ${alertsMaster ? 'text-[#34D399]' : 'text-[#BAE6FD]/30'}`} />}
+          title={t.emergencyEndAlertsTitle}
+          hint={t.emergencyEndAlertsHint}
+          checked={alertsMaster && settings.emergencyEndAlerts !== false}
+          enabled={alertsMaster}
+          onToggle={() => onUpdateSettings({ ...settings, emergencyEndAlerts: settings.emergencyEndAlerts === false })}
+          testId="ios-switch-emergency-end"
+        />
+      </GlassCard>
+
 
       {/* 5. Language */}
       <GlassCard padding={18} className="flex flex-col gap-2.5">
@@ -761,11 +784,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               ? sync.addFromLookup(settings, next.queue, next.customQueueStatusText, next.selectedAddress ?? '', next.selectedAddressQuery)
               : sync.addQueueOnly(settings, next.queue);
             setShowQueueHelp(false);
-            if (applySync(synced)) {
-              // the first address becomes the primary: show it on the main screen
-              if (wasEmpty) onNavigateToMain?.();
-              showToast(wasEmpty ? toast : t.addressAdded);
-            }
+            // the user stays in Settings (owner request): the address is added in place
+            if (applySync(synced)) showToast(wasEmpty ? toast : t.addressAdded);
           }}
         />
         </ModalPortal>

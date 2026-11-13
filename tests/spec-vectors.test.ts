@@ -15,8 +15,8 @@ import {
   parseLocalDateTime,
   type LocalDateTime,
 } from '../src/core/localTime';
-import { makeOutage, type AlertSpec, type EmergencyRecord, type Outage } from '../src/core/outageModels';
-import { buildPlanned, dayView, inWindow, planAlerts, resolveEmergency, spans, status } from '../src/core/outageEngine';
+import { makeOutage, type AlertSpec, type EmergencyRecord, type Outage, type Span } from '../src/core/outageModels';
+import { buildPlanned, dayView, emergencyDelivery, inWindow, planAlerts, resolveEmergency, spans, status } from '../src/core/outageEngine';
 import { HouseKey, StreetKey, TextNorm } from '../src/core/addressKeys';
 import { EmergencyFetch, eventKey, reconcile, type LedgerEntry } from '../src/core/emergencyLedger';
 import { PowerOnMapper, type PowerOnRow } from '../src/core/poweronMapper';
@@ -172,7 +172,19 @@ function outageEngineVectors(): number {
       }
     }
   }
-  return cases.length;
+  // NOTIFICATIONS.md 2.4a: one continuous outage, one announcement
+  const deliveries: Json[] = load('outage_engine.json').emergencyDelivery;
+  for (const d of deliveries) {
+    const planned: Span[] = (d.plannedSpans as Json[]).map((x) => ({
+      start: parseLocalDateTime(x.start),
+      end: parseLocalDateTime(x.end),
+      mayContinue: false,
+      kinds: new Set(['PLANNED'] as const),
+    }));
+    const got = emergencyDelivery(d.event.kind, parseLocalDateTime(d.event.start), dt(d.event.eta ?? null), parseLocalDateTime(d.now), planned, d.plannedAlertsOn);
+    assert.equal(got, d.expect, `emergencyDelivery: ${d.name}`);
+  }
+  return cases.length + deliveries.length;
 }
 
 // -------------------------------------------------------------------------------------------------

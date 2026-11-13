@@ -324,6 +324,16 @@ object AppStrings {
     fun myAddressesDesc(lang: String) = if (lang == "uk") "Окремі сповіщення для кожної адреси" else "Separate alerts for each address"
     fun addressesCount(lang: String, n: Int, max: Int) = if (lang == "uk") "$n з $max" else "$n of $max"
     fun primaryBadge(lang: String) = if (lang == "uk") "Основна" else "Primary"
+    fun emergencyAlertsTitle(lang: String) = if (lang == "uk") "АВАРІЙНІ ВІДКЛЮЧЕННЯ" else "EMERGENCY OUTAGES"
+    fun emergencyAlertsDesc(lang: String) =
+        if (lang == "uk") "Для всіх адрес. Про початок аварійного відключення сповіщення приходить завжди."
+        else "For all addresses. The start of an emergency outage is always announced."
+    fun emergencyEtaAlertsTitle(lang: String) = if (lang == "uk") "Зміна часу відновлення" else "Restoration time changes"
+    fun emergencyEtaAlertsHint(lang: String) =
+        if (lang == "uk") "Коли орієнтовний час відновлення переносять" else "When the estimated restoration moves"
+    fun emergencyEndAlertsTitle(lang: String) = if (lang == "uk") "Світло відновлено" else "Power restored"
+    fun emergencyEndAlertsHint(lang: String) =
+        if (lang == "uk") "Коли аварійне відключення закінчилося" else "When the emergency outage has ended"
     fun reorderHandle(lang: String) = if (lang == "uk") "Перетягніть, щоб змінити порядок" else "Drag to reorder"
     fun moveUp(lang: String) = if (lang == "uk") "Перемістити вгору" else "Move up"
     fun moveDown(lang: String) = if (lang == "uk") "Перемістити вниз" else "Move down"

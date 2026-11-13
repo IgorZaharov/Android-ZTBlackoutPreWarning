@@ -97,11 +97,6 @@ fun TimelineBar(
     val unclearBlockBrush = remember {
         Brush.verticalGradient(listOf(Color(0xFF7E8287), Color(0xFF94989E), Color(0xFF6E7277)))
     }
-    val emergencyBlockBrush = remember {
-        Brush.verticalGradient(
-            listOf(ZtColors.EmergencyAmberStart, ZtColors.EmergencyAmberMid, ZtColors.EmergencyAmberEnd)
-        )
-    }
 
     val cells = remember(slots) { drumCells(slots) }
     val summary = remember(slots, lang, unclearBase) { OutageRowFormat.drumSummary(lang, slots, unclearBase) }
@@ -201,12 +196,19 @@ fun TimelineBar(
                             val period = StripePeriod.toPx() * sqrt(2f)
                             val stripe = StripeWidth.toPx()
 
+                            // An emergency takes only the bottom half of its cells (spec/UI_DRUM.md 1): the top
+                            // half keeps the planned state, so a scheduled outage behind it stays visible
+                            val mid = h / 2f
+                            val emergencyBrush = Brush.verticalGradient(
+                                listOf(ZtColors.EmergencyAmberStart, ZtColors.EmergencyAmberMid, ZtColors.EmergencyAmberEnd),
+                                startY = mid,
+                                endY = h
+                            )
                             for (i in 0 until 48) {
                                 val cell = cells[i]
                                 val left = (i / 2) * (hourW + gap) + (i % 2) * halfW
                                 val brush = when {
                                     cell.planned -> offBlockBrush
-                                    cell.emergency -> emergencyBlockBrush
                                     unclearBase -> unclearBlockBrush
                                     else -> onBlockBrush
                                 }
@@ -214,10 +216,12 @@ fun TimelineBar(
                                 val width = halfW + if (i % 2 == 0) 0.5f else 0f
                                 drawRect(brush, topLeft = Offset(left, 0f), size = Size(width, h))
                                 if (cell.emergency) {
+                                    drawRect(emergencyBrush, topLeft = Offset(left, mid), size = Size(width, h - mid))
                                     drawStripes(
                                         left = left,
                                         right = left + width,
-                                        color = if (cell.planned) ZtColors.EmergencyStripeLight else ZtColors.EmergencyStripeDark,
+                                        top = mid,
+                                        color = ZtColors.EmergencyStripeDark,
                                         stripeWidth = stripe,
                                         period = period
                                     )
@@ -262,18 +266,20 @@ fun TimelineBar(
 }
 
 /**
- * 45 degree stripes inside [left, right]. The pattern is anchored to the drum's x origin (stripe
- * starts are multiples of [period]), so adjacent emergency cells continue each other's stripes.
+ * 45 degree stripes inside [left, right] and from [top] to the bottom. The pattern is anchored to the
+ * drum's x origin (stripe starts are multiples of [period]), so adjacent emergency cells continue each
+ * other's stripes.
  */
-private fun DrawScope.drawStripes(left: Float, right: Float, color: Color, stripeWidth: Float, period: Float) {
-    val h = size.height
-    clipRect(left = left, top = 0f, right = right, bottom = h) {
-        var x = floor((left - h) / period) * period
+private fun DrawScope.drawStripes(left: Float, right: Float, top: Float, color: Color, stripeWidth: Float, period: Float) {
+    val bottom = size.height
+    val band = bottom - top
+    clipRect(left = left, top = top, right = right, bottom = bottom) {
+        var x = floor((left - band) / period) * period
         while (x < right) {
             drawLine(
                 color = color,
-                start = Offset(x, h),
-                end = Offset(x + h, 0f),
+                start = Offset(x, bottom),
+                end = Offset(x + band, top),
                 strokeWidth = stripeWidth
             )
             x += period

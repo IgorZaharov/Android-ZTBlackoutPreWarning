@@ -74,6 +74,10 @@ export interface UserSettings {
   vibrationEnabled: boolean;
   prevSoundEnabled?: boolean;
   prevVibrationEnabled?: boolean;
+  /** Notify when the estimated restoration of an emergency moves (ETA_CHANGED), all addresses; absent = on. */
+  emergencyEtaAlerts?: boolean;
+  /** Notify when an emergency ends (END), all addresses; absent = on. The start always notifies. */
+  emergencyEndAlerts?: boolean;
   theme: ThemeMode;
   language: Language;
 }

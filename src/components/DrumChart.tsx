@@ -170,19 +170,18 @@ export const DrumChart: React.FC<DrumChartProps> = ({
                 const w = halfW + (i % 2 === 0 ? 0.5 : 0); // +0.5 px hides the seam of the two halves of one hour
                 const base = cell.planned
                   ? vGradient(DRUM_COLORS.off)
-                  : cell.emergency
-                  ? vGradient(DRUM_COLORS.emergency)
                   : unclearBase
                   ? vGradient(DRUM_COLORS.unclear)
                   : vGradient(DRUM_COLORS.on);
                 const style: React.CSSProperties = { left, width: w, top: 0, bottom: 0 };
                 if (cell.emergency) {
-                  // The stripe layer is as wide as the whole drum and shifted by the cell offset, so the
+                  // An emergency takes the bottom half only (spec/UI_DRUM.md 1): the top half keeps the planned
+                  // state. The stripe layer is as wide as the whole drum and shifted by the cell offset, so the
                   // stripes of neighbouring emergency cells continue each other.
-                  style.backgroundImage = `${stripeBackground(cell.planned)}, ${base}`;
-                  style.backgroundSize = `${width}px 100%, 100% 100%`;
-                  style.backgroundPosition = `${-left}px 0, 0 0`;
-                  style.backgroundRepeat = 'no-repeat, no-repeat';
+                  style.backgroundImage = `${stripeBackground(false)}, ${vGradient(DRUM_COLORS.emergency)}, ${base}`;
+                  style.backgroundSize = `${width}px 50%, 100% 50%, 100% 100%`;
+                  style.backgroundPosition = `${-left}px 100%, 0 100%, 0 0`;
+                  style.backgroundRepeat = 'no-repeat, no-repeat, no-repeat';
                 } else {
                   style.backgroundImage = base;
                 }
@@ -281,7 +280,7 @@ export const DrumBitmap: React.FC<DrumBitmapProps> = ({
   const labels: [number, string][] = [[0, '00'], [0.25, '06'], [0.5, '12'], [0.75, '18'], [1, '24']];
 
   const stops = (id: string, c: readonly string[]) => (
-    <linearGradient id={`${uid}${id}`} x1="0" y1={trackTop} x2="0" y2={trackBottom} gradientUnits="userSpaceOnUse">
+    <linearGradient id={`${uid}${id}`} x1="0" y1={id === 'amber' ? trackTop + (trackBottom - trackTop) / 2 : trackTop} x2="0" y2={trackBottom} gradientUnits="userSpaceOnUse">
       <stop offset="0" stopColor={c[0]} />
       <stop offset="0.5" stopColor={c[1]} />
       <stop offset="1" stopColor={c[2]} />
@@ -295,23 +294,26 @@ export const DrumBitmap: React.FC<DrumBitmapProps> = ({
       const hLeft = trackLeft + hour * (hourWidth + SEP_PX);
       const left = idx % 2 === 0 ? hLeft : hLeft + halfWidth;
       const right = idx % 2 === 0 ? hLeft + halfWidth : hLeft + hourWidth;
-      const fillId = cell.planned ? 'off' : cell.emergency ? 'amber' : 'on';
+      const fillId = cell.planned ? 'off' : 'on';
       cellEls.push(<rect key={`c${idx}`} x={left} y={trackTop} width={right - left} height={trackH} fill={`url(#${uid}${fillId})`} />);
       if (cell.emergency) {
-        const color = cell.planned ? DRUM_COLORS.stripeLight : DRUM_COLORS.stripeDark;
+        // The bottom half only (spec/UI_DRUM.md 1): the top half keeps the planned state
+        const mid = trackTop + trackH / 2;
+        const band = trackBottom - mid;
+        cellEls.push(<rect key={`e${idx}`} x={left} y={mid} width={right - left} height={band} fill={`url(#${uid}amber)`} />);
         const lines: React.ReactNode[] = [];
         // Global phase (anchored at trackLeft) keeps the stripes continuous across cells
         let n = Math.floor((left - trackLeft) / stripeStep);
         for (;;) {
-          const u = trackLeft - trackH + n * stripeStep;
+          const u = trackLeft - band + n * stripeStep;
           if (u >= right) break;
-          lines.push(<line key={n} x1={u} y1={trackBottom} x2={u + trackH} y2={trackTop} stroke={color} strokeWidth={STRIPE_PX} />);
+          lines.push(<line key={n} x1={u} y1={trackBottom} x2={u + band} y2={mid} stroke={DRUM_COLORS.stripeDark} strokeWidth={STRIPE_PX} />);
           n++;
         }
         cellEls.push(
           <g key={`s${idx}`} clipPath={`url(#${uid}clip${idx})`}>
             <clipPath id={`${uid}clip${idx}`}>
-              <rect x={left} y={trackTop} width={right - left} height={trackH} />
+              <rect x={left} y={mid} width={right - left} height={band} />
             </clipPath>
             {lines}
           </g>

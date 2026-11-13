@@ -8,6 +8,9 @@
  *  - `refresh(settings, force, notify)` fetches ztoe and PowerOn. A source that fails keeps its previous
  *    data and is reported as such; it never becomes "no outage".
  */
+import { plannedSpans as plannedSpansOf } from '../core/outageEngine';
+import type { Span } from '../core/outageModels';
+import { plannedActive } from '../core/subscriptions';
 import { HouseKey, StreetKey } from '../core/addressKeys';
 import { reconcile, outages as ledgerOutages, type EmergencyEvent } from '../core/emergencyLedger';
 import { fromInstant, formatLocalDate, toLocalDate, type LocalDate, type LocalDateTime } from '../core/localTime';
@@ -165,6 +168,9 @@ export interface AddressEvents {
   /** Second line of the notification: the address text, or the label. */
   addressLine: string;
   events: readonly EmergencyEvent[];
+  /** Its planned spans and whether it is warned about them (spec/NOTIFICATIONS.md 2.4a). */
+  plannedSpans: readonly Span[];
+  plannedAlertsOn: boolean;
 }
 
 export interface RefreshOutcome {
@@ -173,6 +179,9 @@ export interface RefreshOutcome {
   poweronOk: boolean | null;
   /** Events of the primary (selected) address. */
   events: readonly EmergencyEvent[];
+  /** The primary's planned spans and whether it is warned about them (spec/NOTIFICATIONS.md 2.4a). */
+  plannedSpans: readonly Span[];
+  plannedAlertsOn: boolean;
   /** Events of the other subscriptions that want emergency alerts. */
   otherEvents: readonly AddressEvents[];
   snapshot: OutageSnapshot;
@@ -203,7 +212,14 @@ export interface OutageRepositoryDeps {
   /** The real instant in epoch milliseconds (tests pass a fake clock). */
   nowMs?: () => number;
   /** Delivers emergency events (default: the browser notification adapter in alertManager). */
-  notify?: (settings: UserSettings, addressKey: string, events: readonly EmergencyEvent[], now: LocalDateTime) => void;
+  notify?: (
+    settings: UserSettings,
+    addressKey: string,
+    events: readonly EmergencyEvent[],
+    now: LocalDateTime,
+    /** The address's planned spans and whether it is warned about them (spec/NOTIFICATIONS.md 2.4a). */
+    planned?: { spans: readonly Span[]; alertsOn: boolean }
+  ) => void;
   /** Passed through to the ztoe fetch (tests inject the HTML here). */
   ztoeOptions?: Pick<ZtoeFetchOptions, 'fetchHtml' | 'isOnline'>;
   /** The subscription store and the master switch (default: the app-wide SubscriptionSync). */
@@ -233,8 +249,11 @@ export class OutageRepository {
     this.nowMs = deps.nowMs ?? (() => Date.now());
     this.notifyEvents =
       deps.notify ??
-      ((settings, addressKey, events, now) => {
-        triggerEmergencyEventAlerts(events, addressKey, settings, resolveLanguage(settings.language), now);
+      ((settings, addressKey, events, now, planned) => {
+        triggerEmergencyEventAlerts(events, addressKey, settings, resolveLanguage(settings.language), now, undefined, {
+          plannedSpans: planned?.spans,
+          plannedAlertsOn: planned?.alertsOn,
+        });
       });
     this.ztoeOptions = deps.ztoeOptions ?? {};
     this.subscriptions =
@@ -249,6 +268,8 @@ export class OutageRepository {
         triggerEmergencyEventAlerts(other.events, other.addressKey, settings, resolveLanguage(settings.language), now, undefined, {
           addressLine: other.addressLine,
           enabled: true,
+          plannedSpans: other.plannedSpans,
+          plannedAlertsOn: other.plannedAlertsOn,
         });
       });
   }
@@ -365,11 +386,25 @@ export class OutageRepository {
       events = polled?.events ?? [];
       this.store.savePowerOn(poweronOk, nowMs);
       if (notify && events.length > 0 && (settings.emergencyNotificationsEnabled ?? true)) {
-        this.notifyEvents(settings, key, events, fromInstant(nowMs));
+        const primaryItem = subs ? subs.store.items.find((i) => i.id === subs.store.primaryId) ?? null : null;
+        this.notifyEvents(settings, key, events, fromInstant(nowMs), {
+          spans: plannedSpansOf(this.outagesFor(settings.queue, key, fromInstant(nowMs))),
+          alertsOn: subs && primaryItem ? plannedActive(subs.master, primaryItem) : settings.notificationsEnabled,
+        });
       }
     }
     const otherEvents = subs ? await this.refreshOtherAddresses(settings, subs, key, nowMs, notify, shownId, widgetIds) : [];
-    return { siteState, fetchStatus, poweronOk, events, otherEvents, snapshot: this.snapshot(settings, fromInstant(this.nowMs())) };
+    const primaryItem = subs ? subs.store.items.find((i) => i.id === subs.store.primaryId) ?? null : null;
+    return {
+      siteState,
+      fetchStatus,
+      poweronOk,
+      events,
+      plannedSpans: key ? plannedSpansOf(this.outagesFor(settings.queue, key, fromInstant(nowMs))) : [],
+      plannedAlertsOn: subs && primaryItem ? plannedActive(subs.master, primaryItem) : settings.notificationsEnabled,
+      otherEvents,
+      snapshot: this.snapshot(settings, fromInstant(this.nowMs())),
+    };
   }
 
   /**
@@ -397,7 +432,14 @@ export class OutageRepository {
       const polled = await this.pollPowerOn({ remId: a.remSlug, settlementId: a.settlementId, streetId: a.streetId, house: a.house }, key, nowMs);
       this.store.savePowerOnFor(key, polled?.ok ?? false, nowMs);
       if (!alerts || !polled || polled.events.length === 0) continue;
-      const other: AddressEvents = { itemId: item.id, addressKey: key, addressLine: addressLine(item), events: polled.events };
+      const other: AddressEvents = {
+        itemId: item.id,
+        addressKey: key,
+        addressLine: addressLine(item),
+        events: polled.events,
+        plannedSpans: plannedSpansOf(this.outagesFor(item.queue, key, fromInstant(nowMs))),
+        plannedAlertsOn: plannedActive(subs.master, item),
+      };
       out.push(other);
       if (notify) this.notifyOther(settings, other, fromInstant(nowMs));
     }

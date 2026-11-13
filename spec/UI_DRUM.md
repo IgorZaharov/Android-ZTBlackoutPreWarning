@@ -12,8 +12,10 @@ Input per cell: `SlotState(planned, emergency)` from `dayView` (`planned` is tru
 |---|---|---|---|
 | false | false | on | ivory vertical gradient `#D8D6CC` -> `#FCFBF7` -> `#CCC9BE` (top, middle, bottom) |
 | true | false | off, planned | crimson vertical gradient `#9E1E18` -> `#D62E26` -> `#8C1914` |
-| false | true | emergency | amber vertical gradient `#FFB020` -> `#F28A1B` -> `#C96A0B` with dark stripes |
-| true | true | both | crimson base (the planned gradient, middle stop `#D62E26`) with amber stripes `#FFB020` at 85 % alpha |
+| false | true | emergency | top half: on (or the unclear grey); bottom half: amber vertical gradient `#FFB020` -> `#F28A1B` -> `#C96A0B` with dark stripes |
+| true | true | both | top half: the planned crimson; bottom half: amber with dark stripes, as above |
+
+An emergency takes only the **bottom half** of its cells, so the planned state behind it (a scheduled outage or power on) stays readable in the top half (owner request after 1.4.0; before, the emergency filled the whole cell and hid the schedule).
 | (day has no valid planned data) | | unclear | grey vertical gradient `#7E8287` -> `#94989E` -> `#6E7277` |
 
 **Emergency stripes** (second cue so the state is not carried by colour alone):
@@ -22,8 +24,7 @@ Input per cell: `SlotState(planned, emergency)` from `dayView` (`planned` is tru
 |---|---|
 | Direction | 45 degrees |
 | Stripe / gap | 3 dp / 3 dp |
-| Emergency only | stripes `#1A1208` at 55 % alpha over the amber gradient |
-| Emergency over planned | base stays crimson, stripes are `#FFB020` at 85 % alpha |
+| Stripes | `#1A1208` at 55 % alpha over the amber half, with or without a planned outage behind it |
 | Hue separation | amber (hue about 40 degrees) is more than 15 degrees away from crimson (about 3) and from the accent (about 11) |
 | Widget | the big widget bitmap uses the same recipe |
 

@@ -80,6 +80,10 @@ State per address: a list of `LedgerEntry(id, start, estimatedEnd?, label?, firs
 4. **Records that disappeared** (open entries not in this fetch), in stored order: set `closedAt = now` and `endEmitted = true`. Emit `END` unless **silent**: silent when `endEmitted` was already true, or the entry was already stale (its estimate is more than 60 minutes in the past), or `startEmitted` was false. An entry with no estimate is never stale, so its disappearance is announced (`earlyEnd = false`).
 5. Entries already closed stay as they are until pruned.
 
+**Continuation** (an ongoing outage re-registered under a new start, see `POWERON_API.md` 5.1 step 7): an open entry that the answer no longer lists while a listed record overlaps or touches its time (an open estimate counts as endless) is the same outage, not a restoration:
+- a listed record with no entry of its own takes the vanished entry over: no `START`, it keeps `firstSeen`, `startEmitted`, `endEmitted` and `lastEmittedEta` of that entry, and the `ETA_CHANGED` rule above applies against that `lastEmittedEta` (event with the new record's id and start);
+- the vanished entry is dropped from the ledger without an `END` (it is not kept as history, or the list would show it twice).
+
 Event order inside one call: `START` and `ETA_CHANGED` in record order, then `END` events.
 
 `EmergencyLedger.outages(entries, now)` turns all entries (open, overdue, stale, closed) into engine outages, so finished emergencies of today stay listable although PowerOn keeps no history.
@@ -104,7 +108,22 @@ Example (`emergency_ledger.json`): `emerg_change_addr_2026-11-13T17:30_2026-11-1
 
 ### 2.4 Gating
 
-Emergency events are gated by the master switch `alertsMaster` **and** the address's `emergencyAlerts` (owner decision 1, `SUBSCRIPTIONS.md` 8.4; in 1.4.0 they were gated by `emergencyNotificationsEnabled` only). The ledger runs whether or not the switch is on (the UI needs its history); the adapter drops the event when the switch is off. A dropped event is not replayed later when the switch is turned on.
+Emergency events are gated by the master switch `alertsMaster` **and** the address's `emergencyAlerts` (owner decision 1, `SUBSCRIPTIONS.md` 8.4; in 1.4.0 they were gated by `emergencyNotificationsEnabled` only). The follow-ups have one more switch each, for all addresses (Settings card "Аварійні відключення"): `ETA_CHANGED` also needs `emergencyEtaAlerts` (`emergency_eta_alerts`, default on), `END` also needs `emergencyEndAlerts` (`emergency_end_alerts`, default on). `START` has no extra switch: an emergency that starts is always announced when its address wants emergency alerts. Both switches show off and are disabled while the master is off. The ledger runs whether or not the switch is on (the UI needs its history); the adapter drops the event when the switch is off. A dropped event is not replayed later when the switch is turned on.
+
+### 2.4a One continuous outage: `emergencyDelivery(kind, start, eta, now, plannedSpans, plannedAlertsOn)`
+
+When emergency and scheduled outages of one address touch or overlap they are one continuous outage, and only its beginning is announced (owner request). `plannedSpans` are the address's `spans(outages not stale, {PLANNED, REPAIR})`; `plannedAlertsOn` is `plannedActive(master, item)` (`SUBSCRIPTIONS.md` 5). Spans include their bounds (`start <= t <= end`).
+
+| Event | Rule | Result |
+|---|---|---|
+| `START` | no planned span holds `start`, or `plannedAlertsOn` is false | `SEND` |
+| `START` | a planned span `p` holds `start` (the user was warned about `p`), the estimate is later than `p.end` | `PROLONG`: delivered with the `ETA_CHANGED` text and the estimate, under the `emergencyEtaAlerts` switch, dedupe key of the `START` |
+| `START` | a planned span holds `start`, no estimate or not later than its end | `DROP` |
+| `END` | a planned span holds `now` and ends after it (`p.start <= now < p.end`), whatever `plannedAlertsOn` | `DROP`: power is still off by the schedule |
+| `END` | otherwise | `SEND` |
+| `ETA_CHANGED` | always | `SEND` |
+
+A dropped event is marked as delivered (never replayed). The scheduled side is `OUTAGE_ENGINE.md` 6.2 step 2a: no pre-warning for a block that starts while an emergency is on.
 
 ### 2.5 Text
 

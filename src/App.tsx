@@ -161,7 +161,11 @@ export default function App() {
           resolveLanguage(effective.language),
           fromInstant(Date.now()),
           (record) => setActiveNotification(record),
-          { subscriptionId: getSubscriptionSync().store(effective).primaryId }
+          {
+            subscriptionId: getSubscriptionSync().store(effective).primaryId,
+            plannedSpans: outcome.plannedSpans,
+            plannedAlertsOn: outcome.plannedAlertsOn,
+          }
         );
       }
       // The other addresses that want emergency alerts (spec/SUBSCRIPTIONS.md 8.4)
@@ -173,7 +177,13 @@ export default function App() {
           resolveLanguage(effective.language),
           fromInstant(Date.now()),
           (record) => setActiveNotification(record),
-          { addressLine: other.addressLine, enabled: true, subscriptionId: other.itemId }
+          {
+            addressLine: other.addressLine,
+            enabled: true,
+            subscriptionId: other.itemId,
+            plannedSpans: other.plannedSpans,
+            plannedAlertsOn: other.plannedAlertsOn,
+          }
         );
       }
       setDataVersion((v) => v + 1);

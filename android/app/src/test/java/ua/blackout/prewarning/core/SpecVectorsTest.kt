@@ -68,6 +68,25 @@ class SpecVectorsTest {
         return out
     }
 
+    /** NOTIFICATIONS.md 2.4a: one continuous outage, one announcement. */
+    @Test
+    fun emergencyDeliveryVectors() {
+        val cases = load("outage_engine.json").getJSONArray("emergencyDelivery").objects()
+        assertTrue(cases.size >= 10)
+        for (d in cases) {
+            val planned = d.getJSONArray("plannedSpans").objects().map {
+                Span(LocalDateTime.parse(it.getString("start")), LocalDateTime.parse(it.getString("end")), false, setOf(OutageKind.PLANNED))
+            }
+            val ev = d.getJSONObject("event")
+            val eta = if (ev.isNull("eta")) null else LocalDateTime.parse(ev.getString("eta"))
+            val got = OutageEngine.emergencyDelivery(
+                EmergencyEventKind.valueOf(ev.getString("kind")), LocalDateTime.parse(ev.getString("start")), eta,
+                LocalDateTime.parse(d.getString("now")), planned, d.getBoolean("plannedAlertsOn")
+            )
+            assertEquals(d.getString("name"), EmergencyDelivery.valueOf(d.getString("expect")), got)
+        }
+    }
+
     @Test
     fun outageEngineVectors() {
         val cases = load("outage_engine.json").getJSONArray("cases").objects()

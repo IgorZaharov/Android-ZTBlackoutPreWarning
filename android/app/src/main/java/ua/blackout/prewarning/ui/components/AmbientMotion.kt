@@ -59,7 +59,7 @@ fun rememberAmbientSeconds(): State<Float> {
  * height) on incommensurate periods, so the background never visibly repeats. [seed] gives each orb its
  * own periods and phase.
  */
-fun ambientDrift(seconds: Float, seed: Int, width: Float, height: Float, amplitude: Float = 0.06f): Offset {
+fun ambientDrift(seconds: Float, seed: Int, width: Float, height: Float, amplitude: Float = 0.16f): Offset {
     val px = PERIODS[seed % PERIODS.size]
     val py = PERIODS[(seed + 2) % PERIODS.size]
     val phase = seed * 1.7f
@@ -70,10 +70,11 @@ fun ambientDrift(seconds: Float, seed: Int, width: Float, height: Float, amplitu
     )
 }
 
-/** Slow "breathing" of an orb's radius, within +-5 %. */
+/** Slow "breathing" of an orb's radius, within +-15 %. */
 fun ambientBreath(seconds: Float, seed: Int): Float {
     val p = PERIODS[(seed + 1) % PERIODS.size] * 1.3f
-    return 1f + 0.05f * sin(2f * PI.toFloat() * seconds / p + seed)
+    return 1f + 0.15f * sin(2f * PI.toFloat() * seconds / p + seed)
 }
 
-private val PERIODS = floatArrayOf(47f, 61f, 53f, 71f, 59f)
+// 23-37 s: slow, but the movement is visible (47-71 s with 6 % drift was too subtle to notice on a phone)
+private val PERIODS = floatArrayOf(23f, 31f, 27f, 37f, 29f)

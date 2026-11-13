@@ -18,6 +18,10 @@ class SettingsRepository(context: Context) {
     }
 
     companion object {
+        /** Emergency follow-up alerts, one choice for all addresses (spec/PERSISTENCE.md 1, NOTIFICATIONS.md 2.4). */
+        const val KEY_EMERGENCY_ETA_ALERTS = "emergency_eta_alerts"
+        const val KEY_EMERGENCY_END_ALERTS = "emergency_end_alerts"
+
         fun readSafeInt(map: Map<String, *>, key: String, defaultVal: Int): Int {
             val raw = map[key] ?: return defaultVal
             return when (raw) {
@@ -204,6 +208,8 @@ class SettingsRepository(context: Context) {
             vibrationEnabled = if (anyAlertsEnabled) rawVibration else false,
             prevSoundEnabled = prevSound,
             prevVibrationEnabled = prevVibration,
+            emergencyEtaAlerts = prefs.getBoolean(KEY_EMERGENCY_ETA_ALERTS, true),
+            emergencyEndAlerts = prefs.getBoolean(KEY_EMERGENCY_END_ALERTS, true),
             themeMode = readSafeString(allMap, "theme_mode", "SYSTEM").ifBlank { "SYSTEM" },
             language = readSafeString(allMap, "language", "SYSTEM").ifBlank { "SYSTEM" }
         )
@@ -241,6 +247,8 @@ class SettingsRepository(context: Context) {
             .putBoolean("emergency_notifications_enabled", settings.emergencyNotificationsEnabled)
             .putBoolean("sound_enabled", if (anyAlertsEnabled) settings.soundEnabled else false)
             .putBoolean("vibration_enabled", if (anyAlertsEnabled) settings.vibrationEnabled else false)
+            .putBoolean(KEY_EMERGENCY_ETA_ALERTS, settings.emergencyEtaAlerts)
+            .putBoolean(KEY_EMERGENCY_END_ALERTS, settings.emergencyEndAlerts)
             .putString("theme_mode", settings.themeMode)
             .putString("language", settings.language)
 

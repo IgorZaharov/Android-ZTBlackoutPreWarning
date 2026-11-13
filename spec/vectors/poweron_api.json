@@ -52,6 +52,144 @@
         { "id": 12, "cityId": 333, "cityName": "Житомир", "streetId": 1, "streetName": "вул. Київська", "dateEvent": "2026-11-12T20:00:00+00:00", "datePlanIn": "2026-11-12T19:00:00+00:00", "koment": "", "switchSubReason": 0, "typeOff": 1, "buildingNames": "5" }
       ],
       "expect": [ { "id": "pw_2026-11-12T20:00", "start": "2026-11-12T20:00", "estimatedEnd": null, "label": null } ]
+    },
+    {
+      "name": "an ongoing outage re-registered twice (overlapping rows) is ONE record: earliest id and start, latest estimate; a later separate outage stays apart",
+      "house": "18",
+      "rows": [
+        {
+          "id": 417318570,
+          "cityId": 333,
+          "cityName": "Житомир",
+          "streetId": 33488,
+          "streetName": "вул. Степана Бандери",
+          "dateEvent": "2026-11-13T06:50:13+00:00",
+          "datePlanIn": "2026-11-13T20:00:00+00:00",
+          "koment": "",
+          "switchSubReason": 0,
+          "typeOff": 1,
+          "buildingNames": "18, 32"
+        },
+        {
+          "id": 417318571,
+          "cityId": 333,
+          "cityName": "Житомир",
+          "streetId": 33488,
+          "streetName": "вул. Степана Бандери",
+          "dateEvent": "2026-11-13T06:50:51+00:00",
+          "datePlanIn": "2026-11-13T20:00:00+00:00",
+          "koment": "",
+          "switchSubReason": 0,
+          "typeOff": 1,
+          "buildingNames": "10, 11, 12"
+        },
+        {
+          "id": 417318573,
+          "cityId": 333,
+          "cityName": "Житомир",
+          "streetId": 33488,
+          "streetName": "вул. Степана Бандери",
+          "dateEvent": "2026-11-13T19:30:00+00:00",
+          "datePlanIn": "2026-11-13T23:00:00+00:00",
+          "koment": "",
+          "switchSubReason": 0,
+          "typeOff": 1,
+          "buildingNames": "18, 32"
+        },
+        {
+          "id": 417318574,
+          "cityId": 333,
+          "cityName": "Житомир",
+          "streetId": 33488,
+          "streetName": "вул. Степана Бандери",
+          "dateEvent": "2026-11-13T19:50:00+00:00",
+          "datePlanIn": "2026-11-13T23:00:00+00:00",
+          "koment": "",
+          "switchSubReason": 0,
+          "typeOff": 1,
+          "buildingNames": "18, 32"
+        },
+        {
+          "id": 417318599,
+          "cityId": 333,
+          "cityName": "Житомир",
+          "streetId": 33488,
+          "streetName": "вул. Степана Бандери",
+          "dateEvent": "2026-11-13T23:30:00+00:00",
+          "datePlanIn": "2026-11-14T01:00:00+00:00",
+          "koment": "",
+          "switchSubReason": 0,
+          "typeOff": 1,
+          "buildingNames": "18, 32"
+        }
+      ],
+      "expect": [
+        {
+          "id": "pw_2026-11-13T06:50",
+          "start": "2026-11-13T06:50",
+          "estimatedEnd": "2026-11-13T23:00",
+          "label": null
+        },
+        {
+          "id": "pw_2026-11-13T23:30",
+          "start": "2026-11-13T23:30",
+          "estimatedEnd": "2026-11-14T01:00",
+          "label": null
+        }
+      ]
+    },
+    {
+      "name": "an open record (no estimate) absorbs the records that start while it is open; touching records merge",
+      "house": "5",
+      "rows": [
+        {
+          "id": 1,
+          "cityId": 333,
+          "cityName": "Житомир",
+          "streetId": 33488,
+          "streetName": "вул. Степана Бандери",
+          "dateEvent": "2026-11-13T08:00:00+00:00",
+          "datePlanIn": "2026-11-13T07:00:00+00:00",
+          "koment": "",
+          "switchSubReason": 0,
+          "typeOff": 1,
+          "buildingNames": "5"
+        },
+        {
+          "id": 2,
+          "cityId": 333,
+          "cityName": "Житомир",
+          "streetId": 33488,
+          "streetName": "вул. Степана Бандери",
+          "dateEvent": "2026-11-13T12:00:00+00:00",
+          "datePlanIn": "2026-11-13T14:00:00+00:00",
+          "koment": "",
+          "switchSubReason": 0,
+          "typeOff": 1,
+          "buildingNames": "5"
+        },
+        {
+          "id": 3,
+          "cityId": 333,
+          "cityName": "Житомир",
+          "streetId": 33488,
+          "streetName": "вул. Степана Бандери",
+          "dateEvent": "2026-11-13T14:00:00+00:00",
+          "datePlanIn": "2026-11-13T15:00:00+00:00",
+          "koment": "",
+          "switchSubReason": 0,
+          "typeOff": 1,
+          "buildingNames": "5"
+        }
+      ],
+      "expect": [
+        {
+          "id": "pw_2026-11-13T08:00",
+          "start": "2026-11-13T08:00",
+          "estimatedEnd": "2026-11-13T15:00",
+          "label": null
+        }
+      ]
     }
   ],
   "repairMapping": [

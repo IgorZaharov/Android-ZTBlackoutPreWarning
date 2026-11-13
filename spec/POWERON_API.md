@@ -93,6 +93,7 @@ For each row, in order:
 4. `estimatedEnd = parseTime(datePlanIn)` only if it is strictly after `start`, else none.
 5. `id = "pw_" + start` (text form, `pw_2026-11-12T21:08`). `label = trim(koment)` or none when empty.
 6. Rows with the same `id` are merged: `estimatedEnd` = the later of the two (a missing estimate loses against a present one), `label` = the first non-empty.
+7. Sort by `start`, then merge records whose times **overlap or touch** (a record without an estimate is open-ended): the merged record keeps the `id` and `start` of the earliest, `estimatedEnd` = the latest (a missing estimate loses), `label` = the first non-empty. Operators re-register an ongoing outage as a new row when its estimate runs out (вул. Степана Бандери 18, Zhytomyr, 2026-11-13: 06:50 -> 20:00, then 19:30 -> 23:00 and 19:50 -> 23:00); without this the app showed three emergencies and announced a new start twice for one outage.
 
 Return the records sorted by `start`. `closedAt` is not set here (only the ledger sets it). The id depends only on the start, so duplicate street ids of one street merge into one record.
 

@@ -156,6 +156,7 @@ Stale emergencies never count. Repair works and emergencies count as off like pl
 
 1. `planned = spans(outages that are not stale, kinds = {PLANNED, REPAIR})`. Emergencies take no part: a planned block directly followed by an emergency keeps its own end in the alert.
 2. For each span in order: skip it if `start <= now`. `fireAt = start - advanceMinutes` (wall-clock minutes); skip it if `fireAt <= now` (no retroactive alerts; `fireAt == now` is also skipped).
+2a. **One continuous outage, one warning:** skip the span when an emergency that is not stale started **before** it and is still on at its start (`emergency.start < span.start` and either `emergency.overdue` or `emergency.end >= span.start`): power is already off, the scheduled block only continues the outage. An emergency starting at the same moment does not take the warning away (the warning is the start of the outage then).
 3. Emit `AlertSpec(key = "planned_" + start, fireAt, spanStart = start, spanEnd = end, mayContinue, durationMinutes = elapsed minutes start -> end)`.
 
 One alert per merged span, keyed by the span's absolute start. A `00:00` continuation is part of the earlier span and never gets its own alert. A span that spans midnight is one alert with the full duration. Alerts exist for any span in the window, so blocks of tomorrow are planned today.

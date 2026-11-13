@@ -94,6 +94,148 @@
         { "now": "2026-11-13T18:50", "fetch": { "confirmed": [ { "id": "pw_2026-11-13T17:30", "start": "2026-11-13T17:30", "estimatedEnd": "2026-11-13T19:30" } ] },
           "events": [ { "kind": "START", "key": "emerg_start_addr_2026-11-13T17:30", "upcoming": false } ] }
       ]
+    },
+    {
+      "name": "continuation: PowerOn replaces an ongoing outage by a new row; no new start, no restore, one estimate change",
+      "addressKey": "addr",
+      "steps": [
+        {
+          "now": "2026-11-13T07:00",
+          "fetch": {
+            "confirmed": [
+              {
+                "id": "pw_2026-11-13T06:50",
+                "start": "2026-11-13T06:50",
+                "estimatedEnd": "2026-11-13T20:00",
+                "label": null
+              }
+            ]
+          },
+          "events": [
+            {
+              "kind": "START",
+              "key": "emerg_start_addr_2026-11-13T06:50",
+              "upcoming": false
+            }
+          ]
+        },
+        {
+          "now": "2026-11-13T20:30",
+          "fetch": {
+            "confirmed": [
+              {
+                "id": "pw_2026-11-13T19:30",
+                "start": "2026-11-13T19:30",
+                "estimatedEnd": "2026-11-13T23:00",
+                "label": null
+              }
+            ]
+          },
+          "events": [
+            {
+              "kind": "ETA_CHANGED",
+              "key": "emerg_change_addr_2026-11-13T19:30_2026-11-13T23:00"
+            }
+          ]
+        },
+        {
+          "now": "2026-11-13T23:10",
+          "fetch": {
+            "confirmed": []
+          },
+          "events": [
+            {
+              "kind": "END",
+              "key": "emerg_end_addr_2026-11-13T19:30",
+              "earlyEnd": false
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "entries stored separately by an older version are absorbed silently when the merged record covers them",
+      "addressKey": "addr",
+      "steps": [
+        {
+          "now": "2026-11-13T07:00",
+          "fetch": {
+            "confirmed": [
+              {
+                "id": "pw_2026-11-13T06:50",
+                "start": "2026-11-13T06:50",
+                "estimatedEnd": "2026-11-13T20:00",
+                "label": null
+              }
+            ]
+          },
+          "events": [
+            {
+              "kind": "START",
+              "key": "emerg_start_addr_2026-11-13T06:50",
+              "upcoming": false
+            }
+          ]
+        },
+        {
+          "now": "2026-11-13T19:35",
+          "fetch": {
+            "confirmed": [
+              {
+                "id": "pw_2026-11-13T06:50",
+                "start": "2026-11-13T06:50",
+                "estimatedEnd": "2026-11-13T20:00",
+                "label": null
+              },
+              {
+                "id": "pw_2026-11-13T19:30",
+                "start": "2026-11-13T19:30",
+                "estimatedEnd": "2026-11-13T23:00",
+                "label": null
+              }
+            ]
+          },
+          "events": [
+            {
+              "kind": "START",
+              "key": "emerg_start_addr_2026-11-13T19:30",
+              "upcoming": false
+            }
+          ]
+        },
+        {
+          "now": "2026-11-13T19:55",
+          "fetch": {
+            "confirmed": [
+              {
+                "id": "pw_2026-11-13T06:50",
+                "start": "2026-11-13T06:50",
+                "estimatedEnd": "2026-11-13T23:00",
+                "label": null
+              }
+            ]
+          },
+          "events": [
+            {
+              "kind": "ETA_CHANGED",
+              "key": "emerg_change_addr_2026-11-13T06:50_2026-11-13T23:00"
+            }
+          ]
+        },
+        {
+          "now": "2026-11-13T23:05",
+          "fetch": {
+            "confirmed": []
+          },
+          "events": [
+            {
+              "kind": "END",
+              "key": "emerg_end_addr_2026-11-13T06:50",
+              "earlyEnd": false
+            }
+          ]
+        }
+      ]
     }
   ]
 }

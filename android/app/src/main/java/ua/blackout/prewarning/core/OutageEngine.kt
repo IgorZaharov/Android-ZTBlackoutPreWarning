@@ -287,8 +287,12 @@ object OutageEngine {
         zone: ZoneId = KYIV_ZONE
     ): List<AlertSpec> {
         val plannedSpans = spans(outages.filter { !it.stale }, setOf(OutageKind.PLANNED, OutageKind.REPAIR))
+        val emergencies = outages.filter { it.kind == OutageKind.EMERGENCY && !it.stale }
         return plannedSpans.mapNotNull { sp ->
             if (!sp.start.isAfter(now)) return@mapNotNull null
+            // One continuous outage, one warning (spec/OUTAGE_ENGINE.md 6.2 step 2a): an emergency that started
+            // before the block and is still on at its start means power is already off
+            if (emergencies.any { it.start.isBefore(sp.start) && (it.overdue || !it.end.isBefore(sp.start)) }) return@mapNotNull null
             val fireAt = sp.start.minusMinutes(advanceMinutes.toLong())
             if (!fireAt.isAfter(now)) return@mapNotNull null
             AlertSpec(
@@ -302,6 +306,37 @@ object OutageEngine {
         }
     }
 
+    /** The planned and repair spans of an address (not stale): what its pre-warnings are about. */
+    fun plannedSpans(outages: List<Outage>): List<Span> =
+        spans(outages.filter { !it.stale }, setOf(OutageKind.PLANNED, OutageKind.REPAIR))
+
+    /**
+     * Whether an emergency event is announced when emergency and scheduled outages of one address form
+     * one continuous outage (spec/NOTIFICATIONS.md 2.4a): only its beginning is announced, a longer
+     * emergency inside a warned block becomes a prolongation, and the end is not "restored" while the
+     * schedule keeps the power off.
+     */
+    fun emergencyDelivery(
+        kind: EmergencyEventKind,
+        start: LocalDateTime,
+        eta: LocalDateTime?,
+        now: LocalDateTime,
+        plannedSpans: List<Span>,
+        plannedAlertsOn: Boolean
+    ): EmergencyDelivery = when (kind) {
+        EmergencyEventKind.ETA_CHANGED -> EmergencyDelivery.SEND
+        EmergencyEventKind.END ->
+            if (plannedSpans.any { !it.start.isAfter(now) && now.isBefore(it.end) }) EmergencyDelivery.DROP else EmergencyDelivery.SEND
+        EmergencyEventKind.START -> {
+            val holder = if (plannedAlertsOn) plannedSpans.firstOrNull { !it.start.isAfter(start) && !start.isAfter(it.end) } else null
+            when {
+                holder == null -> EmergencyDelivery.SEND
+                eta != null && eta.isAfter(holder.end) -> EmergencyDelivery.PROLONG
+                else -> EmergencyDelivery.DROP
+            }
+        }
+    }
+
     /** Instants where the power state flips (all kinds, stale excluded), inclusive of [from] and [to]. */
     fun transitions(outages: List<Outage>, from: LocalDateTime, to: LocalDateTime): List<Transition> =
         spans(outages.filter { !it.stale && !it.overdue })
@@ -309,3 +344,6 @@ object OutageEngine {
             .filter { !it.at.isBefore(from) && !it.at.isAfter(to) }
             .sortedBy { it.at }
 }
+
+/** How one emergency event is announced within a continuous outage (spec/NOTIFICATIONS.md 2.4a). */
+enum class EmergencyDelivery { SEND, PROLONG, DROP }

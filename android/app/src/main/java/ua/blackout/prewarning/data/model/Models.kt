@@ -85,6 +85,10 @@ data class UserSettings(
     val vibrationEnabled: Boolean = true,
     val prevSoundEnabled: Boolean = true,
     val prevVibrationEnabled: Boolean = true,
+    /** Notify when the estimated restoration of an emergency moves (ETA_CHANGED), all addresses (spec/NOTIFICATIONS.md 2.4). */
+    val emergencyEtaAlerts: Boolean = true,
+    /** Notify when an emergency ends (END), all addresses. The start always notifies. */
+    val emergencyEndAlerts: Boolean = true,
     val themeMode: String = "SYSTEM", // "SYSTEM", "DARK", "LIGHT"
     val language: String = "SYSTEM" // "SYSTEM", "UK", "EN"
 )

@@ -473,6 +473,29 @@ function normalizePlaceName(name: string): string {
 }
 
 /**
+ * The house rows of one ztoe `vulica_id` (ZtoeAddressLookup.fetchStreetHouseRows on Android). The request
+ * carries `all=1`: without it ztoe lists only the first 10 records of the street and a "показати ще N записів"
+ * button (вул. Київська in Zhytomyr: 21 of 127 houses). Rows are kept only when their street name has the
+ * street's StreetKey, so a page that ignored `vulica_id` cannot add other streets. Only when no row carries the
+ * name (an unusual spelling) the first page is used, as before. Null when the site did not answer.
+ */
+async function fetchStreetRows(
+  ztoeRemId: string,
+  ztoeNaspunktId: string,
+  vulicaId: string,
+  streetName: string,
+  siteUrl?: string
+): Promise<ZtoeHouseLookupResult[] | null> {
+  const form = { rem_id: ztoeRemId, naspunkt_id: ztoeNaspunktId, vulica_id: vulicaId };
+  const html = await postZtoeLookupForm({ ...form, all: '1' }, siteUrl);
+  if (!html) return null;
+  const rows = parseZtoeAddressLookupTableHtml(html, streetName);
+  if (rows.length > 0) return rows;
+  const firstPage = await postZtoeLookupForm(form, siteUrl);
+  return firstPage ? parseZtoeAddressLookupTableHtml(firstPage, streetName) : [];
+}
+
+/**
  * Resolves the queue (or the "does not switch off" status) of the selected house from the ztoe site.
  * The live row is authoritative; the cached row is used only when the site is unreachable or does
  * not list the house. Emergencies are not looked up here: OutageRepository asks PowerOnClient, and
@@ -501,15 +524,8 @@ export async function checkAddressOnZtoeWebsite(
   if (typeof fetch !== 'undefined' && streetObj && remObj?.ztoeRemId && settlementObj?.ztoeNaspunktId && vulicaIds.length > 0) {
     const lists: ZtoeHouseLookupResult[][] = [];
     for (const vulicaId of vulicaIds) {
-      // Note: Do NOT pass `all: '1'` when `vulica_id` is specified, because `all=1` causes ZTOE
-      // to ignore `vulica_id` and return all streets in the settlement instead of the selected street.
-      const html = await postZtoeLookupForm(
-        { rem_id: remObj.ztoeRemId, naspunkt_id: settlementObj.ztoeNaspunktId, vulica_id: vulicaId },
-        siteUrl
-      );
-      if (!html) continue;
-      const rows = parseZtoeAddressLookupTableHtml(html, streetObj.nameUk);
-      if (rows.length > 0) lists.push(rows);
+      const rows = await fetchStreetRows(remObj.ztoeRemId, settlementObj.ztoeNaspunktId, vulicaId, streetObj.nameUk, siteUrl);
+      if (rows && rows.length > 0) lists.push(rows);
     }
     if (lists.length > 0) {
       const merged = mergeHouseLists(lists);
@@ -536,7 +552,8 @@ export async function checkAddressOnZtoeWebsite(
 
 export const ADDRESS_INDEX_STORAGE_KEY = 'zt_address_index_cache_v1';
 // v5: duplicate streets are merged and the fake default houses / injected emergencies of v4 are gone
-const CACHE_SCHEMA_VERSION = 5;
+// 6: drops street house lists cut to ztoe's first page of 10 records (per-street request without all=1)
+const CACHE_SCHEMA_VERSION = 6;
 const MAX_PERSISTED_HOUSE_STREETS = 50;
 const FRESH_HOUSE_CACHE_TTL_MS = 120_000;
 
@@ -1467,19 +1484,8 @@ export async function fetchHousesForStreet(
   if (streetObj && remObj?.ztoeRemId && settlementObj?.ztoeNaspunktId && vulicaIds.length > 0) {
     const lists: ZtoeHouseLookupResult[][] = [];
     for (const vulicaId of vulicaIds) {
-      // Note: Do NOT pass `all: '1'` when `vulica_id` is specified, because `all=1` causes ZTOE
-      // to ignore `vulica_id` and return all streets in the settlement instead of the selected street.
-      const html = await postZtoeLookupForm(
-        {
-          rem_id: remObj.ztoeRemId,
-          naspunkt_id: settlementObj.ztoeNaspunktId,
-          vulica_id: vulicaId,
-        },
-        siteUrl
-      );
-      if (!html) continue;
-      const parsedRows = parseZtoeAddressLookupTableHtml(html, streetObj.nameUk);
-      if (parsedRows.length > 0) lists.push(parsedRows);
+      const parsedRows = await fetchStreetRows(remObj.ztoeRemId, settlementObj.ztoeNaspunktId, vulicaId, streetObj.nameUk, siteUrl);
+      if (parsedRows && parsedRows.length > 0) lists.push(parsedRows);
     }
     if (lists.length > 0) {
       const merged = mergeHouseLists(lists);

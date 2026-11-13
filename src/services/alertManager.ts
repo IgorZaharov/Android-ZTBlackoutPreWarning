@@ -8,6 +8,7 @@
  *  - deduplication by key in the notified registry, sound & vibration independence, master toggle
  *    state memory, and local storage persistence.
  */
+import type { Span } from '../core/outageModels';
 import { BlackoutSlot, DaySchedule, EmergencyOutageInfo, NotificationRecord, UserSettings } from '../types';
 import { DEFAULT_ZTOE_URL, legacyClock } from './ztoeParser';
 import { isValidEmergencyOutage } from './ztoeAddressLookup';
@@ -32,7 +33,7 @@ import {
   type LocalDate,
   type LocalDateTime,
 } from '../core/localTime';
-import { OutageEngine, buildPlanned } from '../core/outageEngine';
+import { OutageEngine, buildPlanned, emergencyDelivery } from '../core/outageEngine';
 import type { AlertSpec, Outage } from '../core/outageModels';
 import {
   alertLabels,
@@ -69,6 +70,8 @@ export const DEFAULT_SETTINGS: UserSettings = {
   vibrationEnabled: true,
   prevSoundEnabled: true,
   prevVibrationEnabled: true,
+  emergencyEtaAlerts: true,
+  emergencyEndAlerts: true,
   theme: 'system',
   language: 'system'
 };
@@ -528,7 +531,14 @@ export function triggerEmergencyEventAlerts(
   lang: 'uk' | 'en',
   now: LocalDateTime,
   onNotificationFired?: (record: NotificationRecord) => void,
-  options: { addressLine?: string | null; enabled?: boolean; subscriptionId?: string | null } = {}
+  options: {
+    addressLine?: string | null;
+    enabled?: boolean;
+    subscriptionId?: string | null;
+    /** The address's planned spans and whether it is warned about them (spec/NOTIFICATIONS.md 2.4a). */
+    plannedSpans?: readonly Span[];
+    plannedAlertsOn?: boolean;
+  } = {}
 ): NotificationRecord[] {
   const emergencyEnabled = options.enabled ?? settings.emergencyNotificationsEnabled ?? true;
   if (!emergencyEnabled || events.length === 0) return [];
@@ -542,12 +552,19 @@ export function triggerEmergencyEventAlerts(
     const key = eventKey(ev, addressKey);
     if (loadNotifiedSlotIds().has(key)) continue;
     markSlotAsNotified(key);
+    // One continuous outage, one announcement (spec/NOTIFICATIONS.md 2.4a)
+    const delivery = emergencyDelivery(ev.kind, ev.start, ev.eta, now, options.plannedSpans ?? [], options.plannedAlertsOn ?? false);
+    if (delivery === 'DROP') continue;
+    // Follow-ups the user turned off are dropped, never replayed later (spec/NOTIFICATIONS.md 2.4)
+    const asKind = delivery === 'PROLONG' ? 'ETA_CHANGED' : ev.kind;
+    if (asKind === 'ETA_CHANGED' && settings.emergencyEtaAlerts === false) continue;
+    if (asKind === 'END' && settings.emergencyEndAlerts === false) continue;
 
     const start = formatWhen(lang, ev.start, today);
     const eta = ev.eta !== null ? formatWhen(lang, ev.eta, today) : null;
     let title: string;
     let body: string;
-    switch (ev.kind) {
+    switch (asKind) {
       case 'START':
         title = ev.upcoming ? t.emergencyUpcomingTitle : t.emergencyStartTitle;
         body = emergencyStartBody(lang, start, eta);

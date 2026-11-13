@@ -887,7 +887,7 @@ class ZtoeParserTest {
         ua.blackout.prewarning.data.parser.ZtoeAddressLookup.clearCacheForTesting()
         val mockCacheJson = """
             {
-              "version": 2,
+              "version": ${ua.blackout.prewarning.data.parser.ZtoeAddressLookup.CACHE_VERSION},
               "rems": [
                 {"id": "zhytomyr", "ztoeRemId": 7, "nameUk": "Житомирський РЕМ", "nameEn": "Zhytomyr REM"},
                 {"id": "berdychiv", "ztoeRemId": 3, "nameUk": "Бердичівський РЕМ", "nameEn": "Berdychiv REM"}

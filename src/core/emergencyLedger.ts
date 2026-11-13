@@ -99,6 +99,11 @@ export function prune(entries: readonly LedgerEntry[], now: LocalDateTime): Ledg
  *  - finished emergencies of today stay listable (PowerOn keeps no history),
  *  - each transition (start / eta changed / end) is announced exactly once.
  */
+/** The entry's time and the record's time overlap or touch; a missing estimate is open-ended. */
+function overlaps(e: LedgerEntry, r: EmergencyRecord): boolean {
+  return (r.estimatedEnd === null || e.start <= r.estimatedEnd) && (e.estimatedEnd === null || r.start <= e.estimatedEnd);
+}
+
 export function reconcile(
   entries: readonly LedgerEntry[],
   fetch: EmergencyFetch,
@@ -113,13 +118,42 @@ export function reconcile(
   const events: EmergencyEvent[] = [];
   const out = new Map<string, LedgerEntry>();
   const seen = new Set<string>();
+  // Open entries PowerOn stopped listing: a listed record overlapping one is the same outage re-registered under a
+  // new start (continuation, spec/NOTIFICATIONS.md 2.2)
+  const listed = new Set(fetch.records.map((r) => r.id));
+  const vanished = pruned.filter((e) => e.closedAt === null && !listed.has(e.id));
+  const absorbed = new Set<string>();
 
   for (const rec of fetch.records) {
     if (seen.has(rec.id)) continue;
     seen.add(rec.id);
     const resolved = resolveEmergency({ ...rec, closedAt: null }, now, graceMinutes);
     const old = byId.get(rec.id);
-    if (old === undefined) {
+    const continued = old === undefined ? vanished.find((e) => !absorbed.has(e.id) && overlaps(e, rec)) : undefined;
+    if (continued !== undefined) {
+      absorbed.add(continued.id);
+      let e: LedgerEntry = {
+        ...newEntry(rec, now, continued.endEmitted),
+        firstSeen: continued.firstSeen,
+        startEmitted: continued.startEmitted,
+        lastEmittedEta: continued.lastEmittedEta,
+      };
+      if (!resolved.stale && e.startEmitted && !e.endEmitted) {
+        const newEta = rec.estimatedEnd;
+        const last = continued.lastEmittedEta;
+        if (newEta !== null && last === null) {
+          e = { ...e, lastEmittedEta: newEta };
+        } else if (
+          newEta !== null &&
+          last !== null &&
+          Math.abs(wallMinutesBetween(last, newEta)) >= OutageConfig.ETA_CHANGE_MIN_DELTA_MINUTES
+        ) {
+          events.push(event('ETA_CHANGED', rec.id, rec.start, newEta));
+          e = { ...e, lastEmittedEta: newEta };
+        }
+      }
+      out.set(rec.id, e);
+    } else if (old === undefined) {
       if (resolved.stale) {
         out.set(rec.id, newEntry(rec, now, true));
       } else {
@@ -159,6 +193,8 @@ export function reconcile(
       out.set(old.id, old);
       continue;
     }
+    // Taken over by a new record, or covered by a listed one: the outage goes on, nothing ended
+    if (absorbed.has(old.id) || fetch.records.some((r) => overlaps(old, r))) continue;
     const est = old.estimatedEnd;
     const wasStale = est !== null && wallMinutesBetween(est, now) > graceMinutes;
     const silent = old.endEmitted || wasStale || !old.startEmitted;

@@ -387,10 +387,11 @@ open class BlackoutGlanceWidget(private val forceBigLayout: Boolean = false) : G
                 val textYCenter = (trackTop + trackBottom) / 2f - (unclearTextPaint.descent() + unclearTextPaint.ascent()) / 2f
                 canvas.drawText(unclearText, textX, textYCenter, unclearTextPaint)
             } else {
-                // Emergency overlay, same recipe as the main drum: amber gradient with dark 45 degree stripes;
-                // where it overlaps a planned outage the crimson base stays and the stripes turn amber.
+                // Emergency overlay, same recipe as the main drum: the bottom half of the cell is amber with
+                // dark 45 degree stripes; the top half keeps the planned state (spec/UI_DRUM.md 1).
+                val trackMid = (trackTop + trackBottom) / 2f
                 val amberShader = LinearGradient(
-                    0f, trackTop, 0f, trackBottom,
+                    0f, trackMid, 0f, trackBottom,
                     intArrayOf(0xFFFFB020.toInt(), 0xFFF28A1B.toInt(), 0xFFC96A0B.toInt()),
                     floatArrayOf(0f, 0.5f, 1f),
                     Shader.TileMode.CLAMP
@@ -399,7 +400,7 @@ open class BlackoutGlanceWidget(private val forceBigLayout: Boolean = false) : G
                     style = Paint.Style.STROKE
                     strokeWidth = STRIPE_PX
                 }
-                val trackH = trackBottom - trackTop
+                val bandH = trackBottom - trackMid
                 val stripeStep = STRIPE_PX * 2f * 1.4142135f
 
                 for (idx in 0 until 48) {
@@ -411,21 +412,22 @@ open class BlackoutGlanceWidget(private val forceBigLayout: Boolean = false) : G
 
                     paint.shader = when (kind) {
                         1, 3 -> offShader
-                        2 -> amberShader
                         else -> onShader
                     }
                     canvas.drawRect(left, trackTop, right, trackBottom, paint)
 
                     if (kind >= 2) {
-                        stripePaint.color = if (kind == 3) 0xD9FFB020.toInt() else 0x8C1A1208.toInt()
+                        paint.shader = amberShader
+                        canvas.drawRect(left, trackMid, right, trackBottom, paint)
+                        stripePaint.color = 0x8C1A1208.toInt()
                         canvas.save()
-                        canvas.clipRect(left, trackTop, right, trackBottom)
+                        canvas.clipRect(left, trackMid, right, trackBottom)
                         // Global phase (anchored at trackLeft) keeps the stripes continuous across cells
                         var n = Math.floor(((left - trackLeft) / stripeStep).toDouble()).toInt()
                         while (true) {
-                            val u = trackLeft - trackH + n * stripeStep
+                            val u = trackLeft - bandH + n * stripeStep
                             if (u >= right) break
-                            canvas.drawLine(u, trackBottom, u + trackH, trackTop, stripePaint)
+                            canvas.drawLine(u, trackBottom, u + bandH, trackMid, stripePaint)
                             n++
                         }
                         canvas.restore()

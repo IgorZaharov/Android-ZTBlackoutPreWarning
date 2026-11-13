@@ -21,6 +21,8 @@ older iOS documents list different names (`refreshMinutes`, `advanceMinutes`) an
 | `advance_minutes` | int | `15` | clamped 1–240 |
 | `notifications_enabled` | bool | `true` | planned alerts (and master switch for sound/vibration) |
 | `emergency_notifications_enabled` | bool | `true` | emergency alerts; independent of `notifications_enabled` |
+| `emergency_eta_alerts` | bool | `true` | announce a moved restoration estimate (`ETA_CHANGED`) of an emergency, all addresses (`NOTIFICATIONS.md` 2.4) |
+| `emergency_end_alerts` | bool | `true` | announce the end (`END`) of an emergency, all addresses |
 | `sound_enabled` | bool | `true` | forced `false` while both alert switches are off |
 | `vibration_enabled` | bool | `true` | same |
 | `prev_sound_enabled`, `prev_vibration_enabled` | bool | `true` | remembered values restored when alerts are switched on again |
