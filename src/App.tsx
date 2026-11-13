@@ -25,7 +25,7 @@ import {
   loadUserSettings,
   saveUserSettings,
   createTestNotification,
-  checkAndTriggerPlannedAlerts,
+  checkAndTriggerGroupedAlerts,
   triggerEmergencyEventAlerts,
   DEFAULT_SETTINGS,
   clearNotifiedHistory,
@@ -137,6 +137,18 @@ export default function App() {
           (record) => setActiveNotification(record)
         );
       }
+      // The other addresses that want emergency alerts (spec/SUBSCRIPTIONS.md 8.4)
+      for (const other of outcome.otherEvents) {
+        triggerEmergencyEventAlerts(
+          other.events,
+          other.addressKey,
+          effective,
+          resolveLanguage(effective.language),
+          fromInstant(Date.now()),
+          (record) => setActiveNotification(record),
+          { addressLine: other.addressLine, enabled: true }
+        );
+      }
       setDataVersion((v) => v + 1);
       return outcome.fetchStatus ?? 'SUCCESS';
     } catch (err) {
@@ -221,12 +233,23 @@ export default function App() {
         loadSchedules(settings);
       }
 
-      if (settings.notificationsEnabled) {
+      // Planned pre-warnings for every address, one per queue and span (spec/SUBSCRIPTIONS.md section 8)
+      const sync = getSubscriptionSync();
+      const master = sync.master(settings);
+      if (master) {
         const realNow = fromInstant(currentNow.getTime());
-        const snap = getOutageRepository().snapshot(settings, realNow);
-        checkAndTriggerPlannedAlerts(snap.outages, realNow, settings, resolvedLang, (record) => {
-          setActiveNotification(record);
-        });
+        const repo = getOutageRepository();
+        checkAndTriggerGroupedAlerts(
+          sync.store(settings),
+          master,
+          (queue, key) => repo.outagesFor(queue, key, realNow),
+          realNow,
+          settings,
+          resolvedLang,
+          (record) => {
+            setActiveNotification(record);
+          }
+        );
       }
     };
 

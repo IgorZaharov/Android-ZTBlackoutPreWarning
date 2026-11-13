@@ -1,11 +1,13 @@
 /**
- * Multi-address subscriptions, step 1: the stored model, its repair rules, the store operations and
- * the migration from single-address settings. Mirrors android/.../core/Subscriptions.kt; specified in
+ * Multi-address subscriptions: the stored model, its repair rules, the store operations, the
+ * migration from single-address settings, the primary mirror and the alert grouping. Mirrors android/.../core/Subscriptions.kt; specified in
  * spec/SUBSCRIPTIONS.md, golden cases in spec/vectors/subscriptions.json.
  *
  * The model is exchanged as plain objects (toMap / fromMap); the platform encodes them as a string.
  */
 import { HouseKey, StreetKey, TextNorm } from './addressKeys';
+import { formatLocalDateTime, type LocalDateTime } from './localTime';
+import type { AlertSpec } from './outageModels';
 
 export type QueueSource = 'LOOKUP' | 'MANUAL';
 
@@ -413,4 +415,89 @@ export function migrate(legacy: LegacySettings, newId: string, nowMs: number): M
   }
   const store: SubscriptionStore = item ? { primaryId: item.id, items: [item] } : { primaryId: null, items: [] };
   return { store, alertsMaster: legacy.notificationsEnabled || legacy.emergencyNotificationsEnabled };
+}
+
+// -------------------------------------------------------------------------------------------------
+// Alerts for every item (section 8)
+// -------------------------------------------------------------------------------------------------
+
+/** One planned pre-warning shared by every item on one queue with the same span (spec/SUBSCRIPTIONS.md 8.1). */
+export interface PlannedGroup {
+  readonly key: string;
+  readonly queue: string;
+  readonly fireAt: LocalDateTime;
+  readonly spanStart: LocalDateTime;
+  readonly spanEnd: LocalDateTime;
+  readonly mayContinue: boolean;
+  readonly durationMinutes: number;
+  readonly memberIds: readonly string[];
+}
+
+/** The primary first, then the other items by createdAtMs, list order on ties. */
+export function alertOrder(store: SubscriptionStore): Subscription[] {
+  const primary = primaryOf(store);
+  const rest = store.items
+    .map((item, index) => ({ item, index }))
+    .filter((e) => e.item.id !== primary?.id)
+    .sort((a, b) => a.item.createdAtMs - b.item.createdAtMs || a.index - b.index)
+    .map((e) => e.item);
+  return primary ? [primary, ...rest] : rest;
+}
+
+/** One planned alert per (queue, span start, span end) over every plannedActive item (8.1). */
+export function groupAlerts(
+  store: SubscriptionStore,
+  master: boolean,
+  alertsById: Readonly<Record<string, readonly AlertSpec[] | undefined>>,
+): PlannedGroup[] {
+  const groups = new Map<string, { queue: string; first: AlertSpec; mayContinue: boolean; members: string[] }>();
+  for (const item of alertOrder(store)) {
+    if (!plannedActive(master, item) || item.queue === null) continue;
+    const alerts = Object.prototype.hasOwnProperty.call(alertsById, item.id) ? alertsById[item.id] : undefined;
+    if (!alerts) continue;
+    for (const a of alerts) {
+      const key = `planned_q${item.queue}_${formatLocalDateTime(a.spanStart)}_${formatLocalDateTime(a.spanEnd)}`;
+      let g = groups.get(key);
+      if (!g) {
+        g = { queue: item.queue, first: a, mayContinue: false, members: [] };
+        groups.set(key, g);
+      }
+      g.mayContinue = g.mayContinue || a.mayContinue;
+      if (!g.members.includes(item.id)) g.members.push(item.id);
+    }
+  }
+  const out: PlannedGroup[] = [...groups.entries()].map(([key, g]) => ({
+    key,
+    queue: g.queue,
+    fireAt: g.first.fireAt,
+    spanStart: g.first.spanStart,
+    spanEnd: g.first.spanEnd,
+    mayContinue: g.mayContinue,
+    durationMinutes: g.first.durationMinutes,
+    memberIds: g.members,
+  }));
+  return out.sort((a, b) => a.fireAt - b.fireAt || a.spanStart - b.spanStart || (a.key < b.key ? -1 : a.key > b.key ? 1 : 0));
+}
+
+/** Fired-registry key of one item for one span (8.2). */
+export const memberKey = (id: string, spanStart: LocalDateTime): string => `planned_${id}_${formatLocalDateTime(spanStart)}`;
+
+/** The address-independent key 1.4.0 recorded; it counts for every item. */
+export const legacyAlertKey = (spanStart: LocalDateTime): string => `planned_${formatLocalDateTime(spanStart)}`;
+
+export function pendingMembers(group: PlannedGroup, notified: (key: string) => boolean): string[] {
+  const legacy = notified(legacyAlertKey(group.spanStart));
+  return group.memberIds.filter((id) => !legacy && !notified(memberKey(id, group.spanStart)));
+}
+
+/** Labels that open the planned text, or null when the store has at most one item (8.3). */
+export function alertLabels(store: SubscriptionStore, memberIds: readonly string[]): string | null {
+  if (store.items.length <= 1 || memberIds.length === 0) return null;
+  const labels = memberIds
+    .map((id) => store.items.find((i) => i.id === id))
+    .filter((i): i is Subscription => i !== undefined)
+    .map(displayLabel);
+  if (labels.length === 0) return null;
+  const head = labels.slice(0, 2).join(' · ');
+  return labels.length > 2 ? `${head} +${labels.length - 2}` : head;
 }

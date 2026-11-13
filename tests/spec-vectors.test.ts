@@ -15,7 +15,7 @@ import {
   parseLocalDateTime,
   type LocalDateTime,
 } from '../src/core/localTime';
-import { makeOutage, type EmergencyRecord, type Outage } from '../src/core/outageModels';
+import { makeOutage, type AlertSpec, type EmergencyRecord, type Outage } from '../src/core/outageModels';
 import { buildPlanned, dayView, inWindow, planAlerts, resolveEmergency, spans, status } from '../src/core/outageEngine';
 import { HouseKey, StreetKey, TextNorm } from '../src/core/addressKeys';
 import { EmergencyFetch, eventKey, reconcile, type LedgerEntry } from '../src/core/emergencyLedger';
@@ -474,6 +474,55 @@ function subscriptionVectors(): number {
     );
     assert.equal(Sub.anyAlertsEnabled(c.master, { primaryId: items[0]?.id ?? null, items }), c.expect, JSON.stringify(c));
     n++;
+  }
+
+  // Section 8: alerts for every item
+  for (const c of v.fanout.alertOrder) {
+    assert.deepStrictEqual(Sub.alertOrder(storeOf(c.store)).map((i) => i.id), c.expect, c.name);
+    n++;
+  }
+  for (const c of v.fanout.groupAlerts) {
+    const store = storeOf(c.store);
+    const alerts: Record<string, AlertSpec[]> = {};
+    for (const [id, list] of Object.entries(c.alerts as Record<string, Json[]>)) {
+      alerts[id] = list.map((a) => ({
+        key: `planned_${a.spanStart}`,
+        fireAt: parseLocalDateTime(a.fireAt),
+        spanStart: parseLocalDateTime(a.spanStart),
+        spanEnd: parseLocalDateTime(a.spanEnd),
+        mayContinue: a.mayContinue,
+        durationMinutes: a.durationMinutes,
+      }));
+    }
+    const groups = Sub.groupAlerts(store, c.master, alerts);
+    assert.deepStrictEqual(
+      groups.map((g) => ({
+        key: g.key,
+        queue: g.queue,
+        spanStart: formatLocalDateTime(g.spanStart),
+        spanEnd: formatLocalDateTime(g.spanEnd),
+        fireAt: formatLocalDateTime(g.fireAt),
+        durationMinutes: g.durationMinutes,
+        mayContinue: g.mayContinue,
+        memberIds: [...g.memberIds],
+        labels: Sub.alertLabels(store, g.memberIds),
+      })),
+      c.expect,
+      c.name,
+    );
+    for (const p of c.pending) {
+      const notified = new Set<string>(p.notified);
+      assert.deepStrictEqual(groups.map((g) => Sub.pendingMembers(g, (k) => notified.has(k))), p.expect, `${c.name}: pending ${JSON.stringify(p.notified)}`);
+      n++;
+    }
+    n++;
+  }
+  for (const c of v.fanout.alertLabels) {
+    const store = storeOf(c.store);
+    for (const lc of c.cases) {
+      assert.equal(Sub.alertLabels(store, lc.memberIds), lc.expect, `${c.name}: ${JSON.stringify(lc.memberIds)}`);
+      n++;
+    }
   }
   return n;
 }

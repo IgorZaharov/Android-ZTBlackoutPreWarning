@@ -202,4 +202,58 @@ class SubscriptionVectorsTest {
             assertEquals(c.toString(), c.getBoolean("expect"), Subscriptions.anyAlertsEnabled(c.getBoolean("master"), SubscriptionStore(items.firstOrNull()?.id, items)))
         }
     }
+
+    @Test
+    fun fanout() {
+        val v = load().getJSONObject("fanout")
+        for (c in v.getJSONArray("alertOrder").objects()) {
+            assertEquals(c.getString("name"), c.getJSONArray("expect").let { a -> (0 until a.length()).map { a.getString(it) } },
+                Subscriptions.alertOrder(storeOf(c.getJSONObject("store"))).map { it.id })
+        }
+        fun t(s: String) = java.time.LocalDateTime.parse(s)
+        for (c in v.getJSONArray("groupAlerts").objects()) {
+            val name = c.getString("name")
+            val store = storeOf(c.getJSONObject("store"))
+            val alertsJson = c.getJSONObject("alerts")
+            val alerts = alertsJson.keys().asSequence().associateWith { id ->
+                alertsJson.getJSONArray(id).objects().map { a ->
+                    AlertSpec(
+                        key = "planned_" + a.getString("spanStart"),
+                        fireAt = t(a.getString("fireAt")),
+                        spanStart = t(a.getString("spanStart")),
+                        spanEnd = t(a.getString("spanEnd")),
+                        mayContinue = a.getBoolean("mayContinue"),
+                        durationMinutes = a.getLong("durationMinutes")
+                    )
+                }
+            }
+            val groups = Subscriptions.groupAlerts(store, c.getBoolean("master"), alerts)
+            val expected = c.getJSONArray("expect").objects()
+            assertEquals(name, expected.size, groups.size)
+            for ((e, g) in expected.zip(groups)) {
+                assertEquals(name, e.getString("key"), g.key)
+                assertEquals(name, e.getString("queue"), g.queue)
+                assertEquals(name, t(e.getString("spanStart")), g.spanStart)
+                assertEquals(name, t(e.getString("spanEnd")), g.spanEnd)
+                assertEquals(name, t(e.getString("fireAt")), g.fireAt)
+                assertEquals(name, e.getLong("durationMinutes"), g.durationMinutes)
+                assertEquals(name, e.getBoolean("mayContinue"), g.mayContinue)
+                assertEquals(name, e.getJSONArray("memberIds").let { a -> (0 until a.length()).map { a.getString(it) } }, g.memberIds)
+                assertEquals(name, e.optStr("labels"), Subscriptions.alertLabels(store, g.memberIds))
+            }
+            for (pc in c.getJSONArray("pending").objects()) {
+                val notified = pc.getJSONArray("notified").let { a -> (0 until a.length()).map { a.getString(it) }.toSet() }
+                val exp = pc.getJSONArray("expect")
+                val got = groups.map { g -> Subscriptions.pendingMembers(g) { it in notified } }
+                assertEquals(name, (0 until exp.length()).map { i -> exp.getJSONArray(i).let { a -> (0 until a.length()).map { a.getString(it) } } }, got)
+            }
+        }
+        for (c in v.getJSONArray("alertLabels").objects()) {
+            val store = storeOf(c.getJSONObject("store"))
+            for (lc in c.getJSONArray("cases").objects()) {
+                val ids = lc.getJSONArray("memberIds").let { a -> (0 until a.length()).map { a.getString(it) } }
+                assertEquals(c.getString("name") + " " + ids, lc.optStr("expect"), Subscriptions.alertLabels(store, ids))
+            }
+        }
+    }
 }

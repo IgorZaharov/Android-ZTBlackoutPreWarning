@@ -13,6 +13,9 @@ import ua.blackout.prewarning.core.OutageKind
 import ua.blackout.prewarning.core.SiteState
 import ua.blackout.prewarning.core.StatusInfo
 import ua.blackout.prewarning.core.StreetKey
+import ua.blackout.prewarning.core.Subscription
+import ua.blackout.prewarning.core.SubscriptionStore
+import ua.blackout.prewarning.core.Subscriptions
 import ua.blackout.prewarning.data.KYIV_ZONE
 import ua.blackout.prewarning.data.model.BlackoutSlot
 import ua.blackout.prewarning.data.model.SelectedAddressQuery
@@ -145,9 +148,26 @@ class OutageRepository(context: Context) {
         now: LocalDateTime = LocalDateTime.now(KYIV_ZONE),
         key: String? = addressKey(settings.selectedAddressQuery)
     ): OutageSnapshot {
-        val today = now.toLocalDate()
         val q = settings.queue
+        return OutageSnapshot(
+            now = now,
+            queue = q,
+            outages = outagesFor(q, key, now),
+            plannedKnown = q.isBlank() || schedule.hasValidTodayCache(q),
+            tomorrowPublished = q.isNotBlank() && schedule.hasTomorrowSchedule(q),
+            site = store.site(),
+            poweron = store.poweron(),
+            hasAddress = key != null
+        )
+    }
 
+    /**
+     * The outages of one queue and address key (either may be absent), local state only. One ztoe
+     * fetch caches all 12 queues, so this works for every subscription (spec/SUBSCRIPTIONS.md 8.1).
+     */
+    fun outagesFor(queue: String?, key: String?, now: LocalDateTime = LocalDateTime.now(KYIV_ZONE)): List<Outage> {
+        val today = now.toLocalDate()
+        val q = queue.orEmpty()
         val planned = if (q.isNotBlank()) {
             OutageEngine.buildPlanned(today, schedule.todayOffCells(q), schedule.tomorrowOffCells(q), schedule.yesterdayOffCells(q))
         } else {
@@ -155,17 +175,7 @@ class OutageRepository(context: Context) {
         }
         val emergencies = if (key != null) EmergencyLedger.outages(store.ledger(key), now) else emptyList()
         val repairs = if (key != null) store.repairs(key) else emptyList()
-
-        return OutageSnapshot(
-            now = now,
-            queue = q,
-            outages = OutageEngine.inWindow(planned + repairs + emergencies, today),
-            plannedKnown = q.isBlank() || schedule.hasValidTodayCache(q),
-            tomorrowPublished = q.isNotBlank() && schedule.hasTomorrowSchedule(q),
-            site = store.site(),
-            poweron = store.poweron(),
-            hasAddress = key != null
-        )
+        return OutageEngine.inWindow(planned + repairs + emergencies, today)
     }
 
     /**
@@ -177,13 +187,25 @@ class OutageRepository(context: Context) {
         val nowMs = System.currentTimeMillis()
         var siteState: SiteState? = null
         var fetchStatus: FetchStatus? = null
+        val subs: Pair<SubscriptionStore, Boolean>? = try {
+            val sync = SubscriptionSync(appContext)
+            sync.store() to sync.master()
+        } catch (_: Exception) {
+            null
+        }
 
-        if (settings.queue.isNotBlank()) {
+        // One fetch caches all 12 queues. A primary without a queue still fetches for the other addresses.
+        val ztoeQueue = settings.queue.ifBlank {
+            subs?.first?.let { s -> Subscriptions.alertOrder(s).firstNotNullOfOrNull { it.queue } }.orEmpty()
+        }
+        if (ztoeQueue.isNotBlank()) {
             try {
-                val res = ZtoeParser.fetchFullSchedule(settings.cityUrl, settings.queue, appContext, forceNetwork)
-                fetchStatus = res.status
-                siteState = res.siteState
+                val res = ZtoeParser.fetchFullSchedule(settings.cityUrl, ztoeQueue, appContext, forceNetwork)
                 store.saveSite(res.siteState, nowMs, res.notice)
+                if (settings.queue.isNotBlank()) {
+                    fetchStatus = res.status
+                    siteState = res.siteState
+                }
             } catch (_: Exception) {
             }
         }
@@ -193,34 +215,64 @@ class OutageRepository(context: Context) {
         val query = settings.selectedAddressQuery
         val key = addressKey(query)
         if (query != null && key != null) {
-            try {
-                ZtoeAddressLookup.initDiskCache(appContext)
-                val target = buildTarget(query, key, nowMs)
-                if (target != null) {
-                    val now = LocalDateTime.now(KYIV_ZONE)
-                    val result = PowerOnClient().fetch(target, now.toLocalDate(), now)
-                    result.ids?.let { if (it.cityIds.isNotEmpty() || it.streetIds.isNotEmpty()) store.saveIds(key, it, nowMs) }
-
-                    val ledger = EmergencyLedger.reconcile(store.ledger(key), result.emergency, now)
-                    store.saveLedger(key, ledger.entries)
-                    events = ledger.events
-                    result.repairs?.let { store.saveRepairs(key, it) }
-
-                    poweronOk = result.emergency is EmergencyFetch.Confirmed
-                    store.savePowerOn(poweronOk, nowMs)
-                    if (notify && events.isNotEmpty() && settings.emergencyNotificationsEnabled) {
-                        NotificationHelper.postEmergencyEvents(appContext, settings, key, events)
-                    }
-                } else {
-                    store.savePowerOn(false, nowMs)
-                    poweronOk = false
-                }
-            } catch (_: Exception) {
-                store.savePowerOn(false, nowMs)
-                poweronOk = false
+            val polled = pollPowerOn(query, key, nowMs)
+            poweronOk = polled?.first ?: false
+            events = polled?.second.orEmpty()
+            store.savePowerOn(poweronOk, nowMs)
+            if (notify && events.isNotEmpty() && settings.emergencyNotificationsEnabled) {
+                NotificationHelper.postEmergencyEvents(appContext, settings, key, events)
             }
         }
+        if (subs != null) refreshOtherAddresses(settings, subs.first, subs.second, key, nowMs, notify)
         return RefreshOutcome(siteState, fetchStatus, poweronOk, events, snapshot(settings))
+    }
+
+    /**
+     * PowerOn for every other subscription that wants emergency alerts (spec/SUBSCRIPTIONS.md 8.4):
+     * own request, own failure, own ledger. The main screen's PowerOn status stays the primary's.
+     */
+    private fun refreshOtherAddresses(
+        settings: UserSettings,
+        subs: SubscriptionStore,
+        master: Boolean,
+        primaryKey: String?,
+        nowMs: Long,
+        notify: Boolean
+    ) {
+        if (!master) return
+        for (item in subs.items) {
+            val a = item.address ?: continue
+            if (item.id == subs.primaryId || !item.emergencyAlerts) continue
+            val key = a.key
+            if (key == primaryKey) continue
+            val polled = pollPowerOn(SelectedAddressQuery(a.remSlug, a.settlementId, a.streetId, a.house), key, nowMs) ?: continue
+            if (notify && polled.second.isNotEmpty()) {
+                NotificationHelper.postEmergencyEvents(appContext, settings, key, polled.second, addressLine(item), enabled = true)
+            }
+        }
+    }
+
+    /** Second line of an emergency notification for [item] (spec/SUBSCRIPTIONS.md 8.4). */
+    private fun addressLine(item: Subscription): String =
+        item.address?.text?.takeIf { it.isNotBlank() } ?: Subscriptions.displayLabel(item)
+
+    /** One PowerOn query: saves ids, ledger and repairs under [key]. Null when it failed or could not be built. */
+    private fun pollPowerOn(query: SelectedAddressQuery, key: String, nowMs: Long): Pair<Boolean, List<EmergencyEvent>>? = try {
+        ZtoeAddressLookup.initDiskCache(appContext)
+        val target = buildTarget(query, key, nowMs)
+        if (target == null) {
+            null
+        } else {
+            val now = LocalDateTime.now(KYIV_ZONE)
+            val result = PowerOnClient().fetch(target, now.toLocalDate(), now)
+            result.ids?.let { if (it.cityIds.isNotEmpty() || it.streetIds.isNotEmpty()) store.saveIds(key, it, nowMs) }
+            val ledger = EmergencyLedger.reconcile(store.ledger(key), result.emergency, now)
+            store.saveLedger(key, ledger.entries)
+            result.repairs?.let { store.saveRepairs(key, it) }
+            (result.emergency is EmergencyFetch.Confirmed) to ledger.events
+        }
+    } catch (_: Exception) {
+        null
     }
 
     private fun buildTarget(query: SelectedAddressQuery, key: String, nowMs: Long): PowerOnTarget? {

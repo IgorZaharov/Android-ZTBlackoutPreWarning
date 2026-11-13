@@ -1,10 +1,11 @@
 # Subscriptions (multi-address) — store and migration
 
-Status: **steps 1 and 2 of the multi-address feature** (`docs/design/MULTI_ADDRESS.md`, owner decisions in
+Status: **steps 1 to 3 of the multi-address feature** (`docs/design/MULTI_ADDRESS.md`, owner decisions in
 its section 14). This file fixes the stored model, its repair rules, the store operations, the migration
-from single-address settings and (step 2) the mirror of the primary item into the single-address keys.
-Since step 2 the Settings screen edits the store and the store is the source of truth; everything that
-still reads the single-address keys (main screen, widgets, alarms, worker) sees the primary item. Golden cases: [`vectors/subscriptions.json`](vectors/subscriptions.json).
+from single-address settings, (step 2) the mirror of the primary item into the single-address keys and
+(step 3) the alerts for every item. Since step 2 the Settings screen edits the store and the store is the
+source of truth; the main screen and widgets still read the single-address keys and so show the primary
+item, while since step 3 planned and emergency alerts cover every item. Golden cases: [`vectors/subscriptions.json`](vectors/subscriptions.json).
 
 Pure code: Kotlin `core/Subscriptions.kt`, TypeScript `src/core/subscriptions.ts`. Both expose the model
 as plain maps (`toMap` / `fromMap`), so the core never depends on a JSON library; each platform turns
@@ -129,11 +130,11 @@ settings plus the street name the platform resolved for `selected_street`, a new
 Storage: the store is the string key `zt_subscriptions_v1` and the master is the boolean
 `alerts_master_enabled`, both in the user settings file (backed up with it, `PERSISTENCE.md` section 5).
 
-## 7. Mirror of the primary item (step 2, until steps 3–5 read the store)
+## 7. Mirror of the primary item (step 2, until steps 4–5 read the store)
 
-Main screen, widgets, alarms and the worker still read the single-address keys of `PERSISTENCE.md`
-section 1. After every change of the store or of the master switch, the platform writes
-`primaryMirror(store, master)` into those keys; the store is never derived back from them.
+Main screen and widgets still read the single-address keys of `PERSISTENCE.md` section 1. After every
+change of the store or of the master switch, the platform writes `primaryMirror(store, master)` into those
+keys; the store is never derived back from them.
 
 | Key | Value (`p` = primary item, null when the store is empty) |
 |---|---|
@@ -144,7 +145,69 @@ section 1. After every change of the store or of the master switch, the platform
 | `notifications_enabled` | `master AND (p == null OR p.plannedAlerts)` |
 | `emergency_notifications_enabled` | `master AND (p == null OR p.emergencyAlerts)` |
 
-So the master switch silences both kinds for the primary (owner decision 1) without changing the code
-that reads these keys, and the other items get no alerts yet (step 3, fan-out). Sound and vibration keep
-their 1.4.0 rule on the two booleans: when both become false the current values are remembered and
-switched off, when one becomes true again they are restored.
+The two booleans are kept for rollback safety (design section 10 step 7); since step 3 no alert reads them
+(section 8 reads the store).
+
+**Sound and vibration follow the master** (since step 3). When `setMaster` turns the master off, the
+current sound and vibration values are remembered (`prev_sound_enabled`, `prev_vibration_enabled`) and both
+are switched off; when it turns the master on again they are restored. Setting the master to the value it
+already has changes nothing. Item switches never touch sound or vibration, so turning off both switches of
+the primary no longer mutes the alerts of the other items. (Step 2 applied the 1.4.0 rule to the two mirrored
+booleans instead.)
+
+## 8. Alerts for every item (step 3)
+
+### 8.1 Planned: one alert per queue and span
+
+For every item the platform computes `alerts(item)` = `OutageEngine.planAlerts` (`NOTIFICATIONS.md` 1.1)
+over that item's outages: the ztoe table of `item.queue` plus the repair works stored under its address key,
+with the same `now` and the global advance minutes. One ztoe fetch caches all 12 queues, so no extra request
+is needed per item; when the primary item has no queue, the fetch uses the first queue in `alertOrder`.
+
+`alertOrder(store)`: the primary first, then the other items by `createdAtMs`, list order on ties.
+
+`groupAlerts(store, master, alertsById)` walks the items in `alertOrder`, skips every item that is not
+`plannedActive(master, item)` (section 5) or has no entry in `alertsById`, and puts each of its alerts into
+the group of **(item.queue, spanStart, spanEnd)**:
+
+| Group field | Value |
+|---|---|
+| `key` | `planned_q<queue>_<spanStart>_<spanEnd>` (engine text form `yyyy-MM-ddTHH:mm`) |
+| `queue`, `spanStart`, `spanEnd`, `fireAt`, `durationMinutes` | from the first alert of the group |
+| `mayContinue` | true when any alert of the group has it |
+| `memberIds` | item ids in walk order, each once |
+
+Groups are returned sorted by `fireAt`, then `spanStart`, then `key`. Two items on one queue share one group
+(owner decision 3: one merged notification); a repair work that extends one item's span gives that item a
+different `spanEnd` and so its own group. The platform schedules one alarm per pending group (8.2). With at
+most 5 queues and 48 spans per queue in the window the plan stays far below Android's 500 alarm limit.
+
+### 8.2 Dedupe and firing
+
+* `memberKey(id, spanStart)` = `planned_<id>_<spanStart>` is the fired-registry key of one item.
+* `legacyAlertKey(spanStart)` = `planned_<spanStart>` is the key 1.4.0 recorded. A member is **notified** when
+  the registry holds either key; the legacy key counts for every item (it can only exist for an alert that
+  fired just before the update, so no alert repeats).
+* `pendingMembers(group, notified)` = the members that are not notified, in member order. A group is
+  **pending** when that list is not empty. Only pending groups are scheduled.
+* At fire time the platform recomputes the groups from the current state and posts **every pending group whose
+  `spanStart` equals the alarm's span start** (so a changed end, queue or membership never loses the warning,
+  and a second alarm for the same start finds nothing left to post). Posting a group marks `memberKey` for
+  **every** member, so removing one item later never re-alerts the others. The receiver checks are
+  otherwise those of `NOTIFICATIONS.md` 1.2.
+
+### 8.3 Labels in the text
+
+`alertLabels(store, memberIds)`: null when the store has at most one item (the text is exactly 1.4.0's) or the list is empty.
+Otherwise the `displayLabel`s of the members in member order: one -> `l1`; two -> `l1 · l2`; three or more
+-> `l1 · l2 +<n-2>`. The planned body then starts with `<labels> (черга <q>): ` / `<labels> (queue <q>): `
+instead of `Черга <q>: `, or with just `<labels>: ` when the labels are exactly `Черга <q>` (`NOTIFICATIONS.md` 1.3).
+
+### 8.4 Emergency: every item with an address
+
+The platform polls PowerOn for the primary item's address (always: the main screen shows it) and for every
+other item with `master AND emergencyAlerts AND address != null`. Each item has its own request, its own
+failure and its own ledger under its address key, so one failing item never touches another. Events of an
+item are posted when `master AND item.emergencyAlerts`; their second line is `item.address.text` when not
+blank, else `displayLabel(item)`. The PowerOn status line of the main screen comes from the primary's fetch
+only. Emergencies are never merged across items (they are per house).

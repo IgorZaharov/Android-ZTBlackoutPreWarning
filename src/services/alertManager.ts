@@ -34,6 +34,15 @@ import {
 } from '../core/localTime';
 import { OutageEngine, buildPlanned } from '../core/outageEngine';
 import type { AlertSpec, Outage } from '../core/outageModels';
+import {
+  alertLabels,
+  groupAlerts,
+  memberKey,
+  pendingMembers,
+  plannedActive,
+  addressKey as subscriptionAddressKey,
+  type SubscriptionStore,
+} from '../core/subscriptions';
 import { getOutageStateStore } from './outageStore';
 import { getScheduleCache } from './scheduleCache';
 
@@ -246,8 +255,8 @@ export function markSlotAsNotified(slotId: string): void {
     if (typeof localStorage !== 'undefined') {
       const set = loadNotifiedSlotIds();
       set.add(slotId);
-      // Keep max 100 recent entries to avoid unbounded growth
-      const arr = Array.from(set).slice(-100);
+      // Keep max 300 recent entries (shared by up to 5 addresses) to avoid unbounded growth
+      const arr = Array.from(set).slice(-300);
       localStorage.setItem(NOTIFIED_SLOTS_KEY, JSON.stringify(arr));
     }
   } catch (err) {
@@ -399,6 +408,65 @@ export function checkAndTriggerPlannedAlerts(
 }
 
 /**
+ * The web stand-in for the exact alarms with several addresses (spec/SUBSCRIPTIONS.md section 8): the
+ * plan of every plannedActive subscription is grouped per queue and span, and each due group is posted
+ * once while one of its members was not warned yet; posting marks every member. Gated by the master
+ * switch and each address's planned switch. [outagesFor] returns the outages of a queue and address key.
+ */
+export function checkAndTriggerGroupedAlerts(
+  store: SubscriptionStore,
+  master: boolean,
+  outagesFor: (queue: string | null, key: string | null) => readonly Outage[],
+  now: LocalDateTime,
+  settings: UserSettings,
+  lang: 'uk' | 'en',
+  onNotificationFired?: (record: NotificationRecord) => void
+): NotificationRecord[] {
+  if (!master) return [];
+  const advance = settings.advanceNoticeMinutes;
+  // Look back far enough that an alert that became due since the last tick (or a throttled tab) is still planned
+  const lookback = plusMinutes(now, -(advance + ALERT_GRACE_MINUTES));
+  const alertsById: Record<string, AlertSpec[]> = {};
+  for (const item of store.items) {
+    if (!plannedActive(master, item)) continue;
+    const key = item.address ? subscriptionAddressKey(item.address) : null;
+    alertsById[item.id] = OutageEngine.planAlerts(outagesFor(item.queue, key), lookback, advance);
+  }
+  const due = groupAlerts(store, master, alertsById).filter((g) => !(g.fireAt > now));
+  if (due.length === 0) return [];
+
+  const t = translations[lang];
+  const fired: NotificationRecord[] = [];
+  for (const group of due) {
+    const notified = loadNotifiedSlotIds();
+    if (pendingMembers(group, (k) => notified.has(k)).length === 0) continue;
+    for (const id of group.memberIds) markSlotAsNotified(memberKey(id, group.spanStart));
+    const minutesLeft = wallMinutesBetween(now, group.spanStart);
+    const record: NotificationRecord = {
+      id: `alert_${Date.now()}_${fired.length}`,
+      slotId: group.key,
+      timestamp: Date.now(),
+      title: t.plannedAlertTitle,
+      message: plannedAlertBody(
+        lang,
+        group.queue,
+        hm(group.spanStart),
+        OutageEngine.formatSpanTime(group.spanEnd),
+        minutesLeft,
+        group.durationMinutes,
+        group.mayContinue,
+        alertLabels(store, group.memberIds)
+      ),
+      queue: group.queue,
+      advanceMinutes: Math.max(minutesLeft, 0),
+    };
+    deliver(record, settings.soundEnabled, settings.vibrationEnabled, onNotificationFired);
+    fired.push(record);
+  }
+  return fired;
+}
+
+/**
  * Check if an advance alert should be fired for a legacy DaySchedule (today's table, emergency
  * cells excluded). Thin wrapper over [checkAndTriggerPlannedAlerts]: several consecutive blackout
  * slots are ONE merged span, so there is strictly one notification per continuous block.
@@ -438,7 +506,9 @@ export function formatWhen(lang: 'uk' | 'en', dt: LocalDateTime, today: LocalDat
  * Posts the notifications for ledger events (start / restore time changed / end). Each event is
  * announced once: its key (`emerg_start_<addr>_<startISO>` etc.) is remembered in the notified
  * registry. Callers only pass events produced by a confirmed fetch, so a failed request never gets
- * here. Gated by `emergencyNotificationsEnabled` ONLY: the master switch does not affect emergencies.
+ * here. Gated by `emergencyNotificationsEnabled`, which is the primary's `master AND emergencyAlerts`
+ * (owner decision 1); another subscription passes its own gate and address line in [options]
+ * (spec/SUBSCRIPTIONS.md 8.4).
  */
 export function triggerEmergencyEventAlerts(
   events: readonly EmergencyEvent[],
@@ -446,13 +516,15 @@ export function triggerEmergencyEventAlerts(
   settings: UserSettings,
   lang: 'uk' | 'en',
   now: LocalDateTime,
-  onNotificationFired?: (record: NotificationRecord) => void
+  onNotificationFired?: (record: NotificationRecord) => void,
+  options: { addressLine?: string | null; enabled?: boolean } = {}
 ): NotificationRecord[] {
-  const emergencyEnabled = settings.emergencyNotificationsEnabled ?? true;
+  const emergencyEnabled = options.enabled ?? settings.emergencyNotificationsEnabled ?? true;
   if (!emergencyEnabled || events.length === 0) return [];
   const t = translations[lang];
   const today = toLocalDate(now);
-  const address = settings.selectedAddress?.replace(/\n/g, ' ').trim() || null;
+  const line = options.addressLine !== undefined ? options.addressLine : settings.selectedAddress;
+  const address = line?.replace(/\n/g, ' ').trim() || null;
   const fired: NotificationRecord[] = [];
 
   for (const ev of events) {

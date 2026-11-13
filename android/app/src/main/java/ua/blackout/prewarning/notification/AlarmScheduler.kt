@@ -5,17 +5,22 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import ua.blackout.prewarning.core.OutageEngine
+import ua.blackout.prewarning.core.PlannedGroup
+import ua.blackout.prewarning.core.SubscriptionStore
+import ua.blackout.prewarning.core.Subscriptions
 import ua.blackout.prewarning.data.KYIV_ZONE
 import ua.blackout.prewarning.data.repository.AlertRegistry
 import ua.blackout.prewarning.data.repository.OutageRepository
 import ua.blackout.prewarning.data.repository.SettingsRepository
+import ua.blackout.prewarning.data.repository.SubscriptionSync
 import ua.blackout.prewarning.widget.BlackoutGlanceWidget
 import java.time.LocalDateTime
 
 /**
  * Turns the outage engine's alert plan into alarms. The plan (one alert per merged planned span,
  * today and tomorrow, never for anything already started or finished) comes from
- * [OutageEngine.planAlerts]; this object only talks to [AlarmManager].
+ * [OutageEngine.planAlerts] for every subscription, grouped per queue and span by
+ * [Subscriptions.groupAlerts] (spec/SUBSCRIPTIONS.md section 8); this object only talks to [AlarmManager].
  */
 object AlarmScheduler {
     private const val PREFS_NAME = "zt_scheduled_alarms_v1"
@@ -44,9 +49,31 @@ object AlarmScheduler {
 
     private fun epochMs(dt: LocalDateTime): Long = dt.atZone(KYIV_ZONE).toInstant().toEpochMilli()
 
+    /**
+     * The planned alert groups of every subscription as seen at [now] (spec/SUBSCRIPTIONS.md 8.1).
+     * The receiver passes a [now] a little before the alarm so the alert that is firing is still in the plan.
+     */
+    fun plannedGroups(
+        appContext: Context,
+        store: SubscriptionStore,
+        master: Boolean,
+        now: LocalDateTime,
+        advanceMinutes: Int
+    ): List<PlannedGroup> {
+        if (!master) return emptyList()
+        val repo = OutageRepository(appContext)
+        val alerts = store.items
+            .filter { Subscriptions.plannedActive(master, it) }
+            .associate { item -> item.id to OutageEngine.planAlerts(repo.outagesFor(item.queue, item.address?.key, now), now, advanceMinutes) }
+        return Subscriptions.groupAlerts(store, master, alerts)
+    }
+
     @Synchronized
     private fun syncAlarmsInternal(appContext: Context, hasWidgets: Boolean, onTimeChanged: Boolean) {
         val settings = SettingsRepository(appContext).getSettings()
+        val sync = SubscriptionSync(appContext)
+        val subs = sync.store()
+        val master = sync.master()
         val now = LocalDateTime.now(KYIV_ZONE)
         val snapshot = OutageRepository(appContext).snapshot(settings, now)
         val alertRegistry = AlertRegistry(appContext)
@@ -66,30 +93,32 @@ object AlarmScheduler {
         val newAlertIds = LinkedHashSet<String>()
         val newWidgetIds = LinkedHashSet<String>()
 
-        // 2. Pre-warnings: one per merged planned span of today and tomorrow, only for unfinished future spans
-        if (settings.notificationsEnabled) {
-            val alerts = OutageEngine.planAlerts(snapshot.outages, now, settings.advanceNoticeMinutes)
-            if (onTimeChanged) {
-                // The clock moved: alerts whose time is in the future again may notify once more
-                alertRegistry.resetFutureSlotsOnTimeChange(System.currentTimeMillis(), alerts.map { it.key }.toSet())
+        // 2. Pre-warnings: one per queue and merged planned span of today and tomorrow over every
+        //    subscription, only for unfinished future spans that some member was not warned about yet
+        val groups = plannedGroups(appContext, subs, master, now, settings.advanceNoticeMinutes)
+        if (onTimeChanged && groups.isNotEmpty()) {
+            // The clock moved: alerts whose time is in the future again may notify once more
+            alertRegistry.resetFutureSlotsOnTimeChange(
+                System.currentTimeMillis(),
+                groups.flatMap { g -> g.memberIds.map { Subscriptions.memberKey(it, g.spanStart) } + Subscriptions.legacyAlertKey(g.spanStart) }.toSet()
+            )
+        }
+        for (group in groups) {
+            if (Subscriptions.pendingMembers(group) { alertRegistry.hasNotified(it) }.isEmpty()) continue
+            val intent = Intent(appContext, AlarmReceiver::class.java).apply {
+                action = ACTION_ALERT
+                putExtra(EXTRA_KEY, group.key)
+                putExtra(EXTRA_QUEUE, group.queue)
+                putExtra(EXTRA_MINUTES, settings.advanceNoticeMinutes)
+                putExtra(EXTRA_SPAN_START_MS, epochMs(group.spanStart))
             }
-            for (alert in alerts) {
-                if (alertRegistry.hasNotified(alert.key)) continue
-                val intent = Intent(appContext, AlarmReceiver::class.java).apply {
-                    action = ACTION_ALERT
-                    putExtra(EXTRA_KEY, alert.key)
-                    putExtra(EXTRA_QUEUE, settings.queue)
-                    putExtra(EXTRA_MINUTES, settings.advanceNoticeMinutes)
-                    putExtra(EXTRA_SPAN_START_MS, epochMs(alert.spanStart))
-                }
-                val pi = PendingIntent.getBroadcast(
-                    appContext,
-                    AlarmCodes.codeFor(appContext, alert.key),
-                    intent,
-                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-                )
-                if (setWakeupAlarm(alarmManager, epochMs(alert.fireAt), pi, canExact)) newAlertIds.add(alert.key)
-            }
+            val pi = PendingIntent.getBroadcast(
+                appContext,
+                AlarmCodes.codeFor(appContext, group.key),
+                intent,
+                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+            )
+            if (setWakeupAlarm(alarmManager, epochMs(group.fireAt), pi, canExact)) newAlertIds.add(group.key)
         }
 
         // 3. Widget redraws exactly when the power state flips (only when widgets are placed)

@@ -9,7 +9,7 @@ class AlertRegistry(context: Context) {
         appContext.getSharedPreferences("zt_notified_blackouts_v1", Context.MODE_PRIVATE)
 
     companion object {
-        const val MAX_STORED_ENTRIES = 100
+        const val MAX_STORED_ENTRIES = 300
     }
 
     /**
@@ -26,7 +26,7 @@ class AlertRegistry(context: Context) {
 
     /**
      * Marks the slot as notified with timestamp, prunes entries older than 7 days,
-     * and bounds total stored entries to MAX_STORED_ENTRIES = 100.
+     * and bounds total stored entries to MAX_STORED_ENTRIES (300: up to 5 addresses share it).
      */
     fun markNotified(slotId: String) {
         val now = System.currentTimeMillis()

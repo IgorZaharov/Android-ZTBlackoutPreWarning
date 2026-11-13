@@ -551,11 +551,25 @@ export function plannedAlertBody(
   end: string,
   minutesLeft: number,
   durationMinutes: number,
-  mayContinue: boolean
+  mayContinue: boolean,
+  /** alertLabels of the addresses (spec/SUBSCRIPTIONS.md 8.3); null keeps the 1.4.0 text. */
+  labels: string | null = null
 ): string {
   const dur = durationText(lang, durationMinutes);
   const uk = lang === 'uk';
-  const q = queue.trim() === '' ? '' : uk ? `Черга ${queue}: ` : `Queue ${queue}: `;
+  const q =
+    labels !== null
+      ? // a queue-only address is already labelled "Черга 5.2": no second queue in brackets
+        queue.trim() === '' || labels === `Черга ${queue}`
+        ? `${labels}: `
+        : uk
+          ? `${labels} (черга ${queue}): `
+          : `${labels} (queue ${queue}): `
+      : queue.trim() === ''
+        ? ''
+        : uk
+          ? `Черга ${queue}: `
+          : `Queue ${queue}: `;
   let head: string;
   if (minutesLeft > 0) {
     head = uk ? `${q}відключення о ${start} (через ${minutesLeft}${NBSP}хв)` : `${q}outage at ${start} (in ${minutesLeft}${NBSP}min)`;

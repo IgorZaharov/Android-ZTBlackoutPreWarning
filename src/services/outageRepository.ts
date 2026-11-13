@@ -36,6 +36,8 @@ import {
 } from './ztoeAddressLookup';
 import { triggerEmergencyEventAlerts } from './alertManager';
 import { resolveLanguage } from './i18n';
+import { addressKey as subscriptionAddressKey, alertOrder, displayLabel, type Subscription, type SubscriptionStore } from '../core/subscriptions';
+import { getSubscriptionSync } from './subscriptionSync';
 
 const p2 = (n: number): string => String(n).padStart(2, '0');
 const hhmm = (minuteOfDay: number): string => `${p2(Math.floor(minuteOfDay / 60))}:${p2(minuteOfDay % 60)}`;
@@ -156,11 +158,23 @@ export class OutageSnapshot {
   }
 }
 
+/** Emergency events of a subscription other than the primary (spec/SUBSCRIPTIONS.md 8.4). */
+export interface AddressEvents {
+  itemId: string;
+  addressKey: string;
+  /** Second line of the notification: the address text, or the label. */
+  addressLine: string;
+  events: readonly EmergencyEvent[];
+}
+
 export interface RefreshOutcome {
   siteState: SiteState | null;
   fetchStatus: ZtoeFetchStatus | null;
   poweronOk: boolean | null;
+  /** Events of the primary (selected) address. */
   events: readonly EmergencyEvent[];
+  /** Events of the other subscriptions that want emergency alerts. */
+  otherEvents: readonly AddressEvents[];
   snapshot: OutageSnapshot;
 }
 
@@ -192,6 +206,10 @@ export interface OutageRepositoryDeps {
   notify?: (settings: UserSettings, addressKey: string, events: readonly EmergencyEvent[], now: LocalDateTime) => void;
   /** Passed through to the ztoe fetch (tests inject the HTML here). */
   ztoeOptions?: Pick<ZtoeFetchOptions, 'fetchHtml' | 'isOnline'>;
+  /** The subscription store and the master switch (default: the app-wide SubscriptionSync). */
+  subscriptions?: (settings: UserSettings) => { store: SubscriptionStore; master: boolean };
+  /** Delivers the events of another subscription (default: the browser notification adapter). */
+  notifyOther?: (settings: UserSettings, other: AddressEvents, now: LocalDateTime) => void;
 }
 
 export class OutageRepository {
@@ -203,6 +221,8 @@ export class OutageRepository {
   private readonly nowMs: () => number;
   private readonly notifyEvents: NonNullable<OutageRepositoryDeps['notify']>;
   private readonly ztoeOptions: NonNullable<OutageRepositoryDeps['ztoeOptions']>;
+  private readonly subscriptions: NonNullable<OutageRepositoryDeps['subscriptions']>;
+  private readonly notifyOther: NonNullable<OutageRepositoryDeps['notifyOther']>;
 
   constructor(deps: OutageRepositoryDeps = {}) {
     this.schedule = deps.schedule ?? getScheduleCache();
@@ -217,6 +237,20 @@ export class OutageRepository {
         triggerEmergencyEventAlerts(events, addressKey, settings, resolveLanguage(settings.language), now);
       });
     this.ztoeOptions = deps.ztoeOptions ?? {};
+    this.subscriptions =
+      deps.subscriptions ??
+      ((settings) => {
+        const sync = getSubscriptionSync();
+        return { store: sync.store(settings), master: sync.master(settings) };
+      });
+    this.notifyOther =
+      deps.notifyOther ??
+      ((settings, other, now) => {
+        triggerEmergencyEventAlerts(other.events, other.addressKey, settings, resolveLanguage(settings.language), now, undefined, {
+          addressLine: other.addressLine,
+          enabled: true,
+        });
+      });
   }
 
   /** Stable key of the selected address; survives duplicate-street merges because it uses the canonical street key. */
@@ -238,22 +272,32 @@ export class OutageRepository {
     const q = settings.queue || '';
     const hasQueue = q.trim() !== '';
 
-    const planned = hasQueue
-      ? buildPlanned(today, this.schedule.todayOffCells(q, today), this.schedule.tomorrowOffCells(q, today), this.schedule.yesterdayOffCells(q, today))
-      : [];
-    const emergencies = key !== null ? ledgerOutages(this.store.ledger(key), now) : [];
-    const repairs = key !== null ? this.store.repairs(key) : [];
-
     return new OutageSnapshot({
       now,
       queue: q,
-      outages: inWindow([...planned, ...repairs, ...emergencies], today),
+      outages: this.outagesFor(q, key, now),
       plannedKnown: !hasQueue || this.schedule.hasValidTodayCache(q, today),
       tomorrowPublished: hasQueue && this.schedule.hasTomorrowSchedule(q, today),
       site: this.store.site(),
       poweron: this.store.poweron(),
       hasAddress: key !== null,
     });
+  }
+
+  /**
+   * The outages of one queue and address key (either may be absent), local state only. One ztoe fetch
+   * caches all 12 queues, so this works for every subscription (spec/SUBSCRIPTIONS.md 8.1).
+   */
+  outagesFor(queue: string | null, key: string | null, now: LocalDateTime = fromInstant(this.nowMs())): Outage[] {
+    const today = toLocalDate(now);
+    const q = (queue ?? '').trim();
+    const planned =
+      q !== ''
+        ? buildPlanned(today, this.schedule.todayOffCells(q, today), this.schedule.tomorrowOffCells(q, today), this.schedule.yesterdayOffCells(q, today))
+        : [];
+    const emergencies = key !== null ? ledgerOutages(this.store.ledger(key), now) : [];
+    const repairs = key !== null ? this.store.repairs(key) : [];
+    return inWindow([...planned, ...repairs, ...emergencies], today);
   }
 
   /**
@@ -264,18 +308,29 @@ export class OutageRepository {
     const nowMs = this.nowMs();
     let siteState: SiteState | null = null;
     let fetchStatus: ZtoeFetchStatus | null = null;
+    let subs: { store: SubscriptionStore; master: boolean } | null = null;
+    try {
+      subs = this.subscriptions(settings);
+    } catch {
+      subs = null;
+    }
 
-    if ((settings.queue || '').trim() !== '') {
+    // One fetch caches all 12 queues. A primary without a queue still fetches for the other addresses.
+    const primaryQueue = (settings.queue || '').trim();
+    const ztoeQueue = primaryQueue !== '' ? primaryQueue : (subs ? alertOrder(subs.store).find((i) => i.queue !== null)?.queue ?? '' : '');
+    if (ztoeQueue !== '') {
       try {
-        const res = await this.fetchSchedule(settings.url, settings.queue, {
+        const res = await this.fetchSchedule(settings.url, ztoeQueue, {
           force: forceNetwork,
           now: new Date(nowMs),
           cache: this.schedule,
           ...this.ztoeOptions,
         });
-        fetchStatus = res.status;
-        siteState = res.siteState;
         this.store.saveSite(res.siteState, nowMs, res.notice ?? null);
+        if (primaryQueue !== '') {
+          fetchStatus = res.status;
+          siteState = res.siteState;
+        }
       } catch {
         // keep the previous site state
       }
@@ -286,33 +341,60 @@ export class OutageRepository {
     const query = settings.selectedAddressQuery;
     const key = this.addressKey(query);
     if (query && key) {
-      try {
-        const target = this.buildTarget(query, key, nowMs);
-        if (target) {
-          const now = fromInstant(nowMs);
-          const result = await this.powerOn.fetch(target, toLocalDate(now), now);
-          if (result.ids && (result.ids.cityIds.length > 0 || result.ids.streetIds.length > 0)) this.store.saveIds(key, result.ids, nowMs);
-
-          const ledger = reconcile(this.store.ledger(key), result.emergency, now);
-          this.store.saveLedger(key, ledger.entries);
-          events = ledger.events;
-          if (result.repairs) this.store.saveRepairs(key, result.repairs);
-
-          poweronOk = result.emergency.type === 'Confirmed';
-          this.store.savePowerOn(poweronOk, nowMs);
-          if (notify && events.length > 0 && (settings.emergencyNotificationsEnabled ?? true)) {
-            this.notifyEvents(settings, key, events, now);
-          }
-        } else {
-          this.store.savePowerOn(false, nowMs);
-          poweronOk = false;
-        }
-      } catch {
-        this.store.savePowerOn(false, nowMs);
-        poweronOk = false;
+      const polled = await this.pollPowerOn(query, key, nowMs);
+      poweronOk = polled?.ok ?? false;
+      events = polled?.events ?? [];
+      this.store.savePowerOn(poweronOk, nowMs);
+      if (notify && events.length > 0 && (settings.emergencyNotificationsEnabled ?? true)) {
+        this.notifyEvents(settings, key, events, fromInstant(nowMs));
       }
     }
-    return { siteState, fetchStatus, poweronOk, events, snapshot: this.snapshot(settings, fromInstant(this.nowMs())) };
+    const otherEvents = subs ? await this.refreshOtherAddresses(settings, subs, key, nowMs, notify) : [];
+    return { siteState, fetchStatus, poweronOk, events, otherEvents, snapshot: this.snapshot(settings, fromInstant(this.nowMs())) };
+  }
+
+  /**
+   * PowerOn for every other subscription that wants emergency alerts (spec/SUBSCRIPTIONS.md 8.4): own
+   * request, own failure, own ledger. The main view's PowerOn status stays the primary's.
+   */
+  private async refreshOtherAddresses(
+    settings: UserSettings,
+    subs: { store: SubscriptionStore; master: boolean },
+    primaryKey: string | null,
+    nowMs: number,
+    notify: boolean,
+  ): Promise<AddressEvents[]> {
+    if (!subs.master) return [];
+    const out: AddressEvents[] = [];
+    for (const item of subs.store.items) {
+      const a = item.address;
+      if (!a || item.id === subs.store.primaryId || !item.emergencyAlerts) continue;
+      const key = subscriptionAddressKey(a);
+      if (key === primaryKey) continue;
+      const polled = await this.pollPowerOn({ remId: a.remSlug, settlementId: a.settlementId, streetId: a.streetId, house: a.house }, key, nowMs);
+      if (!polled || polled.events.length === 0) continue;
+      const other: AddressEvents = { itemId: item.id, addressKey: key, addressLine: addressLine(item), events: polled.events };
+      out.push(other);
+      if (notify) this.notifyOther(settings, other, fromInstant(nowMs));
+    }
+    return out;
+  }
+
+  /** One PowerOn query: saves ids, ledger and repairs under [key]. Null when it failed or could not be built. */
+  private async pollPowerOn(query: SelectedAddressQuery, key: string, nowMs: number): Promise<{ ok: boolean; events: readonly EmergencyEvent[] } | null> {
+    try {
+      const target = this.buildTarget(query, key, nowMs);
+      if (!target) return null;
+      const now = fromInstant(nowMs);
+      const result = await this.powerOn.fetch(target, toLocalDate(now), now);
+      if (result.ids && (result.ids.cityIds.length > 0 || result.ids.streetIds.length > 0)) this.store.saveIds(key, result.ids, nowMs);
+      const ledger = reconcile(this.store.ledger(key), result.emergency, now);
+      this.store.saveLedger(key, ledger.entries);
+      if (result.repairs) this.store.saveRepairs(key, result.repairs);
+      return { ok: result.emergency.type === 'Confirmed', events: ledger.events };
+    } catch {
+      return null;
+    }
   }
 
   private buildTarget(query: SelectedAddressQuery, key: string, nowMs: number): PowerOnTarget | null {
@@ -339,6 +421,12 @@ export class OutageRepository {
       cachedStreetIds: fresh?.streetIds ?? [],
     };
   }
+}
+
+/** Second line of an emergency notification for [item] (spec/SUBSCRIPTIONS.md 8.4). */
+export function addressLine(item: Subscription): string {
+  const text = item.address?.text ?? '';
+  return text.trim() !== '' ? text : displayLabel(item);
 }
 
 let defaultRepository: OutageRepository | null = null;

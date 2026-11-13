@@ -203,11 +203,20 @@ object AppStrings {
         end: String,
         minutesLeft: Long,
         durationMinutes: Long,
-        mayContinue: Boolean
+        mayContinue: Boolean,
+        /** `alertLabels` of the addresses (spec/SUBSCRIPTIONS.md 8.3); null keeps the 1.4.0 text. */
+        labels: String? = null
     ): String {
         val dur = durationText(lang, durationMinutes)
         val uk = lang == "uk"
-        val q = if (queue.isBlank()) "" else if (uk) "Черга $queue: " else "Queue $queue: "
+        val q = when {
+            // a queue-only address is already labelled "Черга 5.2": no second queue in brackets
+            labels != null && (queue.isBlank() || labels == "Черга $queue") -> "$labels: "
+            labels != null -> if (uk) "$labels (черга $queue): " else "$labels (queue $queue): "
+            queue.isBlank() -> ""
+            uk -> "Черга $queue: "
+            else -> "Queue $queue: "
+        }
         val head = when {
             minutesLeft > 0 && uk -> "${q}відключення о $start (через $minutesLeft${NBSP}хв)"
             minutesLeft > 0 -> "${q}outage at $start (in $minutesLeft${NBSP}min)"

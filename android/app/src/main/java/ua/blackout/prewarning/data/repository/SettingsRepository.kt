@@ -324,15 +324,33 @@ class SettingsRepository(context: Context) {
     }
 
     /**
+     * Sound and vibration follow the alerts master switch (`spec/SUBSCRIPTIONS.md` section 7): off
+     * remembers and mutes them, on restores them. Called only when the master really changes.
+     */
+    fun applyMasterSound(masterOn: Boolean) {
+        val current = getSettings()
+        if (masterOn) {
+            prefs.edit()
+                .putBoolean("sound_enabled", prefs.getBoolean("prev_sound_enabled", true))
+                .putBoolean("vibration_enabled", prefs.getBoolean("prev_vibration_enabled", true))
+                .apply()
+        } else {
+            prefs.edit()
+                .putBoolean("prev_sound_enabled", current.soundEnabled)
+                .putBoolean("prev_vibration_enabled", current.vibrationEnabled)
+                .putBoolean("sound_enabled", false)
+                .putBoolean("vibration_enabled", false)
+                .apply()
+        }
+    }
+
+    /**
      * Writes the primary subscription into the single-address keys (`spec/SUBSCRIPTIONS.md`
-     * section 7). Targeted: sound, vibration, timers, site and language are untouched, except that
-     * sound and vibration follow the 1.4.0 rule when both alert switches go off or come back on.
+     * section 7). Targeted: sound, vibration, timers, site and language are untouched (sound and
+     * vibration follow the master switch, [applyMasterSound]).
      */
     fun applyPrimaryMirror(m: LegacyMirror) {
-        val current = getSettings()
-        val anyWasEnabled = current.notificationsEnabled || current.emergencyNotificationsEnabled
-        val anyNowEnabled = m.notificationsEnabled || m.emergencyNotificationsEnabled
-        val editor = prefs.edit()
+        prefs.edit()
             .putString("queue", m.queue)
             .putString("custom_queue_status_text", m.customQueueStatusText ?: "")
             .putString("selected_address", m.selectedAddress ?: "")
@@ -342,17 +360,7 @@ class SettingsRepository(context: Context) {
             .putString("selected_house", m.house)
             .putBoolean("notifications_enabled", m.notificationsEnabled)
             .putBoolean("emergency_notifications_enabled", m.emergencyNotificationsEnabled)
-        when {
-            anyWasEnabled && !anyNowEnabled -> editor
-                .putBoolean("prev_sound_enabled", current.soundEnabled)
-                .putBoolean("prev_vibration_enabled", current.vibrationEnabled)
-                .putBoolean("sound_enabled", false)
-                .putBoolean("vibration_enabled", false)
-            !anyWasEnabled && anyNowEnabled -> editor
-                .putBoolean("sound_enabled", prefs.getBoolean("prev_sound_enabled", true))
-                .putBoolean("vibration_enabled", prefs.getBoolean("prev_vibration_enabled", true))
-            else -> editor
-        }.apply()
+            .apply()
     }
 
     /**

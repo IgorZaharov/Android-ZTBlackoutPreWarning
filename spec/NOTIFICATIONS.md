@@ -22,7 +22,7 @@ The adapters in the tree before 1.4.0 (`AlarmScheduler`, `AlarmReceiver`, `Notif
 
 Recompute triggers: new schedule data, settings change (advance minutes, notification switch), midnight rollover (Kyiv 00:00 re-sync), device boot, system time or time-zone change, return from an exact-alarm permission change.
 
-Gating: `notificationsEnabled` (default true) is the master switch for planned alerts. Sound and vibration switches are global.
+Gating: the master switch `alertsMaster` and each address's `plannedAlerts` (`SUBSCRIPTIONS.md` section 8; before multi-address step 3 it was `notificationsEnabled`). With several addresses the plan is computed per address and grouped per queue and span (`SUBSCRIPTIONS.md` 8.1). Sound and vibration switches are global.
 
 `fireAt` is a **Kyiv wall-clock** value. Convert it to an absolute instant with the Kyiv zone, never the device zone, so a traveller still gets the alert at the right moment.
 
@@ -45,7 +45,7 @@ The strings below are what `AppStrings.kt` and `src/services/i18n.ts` ship in 1.
 |---|---|---|
 | Title | Попередження: відключення світла | Heads-up: power outage |
 
-Body (`plannedAlertBody`): `{start}` = `HH:mm` of the span start (a midnight start reads `00:00`, never `24:00`); `{end}` = `formatSpanTime(spanEnd)`, so a midnight end reads `24:00`; `{left}` = whole minutes until the start, computed at delivery time; `{q}` = `Черга 5.1: ` / `Queue 5.1: ` (empty without a queue).
+Body (`plannedAlertBody`): `{start}` = `HH:mm` of the span start (a midnight start reads `00:00`, never `24:00`); `{end}` = `formatSpanTime(spanEnd)`, so a midnight end reads `24:00`; `{left}` = whole minutes until the start, computed at delivery time; `{q}` = `Черга 5.1: ` / `Queue 5.1: ` (empty without a queue); with more than one address it is `{labels} (черга 5.1): ` / `{labels} (queue 5.1): ` with `{labels}` from `alertLabels` (`SUBSCRIPTIONS.md` 8.3), or just `{labels}: ` when `{labels}` is exactly `Черга 5.1` (a queue-only address) or there is no queue, e.g. `Київська 77 · Соборна 3 (черга 5.2): відключення о 23:00 (через 15 хв), орієнтовно до 01:00 (2 год).`
 
 | Case | uk | en |
 |---|---|---|
@@ -100,11 +100,11 @@ Before calling `reconcile` the adapter drops records dated beyond tomorrow (`POW
 
 Example (`emergency_ledger.json`): `emerg_change_addr_2026-11-13T17:30_2026-11-13T19:30`.
 
-`addressKey` is an opaque, stable, whitespace-free identifier of the address, supplied by the adapter; the core never interprets it (the vectors use `addr`). Recommended (not enforced): `<remSlug>|<settlementId>|<StreetKey>|<HouseKey>`. The ledger emits each transition once; the key is the adapter's second line of defence: **post only if the key is not in the fired registry, and mark it fired when posting** (Android `AlertRegistry`: entries older than 7 days and beyond 100 are pruned). The planned key from the core, `planned_<spanStartISO>`, is address independent; with more than one address the adapter must qualify it with the address id.
+`addressKey` is an opaque, stable, whitespace-free identifier of the address, supplied by the adapter; the core never interprets it (the vectors use `addr`). Recommended (not enforced): `<remSlug>|<settlementId>|<StreetKey>|<HouseKey>`. The ledger emits each transition once; the key is the adapter's second line of defence: **post only if the key is not in the fired registry, and mark it fired when posting** (Android `AlertRegistry`: entries older than 7 days and beyond 300 are pruned; 100 before multi-address step 3). The planned key from the core, `planned_<spanStartISO>`, is address independent; since multi-address step 3 the registry records `planned_<itemId>_<spanStartISO>` per address and still honours the old key (`SUBSCRIPTIONS.md` 8.2).
 
 ### 2.4 Gating
 
-Emergency events are gated by `emergencyNotificationsEnabled` (default true) **only**; the master `notificationsEnabled` switch does not affect them. The ledger runs whether or not the switch is on (the UI needs its history); the adapter drops the event when the switch is off. A dropped event is not replayed later when the switch is turned on.
+Emergency events are gated by the master switch `alertsMaster` **and** the address's `emergencyAlerts` (owner decision 1, `SUBSCRIPTIONS.md` 8.4; in 1.4.0 they were gated by `emergencyNotificationsEnabled` only). The ledger runs whether or not the switch is on (the UI needs its history); the adapter drops the event when the switch is off. A dropped event is not replayed later when the switch is turned on.
 
 ### 2.5 Text
 
@@ -126,7 +126,7 @@ Normative strings as shipped in 1.4.0 (`AppStrings.kt` / `i18n.ts`). `{start}`, 
 | `END`, normal | Електропостачання за вашою адресою відновлено (початок був: {start}). | Power supply at your address has been restored (started: {start}). |
 | `END`, `earlyEnd = true` | Відключення зникло зі списку до {eta}: світло, імовірно, вже є. | The outage left the list before {eta}: power is probably back. |
 
-The wording of `END` is chosen from `earlyEnd`: when the estimate had already passed it is a normal restore; before it, PowerOn can not tell "restored early" from "cancelled", so the text says so. The selected address is appended as a second line when known.
+The wording of `END` is chosen from `earlyEnd`: when the estimate had already passed it is a normal restore; before it, PowerOn can not tell "restored early" from "cancelled", so the text says so. The address is appended as a second line when known (`SUBSCRIPTIONS.md` 8.4).
 
 ## 3. Reliability limits (state them in the app and in store text)
 

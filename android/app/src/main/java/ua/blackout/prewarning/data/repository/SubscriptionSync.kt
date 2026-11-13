@@ -13,7 +13,7 @@ import ua.blackout.prewarning.data.model.SelectedAddressQuery
  * The one way to change addresses and alert switches since multi-address step 2
  * (`spec/SUBSCRIPTIONS.md` section 7). Every call runs the one-time migration first, changes the
  * subscription store, then writes the primary item into the single-address keys that the main
- * screen, widgets, alarms and the worker still read. Callers sync alarms and widgets themselves.
+ * screen and widgets still read (alerts read the store, section 8). Callers sync alarms and widgets themselves.
  */
 class SubscriptionSync(context: Context) {
     private val appContext = context.applicationContext
@@ -37,7 +37,9 @@ class SubscriptionSync(context: Context) {
 
     fun setMaster(on: Boolean) {
         ensureReady()
+        val was = repo.alertsMaster()
         repo.setAlertsMaster(on)
+        if (was != on) settingsRepo.applyMasterSound(on)
         mirror()
     }
 

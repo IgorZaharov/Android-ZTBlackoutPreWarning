@@ -7,11 +7,11 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import ua.blackout.prewarning.core.OutageEngine
-import ua.blackout.prewarning.core.OutageKind
+import ua.blackout.prewarning.core.Subscriptions
 import ua.blackout.prewarning.data.KYIV_ZONE
 import ua.blackout.prewarning.data.repository.AlertRegistry
-import ua.blackout.prewarning.data.repository.OutageRepository
 import ua.blackout.prewarning.data.repository.SettingsRepository
+import ua.blackout.prewarning.data.repository.SubscriptionSync
 import ua.blackout.prewarning.ui.AppStrings
 import ua.blackout.prewarning.widget.BlackoutGlanceWidget
 import java.time.Instant
@@ -43,11 +43,18 @@ class AlarmReceiver : BroadcastReceiver() {
         }
     }
 
+    /**
+     * Posts every planned group that starts at the alarm's span start and still has a member that
+     * was not warned (spec/SUBSCRIPTIONS.md 8.2). The plan is recomputed from the current state, so
+     * a changed schedule, queue or address list never posts a stale warning or loses a due one.
+     */
     private suspend fun handleAlert(appContext: Context, intent: Intent) {
         val settings = SettingsRepository(appContext).getSettings()
-        if (!settings.notificationsEnabled) return
+        val sync = SubscriptionSync(appContext)
+        val master = sync.master()
+        if (!master) return
+        val subs = sync.store()
 
-        val key = intent.getStringExtra(AlarmScheduler.EXTRA_KEY) ?: return
         val startMs = intent.getLongExtra(AlarmScheduler.EXTRA_SPAN_START_MS, -1L)
         if (startMs < 0L) return
         val advance = intent.getIntExtra(AlarmScheduler.EXTRA_MINUTES, settings.advanceNoticeMinutes)
@@ -66,33 +73,35 @@ class AlarmReceiver : BroadcastReceiver() {
             return
         }
 
-        // The span must still be part of today's plan (schedule or repair works may have changed since scheduling)
-        val snapshot = OutageRepository(appContext).snapshot(settings, now)
-        val span = OutageEngine.spans(
-            snapshot.outages.filter { !it.stale },
-            setOf(OutageKind.PLANNED, OutageKind.REPAIR)
-        ).firstOrNull { it.start == spanStart } ?: return
+        // Plan as seen a little before the alarm, so the alert that is firing now is still part of it
+        val lookback = now.minusMinutes(advance.toLong() + 3)
+        val groups = AlarmScheduler.plannedGroups(appContext, subs, master, lookback, advance)
+            .filter { it.spanStart == spanStart }
+        if (groups.isEmpty()) return
 
         val registry = AlertRegistry(appContext)
-        if (registry.hasNotified(key)) return
-        registry.markNotified(key)
-
         val lang = AppStrings.resolveLang(settings.language)
-        val body = AppStrings.plannedAlertBody(
-            lang = lang,
-            queue = settings.queue,
-            // A start is never "24:00": an outage starting at midnight reads 00:00 (spec/NOTIFICATIONS.md)
-            start = "%02d:%02d".format(span.start.hour, span.start.minute),
-            end = OutageEngine.formatSpanTime(span.end),
-            minutesLeft = ChronoUnit.MINUTES.between(now, spanStart),
-            durationMinutes = OutageEngine.minutesBetween(span.start, span.end),
-            mayContinue = span.mayContinue
-        )
-        NotificationHelper.showPreWarningNotification(
-            appContext,
-            AlarmCodes.codeFor(appContext, key),
-            AppStrings.plannedAlertTitle(lang),
-            body
-        )
+        for (group in groups) {
+            if (Subscriptions.pendingMembers(group) { registry.hasNotified(it) }.isEmpty()) continue
+            for (id in group.memberIds) registry.markNotified(Subscriptions.memberKey(id, group.spanStart))
+
+            val body = AppStrings.plannedAlertBody(
+                lang = lang,
+                queue = group.queue,
+                // A start is never "24:00": an outage starting at midnight reads 00:00 (spec/NOTIFICATIONS.md)
+                start = "%02d:%02d".format(group.spanStart.hour, group.spanStart.minute),
+                end = OutageEngine.formatSpanTime(group.spanEnd),
+                minutesLeft = ChronoUnit.MINUTES.between(now, spanStart),
+                durationMinutes = group.durationMinutes,
+                mayContinue = group.mayContinue,
+                labels = Subscriptions.alertLabels(subs, group.memberIds)
+            )
+            NotificationHelper.showPreWarningNotification(
+                appContext,
+                AlarmCodes.codeFor(appContext, group.key),
+                AppStrings.plannedAlertTitle(lang),
+                body
+            )
+        }
     }
 }

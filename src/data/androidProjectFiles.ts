@@ -1039,7 +1039,7 @@ class AlertRegistry(context: Context) {
         appContext.getSharedPreferences("zt_notified_blackouts_v1", Context.MODE_PRIVATE)
 
     companion object {
-        const val MAX_STORED_ENTRIES = 100
+        const val MAX_STORED_ENTRIES = 300
     }
 
     /**
@@ -1056,7 +1056,7 @@ class AlertRegistry(context: Context) {
 
     /**
      * Marks the slot as notified with timestamp, prunes entries older than 7 days,
-     * and bounds total stored entries to MAX_STORED_ENTRIES = 100.
+     * and bounds total stored entries to MAX_STORED_ENTRIES (300: up to 5 addresses share it).
      */
     fun markNotified(slotId: String) {
         val now = System.currentTimeMillis()
@@ -1156,6 +1156,7 @@ import ua.blackout.prewarning.data.KYIV_ZONE
 import ua.blackout.prewarning.data.model.UserSettings
 import ua.blackout.prewarning.data.repository.AlertRegistry
 import ua.blackout.prewarning.data.repository.SettingsRepository
+import ua.blackout.prewarning.data.repository.SubscriptionSync
 import ua.blackout.prewarning.ui.AppStrings
 import java.time.LocalDate
 import java.time.LocalDateTime
@@ -1297,14 +1298,17 @@ object NotificationHelper {
         context: Context,
         settings: UserSettings,
         addressKey: String,
-        events: List<EmergencyEvent>
+        events: List<EmergencyEvent>,
+        // Default: the primary address (mirrored settings); another subscription passes its own (spec/SUBSCRIPTIONS.md 8.4)
+        addressLine: String? = settings.selectedAddress,
+        enabled: Boolean = settings.emergencyNotificationsEnabled
     ) {
-        if (!settings.emergencyNotificationsEnabled || events.isEmpty()) return
+        if (!enabled || events.isEmpty()) return
         val appContext = context.applicationContext
         val lang = AppStrings.resolveLang(settings.language)
         val today = LocalDate.now(KYIV_ZONE)
         val registry = AlertRegistry(appContext)
-        val address = settings.selectedAddress?.replace("\\n", " ")?.takeIf { it.isNotBlank() }
+        val address = addressLine?.replace("\\n", " ")?.takeIf { it.isNotBlank() }
 
         for (ev in events) {
             val key = ev.key(addressKey)
@@ -1358,24 +1362,17 @@ object NotificationHelper {
         isEmergencyAlert: Boolean = false
     ) {
         val settings = SettingsRepository(context).getSettings()
+        // The master switch silences every alert (owner decision 1); the per-address switches were
+        // checked by the caller (spec/SUBSCRIPTIONS.md section 8). A test notification still shows.
+        val master = try {
+            SubscriptionSync(context).master()
+        } catch (_: Exception) {
+            settings.notificationsEnabled || settings.emergencyNotificationsEnabled
+        }
+        if (!master && !isTest) return
 
-        // If notifications are disabled globally in the app, do NOT send unless this is an explicit Test or an enabled Emergency Alert
-        if (isEmergencyAlert) {
-            if (!settings.emergencyNotificationsEnabled) return
-        } else if (!settings.notificationsEnabled && !isTest) {
-            return
-        }
-
-        val activeSound = if (isEmergencyAlert) {
-            settings.emergencyNotificationsEnabled && settings.soundEnabled
-        } else {
-            settings.notificationsEnabled && settings.soundEnabled
-        }
-        val activeVibe = if (isEmergencyAlert) {
-            settings.emergencyNotificationsEnabled && settings.vibrationEnabled
-        } else {
-            settings.notificationsEnabled && settings.vibrationEnabled
-        }
+        val activeSound = master && settings.soundEnabled
+        val activeVibe = master && settings.vibrationEnabled
 
         createNotificationChannels(context)
 
@@ -1463,11 +1460,11 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import ua.blackout.prewarning.core.OutageEngine
-import ua.blackout.prewarning.core.OutageKind
+import ua.blackout.prewarning.core.Subscriptions
 import ua.blackout.prewarning.data.KYIV_ZONE
 import ua.blackout.prewarning.data.repository.AlertRegistry
-import ua.blackout.prewarning.data.repository.OutageRepository
 import ua.blackout.prewarning.data.repository.SettingsRepository
+import ua.blackout.prewarning.data.repository.SubscriptionSync
 import ua.blackout.prewarning.ui.AppStrings
 import ua.blackout.prewarning.widget.BlackoutGlanceWidget
 import java.time.Instant
@@ -1499,11 +1496,18 @@ class AlarmReceiver : BroadcastReceiver() {
         }
     }
 
+    /**
+     * Posts every planned group that starts at the alarm's span start and still has a member that
+     * was not warned (spec/SUBSCRIPTIONS.md 8.2). The plan is recomputed from the current state, so
+     * a changed schedule, queue or address list never posts a stale warning or loses a due one.
+     */
     private suspend fun handleAlert(appContext: Context, intent: Intent) {
         val settings = SettingsRepository(appContext).getSettings()
-        if (!settings.notificationsEnabled) return
+        val sync = SubscriptionSync(appContext)
+        val master = sync.master()
+        if (!master) return
+        val subs = sync.store()
 
-        val key = intent.getStringExtra(AlarmScheduler.EXTRA_KEY) ?: return
         val startMs = intent.getLongExtra(AlarmScheduler.EXTRA_SPAN_START_MS, -1L)
         if (startMs < 0L) return
         val advance = intent.getIntExtra(AlarmScheduler.EXTRA_MINUTES, settings.advanceNoticeMinutes)
@@ -1522,34 +1526,36 @@ class AlarmReceiver : BroadcastReceiver() {
             return
         }
 
-        // The span must still be part of today's plan (schedule or repair works may have changed since scheduling)
-        val snapshot = OutageRepository(appContext).snapshot(settings, now)
-        val span = OutageEngine.spans(
-            snapshot.outages.filter { !it.stale },
-            setOf(OutageKind.PLANNED, OutageKind.REPAIR)
-        ).firstOrNull { it.start == spanStart } ?: return
+        // Plan as seen a little before the alarm, so the alert that is firing now is still part of it
+        val lookback = now.minusMinutes(advance.toLong() + 3)
+        val groups = AlarmScheduler.plannedGroups(appContext, subs, master, lookback, advance)
+            .filter { it.spanStart == spanStart }
+        if (groups.isEmpty()) return
 
         val registry = AlertRegistry(appContext)
-        if (registry.hasNotified(key)) return
-        registry.markNotified(key)
-
         val lang = AppStrings.resolveLang(settings.language)
-        val body = AppStrings.plannedAlertBody(
-            lang = lang,
-            queue = settings.queue,
-            // A start is never "24:00": an outage starting at midnight reads 00:00 (spec/NOTIFICATIONS.md)
-            start = "%02d:%02d".format(span.start.hour, span.start.minute),
-            end = OutageEngine.formatSpanTime(span.end),
-            minutesLeft = ChronoUnit.MINUTES.between(now, spanStart),
-            durationMinutes = OutageEngine.minutesBetween(span.start, span.end),
-            mayContinue = span.mayContinue
-        )
-        NotificationHelper.showPreWarningNotification(
-            appContext,
-            AlarmCodes.codeFor(appContext, key),
-            AppStrings.plannedAlertTitle(lang),
-            body
-        )
+        for (group in groups) {
+            if (Subscriptions.pendingMembers(group) { registry.hasNotified(it) }.isEmpty()) continue
+            for (id in group.memberIds) registry.markNotified(Subscriptions.memberKey(id, group.spanStart))
+
+            val body = AppStrings.plannedAlertBody(
+                lang = lang,
+                queue = group.queue,
+                // A start is never "24:00": an outage starting at midnight reads 00:00 (spec/NOTIFICATIONS.md)
+                start = "%02d:%02d".format(group.spanStart.hour, group.spanStart.minute),
+                end = OutageEngine.formatSpanTime(group.spanEnd),
+                minutesLeft = ChronoUnit.MINUTES.between(now, spanStart),
+                durationMinutes = group.durationMinutes,
+                mayContinue = group.mayContinue,
+                labels = Subscriptions.alertLabels(subs, group.memberIds)
+            )
+            NotificationHelper.showPreWarningNotification(
+                appContext,
+                AlarmCodes.codeFor(appContext, group.key),
+                AppStrings.plannedAlertTitle(lang),
+                body
+            )
+        }
     }
 }
 `
@@ -14477,6 +14483,9 @@ import ua.blackout.prewarning.core.OutageKind
 import ua.blackout.prewarning.core.SiteState
 import ua.blackout.prewarning.core.StatusInfo
 import ua.blackout.prewarning.core.StreetKey
+import ua.blackout.prewarning.core.Subscription
+import ua.blackout.prewarning.core.SubscriptionStore
+import ua.blackout.prewarning.core.Subscriptions
 import ua.blackout.prewarning.data.KYIV_ZONE
 import ua.blackout.prewarning.data.model.BlackoutSlot
 import ua.blackout.prewarning.data.model.SelectedAddressQuery
@@ -14609,9 +14618,26 @@ class OutageRepository(context: Context) {
         now: LocalDateTime = LocalDateTime.now(KYIV_ZONE),
         key: String? = addressKey(settings.selectedAddressQuery)
     ): OutageSnapshot {
-        val today = now.toLocalDate()
         val q = settings.queue
+        return OutageSnapshot(
+            now = now,
+            queue = q,
+            outages = outagesFor(q, key, now),
+            plannedKnown = q.isBlank() || schedule.hasValidTodayCache(q),
+            tomorrowPublished = q.isNotBlank() && schedule.hasTomorrowSchedule(q),
+            site = store.site(),
+            poweron = store.poweron(),
+            hasAddress = key != null
+        )
+    }
 
+    /**
+     * The outages of one queue and address key (either may be absent), local state only. One ztoe
+     * fetch caches all 12 queues, so this works for every subscription (spec/SUBSCRIPTIONS.md 8.1).
+     */
+    fun outagesFor(queue: String?, key: String?, now: LocalDateTime = LocalDateTime.now(KYIV_ZONE)): List<Outage> {
+        val today = now.toLocalDate()
+        val q = queue.orEmpty()
         val planned = if (q.isNotBlank()) {
             OutageEngine.buildPlanned(today, schedule.todayOffCells(q), schedule.tomorrowOffCells(q), schedule.yesterdayOffCells(q))
         } else {
@@ -14619,17 +14645,7 @@ class OutageRepository(context: Context) {
         }
         val emergencies = if (key != null) EmergencyLedger.outages(store.ledger(key), now) else emptyList()
         val repairs = if (key != null) store.repairs(key) else emptyList()
-
-        return OutageSnapshot(
-            now = now,
-            queue = q,
-            outages = OutageEngine.inWindow(planned + repairs + emergencies, today),
-            plannedKnown = q.isBlank() || schedule.hasValidTodayCache(q),
-            tomorrowPublished = q.isNotBlank() && schedule.hasTomorrowSchedule(q),
-            site = store.site(),
-            poweron = store.poweron(),
-            hasAddress = key != null
-        )
+        return OutageEngine.inWindow(planned + repairs + emergencies, today)
     }
 
     /**
@@ -14641,13 +14657,25 @@ class OutageRepository(context: Context) {
         val nowMs = System.currentTimeMillis()
         var siteState: SiteState? = null
         var fetchStatus: FetchStatus? = null
+        val subs: Pair<SubscriptionStore, Boolean>? = try {
+            val sync = SubscriptionSync(appContext)
+            sync.store() to sync.master()
+        } catch (_: Exception) {
+            null
+        }
 
-        if (settings.queue.isNotBlank()) {
+        // One fetch caches all 12 queues. A primary without a queue still fetches for the other addresses.
+        val ztoeQueue = settings.queue.ifBlank {
+            subs?.first?.let { s -> Subscriptions.alertOrder(s).firstNotNullOfOrNull { it.queue } }.orEmpty()
+        }
+        if (ztoeQueue.isNotBlank()) {
             try {
-                val res = ZtoeParser.fetchFullSchedule(settings.cityUrl, settings.queue, appContext, forceNetwork)
-                fetchStatus = res.status
-                siteState = res.siteState
+                val res = ZtoeParser.fetchFullSchedule(settings.cityUrl, ztoeQueue, appContext, forceNetwork)
                 store.saveSite(res.siteState, nowMs, res.notice)
+                if (settings.queue.isNotBlank()) {
+                    fetchStatus = res.status
+                    siteState = res.siteState
+                }
             } catch (_: Exception) {
             }
         }
@@ -14657,34 +14685,64 @@ class OutageRepository(context: Context) {
         val query = settings.selectedAddressQuery
         val key = addressKey(query)
         if (query != null && key != null) {
-            try {
-                ZtoeAddressLookup.initDiskCache(appContext)
-                val target = buildTarget(query, key, nowMs)
-                if (target != null) {
-                    val now = LocalDateTime.now(KYIV_ZONE)
-                    val result = PowerOnClient().fetch(target, now.toLocalDate(), now)
-                    result.ids?.let { if (it.cityIds.isNotEmpty() || it.streetIds.isNotEmpty()) store.saveIds(key, it, nowMs) }
-
-                    val ledger = EmergencyLedger.reconcile(store.ledger(key), result.emergency, now)
-                    store.saveLedger(key, ledger.entries)
-                    events = ledger.events
-                    result.repairs?.let { store.saveRepairs(key, it) }
-
-                    poweronOk = result.emergency is EmergencyFetch.Confirmed
-                    store.savePowerOn(poweronOk, nowMs)
-                    if (notify && events.isNotEmpty() && settings.emergencyNotificationsEnabled) {
-                        NotificationHelper.postEmergencyEvents(appContext, settings, key, events)
-                    }
-                } else {
-                    store.savePowerOn(false, nowMs)
-                    poweronOk = false
-                }
-            } catch (_: Exception) {
-                store.savePowerOn(false, nowMs)
-                poweronOk = false
+            val polled = pollPowerOn(query, key, nowMs)
+            poweronOk = polled?.first ?: false
+            events = polled?.second.orEmpty()
+            store.savePowerOn(poweronOk, nowMs)
+            if (notify && events.isNotEmpty() && settings.emergencyNotificationsEnabled) {
+                NotificationHelper.postEmergencyEvents(appContext, settings, key, events)
             }
         }
+        if (subs != null) refreshOtherAddresses(settings, subs.first, subs.second, key, nowMs, notify)
         return RefreshOutcome(siteState, fetchStatus, poweronOk, events, snapshot(settings))
+    }
+
+    /**
+     * PowerOn for every other subscription that wants emergency alerts (spec/SUBSCRIPTIONS.md 8.4):
+     * own request, own failure, own ledger. The main screen's PowerOn status stays the primary's.
+     */
+    private fun refreshOtherAddresses(
+        settings: UserSettings,
+        subs: SubscriptionStore,
+        master: Boolean,
+        primaryKey: String?,
+        nowMs: Long,
+        notify: Boolean
+    ) {
+        if (!master) return
+        for (item in subs.items) {
+            val a = item.address ?: continue
+            if (item.id == subs.primaryId || !item.emergencyAlerts) continue
+            val key = a.key
+            if (key == primaryKey) continue
+            val polled = pollPowerOn(SelectedAddressQuery(a.remSlug, a.settlementId, a.streetId, a.house), key, nowMs) ?: continue
+            if (notify && polled.second.isNotEmpty()) {
+                NotificationHelper.postEmergencyEvents(appContext, settings, key, polled.second, addressLine(item), enabled = true)
+            }
+        }
+    }
+
+    /** Second line of an emergency notification for [item] (spec/SUBSCRIPTIONS.md 8.4). */
+    private fun addressLine(item: Subscription): String =
+        item.address?.text?.takeIf { it.isNotBlank() } ?: Subscriptions.displayLabel(item)
+
+    /** One PowerOn query: saves ids, ledger and repairs under [key]. Null when it failed or could not be built. */
+    private fun pollPowerOn(query: SelectedAddressQuery, key: String, nowMs: Long): Pair<Boolean, List<EmergencyEvent>>? = try {
+        ZtoeAddressLookup.initDiskCache(appContext)
+        val target = buildTarget(query, key, nowMs)
+        if (target == null) {
+            null
+        } else {
+            val now = LocalDateTime.now(KYIV_ZONE)
+            val result = PowerOnClient().fetch(target, now.toLocalDate(), now)
+            result.ids?.let { if (it.cityIds.isNotEmpty() || it.streetIds.isNotEmpty()) store.saveIds(key, it, nowMs) }
+            val ledger = EmergencyLedger.reconcile(store.ledger(key), result.emergency, now)
+            store.saveLedger(key, ledger.entries)
+            result.repairs?.let { store.saveRepairs(key, it) }
+            (result.emergency is EmergencyFetch.Confirmed) to ledger.events
+        }
+    } catch (_: Exception) {
+        null
     }
 
     private fun buildTarget(query: SelectedAddressQuery, key: String, nowMs: Long): PowerOnTarget? {
@@ -16070,8 +16128,8 @@ object OutageRowFormat {
     content: `package ua.blackout.prewarning.core
 
 /**
- * Multi-address subscriptions, step 1: the stored model, its repair rules, the store operations and
- * the migration from single-address settings. Specified in \`spec/SUBSCRIPTIONS.md\`, golden cases in
+ * Multi-address subscriptions: the stored model, its repair rules, the store operations, the
+ * migration from single-address settings, the primary mirror and the alert grouping. Specified in \`spec/SUBSCRIPTIONS.md\`, golden cases in
  * \`spec/vectors/subscriptions.json\`, mirrored in \`src/core/subscriptions.ts\`.
  *
  * The model is exchanged as plain maps (\`toMap\` / \`fromMap\`) so this package needs no JSON library;
@@ -16422,7 +16480,80 @@ object Subscriptions {
         val store = if (item == null) SubscriptionStore.EMPTY else SubscriptionStore(item.id, listOf(item))
         return MigrationResult(store, legacy.notificationsEnabled || legacy.emergencyNotificationsEnabled)
     }
+
+    // ---------------------------------------------------------------------------------------------
+    // Alerts for every item (section 8)
+    // ---------------------------------------------------------------------------------------------
+
+    /** The primary first, then the other items by \`createdAtMs\`, list order on ties. */
+    fun alertOrder(store: SubscriptionStore): List<Subscription> {
+        val primary = store.primary
+        val rest = store.items.withIndex()
+            .filter { it.value.id != primary?.id }
+            .sortedWith(compareBy<IndexedValue<Subscription>> { it.value.createdAtMs }.thenBy { it.index })
+            .map { it.value }
+        return listOfNotNull(primary) + rest
+    }
+
+    /** One planned alert per (queue, span start, span end) over every \`plannedActive\` item (8.1). */
+    fun groupAlerts(store: SubscriptionStore, master: Boolean, alertsById: Map<String, List<AlertSpec>>): List<PlannedGroup> {
+        data class Acc(val queue: String, val first: AlertSpec, var mayContinue: Boolean, val members: LinkedHashSet<String>)
+        val groups = LinkedHashMap<String, Acc>()
+        for (item in alertOrder(store)) {
+            if (!plannedActive(master, item)) continue
+            val queue = item.queue ?: continue
+            val alerts = alertsById[item.id] ?: continue
+            for (a in alerts) {
+                val key = "planned_q\${queue}_\${a.spanStart}_\${a.spanEnd}"
+                val acc = groups.getOrPut(key) { Acc(queue, a, false, LinkedHashSet()) }
+                acc.mayContinue = acc.mayContinue || a.mayContinue
+                acc.members.add(item.id)
+            }
+        }
+        return groups.map { (key, g) ->
+            PlannedGroup(
+                key = key,
+                queue = g.queue,
+                fireAt = g.first.fireAt,
+                spanStart = g.first.spanStart,
+                spanEnd = g.first.spanEnd,
+                mayContinue = g.mayContinue,
+                durationMinutes = g.first.durationMinutes,
+                memberIds = g.members.toList()
+            )
+        }.sortedWith(compareBy<PlannedGroup> { it.fireAt }.thenBy { it.spanStart }.thenBy { it.key })
+    }
+
+    /** Fired-registry key of one item for one span (8.2). */
+    fun memberKey(id: String, spanStart: java.time.LocalDateTime): String = "planned_\${id}_$spanStart"
+
+    /** The address-independent key 1.4.0 recorded; it counts for every item. */
+    fun legacyAlertKey(spanStart: java.time.LocalDateTime): String = "planned_$spanStart"
+
+    fun pendingMembers(group: PlannedGroup, notified: (String) -> Boolean): List<String> =
+        group.memberIds.filter { !notified(memberKey(it, group.spanStart)) && !notified(legacyAlertKey(group.spanStart)) }
+
+    /** Labels that open the planned text, or null when the store has at most one item (8.3). */
+    fun alertLabels(store: SubscriptionStore, memberIds: List<String>): String? {
+        if (store.items.size <= 1 || memberIds.isEmpty()) return null
+        val labels = memberIds.mapNotNull { id -> store.items.firstOrNull { it.id == id }?.let { displayLabel(it) } }
+        if (labels.isEmpty()) return null
+        val head = labels.take(2).joinToString(" · ")
+        return if (labels.size > 2) "$head +\${labels.size - 2}" else head
+    }
 }
+
+/** One planned pre-warning shared by every item on one queue with the same span (\`spec/SUBSCRIPTIONS.md\` 8.1). */
+data class PlannedGroup(
+    val key: String,
+    val queue: String,
+    val fireAt: java.time.LocalDateTime,
+    val spanStart: java.time.LocalDateTime,
+    val spanEnd: java.time.LocalDateTime,
+    val mayContinue: Boolean,
+    val durationMinutes: Long,
+    val memberIds: List<String>
+)
 `
   },
   {
@@ -16596,7 +16727,7 @@ import ua.blackout.prewarning.data.model.SelectedAddressQuery
  * The one way to change addresses and alert switches since multi-address step 2
  * (\`spec/SUBSCRIPTIONS.md\` section 7). Every call runs the one-time migration first, changes the
  * subscription store, then writes the primary item into the single-address keys that the main
- * screen, widgets, alarms and the worker still read. Callers sync alarms and widgets themselves.
+ * screen and widgets still read (alerts read the store, section 8). Callers sync alarms and widgets themselves.
  */
 class SubscriptionSync(context: Context) {
     private val appContext = context.applicationContext
@@ -16620,7 +16751,9 @@ class SubscriptionSync(context: Context) {
 
     fun setMaster(on: Boolean) {
         ensureReady()
+        val was = repo.alertsMaster()
         repo.setAlertsMaster(on)
+        if (was != on) settingsRepo.applyMasterSound(on)
         mirror()
     }
 

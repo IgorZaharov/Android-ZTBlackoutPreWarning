@@ -1,5 +1,5 @@
 {
- "_doc": "Golden vectors for spec/SUBSCRIPTIONS.md (multi-address store, step 1). Stores are compared as plain maps after toMap: every item map has all nine fields, address maps all six. 'addressKey' is settlementId|StreetKey|HouseKey, identical to the 1.4.0 key of ledger_*, repair_*, ids_* and emergency alert keys.",
+ "_doc": "Golden vectors for spec/SUBSCRIPTIONS.md (multi-address store and alerts, steps 1-3). Stores are compared as plain maps after toMap: every item map has all nine fields, address maps all six. 'addressKey' is settlementId|StreetKey|HouseKey, identical to the 1.4.0 key of ledger_*, repair_*, ids_* and emergency alert keys. 'fanout' (section 8): alert specs are given as engine text times; the AlertSpec key is planned_<spanStart>; 'pending' lists the pending members of each expected group, in order, for a fired registry holding 'notified'.",
  "labels": {
   "defaultLabel": [
    {
@@ -1351,5 +1351,717 @@
     "emergencyNotificationsEnabled": true
    }
   }
- ]
+ ],
+ "fanout": {
+  "alertOrder": [
+   {
+    "name": "primary first, then by createdAtMs, list order on ties",
+    "store": {
+     "schemaVersion": 1,
+     "primaryId": "cccc0003",
+     "items": [
+      {
+       "id": "aaaa0001",
+       "label": "",
+       "address": null,
+       "queue": "1.1",
+       "queueSource": "MANUAL",
+       "queueStatusText": null,
+       "plannedAlerts": true,
+       "emergencyAlerts": true,
+       "createdAtMs": 30
+      },
+      {
+       "id": "bbbb0002",
+       "label": "",
+       "address": null,
+       "queue": "1.2",
+       "queueSource": "MANUAL",
+       "queueStatusText": null,
+       "plannedAlerts": true,
+       "emergencyAlerts": true,
+       "createdAtMs": 10
+      },
+      {
+       "id": "cccc0003",
+       "label": "",
+       "address": null,
+       "queue": "2.1",
+       "queueSource": "MANUAL",
+       "queueStatusText": null,
+       "plannedAlerts": true,
+       "emergencyAlerts": true,
+       "createdAtMs": 5
+      },
+      {
+       "id": "dddd0004",
+       "label": "",
+       "address": null,
+       "queue": "2.2",
+       "queueSource": "MANUAL",
+       "queueStatusText": null,
+       "plannedAlerts": true,
+       "emergencyAlerts": true,
+       "createdAtMs": 10
+      }
+     ]
+    },
+    "expect": [
+     "cccc0003",
+     "bbbb0002",
+     "dddd0004",
+     "aaaa0001"
+    ]
+   },
+   {
+    "name": "empty store",
+    "store": {
+     "schemaVersion": 1,
+     "primaryId": null,
+     "items": []
+    },
+    "expect": []
+   }
+  ],
+  "groupAlerts": [
+   {
+    "name": "two addresses on one queue share one alert; a repair work that extends one span splits it; planned-off item skipped; groups sorted by fireAt, start, key",
+    "store": {
+     "schemaVersion": 1,
+     "primaryId": "bbbb0002",
+     "items": [
+      {
+       "id": "aaaa0001",
+       "label": "",
+       "address": {
+        "remSlug": "zhytomyr",
+        "settlementId": "16657",
+        "streetId": "st_123",
+        "streetName": "вул. Київська",
+        "house": "77",
+        "text": "Житомирський РЕМ, м. Житомир, вул. Київська, буд. 77"
+       },
+       "queue": "5.2",
+       "queueSource": "LOOKUP",
+       "queueStatusText": null,
+       "plannedAlerts": true,
+       "emergencyAlerts": true,
+       "createdAtMs": 10
+      },
+      {
+       "id": "bbbb0002",
+       "label": "",
+       "address": {
+        "remSlug": "zhytomyr",
+        "settlementId": "16657",
+        "streetId": "st_200",
+        "streetName": "вул. Соборна",
+        "house": "3",
+        "text": ""
+       },
+       "queue": "5.2",
+       "queueSource": "LOOKUP",
+       "queueStatusText": null,
+       "plannedAlerts": true,
+       "emergencyAlerts": true,
+       "createdAtMs": 20
+      },
+      {
+       "id": "cccc0003",
+       "label": "",
+       "address": null,
+       "queue": "3.1",
+       "queueSource": "MANUAL",
+       "queueStatusText": null,
+       "plannedAlerts": false,
+       "emergencyAlerts": true,
+       "createdAtMs": 5
+      },
+      {
+       "id": "dddd0004",
+       "label": "",
+       "address": null,
+       "queue": "1.1",
+       "queueSource": "MANUAL",
+       "queueStatusText": null,
+       "plannedAlerts": true,
+       "emergencyAlerts": true,
+       "createdAtMs": 30
+      }
+     ]
+    },
+    "master": true,
+    "alerts": {
+     "aaaa0001": [
+      {
+       "spanStart": "2026-11-13T23:00",
+       "spanEnd": "2026-11-14T01:00",
+       "fireAt": "2026-11-13T22:45",
+       "durationMinutes": 120,
+       "mayContinue": false
+      },
+      {
+       "spanStart": "2026-11-14T08:00",
+       "spanEnd": "2026-11-14T10:00",
+       "fireAt": "2026-11-14T07:45",
+       "durationMinutes": 120,
+       "mayContinue": false
+      }
+     ],
+     "bbbb0002": [
+      {
+       "spanStart": "2026-11-13T23:00",
+       "spanEnd": "2026-11-14T01:00",
+       "fireAt": "2026-11-13T22:45",
+       "durationMinutes": 120,
+       "mayContinue": false
+      },
+      {
+       "spanStart": "2026-11-14T08:00",
+       "spanEnd": "2026-11-14T12:00",
+       "fireAt": "2026-11-14T07:45",
+       "durationMinutes": 240,
+       "mayContinue": false
+      }
+     ],
+     "cccc0003": [
+      {
+       "spanStart": "2026-11-13T20:00",
+       "spanEnd": "2026-11-13T22:00",
+       "fireAt": "2026-11-13T19:45",
+       "durationMinutes": 120,
+       "mayContinue": false
+      }
+     ],
+     "dddd0004": [
+      {
+       "spanStart": "2026-11-13T23:00",
+       "spanEnd": "2026-11-14T00:30",
+       "fireAt": "2026-11-13T22:45",
+       "durationMinutes": 90,
+       "mayContinue": true
+      }
+     ]
+    },
+    "expect": [
+     {
+      "key": "planned_q1.1_2026-11-13T23:00_2026-11-14T00:30",
+      "queue": "1.1",
+      "spanStart": "2026-11-13T23:00",
+      "spanEnd": "2026-11-14T00:30",
+      "fireAt": "2026-11-13T22:45",
+      "durationMinutes": 90,
+      "mayContinue": true,
+      "memberIds": [
+       "dddd0004"
+      ],
+      "labels": "Черга 1.1"
+     },
+     {
+      "key": "planned_q5.2_2026-11-13T23:00_2026-11-14T01:00",
+      "queue": "5.2",
+      "spanStart": "2026-11-13T23:00",
+      "spanEnd": "2026-11-14T01:00",
+      "fireAt": "2026-11-13T22:45",
+      "durationMinutes": 120,
+      "mayContinue": false,
+      "memberIds": [
+       "bbbb0002",
+       "aaaa0001"
+      ],
+      "labels": "Соборна 3 · Київська 77"
+     },
+     {
+      "key": "planned_q5.2_2026-11-14T08:00_2026-11-14T10:00",
+      "queue": "5.2",
+      "spanStart": "2026-11-14T08:00",
+      "spanEnd": "2026-11-14T10:00",
+      "fireAt": "2026-11-14T07:45",
+      "durationMinutes": 120,
+      "mayContinue": false,
+      "memberIds": [
+       "aaaa0001"
+      ],
+      "labels": "Київська 77"
+     },
+     {
+      "key": "planned_q5.2_2026-11-14T08:00_2026-11-14T12:00",
+      "queue": "5.2",
+      "spanStart": "2026-11-14T08:00",
+      "spanEnd": "2026-11-14T12:00",
+      "fireAt": "2026-11-14T07:45",
+      "durationMinutes": 240,
+      "mayContinue": false,
+      "memberIds": [
+       "bbbb0002"
+      ],
+      "labels": "Соборна 3"
+     }
+    ],
+    "pending": [
+     {
+      "notified": [],
+      "expect": [
+       [
+        "dddd0004"
+       ],
+       [
+        "bbbb0002",
+        "aaaa0001"
+       ],
+       [
+        "aaaa0001"
+       ],
+       [
+        "bbbb0002"
+       ]
+      ]
+     },
+     {
+      "notified": [
+       "planned_bbbb0002_2026-11-13T23:00"
+      ],
+      "expect": [
+       [
+        "dddd0004"
+       ],
+       [
+        "aaaa0001"
+       ],
+       [
+        "aaaa0001"
+       ],
+       [
+        "bbbb0002"
+       ]
+      ]
+     },
+     {
+      "notified": [
+       "planned_2026-11-13T23:00",
+       "planned_aaaa0001_2026-11-14T08:00"
+      ],
+      "expect": [
+       [],
+       [],
+       [],
+       [
+        "bbbb0002"
+       ]
+      ]
+     }
+    ]
+   },
+   {
+    "name": "master off gives no alerts at all",
+    "store": {
+     "schemaVersion": 1,
+     "primaryId": "bbbb0002",
+     "items": [
+      {
+       "id": "aaaa0001",
+       "label": "",
+       "address": {
+        "remSlug": "zhytomyr",
+        "settlementId": "16657",
+        "streetId": "st_123",
+        "streetName": "вул. Київська",
+        "house": "77",
+        "text": "Житомирський РЕМ, м. Житомир, вул. Київська, буд. 77"
+       },
+       "queue": "5.2",
+       "queueSource": "LOOKUP",
+       "queueStatusText": null,
+       "plannedAlerts": true,
+       "emergencyAlerts": true,
+       "createdAtMs": 10
+      },
+      {
+       "id": "bbbb0002",
+       "label": "",
+       "address": {
+        "remSlug": "zhytomyr",
+        "settlementId": "16657",
+        "streetId": "st_200",
+        "streetName": "вул. Соборна",
+        "house": "3",
+        "text": ""
+       },
+       "queue": "5.2",
+       "queueSource": "LOOKUP",
+       "queueStatusText": null,
+       "plannedAlerts": true,
+       "emergencyAlerts": true,
+       "createdAtMs": 20
+      },
+      {
+       "id": "cccc0003",
+       "label": "",
+       "address": null,
+       "queue": "3.1",
+       "queueSource": "MANUAL",
+       "queueStatusText": null,
+       "plannedAlerts": false,
+       "emergencyAlerts": true,
+       "createdAtMs": 5
+      },
+      {
+       "id": "dddd0004",
+       "label": "",
+       "address": null,
+       "queue": "1.1",
+       "queueSource": "MANUAL",
+       "queueStatusText": null,
+       "plannedAlerts": true,
+       "emergencyAlerts": true,
+       "createdAtMs": 30
+      }
+     ]
+    },
+    "master": false,
+    "alerts": {
+     "aaaa0001": [
+      {
+       "spanStart": "2026-11-13T23:00",
+       "spanEnd": "2026-11-14T01:00",
+       "fireAt": "2026-11-13T22:45",
+       "durationMinutes": 120,
+       "mayContinue": false
+      },
+      {
+       "spanStart": "2026-11-14T08:00",
+       "spanEnd": "2026-11-14T10:00",
+       "fireAt": "2026-11-14T07:45",
+       "durationMinutes": 120,
+       "mayContinue": false
+      }
+     ],
+     "bbbb0002": [
+      {
+       "spanStart": "2026-11-13T23:00",
+       "spanEnd": "2026-11-14T01:00",
+       "fireAt": "2026-11-13T22:45",
+       "durationMinutes": 120,
+       "mayContinue": false
+      },
+      {
+       "spanStart": "2026-11-14T08:00",
+       "spanEnd": "2026-11-14T12:00",
+       "fireAt": "2026-11-14T07:45",
+       "durationMinutes": 240,
+       "mayContinue": false
+      }
+     ],
+     "cccc0003": [
+      {
+       "spanStart": "2026-11-13T20:00",
+       "spanEnd": "2026-11-13T22:00",
+       "fireAt": "2026-11-13T19:45",
+       "durationMinutes": 120,
+       "mayContinue": false
+      }
+     ],
+     "dddd0004": [
+      {
+       "spanStart": "2026-11-13T23:00",
+       "spanEnd": "2026-11-14T00:30",
+       "fireAt": "2026-11-13T22:45",
+       "durationMinutes": 90,
+       "mayContinue": true
+      }
+     ]
+    },
+    "expect": [],
+    "pending": []
+   },
+   {
+    "name": "an item without a queue and an item without an alerts entry are skipped; a single item keeps the 1.4.0 text (no labels)",
+    "store": {
+     "schemaVersion": 1,
+     "primaryId": "aaaa0001",
+     "items": [
+      {
+       "id": "aaaa0001",
+       "label": "",
+       "address": {
+        "remSlug": "zhytomyr",
+        "settlementId": "16657",
+        "streetId": "st_123",
+        "streetName": "вул. Київська",
+        "house": "77",
+        "text": "Житомирський РЕМ, м. Житомир, вул. Київська, буд. 77"
+       },
+       "queue": "4.1",
+       "queueSource": "LOOKUP",
+       "queueStatusText": null,
+       "plannedAlerts": true,
+       "emergencyAlerts": true,
+       "createdAtMs": 1
+      }
+     ]
+    },
+    "master": true,
+    "alerts": {
+     "aaaa0001": [
+      {
+       "spanStart": "2026-11-13T10:00",
+       "spanEnd": "2026-11-13T11:30",
+       "fireAt": "2026-11-13T09:45",
+       "durationMinutes": 90,
+       "mayContinue": false
+      }
+     ],
+     "zzzz9999": [
+      {
+       "spanStart": "2026-11-13T23:00",
+       "spanEnd": "2026-11-14T01:00",
+       "fireAt": "2026-11-13T22:45",
+       "durationMinutes": 120,
+       "mayContinue": false
+      }
+     ]
+    },
+    "expect": [
+     {
+      "key": "planned_q4.1_2026-11-13T10:00_2026-11-13T11:30",
+      "queue": "4.1",
+      "spanStart": "2026-11-13T10:00",
+      "spanEnd": "2026-11-13T11:30",
+      "fireAt": "2026-11-13T09:45",
+      "durationMinutes": 90,
+      "mayContinue": false,
+      "memberIds": [
+       "aaaa0001"
+      ],
+      "labels": null
+     }
+    ],
+    "pending": [
+     {
+      "notified": [
+       "planned_2026-11-13T10:00"
+      ],
+      "expect": [
+       []
+      ]
+     }
+    ]
+   },
+   {
+    "name": "address item without a queue is never plannedActive",
+    "store": {
+     "schemaVersion": 1,
+     "primaryId": "aaaa0001",
+     "items": [
+      {
+       "id": "aaaa0001",
+       "label": "",
+       "address": {
+        "remSlug": "zhytomyr",
+        "settlementId": "16657",
+        "streetId": "st_123",
+        "streetName": "вул. Київська",
+        "house": "77",
+        "text": "Житомирський РЕМ, м. Житомир, вул. Київська, буд. 77"
+       },
+       "queue": null,
+       "queueSource": "LOOKUP",
+       "queueStatusText": null,
+       "plannedAlerts": true,
+       "emergencyAlerts": true,
+       "createdAtMs": 1
+      },
+      {
+       "id": "bbbb0002",
+       "label": "",
+       "address": null,
+       "queue": "6.2",
+       "queueSource": "MANUAL",
+       "queueStatusText": null,
+       "plannedAlerts": true,
+       "emergencyAlerts": true,
+       "createdAtMs": 2
+      }
+     ]
+    },
+    "master": true,
+    "alerts": {
+     "aaaa0001": [
+      {
+       "spanStart": "2026-11-13T23:00",
+       "spanEnd": "2026-11-14T01:00",
+       "fireAt": "2026-11-13T22:45",
+       "durationMinutes": 120,
+       "mayContinue": false
+      }
+     ],
+     "bbbb0002": [
+      {
+       "spanStart": "2026-11-13T23:00",
+       "spanEnd": "2026-11-14T01:00",
+       "fireAt": "2026-11-13T22:45",
+       "durationMinutes": 120,
+       "mayContinue": false
+      }
+     ]
+    },
+    "expect": [
+     {
+      "key": "planned_q6.2_2026-11-13T23:00_2026-11-14T01:00",
+      "queue": "6.2",
+      "spanStart": "2026-11-13T23:00",
+      "spanEnd": "2026-11-14T01:00",
+      "fireAt": "2026-11-13T22:45",
+      "durationMinutes": 120,
+      "mayContinue": false,
+      "memberIds": [
+       "bbbb0002"
+      ],
+      "labels": "Черга 6.2"
+     }
+    ],
+    "pending": []
+   }
+  ],
+  "alertLabels": [
+   {
+    "name": "three or more members: two labels and the rest as a count",
+    "store": {
+     "schemaVersion": 1,
+     "primaryId": "aaaa0001",
+     "items": [
+      {
+       "id": "aaaa0001",
+       "label": "",
+       "address": {
+        "remSlug": "zhytomyr",
+        "settlementId": "16657",
+        "streetId": "st_123",
+        "streetName": "вул. Київська",
+        "house": "77",
+        "text": "Житомирський РЕМ, м. Житомир, вул. Київська, буд. 77"
+       },
+       "queue": "2.1",
+       "queueSource": "LOOKUP",
+       "queueStatusText": null,
+       "plannedAlerts": true,
+       "emergencyAlerts": true,
+       "createdAtMs": 0
+      },
+      {
+       "id": "bbbb0002",
+       "label": "",
+       "address": {
+        "remSlug": "zhytomyr",
+        "settlementId": "16657",
+        "streetId": "st_200",
+        "streetName": "вул. Соборна",
+        "house": "3",
+        "text": ""
+       },
+       "queue": "2.1",
+       "queueSource": "LOOKUP",
+       "queueStatusText": null,
+       "plannedAlerts": true,
+       "emergencyAlerts": true,
+       "createdAtMs": 0
+      },
+      {
+       "id": "cccc0003",
+       "label": "",
+       "address": {
+        "remSlug": "zhytomyr",
+        "settlementId": "16657",
+        "streetId": "st_300",
+        "streetName": "вул. Лісова",
+        "house": "9",
+        "text": ""
+       },
+       "queue": "2.1",
+       "queueSource": "LOOKUP",
+       "queueStatusText": null,
+       "plannedAlerts": true,
+       "emergencyAlerts": false,
+       "createdAtMs": 0
+      },
+      {
+       "id": "dddd0004",
+       "label": "Дача",
+       "address": null,
+       "queue": "2.2",
+       "queueSource": "MANUAL",
+       "queueStatusText": null,
+       "plannedAlerts": true,
+       "emergencyAlerts": true,
+       "createdAtMs": 0
+      }
+     ]
+    },
+    "cases": [
+     {
+      "memberIds": [
+       "aaaa0001",
+       "bbbb0002",
+       "cccc0003"
+      ],
+      "expect": "Київська 77 · Соборна 3 +1"
+     },
+     {
+      "memberIds": [
+       "dddd0004",
+       "aaaa0001",
+       "bbbb0002",
+       "cccc0003"
+      ],
+      "expect": "Дача · Київська 77 +2"
+     },
+     {
+      "memberIds": [
+       "cccc0003"
+      ],
+      "expect": "Лісова 9"
+     },
+     {
+      "memberIds": [],
+      "expect": null
+     }
+    ]
+   },
+   {
+    "name": "one item in the store: no labels",
+    "store": {
+     "schemaVersion": 1,
+     "primaryId": "aaaa0001",
+     "items": [
+      {
+       "id": "aaaa0001",
+       "label": "",
+       "address": {
+        "remSlug": "zhytomyr",
+        "settlementId": "16657",
+        "streetId": "st_123",
+        "streetName": "вул. Київська",
+        "house": "77",
+        "text": "Житомирський РЕМ, м. Житомир, вул. Київська, буд. 77"
+       },
+       "queue": "2.1",
+       "queueSource": "LOOKUP",
+       "queueStatusText": null,
+       "plannedAlerts": true,
+       "emergencyAlerts": true,
+       "createdAtMs": 0
+      }
+     ]
+    },
+    "cases": [
+     {
+      "memberIds": [
+       "aaaa0001"
+      ],
+      "expect": null
+     }
+    ]
+   }
+  ]
+ }
 }

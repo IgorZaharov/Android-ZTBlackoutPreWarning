@@ -1,8 +1,8 @@
 package ua.blackout.prewarning.core
 
 /**
- * Multi-address subscriptions, step 1: the stored model, its repair rules, the store operations and
- * the migration from single-address settings. Specified in `spec/SUBSCRIPTIONS.md`, golden cases in
+ * Multi-address subscriptions: the stored model, its repair rules, the store operations, the
+ * migration from single-address settings, the primary mirror and the alert grouping. Specified in `spec/SUBSCRIPTIONS.md`, golden cases in
  * `spec/vectors/subscriptions.json`, mirrored in `src/core/subscriptions.ts`.
  *
  * The model is exchanged as plain maps (`toMap` / `fromMap`) so this package needs no JSON library;
@@ -353,4 +353,77 @@ object Subscriptions {
         val store = if (item == null) SubscriptionStore.EMPTY else SubscriptionStore(item.id, listOf(item))
         return MigrationResult(store, legacy.notificationsEnabled || legacy.emergencyNotificationsEnabled)
     }
+
+    // ---------------------------------------------------------------------------------------------
+    // Alerts for every item (section 8)
+    // ---------------------------------------------------------------------------------------------
+
+    /** The primary first, then the other items by `createdAtMs`, list order on ties. */
+    fun alertOrder(store: SubscriptionStore): List<Subscription> {
+        val primary = store.primary
+        val rest = store.items.withIndex()
+            .filter { it.value.id != primary?.id }
+            .sortedWith(compareBy<IndexedValue<Subscription>> { it.value.createdAtMs }.thenBy { it.index })
+            .map { it.value }
+        return listOfNotNull(primary) + rest
+    }
+
+    /** One planned alert per (queue, span start, span end) over every `plannedActive` item (8.1). */
+    fun groupAlerts(store: SubscriptionStore, master: Boolean, alertsById: Map<String, List<AlertSpec>>): List<PlannedGroup> {
+        data class Acc(val queue: String, val first: AlertSpec, var mayContinue: Boolean, val members: LinkedHashSet<String>)
+        val groups = LinkedHashMap<String, Acc>()
+        for (item in alertOrder(store)) {
+            if (!plannedActive(master, item)) continue
+            val queue = item.queue ?: continue
+            val alerts = alertsById[item.id] ?: continue
+            for (a in alerts) {
+                val key = "planned_q${queue}_${a.spanStart}_${a.spanEnd}"
+                val acc = groups.getOrPut(key) { Acc(queue, a, false, LinkedHashSet()) }
+                acc.mayContinue = acc.mayContinue || a.mayContinue
+                acc.members.add(item.id)
+            }
+        }
+        return groups.map { (key, g) ->
+            PlannedGroup(
+                key = key,
+                queue = g.queue,
+                fireAt = g.first.fireAt,
+                spanStart = g.first.spanStart,
+                spanEnd = g.first.spanEnd,
+                mayContinue = g.mayContinue,
+                durationMinutes = g.first.durationMinutes,
+                memberIds = g.members.toList()
+            )
+        }.sortedWith(compareBy<PlannedGroup> { it.fireAt }.thenBy { it.spanStart }.thenBy { it.key })
+    }
+
+    /** Fired-registry key of one item for one span (8.2). */
+    fun memberKey(id: String, spanStart: java.time.LocalDateTime): String = "planned_${id}_$spanStart"
+
+    /** The address-independent key 1.4.0 recorded; it counts for every item. */
+    fun legacyAlertKey(spanStart: java.time.LocalDateTime): String = "planned_$spanStart"
+
+    fun pendingMembers(group: PlannedGroup, notified: (String) -> Boolean): List<String> =
+        group.memberIds.filter { !notified(memberKey(it, group.spanStart)) && !notified(legacyAlertKey(group.spanStart)) }
+
+    /** Labels that open the planned text, or null when the store has at most one item (8.3). */
+    fun alertLabels(store: SubscriptionStore, memberIds: List<String>): String? {
+        if (store.items.size <= 1 || memberIds.isEmpty()) return null
+        val labels = memberIds.mapNotNull { id -> store.items.firstOrNull { it.id == id }?.let { displayLabel(it) } }
+        if (labels.isEmpty()) return null
+        val head = labels.take(2).joinToString(" · ")
+        return if (labels.size > 2) "$head +${labels.size - 2}" else head
+    }
 }
+
+/** One planned pre-warning shared by every item on one queue with the same span (`spec/SUBSCRIPTIONS.md` 8.1). */
+data class PlannedGroup(
+    val key: String,
+    val queue: String,
+    val fireAt: java.time.LocalDateTime,
+    val spanStart: java.time.LocalDateTime,
+    val spanEnd: java.time.LocalDateTime,
+    val mayContinue: Boolean,
+    val durationMinutes: Long,
+    val memberIds: List<String>
+)

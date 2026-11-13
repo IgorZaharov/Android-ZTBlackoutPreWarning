@@ -2282,7 +2282,7 @@ async function runUnitTestE_AddressLookupAndUnsetQueue() {
   const { SubscriptionSync } = await import('../src/services/subscriptionSync');
   const { SubscriptionRepository } = await import('../src/services/subscriptionStore');
   const { createMemoryStorage } = await import('../src/services/storage');
-  const { setEmergency: setSubscriptionEmergency } = await import('../src/core/subscriptions');
+  const { setEmergency: setSubscriptionEmergency, setPlanned: setSubscriptionPlanned } = await import('../src/core/subscriptions');
 
   const read = (rel: string) => fs.readFileSync(path.join(ROOT_DIR, rel), 'utf-8');
   const KT = 'android/app/src/main/java/ua/blackout/prewarning/';
@@ -2420,12 +2420,18 @@ async function runUnitTestE_AddressLookupAndUnsetQueue() {
     0,
     'No emergency notification while the address switch for emergencies is OFF'
   );
+  // Since multi-address step 3 sound and vibration follow the master only: both switches of the primary off keep them
+  const afterAddressBothOff = subSync.change(afterAddressEmergencyOff, (st) => setSubscriptionPlanned(st, primaryId, false)).settings;
+  assert.equal(afterAddressBothOff.notificationsEnabled, false);
+  assert.equal(afterAddressBothOff.soundEnabled, true, 'Item switches never mute sound (spec/SUBSCRIPTIONS.md section 7)');
   const notificationHelperKt = read(KT + 'notification/NotificationHelper.kt');
   assert.ok(
-    notificationHelperKt.includes('if (!settings.emergencyNotificationsEnabled || events.isEmpty()) return') &&
-      notificationHelperKt.includes('settings.emergencyNotificationsEnabled && settings.soundEnabled') &&
-      notificationHelperKt.includes('settings.emergencyNotificationsEnabled && settings.vibrationEnabled'),
-    'NotificationHelper.kt must gate emergency events by emergencyNotificationsEnabled only and respect Sound / Vibration'
+    notificationHelperKt.includes('enabled: Boolean = settings.emergencyNotificationsEnabled') &&
+      notificationHelperKt.includes('if (!enabled || events.isEmpty()) return') &&
+      notificationHelperKt.includes('if (!master && !isTest) return') &&
+      notificationHelperKt.includes('val activeSound = master && settings.soundEnabled') &&
+      notificationHelperKt.includes('val activeVibe = master && settings.vibrationEnabled'),
+    'NotificationHelper.kt must gate emergency events by the master and the address switch and respect Sound / Vibration'
   );
 
   // 6. "?" window: exact subtitle, searchable pickers, emergency switch block, 40 dp help button

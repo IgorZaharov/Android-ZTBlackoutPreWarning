@@ -37,7 +37,7 @@ import {
 } from '../src/core/subscriptions';
 import { ScheduleCache } from '../src/services/scheduleCache';
 import { OutageStateStore } from '../src/services/outageStore';
-import { OutageRepository, type AddressResolver } from '../src/services/outageRepository';
+import { OutageRepository, type AddressEvents, type AddressResolver } from '../src/services/outageRepository';
 import {
   classifyFetchFailure,
   applyEmergencyOutageToSchedule,
@@ -63,6 +63,7 @@ import {
 import {
   DEFAULT_SETTINGS,
   checkAndTriggerAdvanceAlert,
+  checkAndTriggerGroupedAlerts,
   checkAndTriggerPlannedAlerts,
   clearNotifiedHistory,
   formatWhen,
@@ -360,12 +361,13 @@ const settings22: UserSettings = {
   selectedAddressQuery: { remId: 'zhytomyr', settlementId: 'zt_city', streetId: 'zt_kyivska', house: '37' },
 };
 
-function makeRepo() {
+function makeRepo(subscriptions?: () => { store: SubscriptionStore; master: boolean }) {
   const clock = { ms: kyivMs('2026-11-12T22:30') };
   const online = { value: true };
   const ztoe = { html: PAGE_12_AND_13 as string | null };
   const poweron = { accidents: [] as string[], fail: false };
   const notified: { key: string; events: readonly EmergencyEvent[] }[] = [];
+  const notifiedOther: AddressEvents[] = [];
   const http: HttpGet = async (url) => {
     if (poweron.fail) throw new Error('network down');
     if (url.includes('pw_cities')) return '[{"id":333,"name":"Житомир"}]';
@@ -381,6 +383,8 @@ function makeRepo() {
     address: KYIVSKA,
     nowMs: () => clock.ms,
     notify: (_s, key, events) => void notified.push({ key, events }),
+    subscriptions: subscriptions ?? (() => ({ store: { primaryId: null, items: [] }, master: true })),
+    notifyOther: (_s, other) => void notifiedOther.push(other),
     ztoeOptions: {
       isOnline: () => online.value,
       fetchHtml: async () => {
@@ -389,7 +393,7 @@ function makeRepo() {
       },
     },
   });
-  return { repo, clock, online, ztoe, poweron, notified };
+  return { repo, clock, online, ztoe, poweron, notified, notifiedOther };
 }
 
 const ACCIDENT_22_00_TO_23_30 = accident(1, 'вул. Київська', 'Житомир', '35, 37, 39', '2026-11-12T22:00:00+00:00', '2026-11-12T23:30:00+00:00');
@@ -764,6 +768,104 @@ test('alerts: legacy checkAndTriggerAdvanceAlert is engine based (one notificati
   clearNotifiedHistory();
 });
 
+const kyivAddr = (house: string): SubscriptionAddress => ({
+  remSlug: 'zhytomyr',
+  settlementId: 'zt_city',
+  streetId: 'zt_kyivska',
+  streetName: 'вул. Київська',
+  house,
+  text: '',
+});
+
+test('alerts: one merged warning per queue and span for every address (spec/SUBSCRIPTIONS.md 8)', () => {
+  clearNotifiedHistory();
+  const store: SubscriptionStore = {
+    primaryId: 'aaaa0001',
+    items: [
+      makeSubscription('aaaa0001', { address: kyivAddr('37'), queue: '2.2', queueSource: 'LOOKUP', createdAtMs: 1 }),
+      makeSubscription('aaaa0002', { address: kyivAddr('39'), queue: '2.2', queueSource: 'LOOKUP', createdAtMs: 2 }),
+      makeSubscription('aaaa0003', { queue: '1.1', createdAtMs: 3 }),
+      makeSubscription('aaaa0004', { queue: '3.1', plannedAlerts: false, createdAtMs: 4 }),
+    ],
+  };
+  const day = parseLocalDate('2026-11-13');
+  const cells = (from: number, to: number) => Array.from({ length: 48 }, (_, i) => i >= from && i < to);
+  const outagesFor = (queue: string | null) =>
+    queue === '2.2' ? planned14to16() : queue === '1.1' ? buildPlanned(day, cells(28, 30), null) : queue === '3.1' ? planned14to16() : [];
+
+  assert.deepEqual(checkAndTriggerGroupedAlerts(store, true, outagesFor, dt('2026-11-13T13:44'), alertSettings, 'uk'), []);
+  const fired = checkAndTriggerGroupedAlerts(store, true, outagesFor, dt('2026-11-13T13:45'), alertSettings, 'uk');
+  assert.deepEqual(
+    fired.map((r) => r.message),
+    [
+      `Черга 1.1: відключення о 14:00 (через 15${NBSP}хв), орієнтовно до 15:00 (1${NBSP}год).`,
+      `Київська 37 · Київська 39 (черга 2.2): відключення о 14:00 (через 15${NBSP}хв), орієнтовно до 16:00 (2${NBSP}год).`,
+    ],
+    'two addresses on queue 2.2 share one warning; the planned-off address on 3.1 gets none'
+  );
+  assert.deepEqual(fired.map((r) => r.slotId), ['planned_q1.1_2026-11-13T14:00_2026-11-13T15:00', 'planned_q2.2_2026-11-13T14:00_2026-11-13T16:00']);
+  assert.deepEqual(checkAndTriggerGroupedAlerts(store, true, outagesFor, dt('2026-11-13T13:47'), alertSettings, 'uk'), [], 'never twice');
+
+  // posting marked every member: after removing the primary the other address is not warned again
+  const without = { primaryId: 'aaaa0002', items: store.items.filter((i) => i.id !== 'aaaa0001') };
+  assert.deepEqual(checkAndTriggerGroupedAlerts(without, true, outagesFor, dt('2026-11-13T13:48'), alertSettings, 'uk'), []);
+
+  // a warning recorded by 1.4.0 (the address-independent key planned_<start>) counts for every address
+  // with a span starting then, on any queue (8.2), so nothing repeats right after the update
+  clearNotifiedHistory();
+  assert.equal(checkAndTriggerPlannedAlerts(planned14to16(), dt('2026-11-13T13:45'), alertSettings, 'uk').length, 1);
+  assert.deepEqual(checkAndTriggerGroupedAlerts(store, true, outagesFor, dt('2026-11-13T13:46'), alertSettings, 'uk'), []);
+
+  // the master switch silences everything
+  clearNotifiedHistory();
+  assert.deepEqual(checkAndTriggerGroupedAlerts(store, false, outagesFor, dt('2026-11-13T13:45'), alertSettings, 'uk'), []);
+  // one address only: the 1.4.0 text
+  const single = { primaryId: 'aaaa0001', items: store.items.slice(0, 1) };
+  const one = checkAndTriggerGroupedAlerts(single, true, outagesFor, dt('2026-11-13T13:45'), alertSettings, 'en');
+  assert.equal(one.length, 1);
+  assert.ok(one[0].message.startsWith('Queue 2.2: outage at 14:00'), one[0].message);
+  clearNotifiedHistory();
+});
+
+test('repository: emergencies are polled for every address that wants them, each with its own ledger', async () => {
+  const store: SubscriptionStore = {
+    primaryId: 'aaaa0001',
+    items: [
+      makeSubscription('aaaa0001', { address: kyivAddr('37'), queue: '2.2', queueSource: 'LOOKUP', createdAtMs: 1 }),
+      makeSubscription('aaaa0002', { address: { ...kyivAddr('39'), text: 'м. Житомир, вул. Київська, 39' }, queue: '2.2', queueSource: 'LOOKUP', createdAtMs: 2 }),
+      makeSubscription('aaaa0003', { address: kyivAddr('41'), queue: '2.2', queueSource: 'LOOKUP', createdAtMs: 3 }),
+      makeSubscription('aaaa0004', { address: kyivAddr('35'), queue: '2.2', queueSource: 'LOOKUP', emergencyAlerts: false, createdAtMs: 4 }),
+    ],
+  };
+  const master = { value: true };
+  const { repo, poweron, notified, notifiedOther } = makeRepo(() => ({ store, master: master.value }));
+  poweron.accidents.push(ACCIDENT_22_00_TO_23_30);
+  const out = await repo.refresh(settings22);
+  assert.deepEqual(out.events.map((e) => e.kind), ['START'], 'the primary as before');
+  assert.equal(notified.length, 1);
+  // 39 is in the outage list (35, 37, 39), 41 is not, 35 has its emergency switch off
+  assert.deepEqual(out.otherEvents.map((o) => [o.itemId, o.addressKey, o.addressLine, o.events.map((e) => e.kind)]), [
+    ['aaaa0002', 'zt_city|' + 'byл kиїbcьka' + '|39', 'м. Житомир, вул. Київська, 39', ['START']],
+  ]);
+  assert.equal(notifiedOther.length, 1);
+  assert.equal(out.snapshot.poweron?.ok, true, 'the status line is the primary fetch');
+  // its own ledger: the second refresh announces nothing new
+  const again = await repo.refresh(settings22);
+  assert.deepEqual(again.otherEvents, []);
+
+  // a primary without a queue ("не вимикається") still fetches ztoe for the other addresses
+  const noQueue = makeRepo(() => ({ store, master: true }));
+  const primaryNoQueue = await noQueue.repo.refresh({ ...settings22, queue: '' });
+  assert.equal(primaryNoQueue.fetchStatus, null, 'the primary itself has no table to report');
+  assert.ok(noQueue.repo.outagesFor('2.2', null).length > 0, 'queue 2.2 is cached for the other addresses');
+
+  // the master switch stops polling the other addresses
+  master.value = false;
+  poweron.accidents.length = 0;
+  const off = await repo.refresh(settings22);
+  assert.deepEqual(off.otherEvents, [], 'no END for an address while the master is off');
+});
+
 const ev = (kind: EmergencyEvent['kind'], start: string, eta: string | null, extra: Partial<EmergencyEvent> = {}): EmergencyEvent => ({
   kind,
   entryId: 'pw_x',
@@ -782,7 +884,7 @@ test('alerts: emergency events use their own switch, dedupe keys and the Android
   assert.equal(eventKey(events[0], key), 'emerg_start_zt_city|key|37_2026-11-13T17:30');
   assert.equal(eventKey(events[1], key), 'emerg_change_zt_city|key|37_2026-11-13T17:30_2026-11-13T20:00');
 
-  // the master switch does not affect emergency alerts; the emergency switch does
+  // the primary's gate is emergencyNotificationsEnabled (= master AND its emergency switch); the planned switch does not matter
   const off = { ...alertSettings, emergencyNotificationsEnabled: false, notificationsEnabled: true };
   assert.deepEqual(triggerEmergencyEventAlerts(events, key, off, 'uk', now), []);
   const onlyEmergency = { ...alertSettings, notificationsEnabled: false, emergencyNotificationsEnabled: true, selectedAddress: 'м. Житомир,\nвул. Київська, 37' };

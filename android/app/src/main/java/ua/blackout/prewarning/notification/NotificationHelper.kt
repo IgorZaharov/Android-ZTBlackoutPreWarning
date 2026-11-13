@@ -22,6 +22,7 @@ import ua.blackout.prewarning.data.KYIV_ZONE
 import ua.blackout.prewarning.data.model.UserSettings
 import ua.blackout.prewarning.data.repository.AlertRegistry
 import ua.blackout.prewarning.data.repository.SettingsRepository
+import ua.blackout.prewarning.data.repository.SubscriptionSync
 import ua.blackout.prewarning.ui.AppStrings
 import java.time.LocalDate
 import java.time.LocalDateTime
@@ -163,14 +164,17 @@ object NotificationHelper {
         context: Context,
         settings: UserSettings,
         addressKey: String,
-        events: List<EmergencyEvent>
+        events: List<EmergencyEvent>,
+        // Default: the primary address (mirrored settings); another subscription passes its own (spec/SUBSCRIPTIONS.md 8.4)
+        addressLine: String? = settings.selectedAddress,
+        enabled: Boolean = settings.emergencyNotificationsEnabled
     ) {
-        if (!settings.emergencyNotificationsEnabled || events.isEmpty()) return
+        if (!enabled || events.isEmpty()) return
         val appContext = context.applicationContext
         val lang = AppStrings.resolveLang(settings.language)
         val today = LocalDate.now(KYIV_ZONE)
         val registry = AlertRegistry(appContext)
-        val address = settings.selectedAddress?.replace("\n", " ")?.takeIf { it.isNotBlank() }
+        val address = addressLine?.replace("\n", " ")?.takeIf { it.isNotBlank() }
 
         for (ev in events) {
             val key = ev.key(addressKey)
@@ -224,24 +228,17 @@ object NotificationHelper {
         isEmergencyAlert: Boolean = false
     ) {
         val settings = SettingsRepository(context).getSettings()
+        // The master switch silences every alert (owner decision 1); the per-address switches were
+        // checked by the caller (spec/SUBSCRIPTIONS.md section 8). A test notification still shows.
+        val master = try {
+            SubscriptionSync(context).master()
+        } catch (_: Exception) {
+            settings.notificationsEnabled || settings.emergencyNotificationsEnabled
+        }
+        if (!master && !isTest) return
 
-        // If notifications are disabled globally in the app, do NOT send unless this is an explicit Test or an enabled Emergency Alert
-        if (isEmergencyAlert) {
-            if (!settings.emergencyNotificationsEnabled) return
-        } else if (!settings.notificationsEnabled && !isTest) {
-            return
-        }
-
-        val activeSound = if (isEmergencyAlert) {
-            settings.emergencyNotificationsEnabled && settings.soundEnabled
-        } else {
-            settings.notificationsEnabled && settings.soundEnabled
-        }
-        val activeVibe = if (isEmergencyAlert) {
-            settings.emergencyNotificationsEnabled && settings.vibrationEnabled
-        } else {
-            settings.notificationsEnabled && settings.vibrationEnabled
-        }
+        val activeSound = master && settings.soundEnabled
+        val activeVibe = master && settings.vibrationEnabled
 
         createNotificationChannels(context)
 

@@ -2,7 +2,8 @@
  * Web port of android/.../data/repository/SubscriptionSync.kt (multi-address step 2,
  * spec/SUBSCRIPTIONS.md section 7): the one way to change addresses and alert switches. Every call
  * runs the one-time migration first, changes the subscription store, then returns the UserSettings with
- * the primary item mirrored into the single-address fields that the main view, widgets and alerts read.
+ * the primary item mirrored into the single-address fields that the main view and widgets read (alerts read
+ * the store, section 8).
  * Callers save the returned settings.
  */
 import {
@@ -47,17 +48,24 @@ export function legacyFromSettings(s: UserSettings, streetName: string | null): 
 }
 
 /**
- * Writes the mirror into the settings. Sound and vibration keep the 1.4.0 rule: remembered and switched
- * off when both alert switches go off, restored when one comes back on (as SettingsRepository.applyPrimaryMirror).
+ * Sound and vibration follow the alerts master switch (spec/SUBSCRIPTIONS.md section 7): off remembers
+ * and mutes them, on restores them (as SettingsRepository.applyMasterSound). Only for a real change.
+ */
+export function applyMasterSound(s: UserSettings, masterOn: boolean): UserSettings {
+  if (masterOn) return { ...s, soundEnabled: s.prevSoundEnabled ?? true, vibrationEnabled: s.prevVibrationEnabled ?? true };
+  return { ...s, prevSoundEnabled: s.soundEnabled, prevVibrationEnabled: s.vibrationEnabled, soundEnabled: false, vibrationEnabled: false };
+}
+
+/**
+ * Writes the mirror into the settings (as SettingsRepository.applyPrimaryMirror). Sound and vibration are
+ * untouched: they follow the master switch ([applyMasterSound]).
  */
 export function applyPrimaryMirror(s: UserSettings, m: LegacyMirror, master: boolean): UserSettings {
-  const anyWas = Boolean(s.notificationsEnabled || (s.emergencyNotificationsEnabled ?? true));
-  const anyNow = m.notificationsEnabled || m.emergencyNotificationsEnabled;
   const query: SelectedAddressQuery | undefined =
     m.remSlug && m.settlementId && m.streetId && m.house
       ? { remId: m.remSlug, settlementId: m.settlementId, streetId: m.streetId, house: m.house }
       : undefined;
-  const next: UserSettings = {
+  return {
     ...s,
     queue: m.queue,
     customQueueStatusText: m.customQueueStatusText ?? undefined,
@@ -67,19 +75,6 @@ export function applyPrimaryMirror(s: UserSettings, m: LegacyMirror, master: boo
     emergencyNotificationsEnabled: m.emergencyNotificationsEnabled,
     alertsMaster: master,
   };
-  if (anyWas && !anyNow) {
-    return {
-      ...next,
-      prevSoundEnabled: s.soundEnabled,
-      prevVibrationEnabled: s.vibrationEnabled,
-      soundEnabled: false,
-      vibrationEnabled: false,
-    };
-  }
-  if (!anyWas && anyNow) {
-    return { ...next, soundEnabled: s.prevSoundEnabled ?? true, vibrationEnabled: s.prevVibrationEnabled ?? true };
-  }
-  return next;
 }
 
 export interface SyncResult {
@@ -114,8 +109,9 @@ export class SubscriptionSync {
 
   setMaster(settings: UserSettings, on: boolean): UserSettings {
     this.ensureReady(settings);
+    const was = this.repo.alertsMaster();
     this.repo.setAlertsMaster(on);
-    return this.mirror(settings);
+    return this.mirror(was !== on ? applyMasterSound(settings, on) : settings);
   }
 
   change(settings: UserSettings, op: (store: SubscriptionStore) => StoreResult): SyncResult {
