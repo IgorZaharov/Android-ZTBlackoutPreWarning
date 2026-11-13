@@ -1,5 +1,5 @@
 {
- "_doc": "Golden vectors for spec/SUBSCRIPTIONS.md (multi-address store, alerts and main screen, steps 1-4). Stores are compared as plain maps after toMap: every item map has all nine fields, address maps all six. 'addressKey' is settlementId|StreetKey|HouseKey, identical to the 1.4.0 key of ledger_*, repair_*, ids_* and emergency alert keys. 'fanout' (section 8): alert specs are given as engine text times; the AlertSpec key is planned_<spanStart>; 'pending' lists the pending members of each expected group, in order, for a fired registry holding 'notified'. 'main' (section 9): switcherItems and viewItem give item ids.",
+ "_doc": "Golden vectors for spec/SUBSCRIPTIONS.md (multi-address store, alerts and main screen, steps 1-4). Stores are compared as plain maps after toMap: every item map has all nine fields, address maps all six. 'addressKey' is settlementId|StreetKey|HouseKey, identical to the 1.4.0 key of ledger_*, repair_*, ids_* and emergency alert keys. 'fanout' (section 8): alert specs are given as engine text times; the AlertSpec key is planned_<spanStart>; 'pending' lists the pending members of each expected group, in order, for a fired registry holding 'notified'. 'main' (section 9): switcherItems and viewItem give item ids. 'widget' (section 10): boundId null means follow primary; widgetItem and widgetItemIds give item ids.",
  "labels": {
   "defaultLabel": [
    {
@@ -2430,6 +2430,410 @@
     },
     "master": true,
     "expect": false
+   }
+  ]
+ },
+ "widget": {
+  "widgetItem": [
+   {
+    "name": "bound item, else (follow primary or a removed item) the primary",
+    "store": {
+     "schemaVersion": 1,
+     "primaryId": "bbbb0002",
+     "items": [
+      {
+       "id": "aaaa0001",
+       "label": "",
+       "address": {
+        "remSlug": "zhytomyr",
+        "settlementId": "16657",
+        "streetId": "st_123",
+        "streetName": "вул. Київська",
+        "house": "77",
+        "text": "Житомирський РЕМ, м. Житомир, вул. Київська, буд. 77"
+       },
+       "queue": "5.2",
+       "queueSource": "LOOKUP",
+       "queueStatusText": null,
+       "plannedAlerts": true,
+       "emergencyAlerts": true,
+       "createdAtMs": 10
+      },
+      {
+       "id": "bbbb0002",
+       "label": "",
+       "address": {
+        "remSlug": "zhytomyr",
+        "settlementId": "16657",
+        "streetId": "st_200",
+        "streetName": "вул. Соборна",
+        "house": "3",
+        "text": ""
+       },
+       "queue": "5.2",
+       "queueSource": "LOOKUP",
+       "queueStatusText": null,
+       "plannedAlerts": true,
+       "emergencyAlerts": true,
+       "createdAtMs": 20
+      },
+      {
+       "id": "cccc0003",
+       "label": "",
+       "address": null,
+       "queue": "3.1",
+       "queueSource": "MANUAL",
+       "queueStatusText": null,
+       "plannedAlerts": false,
+       "emergencyAlerts": true,
+       "createdAtMs": 5
+      },
+      {
+       "id": "dddd0004",
+       "label": "",
+       "address": null,
+       "queue": "1.1",
+       "queueSource": "MANUAL",
+       "queueStatusText": null,
+       "plannedAlerts": true,
+       "emergencyAlerts": true,
+       "createdAtMs": 30
+      }
+     ]
+    },
+    "cases": [
+     {
+      "boundId": "cccc0003",
+      "expect": "cccc0003"
+     },
+     {
+      "boundId": null,
+      "expect": "bbbb0002"
+     },
+     {
+      "boundId": "zzzz9999",
+      "expect": "bbbb0002"
+     }
+    ]
+   },
+   {
+    "name": "empty store: the queue-unselected state",
+    "store": {
+     "schemaVersion": 1,
+     "primaryId": null,
+     "items": []
+    },
+    "cases": [
+     {
+      "boundId": null,
+      "expect": null
+     },
+     {
+      "boundId": "aaaa0001",
+      "expect": null
+     }
+    ]
+   }
+  ],
+  "widgetLabel": [
+   {
+    "name": "two or more items: always the label of the shown item",
+    "store": {
+     "schemaVersion": 1,
+     "primaryId": "bbbb0002",
+     "items": [
+      {
+       "id": "aaaa0001",
+       "label": "",
+       "address": {
+        "remSlug": "zhytomyr",
+        "settlementId": "16657",
+        "streetId": "st_123",
+        "streetName": "вул. Київська",
+        "house": "77",
+        "text": "Житомирський РЕМ, м. Житомир, вул. Київська, буд. 77"
+       },
+       "queue": "5.2",
+       "queueSource": "LOOKUP",
+       "queueStatusText": null,
+       "plannedAlerts": true,
+       "emergencyAlerts": true,
+       "createdAtMs": 10
+      },
+      {
+       "id": "bbbb0002",
+       "label": "",
+       "address": {
+        "remSlug": "zhytomyr",
+        "settlementId": "16657",
+        "streetId": "st_200",
+        "streetName": "вул. Соборна",
+        "house": "3",
+        "text": ""
+       },
+       "queue": "5.2",
+       "queueSource": "LOOKUP",
+       "queueStatusText": null,
+       "plannedAlerts": true,
+       "emergencyAlerts": true,
+       "createdAtMs": 20
+      },
+      {
+       "id": "cccc0003",
+       "label": "",
+       "address": null,
+       "queue": "3.1",
+       "queueSource": "MANUAL",
+       "queueStatusText": null,
+       "plannedAlerts": false,
+       "emergencyAlerts": true,
+       "createdAtMs": 5
+      },
+      {
+       "id": "dddd0004",
+       "label": "",
+       "address": null,
+       "queue": "1.1",
+       "queueSource": "MANUAL",
+       "queueStatusText": null,
+       "plannedAlerts": true,
+       "emergencyAlerts": true,
+       "createdAtMs": 30
+      }
+     ]
+    },
+    "cases": [
+     {
+      "boundId": "cccc0003",
+      "expect": "Черга 3.1"
+     },
+     {
+      "boundId": null,
+      "expect": "Соборна 3"
+     },
+     {
+      "boundId": "zzzz9999",
+      "expect": "Соборна 3"
+     }
+    ]
+   },
+   {
+    "name": "one item: no label, unless the bound item was removed (the fallback must be visible)",
+    "store": {
+     "schemaVersion": 1,
+     "primaryId": "aaaa0001",
+     "items": [
+      {
+       "id": "aaaa0001",
+       "label": "",
+       "address": {
+        "remSlug": "zhytomyr",
+        "settlementId": "16657",
+        "streetId": "st_123",
+        "streetName": "вул. Київська",
+        "house": "77",
+        "text": "Житомирський РЕМ, м. Житомир, вул. Київська, буд. 77"
+       },
+       "queue": "5.2",
+       "queueSource": "LOOKUP",
+       "queueStatusText": null,
+       "plannedAlerts": true,
+       "emergencyAlerts": true,
+       "createdAtMs": 0
+      }
+     ]
+    },
+    "cases": [
+     {
+      "boundId": null,
+      "expect": null
+     },
+     {
+      "boundId": "aaaa0001",
+      "expect": null
+     },
+     {
+      "boundId": "zzzz9999",
+      "expect": "Київська 77"
+     }
+    ]
+   },
+   {
+    "name": "empty store: no label",
+    "store": {
+     "schemaVersion": 1,
+     "primaryId": null,
+     "items": []
+    },
+    "cases": [
+     {
+      "boundId": "zzzz9999",
+      "expect": null
+     }
+    ]
+   }
+  ],
+  "widgetItemIds": [
+   {
+    "name": "distinct shown items in order of first appearance; a removed binding counts as the primary",
+    "store": {
+     "schemaVersion": 1,
+     "primaryId": "bbbb0002",
+     "items": [
+      {
+       "id": "aaaa0001",
+       "label": "",
+       "address": {
+        "remSlug": "zhytomyr",
+        "settlementId": "16657",
+        "streetId": "st_123",
+        "streetName": "вул. Київська",
+        "house": "77",
+        "text": "Житомирський РЕМ, м. Житомир, вул. Київська, буд. 77"
+       },
+       "queue": "5.2",
+       "queueSource": "LOOKUP",
+       "queueStatusText": null,
+       "plannedAlerts": true,
+       "emergencyAlerts": true,
+       "createdAtMs": 10
+      },
+      {
+       "id": "bbbb0002",
+       "label": "",
+       "address": {
+        "remSlug": "zhytomyr",
+        "settlementId": "16657",
+        "streetId": "st_200",
+        "streetName": "вул. Соборна",
+        "house": "3",
+        "text": ""
+       },
+       "queue": "5.2",
+       "queueSource": "LOOKUP",
+       "queueStatusText": null,
+       "plannedAlerts": true,
+       "emergencyAlerts": true,
+       "createdAtMs": 20
+      },
+      {
+       "id": "cccc0003",
+       "label": "",
+       "address": null,
+       "queue": "3.1",
+       "queueSource": "MANUAL",
+       "queueStatusText": null,
+       "plannedAlerts": false,
+       "emergencyAlerts": true,
+       "createdAtMs": 5
+      },
+      {
+       "id": "dddd0004",
+       "label": "",
+       "address": null,
+       "queue": "1.1",
+       "queueSource": "MANUAL",
+       "queueStatusText": null,
+       "plannedAlerts": true,
+       "emergencyAlerts": true,
+       "createdAtMs": 30
+      }
+     ]
+    },
+    "boundIds": [
+     "cccc0003",
+     null,
+     "zzzz9999",
+     "cccc0003",
+     "dddd0004"
+    ],
+    "expect": [
+     "cccc0003",
+     "bbbb0002",
+     "dddd0004"
+    ]
+   },
+   {
+    "name": "no widgets",
+    "store": {
+     "schemaVersion": 1,
+     "primaryId": "bbbb0002",
+     "items": [
+      {
+       "id": "aaaa0001",
+       "label": "",
+       "address": {
+        "remSlug": "zhytomyr",
+        "settlementId": "16657",
+        "streetId": "st_123",
+        "streetName": "вул. Київська",
+        "house": "77",
+        "text": "Житомирський РЕМ, м. Житомир, вул. Київська, буд. 77"
+       },
+       "queue": "5.2",
+       "queueSource": "LOOKUP",
+       "queueStatusText": null,
+       "plannedAlerts": true,
+       "emergencyAlerts": true,
+       "createdAtMs": 10
+      },
+      {
+       "id": "bbbb0002",
+       "label": "",
+       "address": {
+        "remSlug": "zhytomyr",
+        "settlementId": "16657",
+        "streetId": "st_200",
+        "streetName": "вул. Соборна",
+        "house": "3",
+        "text": ""
+       },
+       "queue": "5.2",
+       "queueSource": "LOOKUP",
+       "queueStatusText": null,
+       "plannedAlerts": true,
+       "emergencyAlerts": true,
+       "createdAtMs": 20
+      },
+      {
+       "id": "cccc0003",
+       "label": "",
+       "address": null,
+       "queue": "3.1",
+       "queueSource": "MANUAL",
+       "queueStatusText": null,
+       "plannedAlerts": false,
+       "emergencyAlerts": true,
+       "createdAtMs": 5
+      },
+      {
+       "id": "dddd0004",
+       "label": "",
+       "address": null,
+       "queue": "1.1",
+       "queueSource": "MANUAL",
+       "queueStatusText": null,
+       "plannedAlerts": true,
+       "emergencyAlerts": true,
+       "createdAtMs": 30
+      }
+     ]
+    },
+    "boundIds": [],
+    "expect": []
+   },
+   {
+    "name": "empty store",
+    "store": {
+     "schemaVersion": 1,
+     "primaryId": null,
+     "items": []
+    },
+    "boundIds": [
+     null,
+     "aaaa0001"
+    ],
+    "expect": []
    }
   ]
  }

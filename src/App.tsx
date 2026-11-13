@@ -21,7 +21,7 @@ import {
 import { UserSettings, NotificationRecord, Language } from './types';
 import { checkAddressOnZtoeWebsite, prefetchAddressIndexInBackground } from './services/ztoeAddressLookup';
 import { getSubscriptionSync } from './services/subscriptionSync';
-import { displayLabel, viewItem } from './core/subscriptions';
+import { displayLabel, viewItem, widgetItem, widgetLabel, type Subscription } from './core/subscriptions';
 import {
   loadUserSettings,
   saveUserSettings,
@@ -52,6 +52,19 @@ type RefreshStatus = 'SUCCESS' | 'NO_INTERNET' | 'NO_QUEUES_FOUND';
 /** Id of the ledger entry written by the "Simulate emergency" workbench button. */
 const SIMULATED_EMERGENCY_ID = 'simulator-emergency';
 
+/** The single-address settings an item is drawn with (main view and widgets show it like the primary). */
+function settingsOfItem(settings: UserSettings, item: Subscription | null): UserSettings {
+  if (!item) return settings;
+  const a = item.address;
+  return {
+    ...settings,
+    queue: item.queue ?? '',
+    customQueueStatusText: item.queueStatusText ?? undefined,
+    selectedAddress: a ? a.text || displayLabel(item) : undefined,
+    selectedAddressQuery: a ? { remId: a.remSlug, settlementId: a.settlementId, streetId: a.streetId, house: a.house } : undefined,
+  };
+}
+
 export default function App() {
   // The multi-address store is migrated on first start; the master switch is copied into the settings
   // so the bells show it (spec/SUBSCRIPTIONS.md section 7)
@@ -64,6 +77,9 @@ export default function App() {
   // The address the main view shows (spec/SUBSCRIPTIONS.md 9): session state, a fresh start shows the primary
   const [shownSubscriptionId, setShownSubscriptionId] = useState<string | null>(null);
   const shownOtherIdRef = React.useRef<string | null>(null);
+  // The address of the simulated widgets (spec/SUBSCRIPTIONS.md 10): null = follow the primary
+  const [widgetBoundId, setWidgetBoundId] = useState<string | null>(null);
+  const widgetOtherIdRef = React.useRef<string | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [activeNotification, setActiveNotification] = useState<NotificationRecord | null>(null);
   
@@ -129,7 +145,13 @@ export default function App() {
       }
 
       // The notifications are delivered here (not inside refresh) so the in-app heads-up card shows them too
-      const outcome = await repo.refresh(effective, force, false, shownOtherIdRef.current);
+      const outcome = await repo.refresh(
+        effective,
+        force,
+        false,
+        shownOtherIdRef.current,
+        widgetOtherIdRef.current ? [widgetOtherIdRef.current] : []
+      );
       const key = repo.addressKey(effective.selectedAddressQuery);
       if (key && outcome.events.length > 0) {
         triggerEmergencyEventAlerts(
@@ -386,17 +408,25 @@ export default function App() {
     () => (shownOther ? getOutageRepository().snapshotFor(shownOther, nowLdt) : snapshot),
     [shownOther, snapshot, nowLdt, dataVersion]
   );
-  const mainSettings = React.useMemo<UserSettings>(() => {
-    if (!shownOther) return settings;
-    const a = shownOther.address;
-    return {
-      ...settings,
-      queue: shownOther.queue ?? '',
-      customQueueStatusText: shownOther.queueStatusText ?? undefined,
-      selectedAddress: a ? a.text || displayLabel(shownOther) : undefined,
-      selectedAddressQuery: a ? { remId: a.remSlug, settlementId: a.settlementId, streetId: a.streetId, house: a.house } : undefined,
-    };
-  }, [settings, shownOther]);
+  const mainSettings = React.useMemo<UserSettings>(() => settingsOfItem(settings, shownOther), [settings, shownOther]);
+
+  // The widgets show their bound address, else the primary (step 5); a removed binding falls back visibly
+  const widgetOther = React.useMemo(() => {
+    const item = widgetItem(subscriptionStore, widgetBoundId);
+    return item !== null && item.id !== subscriptionStore.primaryId ? item : null;
+  }, [subscriptionStore, widgetBoundId]);
+  widgetOtherIdRef.current = widgetOther?.id ?? null;
+  const widgetSnapshot = React.useMemo(
+    () => (widgetOther ? getOutageRepository().snapshotFor(widgetOther, nowLdt) : snapshot),
+    [widgetOther, snapshot, nowLdt, dataVersion]
+  );
+  const widgetSettings = React.useMemo<UserSettings>(() => settingsOfItem(settings, widgetOther), [settings, widgetOther]);
+  const widgetAddressLabel = widgetLabel(subscriptionStore, widgetBoundId);
+  const widgetItemId = widgetItem(subscriptionStore, widgetBoundId)?.id ?? null;
+  const widgetOtherId = widgetOther?.id ?? null;
+  useEffect(() => {
+    if (widgetOtherId !== null) loadSchedules(settings);
+  }, [widgetOtherId]);
   // Another address is shown: poll its PowerOn too (its switches gate notifications only)
   const shownOtherId = shownOther?.id ?? null;
   useEffect(() => {
@@ -662,6 +692,12 @@ export default function App() {
                   subscriptionStore={subscriptionStore}
                   shownSubscriptionId={viewItem(subscriptionStore, shownSubscriptionId)?.id ?? null}
                   onSelectSubscription={setShownSubscriptionId}
+                  widgetSnapshot={widgetSnapshot}
+                  widgetSettings={widgetSettings}
+                  widgetAddressLabel={widgetAddressLabel}
+                  widgetBoundId={widgetBoundId}
+                  onBindWidget={setWidgetBoundId}
+                  widgetItemId={widgetItemId}
                   onOpenNotification={(record) => {
                     if (record.subscriptionId) setShownSubscriptionId(record.subscriptionId);
                     setPhoneTab('schedule');
@@ -969,14 +1005,19 @@ export default function App() {
           {activeMode === 'widget' && (
             <div className="flex flex-col items-center justify-center">
               <WidgetSimulator
-                snapshot={snapshot}
+                snapshot={widgetSnapshot}
                 now={effectiveNow}
-                settings={settings}
+                settings={widgetSettings}
                 lang={resolvedLang}
                 onToggleNotifications={handleToggleNotifications}
                 onRefresh={() => loadSchedules(settings, true)}
                 isRefreshing={isRefreshing}
+                addressLabel={widgetAddressLabel}
+                subscriptionStore={subscriptionStore}
+                boundId={widgetBoundId}
+                onBind={setWidgetBoundId}
                 onOpenApp={() => {
+                  if (widgetItemId) setShownSubscriptionId(widgetItemId);
                   setActiveMode('app');
                   setPhoneTab('schedule');
                 }}

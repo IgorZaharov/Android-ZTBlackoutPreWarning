@@ -894,6 +894,26 @@ test('repository: the address shown on the main view is polled whatever its swit
   assert.equal(out.snapshot.poweron?.ok, true, 'the primary keeps its own status');
 });
 
+test('repository: an address shown on a widget is polled whatever its switches, without alerts (spec/SUBSCRIPTIONS.md 10)', async () => {
+  const store: SubscriptionStore = {
+    primaryId: 'aaaa0001',
+    items: [
+      makeSubscription('aaaa0001', { address: kyivAddr('37'), queue: '2.2', queueSource: 'LOOKUP', createdAtMs: 1 }),
+      makeSubscription('aaaa0004', { address: kyivAddr('39'), queue: '3.1', queueSource: 'LOOKUP', plannedAlerts: false, emergencyAlerts: false, createdAtMs: 4 }),
+    ],
+  };
+  const { repo, poweron, notifiedOther } = makeRepo(() => ({ store, master: true }));
+  poweron.accidents.push(ACCIDENT_22_00_TO_23_30);
+  const onWidget = store.items[1];
+
+  const out = await repo.refresh(settings22, false, true, null, [onWidget.id]);
+  assert.deepEqual(out.otherEvents, [], 'its emergency switch is off: no alert');
+  assert.equal(notifiedOther.length, 0);
+  const snap = repo.snapshotFor(onWidget);
+  assert.equal(snap.poweron?.ok, true, 'polled: the widget has a fresh status');
+  assert.ok(snap.featuredEmergency() !== null, 'the emergency at 39 reaches the widget');
+});
+
 const ev = (kind: EmergencyEvent['kind'], start: string, eta: string | null, extra: Partial<EmergencyEvent> = {}): EmergencyEvent => ({
   kind,
   entryId: 'pw_x',

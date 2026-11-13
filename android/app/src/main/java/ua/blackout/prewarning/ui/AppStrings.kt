@@ -324,6 +324,10 @@ object AppStrings {
     fun myAddressesDesc(lang: String) = if (lang == "uk") "Окремі сповіщення для кожної адреси" else "Separate alerts for each address"
     fun addressesCount(lang: String, n: Int, max: Int) = if (lang == "uk") "$n з $max" else "$n of $max"
     fun primaryBadge(lang: String) = if (lang == "uk") "Основна" else "Primary"
+    fun widgetConfigTitle(lang: String) = if (lang == "uk") "Адреса віджета" else "Widget address"
+    fun widgetConfigDesc(lang: String) = if (lang == "uk") "Яку адресу показує цей віджет" else "Which address this widget shows"
+    fun widgetFollowPrimary(lang: String) = if (lang == "uk") "Основна адреса (авто)" else "Primary address (auto)"
+    fun widgetFollowPrimaryHint(lang: String) = if (lang == "uk") "Змінюється разом з основною адресою" else "Changes when the primary address changes"
     fun makePrimary(lang: String) = if (lang == "uk") "Зробити основною" else "Make primary"
     fun plannedShort(lang: String) = if (lang == "uk") "Планові" else "Planned"
     fun plannedDesc(lang: String, min: Int) =

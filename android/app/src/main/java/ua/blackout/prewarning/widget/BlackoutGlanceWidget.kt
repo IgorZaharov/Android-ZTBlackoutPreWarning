@@ -23,7 +23,9 @@ import androidx.glance.GlanceTheme
 import androidx.glance.Image
 import androidx.glance.ImageProvider
 import androidx.glance.LocalSize
+import androidx.glance.action.Action
 import androidx.glance.action.ActionParameters
+import androidx.glance.action.actionParametersOf
 import androidx.glance.action.actionStartActivity
 import androidx.glance.action.clickable
 import androidx.glance.appwidget.CircularProgressIndicator
@@ -57,6 +59,7 @@ import ua.blackout.prewarning.data.model.UserSettings
 import ua.blackout.prewarning.data.repository.OutageRepository
 import ua.blackout.prewarning.data.repository.OutageSnapshot
 import ua.blackout.prewarning.data.repository.SettingsRepository
+import ua.blackout.prewarning.notification.NotificationHelper
 import ua.blackout.prewarning.data.repository.SubscriptionSync
 import ua.blackout.prewarning.notification.AlarmScheduler
 import ua.blackout.prewarning.ui.AppStrings
@@ -114,12 +117,14 @@ open class BlackoutGlanceWidget(private val forceBigLayout: Boolean = false) : G
             val nowHour: Int,
             val nowMinute: Int,
             /** Small "data from HH:mm" caption when the cached schedule is shown because the site failed. */
-            val staleCaption: String?
+            val staleCaption: String?,
+            /** Address label of the shown item (`widgetLabel`, spec/SUBSCRIPTIONS.md 10); null keeps the 1.4.0 look. */
+            val addressLabel: String? = null
         )
 
         private fun p2(n: Int) = n.toString().padStart(2, '0')
 
-        internal fun buildWidgetModel(settings: UserSettings, snapshot: OutageSnapshot): WidgetModel {
+        internal fun buildWidgetModel(settings: UserSettings, snapshot: OutageSnapshot, addressLabel: String? = null): WidgetModel {
             val lang = AppStrings.resolveLang(settings.language)
             val now = snapshot.now
             val isNoQueueHouse = !settings.customQueueStatusText.isNullOrBlank()
@@ -141,7 +146,8 @@ open class BlackoutGlanceWidget(private val forceBigLayout: Boolean = false) : G
                     slots = emptyList(),
                     nowHour = now.hour,
                     nowMinute = now.minute,
-                    staleCaption = null
+                    staleCaption = null,
+                    addressLabel = addressLabel
                 )
             }
 
@@ -173,7 +179,8 @@ open class BlackoutGlanceWidget(private val forceBigLayout: Boolean = false) : G
                 slots = snapshot.slotsFor(snapshot.today),
                 nowHour = now.hour,
                 nowMinute = now.minute,
-                staleCaption = staleCaption
+                staleCaption = staleCaption,
+                addressLabel = addressLabel
             )
         }
 
@@ -480,8 +487,14 @@ open class BlackoutGlanceWidget(private val forceBigLayout: Boolean = false) : G
 
     override suspend fun provideGlance(context: Context, id: GlanceId) {
         val appContext = context.applicationContext
-        val settingsRepo = SettingsRepository(appContext)
-        val outageRepo = OutageRepository(appContext)
+        // Which address this widget shows is looked up by its app widget id (spec/SUBSCRIPTIONS.md 10)
+        val appWidgetId = try {
+            GlanceAppWidgetManager(appContext).getAppWidgetId(id)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            null
+        }
 
         // Drawing never touches the network and never wipes caches (C13/C14): the data is refreshed by the
         // worker, the widget receiver and the refresh button, and every value below is computed live.
@@ -492,8 +505,9 @@ open class BlackoutGlanceWidget(private val forceBigLayout: Boolean = false) : G
             val refreshTick = prefs[KEY_REFRESH_TICK] ?: 0L
             val refreshingSince = prefs[KEY_REFRESHING_SINCE] ?: 0L
             val isRefreshing = refreshingSince > 0L && System.currentTimeMillis() - refreshingSince < REFRESH_BUSY_MAX_MS
-            val currentSettings = settingsRepo.getSettings()
-            val model = buildWidgetModel(currentSettings, outageRepo.snapshot(currentSettings))
+            val source = widgetSource(appContext, appWidgetId)
+            val model = buildWidgetModel(source.settings, source.snapshot, source.label)
+            val openApp = openAppAction(source.itemId)
 
             val resolvedLang = model.lang
             // the bell shows and toggles the master switch for all addresses (owner decision 4)
@@ -505,6 +519,7 @@ open class BlackoutGlanceWidget(private val forceBigLayout: Boolean = false) : G
             val nextBlackoutText = model.nextOutage
             val slots = model.slots
             val queueHeaderText = model.queueHeader
+            val addressLabel = model.addressLabel
             val staleCaption = model.staleCaption
 
             val size = LocalSize.current
@@ -545,16 +560,27 @@ open class BlackoutGlanceWidget(private val forceBigLayout: Boolean = false) : G
                                 Column(
                                     modifier = GlanceModifier
                                         .defaultWeight()
-                                        .clickable(actionStartActivity<MainActivity>())
+                                        .clickable(openApp)
                                 ) {
-                                    Text(
-                                        text = queueHeaderText,
-                                        style = TextStyle(
-                                            fontWeight = FontWeight.Bold,
-                                            fontSize = 16.sp,
-                                            color = ColorProvider(Color.White)
+                                    Row(verticalAlignment = Alignment.Vertical.CenterVertically) {
+                                        Text(
+                                            text = queueHeaderText,
+                                            style = TextStyle(
+                                                fontWeight = FontWeight.Bold,
+                                                fontSize = 16.sp,
+                                                color = ColorProvider(Color.White)
+                                            ),
+                                            maxLines = 1
                                         )
-                                    )
+                                        if (addressLabel != null) {
+                                            Spacer(modifier = GlanceModifier.width(6.dp))
+                                            Text(
+                                                text = addressLabel,
+                                                style = TextStyle(fontSize = 11.sp, color = ColorProvider(Color(0xB3BAE6FD))),
+                                                maxLines = 1
+                                            )
+                                        }
+                                    }
                                     Row(verticalAlignment = Alignment.Vertical.CenterVertically) {
                                         Text(
                                             text = statusText,
@@ -636,7 +662,7 @@ open class BlackoutGlanceWidget(private val forceBigLayout: Boolean = false) : G
                                     .cornerRadius(12.dp)
                                     .background(ColorProvider(Color(0x33000000)))
                                     .padding(horizontal = 10.dp, vertical = 6.dp)
-                                    .clickable(actionStartActivity<MainActivity>()),
+                                    .clickable(openApp),
                                 verticalAlignment = Alignment.Vertical.CenterVertically
                             ) {
                                 Column(modifier = GlanceModifier.defaultWeight()) {
@@ -680,7 +706,7 @@ open class BlackoutGlanceWidget(private val forceBigLayout: Boolean = false) : G
                                 modifier = GlanceModifier
                                     .fillMaxWidth()
                                     .height(52.dp)
-                                    .clickable(actionStartActivity<MainActivity>())
+                                    .clickable(openApp)
                             )
 
                             // Upcoming Outage Interval ("Наступне відключення")
@@ -691,7 +717,7 @@ open class BlackoutGlanceWidget(private val forceBigLayout: Boolean = false) : G
                                     .cornerRadius(8.dp)
                                     .background(ColorProvider(Color(0x26000000)))
                                     .padding(horizontal = 8.dp, vertical = 3.dp)
-                                    .clickable(actionStartActivity<MainActivity>()),
+                                    .clickable(openApp),
                                 verticalAlignment = Alignment.Vertical.CenterVertically
                             ) {
                                 Text(
@@ -730,9 +756,21 @@ open class BlackoutGlanceWidget(private val forceBigLayout: Boolean = false) : G
                                         fontSize = 14.sp,
                                         color = ColorProvider(Color.White)
                                     ),
-                                    modifier = GlanceModifier.clickable(actionStartActivity<MainActivity>())
+                                    maxLines = 1,
+                                    modifier = GlanceModifier.clickable(openApp)
                                 )
-                                Spacer(modifier = GlanceModifier.defaultWeight())
+                                if (addressLabel != null) {
+                                    Spacer(modifier = GlanceModifier.width(6.dp))
+                                    Text(
+                                        text = addressLabel,
+                                        style = TextStyle(fontSize = 10.sp, color = ColorProvider(Color(0xB3BAE6FD))),
+                                        maxLines = 1,
+                                        modifier = GlanceModifier.defaultWeight().clickable(openApp)
+                                    )
+                                    Spacer(modifier = GlanceModifier.width(6.dp))
+                                } else {
+                                    Spacer(modifier = GlanceModifier.defaultWeight())
+                                }
                                 Text(
                                     text = statusText,
                                     style = TextStyle(
@@ -740,7 +778,7 @@ open class BlackoutGlanceWidget(private val forceBigLayout: Boolean = false) : G
                                         fontSize = 10.sp,
                                         color = ColorProvider(statusColor)
                                     ),
-                                    modifier = GlanceModifier.clickable(actionStartActivity<MainActivity>())
+                                    modifier = GlanceModifier.clickable(openApp)
                                 )
                             }
 
@@ -754,7 +792,7 @@ open class BlackoutGlanceWidget(private val forceBigLayout: Boolean = false) : G
                                 Column(
                                     modifier = GlanceModifier
                                         .defaultWeight()
-                                        .clickable(actionStartActivity<MainActivity>())
+                                        .clickable(openApp)
                                 ) {
                                     Text(
                                         text = if (isBlackoutNow) "До увімкнення:" else "До відключення:",
@@ -829,6 +867,13 @@ open class BlackoutGlanceWidget(private val forceBigLayout: Boolean = false) : G
 
 class BlackoutBigGlanceWidget : BlackoutGlanceWidget(forceBigLayout = true)
 
+private val OPEN_SUBSCRIPTION = ActionParameters.Key<String>(NotificationHelper.EXTRA_SUBSCRIPTION_ID)
+
+/** A tap opens the main screen with the widget's address shown (spec/SUBSCRIPTIONS.md 9 and 10). */
+internal fun openAppAction(itemId: String?): Action =
+    if (itemId == null) actionStartActivity<MainActivity>()
+    else actionStartActivity<MainActivity>(actionParametersOf(OPEN_SUBSCRIPTION to itemId))
+
 /**
  * Third widget (4x1): the 24-hour drum chart with the current-time needle, no buttons or switches; a tap
  * opens the app. It draws from the same snapshot as the other two widgets, so the 48 half-hour states
@@ -848,15 +893,22 @@ class BlackoutStripGlanceWidget : GlanceAppWidget() {
 
     override suspend fun provideGlance(context: Context, id: GlanceId) {
         val appContext = context.applicationContext
-        val settingsRepo = SettingsRepository(appContext)
-        val outageRepo = OutageRepository(appContext)
+        // Which address this widget shows is looked up by its app widget id (spec/SUBSCRIPTIONS.md 10)
+        val appWidgetId = try {
+            GlanceAppWidgetManager(appContext).getAppWidgetId(id)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: Exception) {
+            null
+        }
 
         provideContent {
             val prefs = currentState<Preferences>()
             @Suppress("UNUSED_VARIABLE")
             val refreshTick = prefs[BlackoutGlanceWidget.KEY_REFRESH_TICK] ?: 0L
-            val settings = settingsRepo.getSettings()
-            val model = BlackoutGlanceWidget.buildWidgetModel(settings, outageRepo.snapshot(settings))
+            val source = widgetSource(appContext, appWidgetId)
+            val model = BlackoutGlanceWidget.buildWidgetModel(source.settings, source.snapshot, source.label)
+            val openApp = openAppAction(source.itemId)
             // Same bitmap as the big widget's drum (720 x 132), drawn at the same 52 dp height
             val chartBitmap = BlackoutGlanceWidget.renderAnalogCounterBitmap(
                 model.slots, model.nowHour, model.nowMinute, model.lang
@@ -885,7 +937,7 @@ class BlackoutStripGlanceWidget : GlanceAppWidget() {
                         .cornerRadius(20.dp)
                         .background(ColorProvider(Color(0xCC141A29)))
                         .padding(6.dp)
-                        .clickable(actionStartActivity<MainActivity>()),
+                        .clickable(openApp),
                     verticalAlignment = Alignment.Vertical.CenterVertically
                 ) {
                     if (showInfo) {
@@ -903,6 +955,15 @@ class BlackoutStripGlanceWidget : GlanceAppWidget() {
                                 maxLines = 1
                             )
                             Spacer(modifier = GlanceModifier.width(6.dp))
+                            if (model.addressLabel != null) {
+                                Text(
+                                    text = model.addressLabel,
+                                    style = TextStyle(fontSize = 10.sp, color = ColorProvider(Color(0xB3BAE6FD))),
+                                    maxLines = 1,
+                                    modifier = GlanceModifier.defaultWeight()
+                                )
+                                Spacer(modifier = GlanceModifier.width(6.dp))
+                            }
                             Text(
                                 text = statusText,
                                 style = TextStyle(
@@ -911,8 +972,9 @@ class BlackoutStripGlanceWidget : GlanceAppWidget() {
                                     color = ColorProvider(statusColor)
                                 ),
                                 maxLines = 1,
-                                modifier = GlanceModifier.defaultWeight()
+                                modifier = if (model.addressLabel == null) GlanceModifier.defaultWeight() else GlanceModifier
                             )
+                            if (model.addressLabel != null && !model.isUnclear) Spacer(modifier = GlanceModifier.width(6.dp))
                             if (!model.isUnclear) {
                                 Text(
                                     text = model.countdown,

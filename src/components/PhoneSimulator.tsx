@@ -30,6 +30,13 @@ interface PhoneSimulatorProps {
   subscriptionStore?: SubscriptionStore;
   shownSubscriptionId?: string | null;
   onSelectSubscription?: (id: string) => void;
+  /** What the widgets show (spec/SUBSCRIPTIONS.md 10); the primary when absent. */
+  widgetSnapshot?: OutageSnapshot;
+  widgetSettings?: UserSettings;
+  widgetAddressLabel?: string | null;
+  widgetBoundId?: string | null;
+  onBindWidget?: (id: string | null) => void;
+  widgetItemId?: string | null;
   /** A tap on the heads-up card: shows its address on the main screen. */
   onOpenNotification?: (record: NotificationRecord) => void;
   settings: UserSettings;
@@ -54,6 +61,12 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
   subscriptionStore,
   shownSubscriptionId = null,
   onSelectSubscription,
+  widgetSnapshot,
+  widgetSettings,
+  widgetAddressLabel = null,
+  widgetBoundId = null,
+  onBindWidget,
+  widgetItemId = null,
   onOpenNotification,
   settings,
   lang,
@@ -262,14 +275,21 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
 
           {activeTab === 'widget' && (
             <WidgetSimulator
-              snapshot={snapshot}
+              snapshot={widgetSnapshot ?? snapshot}
               now={now}
-              settings={settings}
+              settings={widgetSettings ?? settings}
               lang={lang}
               onToggleNotifications={onToggleNotifications}
               onRefresh={onRefresh}
               isRefreshing={isRefreshing}
-              onOpenApp={() => setActiveTab('schedule')}
+              addressLabel={widgetAddressLabel}
+              subscriptionStore={subscriptionStore}
+              boundId={widgetBoundId}
+              onBind={onBindWidget}
+              onOpenApp={() => {
+                if (widgetItemId) onSelectSubscription?.(widgetItemId);
+                setActiveTab('schedule');
+              }}
             />
           )}
 

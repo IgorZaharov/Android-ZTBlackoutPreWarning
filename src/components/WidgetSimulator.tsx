@@ -8,6 +8,7 @@ import { hourOf, minuteOf, toLocalDate } from '../core/localTime';
 import { DrumBitmap, drumSignature } from './DrumChart';
 import { formatHhmm } from './siteStatus';
 import { staleChip } from '../services/i18n';
+import { displayLabel, type SubscriptionStore } from '../core/subscriptions';
 
 interface WidgetSimulatorProps {
   snapshot: OutageSnapshot;
@@ -21,6 +22,13 @@ interface WidgetSimulatorProps {
   onOpenApp: () => void;
   /** Initial gallery selection. */
   initialSize?: WidgetSize;
+  /** Address label of the shown item (`widgetLabel`, spec/SUBSCRIPTIONS.md 10); null keeps the 1.4.0 look. */
+  addressLabel?: string | null;
+  /** With two or more addresses a picker stands in for the Android widget configure screen. */
+  subscriptionStore?: SubscriptionStore;
+  /** The bound item id; null = follow the primary. */
+  boundId?: string | null;
+  onBind?: (id: string | null) => void;
 }
 
 export type WidgetSize = '2x1' | '3x2' | '4x1' | 'all';
@@ -144,6 +152,10 @@ export const WidgetSimulator: React.FC<WidgetSimulatorProps> = ({
   isRefreshing = false,
   onOpenApp,
   initialSize = 'all',
+  addressLabel = null,
+  subscriptionStore,
+  boundId = null,
+  onBind,
 }) => {
   const t = translations[lang];
   const isUk = lang === 'uk';
@@ -188,8 +200,13 @@ export const WidgetSimulator: React.FC<WidgetSimulatorProps> = ({
         className="w-full max-w-[340px] cursor-pointer rounded-3xl border border-white/25 bg-[#141A29]/80 p-4 text-white shadow-[0_12px_40px_rgba(0,0,0,0.5)] backdrop-blur-2xl transition-colors hover:border-white/40"
       >
         <div className="mb-2 flex items-center justify-between gap-2">
-          <span className="text-base font-bold tracking-tight text-white">{model.queueHeader}</span>
-          <span data-testid="widget-small-status" className={`text-xs font-bold ${statusColorClass}`}>
+          <span className="whitespace-nowrap text-base font-bold tracking-tight text-white">{model.queueHeader}</span>
+          {addressLabel && (
+            <span data-testid="widget-small-address" className="min-w-0 flex-1 truncate text-xs text-[#BAE6FD]/70">
+              {addressLabel}
+            </span>
+          )}
+          <span data-testid="widget-small-status" className={`shrink-0 text-xs font-bold ${statusColorClass}`}>
             {statusLabel}
           </span>
         </div>
@@ -219,7 +236,14 @@ export const WidgetSimulator: React.FC<WidgetSimulatorProps> = ({
       >
         <div className="flex items-center justify-between gap-2">
           <div className="min-w-0">
-            <span className="text-lg font-bold tracking-tight text-white">{model.queueHeader}</span>
+            <div className="flex min-w-0 items-baseline gap-1.5">
+              <span className="whitespace-nowrap text-lg font-bold tracking-tight text-white">{model.queueHeader}</span>
+              {addressLabel && (
+                <span data-testid="widget-big-address" className="truncate text-xs text-[#BAE6FD]/70">
+                  {addressLabel}
+                </span>
+              )}
+            </div>
             <div className="flex items-center gap-1.5">
               <span data-testid="widget-big-status" className={`shrink-0 whitespace-nowrap text-xs font-bold ${statusColorClass}`}>
                 {statusLabel}
@@ -285,7 +309,12 @@ export const WidgetSimulator: React.FC<WidgetSimulatorProps> = ({
       >
         <div data-testid="widget-strip-info" className="flex items-center gap-1.5 px-1.5 leading-4">
           <span className="whitespace-nowrap text-xs font-bold text-white">{model.queueHeader}</span>
-          <span data-testid="widget-strip-status" className={`truncate text-[10px] font-bold ${statusColorClass}`}>
+          {addressLabel && (
+            <span data-testid="widget-strip-address" className="min-w-0 flex-1 truncate text-[10px] text-[#BAE6FD]/70">
+              {addressLabel}
+            </span>
+          )}
+          <span data-testid="widget-strip-status" className={`${addressLabel ? 'shrink-0' : 'truncate'} text-[10px] font-bold ${statusColorClass}`}>
             {statusLabel}
           </span>
           {!model.isUnclear && (
@@ -348,6 +377,26 @@ export const WidgetSimulator: React.FC<WidgetSimulatorProps> = ({
             </button>
           ))}
         </div>
+
+        {subscriptionStore && subscriptionStore.items.length >= 2 && onBind && (
+          <label className="flex flex-col gap-1 text-xs font-semibold text-sky-200/80">
+            {t.widgetConfigTitle}
+            <select
+              data-testid="widget-address-select"
+              value={boundId ?? ''}
+              onChange={(e) => onBind(e.target.value === '' ? null : e.target.value)}
+              className="min-h-11 cursor-pointer rounded-lg border border-white/15 bg-black/30 px-2 text-sm font-medium text-white"
+            >
+              <option value="">{t.widgetFollowPrimary}</option>
+              {subscriptionStore.items.map((item) => (
+                <option key={item.id} value={item.id}>
+                  {displayLabel(item)}
+                  {item.id === subscriptionStore.primaryId ? ` (${t.primaryBadge})` : ''}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
       </div>
 
       {/* Simulated Android wallpaper with the widgets */}

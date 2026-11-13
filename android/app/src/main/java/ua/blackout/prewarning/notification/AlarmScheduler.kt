@@ -14,6 +14,7 @@ import ua.blackout.prewarning.data.repository.OutageRepository
 import ua.blackout.prewarning.data.repository.SettingsRepository
 import ua.blackout.prewarning.data.repository.SubscriptionSync
 import ua.blackout.prewarning.widget.BlackoutGlanceWidget
+import ua.blackout.prewarning.widget.WidgetBindings
 import java.time.LocalDateTime
 
 /**
@@ -123,8 +124,19 @@ object AlarmScheduler {
 
         // 3. Widget redraws exactly when the power state flips (only when widgets are placed)
         if (hasWidgets) {
-            for (t in OutageEngine.transitions(snapshot.outages, now.plusSeconds(1), now.plusHours(48))) {
+            // Every address a widget shows has its own transitions (spec/SUBSCRIPTIONS.md 10); equal ones share one alarm
+            val repo = OutageRepository(appContext)
+            val outageLists = WidgetBindings.shownItemIds(appContext, subs).map { itemId ->
+                if (itemId == subs.primaryId) {
+                    snapshot.outages
+                } else {
+                    subs.items.firstOrNull { it.id == itemId }?.let { repo.snapshotFor(it, now).outages }.orEmpty()
+                }
+            }.ifEmpty { listOf(snapshot.outages) }
+            val transitions = outageLists.flatMap { OutageEngine.transitions(it, now.plusSeconds(1), now.plusHours(48)) }
+            for (t in transitions) {
                 val id = "wt_${t.at}_${if (t.isOff) "off" else "on"}"
+                if (id in newWidgetIds) continue
                 val intent = Intent(appContext, AlarmReceiver::class.java).apply {
                     action = ACTION_WIDGET
                     putExtra("EXTRA_TRANSITION_ID", id)

@@ -276,4 +276,30 @@ class SubscriptionVectorsTest {
                 Subscriptions.noAlertsCaption(c.getBoolean("master"), storeOf(c.getJSONObject("store"))))
         }
     }
+
+    @Test
+    fun widgets() {
+        val v = load().getJSONObject("widget")
+        for (c in v.getJSONArray("widgetItem").objects()) {
+            val store = storeOf(c.getJSONObject("store"))
+            for (vc in c.getJSONArray("cases").objects()) {
+                val b = vc.optStr("boundId")
+                assertEquals(c.getString("name") + " " + b, vc.optStr("expect"), Subscriptions.widgetItem(store, b)?.id)
+            }
+        }
+        for (c in v.getJSONArray("widgetLabel").objects()) {
+            val store = storeOf(c.getJSONObject("store"))
+            for (vc in c.getJSONArray("cases").objects()) {
+                val b = vc.optStr("boundId")
+                assertEquals(c.getString("name") + " " + b, vc.optStr("expect"), Subscriptions.widgetLabel(store, b))
+            }
+        }
+        for (c in v.getJSONArray("widgetItemIds").objects()) {
+            val a = c.getJSONArray("boundIds")
+            val bound = (0 until a.length()).map { if (a.isNull(it)) null else a.getString(it) }
+            val e = c.getJSONArray("expect")
+            assertEquals(c.getString("name"), (0 until e.length()).map { e.getString(it) },
+                Subscriptions.widgetItemIds(storeOf(c.getJSONObject("store")), bound))
+        }
+    }
 }

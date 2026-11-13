@@ -30,6 +30,11 @@ open class BlackoutWidgetReceiver : GlanceAppWidgetReceiver() {
         refreshAndRedraw(context, forceNetwork = false)
     }
 
+    override fun onDeleted(context: Context, appWidgetIds: IntArray) {
+        super.onDeleted(context, appWidgetIds)
+        WidgetBindings.unbind(context, appWidgetIds)
+    }
+
     override fun onDisabled(context: Context) {
         super.onDisabled(context)
         // The last widget is gone: re-plan so the widget transition alarms are cancelled

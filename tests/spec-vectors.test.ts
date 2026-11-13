@@ -541,6 +541,26 @@ function subscriptionVectors(): number {
     assert.equal(Sub.noAlertsCaption(c.master, storeOf(c.store)), c.expect, c.name);
     n++;
   }
+
+  // Section 10: widgets
+  for (const c of v.widget.widgetItem) {
+    const store = storeOf(c.store);
+    for (const vc of c.cases) {
+      assert.equal(Sub.widgetItem(store, vc.boundId)?.id ?? null, vc.expect, `${c.name}: ${vc.boundId}`);
+      n++;
+    }
+  }
+  for (const c of v.widget.widgetLabel) {
+    const store = storeOf(c.store);
+    for (const vc of c.cases) {
+      assert.equal(Sub.widgetLabel(store, vc.boundId), vc.expect, `${c.name}: ${vc.boundId}`);
+      n++;
+    }
+  }
+  for (const c of v.widget.widgetItemIds) {
+    assert.deepStrictEqual(Sub.widgetItemIds(storeOf(c.store), c.boundIds), c.expect, c.name);
+    n++;
+  }
   return n;
 }
 

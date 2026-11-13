@@ -1,5 +1,6 @@
 package ua.blackout.prewarning.data.repository
 
+import ua.blackout.prewarning.widget.WidgetBindings
 import android.content.Context
 import ua.blackout.prewarning.core.DayView
 import ua.blackout.prewarning.core.EmergencyEvent
@@ -250,11 +251,17 @@ class OutageRepository(context: Context) {
         notify: Boolean,
         shownId: String?
     ) {
+        // Addresses on a widget are polled too, so the widget's emergency state is fresh (spec/SUBSCRIPTIONS.md 10)
+        val onWidgets = try {
+            WidgetBindings.shownItemIds(appContext, subs)
+        } catch (_: Exception) {
+            emptyList()
+        }
         for (item in subs.items) {
             val a = item.address ?: continue
             if (item.id == subs.primaryId) continue
             val alerts = master && item.emergencyAlerts
-            if (!alerts && item.id != shownId) continue
+            if (!alerts && item.id != shownId && item.id !in onWidgets) continue
             val key = a.key
             if (key == primaryKey) continue
             val polled = pollPowerOn(SelectedAddressQuery(a.remSlug, a.settlementId, a.streetId, a.house), key, nowMs)

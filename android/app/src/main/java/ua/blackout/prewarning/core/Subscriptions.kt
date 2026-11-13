@@ -429,6 +429,27 @@ object Subscriptions {
     /** The master is on but no item has a switch on: "on" would silently mean nothing. */
     fun noAlertsCaption(master: Boolean, store: SubscriptionStore): Boolean =
         master && store.items.isNotEmpty() && !anyAlertsEnabled(master, store)
+
+    // ---------------------------------------------------------------------------------------------
+    // Widgets (spec/SUBSCRIPTIONS.md section 10)
+    // ---------------------------------------------------------------------------------------------
+
+    /** The item a widget shows: its bound item if it still exists, else the primary (null = follow primary). */
+    fun widgetItem(store: SubscriptionStore, boundId: String?): Subscription? = viewItem(store, boundId)
+
+    /**
+     * The address label a widget prints: always with two or more items; with one item only when the bound
+     * item was removed, so the fall back to the primary is visible.
+     */
+    fun widgetLabel(store: SubscriptionStore, boundId: String?): String? {
+        val item = widgetItem(store, boundId) ?: return null
+        val removed = boundId != null && store.items.none { it.id == boundId }
+        return if (store.items.size >= 2 || removed) displayLabel(item) else null
+    }
+
+    /** The distinct items the placed widgets show, in order of first appearance (redraw alarms, polling). */
+    fun widgetItemIds(store: SubscriptionStore, boundIds: List<String?>): List<String> =
+        boundIds.mapNotNull { widgetItem(store, it)?.id }.distinct()
 }
 
 /** One planned pre-warning shared by every item on one queue with the same span (`spec/SUBSCRIPTIONS.md` 8.1). */

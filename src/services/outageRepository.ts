@@ -315,8 +315,15 @@ export class OutageRepository {
    * Refreshes ztoe (planned) and PowerOn (emergency + repair works) for the selected address.
    * A source that fails keeps its previous data and is reported as such; it never counts as "no outage".
    * [shownId] is the item the main view shows: it is polled whatever its switches (spec/SUBSCRIPTIONS.md 8.4).
+   * [widgetIds] are the items the widgets show (section 10), polled the same way.
    */
-  async refresh(settings: UserSettings, forceNetwork = false, notify = true, shownId: string | null = null): Promise<RefreshOutcome> {
+  async refresh(
+    settings: UserSettings,
+    forceNetwork = false,
+    notify = true,
+    shownId: string | null = null,
+    widgetIds: string[] = []
+  ): Promise<RefreshOutcome> {
     const nowMs = this.nowMs();
     let siteState: SiteState | null = null;
     let fetchStatus: ZtoeFetchStatus | null = null;
@@ -361,7 +368,7 @@ export class OutageRepository {
         this.notifyEvents(settings, key, events, fromInstant(nowMs));
       }
     }
-    const otherEvents = subs ? await this.refreshOtherAddresses(settings, subs, key, nowMs, notify, shownId) : [];
+    const otherEvents = subs ? await this.refreshOtherAddresses(settings, subs, key, nowMs, notify, shownId, widgetIds) : [];
     return { siteState, fetchStatus, poweronOk, events, otherEvents, snapshot: this.snapshot(settings, fromInstant(this.nowMs())) };
   }
 
@@ -376,13 +383,15 @@ export class OutageRepository {
     nowMs: number,
     notify: boolean,
     shownId: string | null,
+    widgetIds: string[] = [],
   ): Promise<AddressEvents[]> {
     const out: AddressEvents[] = [];
     for (const item of subs.store.items) {
       const a = item.address;
       if (!a || item.id === subs.store.primaryId) continue;
       const alerts = subs.master && item.emergencyAlerts;
-      if (!alerts && item.id !== shownId) continue;
+      // the shown item and the items on widgets are polled whatever their switches (spec/SUBSCRIPTIONS.md 10)
+      if (!alerts && item.id !== shownId && !widgetIds.includes(item.id)) continue;
       const key = subscriptionAddressKey(a);
       if (key === primaryKey) continue;
       const polled = await this.pollPowerOn({ remId: a.remSlug, settlementId: a.settlementId, streetId: a.streetId, house: a.house }, key, nowMs);

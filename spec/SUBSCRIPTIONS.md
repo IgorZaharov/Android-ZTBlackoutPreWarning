@@ -1,12 +1,12 @@
 # Subscriptions (multi-address) — store and migration
 
-Status: **steps 1 to 4 of the multi-address feature** (`docs/design/MULTI_ADDRESS.md`, owner decisions in
+Status: **steps 1 to 5 of the multi-address feature** (`docs/design/MULTI_ADDRESS.md`, owner decisions in
 its section 14). This file fixes the stored model, its repair rules, the store operations, the migration
 from single-address settings, (step 2) the mirror of the primary item into the single-address keys and
-(step 3) the alerts for every item and (step 4) the address switcher of the main screen. Since step 2 the
-Settings screen edits the store and the store is the source of truth; widgets still read the single-address
-keys and so show the primary item, since step 3 planned and emergency alerts cover every item, and since
-step 4 the main screen can show any item. Golden cases: [`vectors/subscriptions.json`](vectors/subscriptions.json).
+(step 3) the alerts for every item, (step 4) the address switcher of the main screen and (step 5) the address
+of each widget. Since step 2 the Settings screen edits the store and the store is the source of truth; since
+step 3 planned and emergency alerts cover every item, since step 4 the main screen can show any item and
+since step 5 every widget shows its own item (the primary by default). Golden cases: [`vectors/subscriptions.json`](vectors/subscriptions.json).
 
 Pure code: Kotlin `core/Subscriptions.kt`, TypeScript `src/core/subscriptions.ts`. Both expose the model
 as plain maps (`toMap` / `fromMap`), so the core never depends on a JSON library; each platform turns
@@ -245,3 +245,31 @@ noAlertsCaption(master, store) = master AND store.items not empty AND NOT anyAle
   (`memberIds[0]`, the primary when it is a member), an emergency the item it was polled for. A tap target that
   no longer exists shows the primary.
 
+## 10. Widgets: one address per widget (step 5)
+
+```
+widgetItem(store, boundId)     = viewItem(store, boundId)   (boundId null = follow the primary)
+widgetLabel(store, boundId)    = null when widgetItem is null; else displayLabel(widgetItem) when store.items has
+                                 2 or more items, or when boundId is not null and names no item; else null
+widgetItemIds(store, boundIds) = the distinct ids of widgetItem(store, b) for each b, in order of first appearance
+```
+
+* Each placed widget has a binding: absent or null means **follow the primary** (owner decision 6), so a new
+  primary moves those widgets with it; an item id pins the widget. A binding to a removed item falls back to
+  the primary and the label makes that visible (`widgetLabel`). Bindings are device state, not backed up
+  (Android app widget ids change on restore).
+* The shown item supplies the queue header, the ZTOE status text of a house without a queue and the outages
+  (`outagesFor(item.queue, item.address.key)`, local state only), exactly as on the main screen (section 9).
+  With `widgetLabel` not null the label is printed next to the queue (all three widget sizes); with one item
+  the widgets look as in 1.4.0.
+* The widget bell stays the master switch (owner decision 4) and the refresh button refreshes everything.
+* Tapping a widget opens the main screen with its item shown (section 9, tap targets).
+* Every item in `widgetItemIds` of the placed widgets is polled on PowerOn whatever its switches (as the shown
+  item of section 8.4) and gets widget redraw alarms at its own power transitions; equal transition times of
+  different items share one alarm.
+* Choosing the binding: Android adds a configure screen to the three widget providers
+  (`reconfigurable|configuration_optional`): on Android 12+ the widget is placed following the primary and
+  "reconfigure" opens the screen; older versions open it on placement and confirm at once when there are
+  fewer than two items. It lists `Основна адреса (авто)` / `Primary address (auto)` and every item in list
+  order, the primary marked with a star. The web simulator shows the same choice as a picker above the
+  widgets, one binding for all simulated widgets. iOS: WidgetKit configuration intent (design section 11).

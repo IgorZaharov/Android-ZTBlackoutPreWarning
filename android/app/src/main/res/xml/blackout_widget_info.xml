@@ -10,5 +10,7 @@
     android:targetCellWidth="2"
     android:targetCellHeight="1"
     android:updatePeriodMillis="900000"
+    android:configure="ua.blackout.prewarning.widget.WidgetConfigActivity"
+    android:widgetFeatures="reconfigurable|configuration_optional"
     android:widgetCategory="home_screen" />
 

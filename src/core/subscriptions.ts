@@ -518,3 +518,33 @@ export function viewItem(store: SubscriptionStore, selectedId: string | null): S
 export function noAlertsCaption(master: boolean, store: SubscriptionStore): boolean {
   return master && store.items.length > 0 && !anyAlertsEnabled(master, store);
 }
+
+// -------------------------------------------------------------------------------------------------
+// Widgets (spec/SUBSCRIPTIONS.md section 10)
+// -------------------------------------------------------------------------------------------------
+
+/** The item a widget shows: its bound item if it still exists, else the primary (null = follow primary). */
+export function widgetItem(store: SubscriptionStore, boundId: string | null): Subscription | null {
+  return viewItem(store, boundId);
+}
+
+/**
+ * The address label a widget prints: always with two or more items; with one item only when the bound
+ * item was removed, so the fall back to the primary is visible.
+ */
+export function widgetLabel(store: SubscriptionStore, boundId: string | null): string | null {
+  const item = widgetItem(store, boundId);
+  if (item === null) return null;
+  const removed = boundId !== null && !store.items.some((i) => i.id === boundId);
+  return store.items.length >= 2 || removed ? displayLabel(item) : null;
+}
+
+/** The distinct items the placed widgets show, in order of first appearance (redraw alarms, polling). */
+export function widgetItemIds(store: SubscriptionStore, boundIds: (string | null)[]): string[] {
+  const out: string[] = [];
+  for (const b of boundIds) {
+    const id = widgetItem(store, b)?.id;
+    if (id !== undefined && !out.includes(id)) out.push(id);
+  }
+  return out;
+}
