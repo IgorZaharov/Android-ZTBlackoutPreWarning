@@ -208,6 +208,25 @@ export class OutageStateStore {
     });
   }
 
+  /** PowerOn status of a non-primary address (spec/SUBSCRIPTIONS.md 8.4); the primary keeps the keys above. */
+  poweronFor(addressKey: string): PowerOnSnapshot | null {
+    if (!this.prefs.contains(`poweron_checked_ms_${addressKey}`)) return null;
+    const lastOk = this.prefs.getLong(`poweron_last_ok_ms_${addressKey}`, 0);
+    return {
+      ok: this.prefs.getBoolean(`poweron_ok_${addressKey}`, false),
+      checkedAtMs: this.prefs.getLong(`poweron_checked_ms_${addressKey}`, 0),
+      lastOkMs: lastOk > 0 ? lastOk : null,
+    };
+  }
+
+  savePowerOnFor(addressKey: string, ok: boolean, nowMs: number): void {
+    this.prefs.edit({
+      [`poweron_ok_${addressKey}`]: ok,
+      [`poweron_checked_ms_${addressKey}`]: nowMs,
+      ...(ok ? { [`poweron_last_ok_ms_${addressKey}`]: nowMs } : {}),
+    });
+  }
+
   /** Forgets everything (used by "reset to defaults"). */
   clearAll(): void {
     this.prefs.clear();

@@ -147,19 +147,28 @@ class OutageRepository(context: Context) {
         settings: UserSettings,
         now: LocalDateTime = LocalDateTime.now(KYIV_ZONE),
         key: String? = addressKey(settings.selectedAddressQuery)
-    ): OutageSnapshot {
-        val q = settings.queue
-        return OutageSnapshot(
+    ): OutageSnapshot = snapshotOf(settings.queue, key, now, store.poweron())
+
+    /**
+     * The snapshot of one non-primary subscription for the main screen (spec/SUBSCRIPTIONS.md 9).
+     * The primary goes through [snapshot]; another item has its own PowerOn status under its address key.
+     */
+    fun snapshotFor(item: Subscription, now: LocalDateTime = LocalDateTime.now(KYIV_ZONE)): OutageSnapshot {
+        val key = item.address?.key
+        return snapshotOf(item.queue.orEmpty(), key, now, key?.let { store.poweron(it) })
+    }
+
+    private fun snapshotOf(q: String, key: String?, now: LocalDateTime, poweron: PowerOnSnapshot?): OutageSnapshot =
+        OutageSnapshot(
             now = now,
             queue = q,
             outages = outagesFor(q, key, now),
             plannedKnown = q.isBlank() || schedule.hasValidTodayCache(q),
             tomorrowPublished = q.isNotBlank() && schedule.hasTomorrowSchedule(q),
             site = store.site(),
-            poweron = store.poweron(),
+            poweron = poweron,
             hasAddress = key != null
         )
-    }
 
     /**
      * The outages of one queue and address key (either may be absent), local state only. One ztoe
@@ -181,9 +190,10 @@ class OutageRepository(context: Context) {
     /**
      * Refreshes ztoe (planned) and PowerOn (emergency + repair works) for the selected address.
      * Runs on a worker thread. A source that fails keeps its previous data and is reported as such;
-     * it never counts as "no outage".
+     * it never counts as "no outage". [shownId] is the item the main screen shows: it is polled whatever
+     * its switches (spec/SUBSCRIPTIONS.md 8.4).
      */
-    fun refresh(settings: UserSettings, forceNetwork: Boolean = false, notify: Boolean = true): RefreshOutcome {
+    fun refresh(settings: UserSettings, forceNetwork: Boolean = false, notify: Boolean = true, shownId: String? = null): RefreshOutcome {
         val nowMs = System.currentTimeMillis()
         var siteState: SiteState? = null
         var fetchStatus: FetchStatus? = null
@@ -220,16 +230,16 @@ class OutageRepository(context: Context) {
             events = polled?.second.orEmpty()
             store.savePowerOn(poweronOk, nowMs)
             if (notify && events.isNotEmpty() && settings.emergencyNotificationsEnabled) {
-                NotificationHelper.postEmergencyEvents(appContext, settings, key, events)
+                NotificationHelper.postEmergencyEvents(appContext, settings, key, events, subscriptionId = subs?.first?.primaryId)
             }
         }
-        if (subs != null) refreshOtherAddresses(settings, subs.first, subs.second, key, nowMs, notify)
+        if (subs != null) refreshOtherAddresses(settings, subs.first, subs.second, key, nowMs, notify, shownId)
         return RefreshOutcome(siteState, fetchStatus, poweronOk, events, snapshot(settings))
     }
 
     /**
-     * PowerOn for every other subscription that wants emergency alerts (spec/SUBSCRIPTIONS.md 8.4):
-     * own request, own failure, own ledger. The main screen's PowerOn status stays the primary's.
+     * PowerOn for every other subscription that wants emergency alerts, plus the one the main screen
+     * shows (spec/SUBSCRIPTIONS.md 8.4): own request, own failure, own ledger, own status line.
      */
     private fun refreshOtherAddresses(
         settings: UserSettings,
@@ -237,17 +247,23 @@ class OutageRepository(context: Context) {
         master: Boolean,
         primaryKey: String?,
         nowMs: Long,
-        notify: Boolean
+        notify: Boolean,
+        shownId: String?
     ) {
-        if (!master) return
         for (item in subs.items) {
             val a = item.address ?: continue
-            if (item.id == subs.primaryId || !item.emergencyAlerts) continue
+            if (item.id == subs.primaryId) continue
+            val alerts = master && item.emergencyAlerts
+            if (!alerts && item.id != shownId) continue
             val key = a.key
             if (key == primaryKey) continue
-            val polled = pollPowerOn(SelectedAddressQuery(a.remSlug, a.settlementId, a.streetId, a.house), key, nowMs) ?: continue
-            if (notify && polled.second.isNotEmpty()) {
-                NotificationHelper.postEmergencyEvents(appContext, settings, key, polled.second, addressLine(item), enabled = true)
+            val polled = pollPowerOn(SelectedAddressQuery(a.remSlug, a.settlementId, a.streetId, a.house), key, nowMs)
+            store.savePowerOn(key, polled?.first ?: false, nowMs)
+            if (polled == null) continue
+            if (notify && alerts && polled.second.isNotEmpty()) {
+                NotificationHelper.postEmergencyEvents(
+                    appContext, settings, key, polled.second, addressLine(item), enabled = true, subscriptionId = item.id
+                )
             }
         }
     }

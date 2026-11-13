@@ -28,6 +28,9 @@ import java.time.LocalDate
 import java.time.LocalDateTime
 
 object NotificationHelper {
+    /** Intent extra of a notification tap: the subscription id to show on the main screen. */
+    const val EXTRA_SUBSCRIPTION_ID = "ua.blackout.prewarning.SUBSCRIPTION_ID"
+
     const val CHANNEL_SOUND_VIBE = "zt_blackout_sound_vibe_v2"
     const val CHANNEL_SOUND_ONLY = "zt_blackout_sound_only_v2"
     const val CHANNEL_VIBE_ONLY = "zt_blackout_vibe_only_v2"
@@ -167,7 +170,9 @@ object NotificationHelper {
         events: List<EmergencyEvent>,
         // Default: the primary address (mirrored settings); another subscription passes its own (spec/SUBSCRIPTIONS.md 8.4)
         addressLine: String? = settings.selectedAddress,
-        enabled: Boolean = settings.emergencyNotificationsEnabled
+        enabled: Boolean = settings.emergencyNotificationsEnabled,
+        // The subscription a tap shows on the main screen (spec/SUBSCRIPTIONS.md 9)
+        subscriptionId: String? = null
     ) {
         if (!enabled || events.isEmpty()) return
         val appContext = context.applicationContext
@@ -203,7 +208,8 @@ object NotificationHelper {
                 title = title,
                 body = if (address != null) "$body\n$address" else body,
                 isTest = false,
-                isEmergencyAlert = true
+                isEmergencyAlert = true,
+                subscriptionId = subscriptionId
             )
         }
     }
@@ -225,7 +231,8 @@ object NotificationHelper {
         title: String,
         body: String,
         isTest: Boolean = false,
-        isEmergencyAlert: Boolean = false
+        isEmergencyAlert: Boolean = false,
+        subscriptionId: String? = null
     ) {
         val settings = SettingsRepository(context).getSettings()
         // The master switch silences every alert (owner decision 1); the per-address switches were
@@ -260,6 +267,7 @@ object NotificationHelper {
 
         val intent = Intent(context, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            if (subscriptionId != null) putExtra(EXTRA_SUBSCRIPTION_ID, subscriptionId)
         }
 
         val pendingIntent = PendingIntent.getActivity(

@@ -187,7 +187,7 @@ class SettingsRepository(context: Context) {
             null
         }
 
-        val anyAlertsEnabled = notificationsEnabled || emergencyNotificationsEnabled
+        val anyAlertsEnabled = soundGate(notificationsEnabled, emergencyNotificationsEnabled)
 
         return UserSettings(
             cityUrl = readSafeString(allMap, "city_url", "https://www.ztoe.com.ua/unhooking-search.php").ifBlank { "https://www.ztoe.com.ua/unhooking-search.php" },
@@ -209,8 +209,19 @@ class SettingsRepository(context: Context) {
         )
     }
 
+    /**
+     * Whether sound and vibration may be on: the master switch once it is stored, else the 1.4.0 rule
+     * (spec/SUBSCRIPTIONS.md section 7), so a primary with both switches off never mutes the other addresses.
+     */
+    private fun soundGate(notificationsEnabled: Boolean, emergencyNotificationsEnabled: Boolean): Boolean =
+        if (prefs.contains(SubscriptionRepository.KEY_MASTER)) {
+            prefs.getBoolean(SubscriptionRepository.KEY_MASTER, true)
+        } else {
+            notificationsEnabled || emergencyNotificationsEnabled
+        }
+
     fun saveSettings(settings: UserSettings) {
-        val anyAlertsEnabled = settings.notificationsEnabled || settings.emergencyNotificationsEnabled
+        val anyAlertsEnabled = soundGate(settings.notificationsEnabled, settings.emergencyNotificationsEnabled)
         val editor = prefs.edit()
             .putString("city_url", settings.cityUrl)
             .putString("queue", settings.queue)

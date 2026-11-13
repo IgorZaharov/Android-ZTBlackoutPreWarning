@@ -268,10 +268,21 @@ export class OutageRepository {
 
   /** Local state only. [now] is the Kyiv wall clock. */
   snapshot(settings: UserSettings, now: LocalDateTime = fromInstant(this.nowMs()), key: string | null = this.addressKey(settings.selectedAddressQuery)): OutageSnapshot {
-    const today = toLocalDate(now);
-    const q = settings.queue || '';
-    const hasQueue = q.trim() !== '';
+    return this.snapshotOf(settings.queue || '', key, now, this.store.poweron());
+  }
 
+  /**
+   * The snapshot of one non-primary subscription for the main view (spec/SUBSCRIPTIONS.md 9). The primary
+   * goes through [snapshot]; another item has its own PowerOn status under its address key.
+   */
+  snapshotFor(item: Subscription, now: LocalDateTime = fromInstant(this.nowMs())): OutageSnapshot {
+    const key = item.address ? subscriptionAddressKey(item.address) : null;
+    return this.snapshotOf(item.queue ?? '', key, now, key !== null ? this.store.poweronFor(key) : null);
+  }
+
+  private snapshotOf(q: string, key: string | null, now: LocalDateTime, poweron: PowerOnSnapshot | null): OutageSnapshot {
+    const today = toLocalDate(now);
+    const hasQueue = q.trim() !== '';
     return new OutageSnapshot({
       now,
       queue: q,
@@ -279,7 +290,7 @@ export class OutageRepository {
       plannedKnown: !hasQueue || this.schedule.hasValidTodayCache(q, today),
       tomorrowPublished: hasQueue && this.schedule.hasTomorrowSchedule(q, today),
       site: this.store.site(),
-      poweron: this.store.poweron(),
+      poweron,
       hasAddress: key !== null,
     });
   }
@@ -303,8 +314,9 @@ export class OutageRepository {
   /**
    * Refreshes ztoe (planned) and PowerOn (emergency + repair works) for the selected address.
    * A source that fails keeps its previous data and is reported as such; it never counts as "no outage".
+   * [shownId] is the item the main view shows: it is polled whatever its switches (spec/SUBSCRIPTIONS.md 8.4).
    */
-  async refresh(settings: UserSettings, forceNetwork = false, notify = true): Promise<RefreshOutcome> {
+  async refresh(settings: UserSettings, forceNetwork = false, notify = true, shownId: string | null = null): Promise<RefreshOutcome> {
     const nowMs = this.nowMs();
     let siteState: SiteState | null = null;
     let fetchStatus: ZtoeFetchStatus | null = null;
@@ -349,13 +361,13 @@ export class OutageRepository {
         this.notifyEvents(settings, key, events, fromInstant(nowMs));
       }
     }
-    const otherEvents = subs ? await this.refreshOtherAddresses(settings, subs, key, nowMs, notify) : [];
+    const otherEvents = subs ? await this.refreshOtherAddresses(settings, subs, key, nowMs, notify, shownId) : [];
     return { siteState, fetchStatus, poweronOk, events, otherEvents, snapshot: this.snapshot(settings, fromInstant(this.nowMs())) };
   }
 
   /**
-   * PowerOn for every other subscription that wants emergency alerts (spec/SUBSCRIPTIONS.md 8.4): own
-   * request, own failure, own ledger. The main view's PowerOn status stays the primary's.
+   * PowerOn for every other subscription that wants emergency alerts, plus the one the main view shows
+   * (spec/SUBSCRIPTIONS.md 8.4): own request, own failure, own ledger, own status line.
    */
   private async refreshOtherAddresses(
     settings: UserSettings,
@@ -363,16 +375,19 @@ export class OutageRepository {
     primaryKey: string | null,
     nowMs: number,
     notify: boolean,
+    shownId: string | null,
   ): Promise<AddressEvents[]> {
-    if (!subs.master) return [];
     const out: AddressEvents[] = [];
     for (const item of subs.store.items) {
       const a = item.address;
-      if (!a || item.id === subs.store.primaryId || !item.emergencyAlerts) continue;
+      if (!a || item.id === subs.store.primaryId) continue;
+      const alerts = subs.master && item.emergencyAlerts;
+      if (!alerts && item.id !== shownId) continue;
       const key = subscriptionAddressKey(a);
       if (key === primaryKey) continue;
       const polled = await this.pollPowerOn({ remId: a.remSlug, settlementId: a.settlementId, streetId: a.streetId, house: a.house }, key, nowMs);
-      if (!polled || polled.events.length === 0) continue;
+      this.store.savePowerOnFor(key, polled?.ok ?? false, nowMs);
+      if (!alerts || !polled || polled.events.length === 0) continue;
       const other: AddressEvents = { itemId: item.id, addressKey: key, addressLine: addressLine(item), events: polled.events };
       out.push(other);
       if (notify) this.notifyOther(settings, other, fromInstant(nowMs));

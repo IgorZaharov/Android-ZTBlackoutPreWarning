@@ -1,4 +1,4 @@
-import React, { useLayoutEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertTriangle,
   Bell,
@@ -12,6 +12,7 @@ import {
   HelpCircle,
   Info,
   RefreshCw,
+  Star,
   WifiOff,
   Wrench,
   Zap
@@ -25,6 +26,7 @@ import { formatRow, hhmm } from './outageRowFormat';
 import { poweronLine, siteBanner, siteChips, siteNotice as siteNoticeOf, TONE_COLORS, formatHhmm, type StatusIcon, type StatusChip } from './siteStatus';
 import { DrumChart } from './DrumChart';
 import { GlassCard, TEXT_SECONDARY, TEXT_TERTIARY } from './GlassCard';
+import { displayLabel, type Subscription } from '../core/subscriptions';
 
 export type RefreshStatus = 'SUCCESS' | 'NO_INTERNET' | 'NO_QUEUES_FOUND';
 
@@ -84,6 +86,14 @@ interface MainViewProps {
   onSendTestAlert?: () => void;
   onOpenQueueSelection?: () => void;
   onChangeLanguage?: (lang: Language) => void;
+  /** Address switcher (spec/SUBSCRIPTIONS.md 9): empty with fewer than 2 addresses, then the view looks as in 1.4.0. */
+  addresses?: readonly Subscription[];
+  primaryAddressId?: string | null;
+  shownAddressId?: string | null;
+  onSelectAddress?: (id: string) => void;
+  /** The master is on but no address has a switch on. */
+  showNoAlertsCaption?: boolean;
+  onOpenSettings?: () => void;
 }
 
 /** 48 light POWER_ON half-hour slots for buildings that are never disconnected by hourly schedules. */
@@ -164,11 +174,20 @@ export const MainView: React.FC<MainViewProps> = ({
   isRefreshing,
   onOpenQueueSelection,
   onChangeLanguage,
+  addresses = [],
+  primaryAddressId = null,
+  shownAddressId = null,
+  onSelectAddress,
+  showNoAlertsCaption = false,
+  onOpenSettings,
 }) => {
   const t = translations[lang];
   // the header bell shows and toggles the master switch for all addresses (owner decision 4)
   const alertsOn = settings.alertsMaster ?? settings.notificationsEnabled;
   const [selectedDayTab, setSelectedDayTab] = useState<'today' | 'tomorrow'>('today');
+  // Another address starts on Today (spec/SUBSCRIPTIONS.md 9)
+  useEffect(() => setSelectedDayTab('today'), [shownAddressId]);
+  const hasSwitcher = addresses.length > 0;
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
   const queue = settings.queue || '';
@@ -226,6 +245,40 @@ export const MainView: React.FC<MainViewProps> = ({
     setToastMessage(msg);
     setTimeout(() => setToastMessage(null), 3000);
   };
+
+  /** The featured emergency card; with a switcher it sits under the chips (spec/SUBSCRIPTIONS.md 9). */
+  const emergencyBanner = (featured: Outage) => (
+    <GlassCard data-testid="main-emergency-outage-banner" className="flex flex-col gap-1.5">
+      {(() => {
+        const status = statusAt(featured, snapshot.now);
+        const title =
+          lang === 'uk' && featured.label && featured.label.trim() !== ''
+            ? featured.label
+            : status === 'UPCOMING'
+            ? t.emergencyUpcomingTitle
+            : t.emergencyOutageTitle;
+        const restore = featured.overdue || !(featured.end > featured.start) ? '--:--' : formatDateTime(featured.end);
+        return (
+          <>
+            <div data-testid="main-emergency-outage-title" className="text-base font-bold leading-[23px] text-[#FF5E3A]">
+              {title}
+            </div>
+            <div data-testid="main-emergency-outage-times" className="flex flex-col gap-0.5">
+              <div className="flex items-center justify-between gap-2 text-[13px] leading-[19px]">
+                <span className={`${TEXT_SECONDARY} font-medium`}>{t.emergencyStartLabel}</span>
+                <span className="whitespace-nowrap text-right font-mono font-bold tabular-nums text-white">{formatDateTime(featured.start)}</span>
+              </div>
+              <div className="flex items-center justify-between gap-2 text-[13px] leading-[19px]">
+                <span className={`${TEXT_SECONDARY} font-medium`}>{t.emergencyRestoreLabel}</span>
+                <span className="whitespace-nowrap text-right font-mono font-bold tabular-nums text-white">{restore}</span>
+              </div>
+              {status === 'OVERDUE' && <div className={`text-[13px] font-medium leading-[19px] ${TEXT_SECONDARY}`}>{t.rowOverdue}</div>}
+            </div>
+          </>
+        );
+      })()}
+    </GlassCard>
+  );
 
   const dimmed = isQueueUnselected;
   const tabClass = (selected: boolean) =>
@@ -355,39 +408,22 @@ export const MainView: React.FC<MainViewProps> = ({
           dimmed ? 'pointer-events-none select-none opacity-15 brightness-50' : ''
         }`}
       >
-        {/* Featured emergency outage: active, overdue or the next upcoming one; finished ones never show here */}
-        {!isQueueUnselected && featured !== null && (
-          <GlassCard data-testid="main-emergency-outage-banner" className="flex flex-col gap-1.5">
-            {(() => {
-              const status = statusAt(featured, snapshot.now);
-              const title =
-                lang === 'uk' && featured.label && featured.label.trim() !== ''
-                  ? featured.label
-                  : status === 'UPCOMING'
-                  ? t.emergencyUpcomingTitle
-                  : t.emergencyOutageTitle;
-              const restore = featured.overdue || !(featured.end > featured.start) ? '--:--' : formatDateTime(featured.end);
-              return (
-                <>
-                  <div data-testid="main-emergency-outage-title" className="text-base font-bold leading-[23px] text-[#FF5E3A]">
-                    {title}
-                  </div>
-                  <div data-testid="main-emergency-outage-times" className="flex flex-col gap-0.5">
-                    <div className="flex items-center justify-between gap-2 text-[13px] leading-[19px]">
-                      <span className={`${TEXT_SECONDARY} font-medium`}>{t.emergencyStartLabel}</span>
-                      <span className="whitespace-nowrap text-right font-mono font-bold tabular-nums text-white">{formatDateTime(featured.start)}</span>
-                    </div>
-                    <div className="flex items-center justify-between gap-2 text-[13px] leading-[19px]">
-                      <span className={`${TEXT_SECONDARY} font-medium`}>{t.emergencyRestoreLabel}</span>
-                      <span className="whitespace-nowrap text-right font-mono font-bold tabular-nums text-white">{restore}</span>
-                    </div>
-                    {status === 'OVERDUE' && <div className={`text-[13px] font-medium leading-[19px] ${TEXT_SECONDARY}`}>{t.rowOverdue}</div>}
-                  </div>
-                </>
-              );
-            })()}
-          </GlassCard>
+        {/* The master is on but no address has a switch on: say so, with a way to Settings */}
+        {!isQueueUnselected && showNoAlertsCaption && (
+          <div data-testid="main-no-alerts-caption" className="flex items-center gap-2">
+            <span className="flex-1 text-[13px] font-medium leading-[19px] text-[#FF5E3A]">{t.noAddressAlerts}</span>
+            <button
+              type="button"
+              onClick={onOpenSettings}
+              className="min-h-12 shrink-0 rounded-xl px-2 text-sm font-bold text-white hover:bg-white/10"
+            >
+              {t.settingsTitle}
+            </button>
+          </div>
         )}
+
+        {/* Featured emergency outage: active, overdue or the next upcoming one; finished ones never show here */}
+        {!hasSwitcher && !isQueueUnselected && featured !== null && emergencyBanner(featured)}
 
         {/* Site is degraded (no table / unreachable / no internet): persistent banner, not a toast */}
         {!isQueueUnselected && banner !== null && (
@@ -433,6 +469,33 @@ export const MainView: React.FC<MainViewProps> = ({
             </div>
           </GlassCard>
         )}
+
+        {/* Address switcher: under the global banners, above everything of one address */}
+        {hasSwitcher && (
+          <div data-testid="main-address-switcher" role="tablist" className="-mx-1 flex gap-2 overflow-x-auto px-1">
+            {addresses.map((item) => {
+              const selected = item.id === shownAddressId;
+              const isPrimary = item.id === primaryAddressId;
+              return (
+                <button
+                  key={item.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={selected}
+                  data-testid={`main-address-chip-${item.id}`}
+                  onClick={() => onSelectAddress?.(item.id)}
+                  className={`flex min-h-12 shrink-0 items-center gap-1.5 whitespace-nowrap rounded-2xl border px-3.5 py-2 text-sm font-bold transition-colors ${
+                    selected ? 'border-white/40 bg-white/20 text-white' : 'border-white/[0.12] bg-[#141A29]/50 text-[#BAE6FD]/80 hover:text-white'
+                  }`}
+                >
+                  {isPrimary && <Star className="h-4 w-4 fill-current text-[#FF5E3A]" aria-label={t.primaryBadge} role="img" />}
+                  <span>{displayLabel(item)}</span>
+                </button>
+              );
+            })}
+          </div>
+        )}
+        {hasSwitcher && !isQueueUnselected && featured !== null && emergencyBanner(featured)}
 
         {/* Custom ZTOE queue/house status message */}
         {!isQueueUnselected && customStatus !== null && (

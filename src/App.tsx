@@ -21,6 +21,7 @@ import {
 import { UserSettings, NotificationRecord, Language } from './types';
 import { checkAddressOnZtoeWebsite, prefetchAddressIndexInBackground } from './services/ztoeAddressLookup';
 import { getSubscriptionSync } from './services/subscriptionSync';
+import { displayLabel, viewItem } from './core/subscriptions';
 import {
   loadUserSettings,
   saveUserSettings,
@@ -60,6 +61,9 @@ export default function App() {
   });
   // Bumped after every refresh so the outage snapshot is rebuilt from the freshly stored state
   const [dataVersion, setDataVersion] = useState(0);
+  // The address the main view shows (spec/SUBSCRIPTIONS.md 9): session state, a fresh start shows the primary
+  const [shownSubscriptionId, setShownSubscriptionId] = useState<string | null>(null);
+  const shownOtherIdRef = React.useRef<string | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [activeNotification, setActiveNotification] = useState<NotificationRecord | null>(null);
   
@@ -125,7 +129,7 @@ export default function App() {
       }
 
       // The notifications are delivered here (not inside refresh) so the in-app heads-up card shows them too
-      const outcome = await repo.refresh(effective, force, false);
+      const outcome = await repo.refresh(effective, force, false, shownOtherIdRef.current);
       const key = repo.addressKey(effective.selectedAddressQuery);
       if (key && outcome.events.length > 0) {
         triggerEmergencyEventAlerts(
@@ -134,7 +138,8 @@ export default function App() {
           effective,
           resolveLanguage(effective.language),
           fromInstant(Date.now()),
-          (record) => setActiveNotification(record)
+          (record) => setActiveNotification(record),
+          { subscriptionId: getSubscriptionSync().store(effective).primaryId }
         );
       }
       // The other addresses that want emergency alerts (spec/SUBSCRIPTIONS.md 8.4)
@@ -146,7 +151,7 @@ export default function App() {
           resolveLanguage(effective.language),
           fromInstant(Date.now()),
           (record) => setActiveNotification(record),
-          { addressLine: other.addressLine, enabled: true }
+          { addressLine: other.addressLine, enabled: true, subscriptionId: other.itemId }
         );
       }
       setDataVersion((v) => v + 1);
@@ -369,6 +374,34 @@ export default function App() {
     () => getOutageRepository().snapshot(settings, nowLdt),
     [settings, nowLdt, dataVersion]
   );
+
+  // The main view can show another address (step 4); widgets and the roulette keep the primary
+  const subscriptionStore = React.useMemo(() => getSubscriptionSync().store(settings), [settings]);
+  const shownOther = React.useMemo(() => {
+    const item = viewItem(subscriptionStore, shownSubscriptionId);
+    return item !== null && item.id !== subscriptionStore.primaryId ? item : null;
+  }, [subscriptionStore, shownSubscriptionId]);
+  shownOtherIdRef.current = shownOther?.id ?? null;
+  const mainSnapshot = React.useMemo(
+    () => (shownOther ? getOutageRepository().snapshotFor(shownOther, nowLdt) : snapshot),
+    [shownOther, snapshot, nowLdt, dataVersion]
+  );
+  const mainSettings = React.useMemo<UserSettings>(() => {
+    if (!shownOther) return settings;
+    const a = shownOther.address;
+    return {
+      ...settings,
+      queue: shownOther.queue ?? '',
+      customQueueStatusText: shownOther.queueStatusText ?? undefined,
+      selectedAddress: a ? a.text || displayLabel(shownOther) : undefined,
+      selectedAddressQuery: a ? { remId: a.remSlug, settlementId: a.settlementId, streetId: a.streetId, house: a.house } : undefined,
+    };
+  }, [settings, shownOther]);
+  // Another address is shown: poll its PowerOn too (its switches gate notifications only)
+  const shownOtherId = shownOther?.id ?? null;
+  useEffect(() => {
+    if (shownOtherId !== null) loadSchedules(settings);
+  }, [shownOtherId]);
 
   /** Workbench tool: writes a simulated emergency into the ledger (through the same reconcile the refresh uses) so the new pipeline shows and announces it. */
   const handleSimulateEmergency = () => {
@@ -624,6 +657,16 @@ export default function App() {
               <div className="w-full max-w-[420px] shrink-0">
                 <PhoneSimulator
                   snapshot={snapshot}
+                  mainSnapshot={mainSnapshot}
+                  mainSettings={mainSettings}
+                  subscriptionStore={subscriptionStore}
+                  shownSubscriptionId={viewItem(subscriptionStore, shownSubscriptionId)?.id ?? null}
+                  onSelectSubscription={setShownSubscriptionId}
+                  onOpenNotification={(record) => {
+                    if (record.subscriptionId) setShownSubscriptionId(record.subscriptionId);
+                    setPhoneTab('schedule');
+                    setActiveNotification(null);
+                  }}
                   settings={settings}
                   lang={resolvedLang}
                   activeNotification={activeNotification}

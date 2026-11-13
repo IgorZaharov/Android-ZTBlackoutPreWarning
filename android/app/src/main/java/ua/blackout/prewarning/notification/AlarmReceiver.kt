@@ -100,7 +100,9 @@ class AlarmReceiver : BroadcastReceiver() {
                 appContext,
                 AlarmCodes.codeFor(appContext, group.key),
                 AppStrings.plannedAlertTitle(lang),
-                body
+                body,
+                // a tap shows the first member, the primary when it is one (spec/SUBSCRIPTIONS.md 9)
+                subscriptionId = group.memberIds.firstOrNull()
             )
         }
     }

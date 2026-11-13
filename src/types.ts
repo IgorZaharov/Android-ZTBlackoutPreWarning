@@ -86,6 +86,8 @@ export interface NotificationRecord {
   message: string;
   queue: string;
   advanceMinutes: number;
+  /** The subscription a tap shows on the main view (spec/SUBSCRIPTIONS.md 9); absent = the primary. */
+  subscriptionId?: string;
 }
 
 export interface QueueOption {

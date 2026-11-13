@@ -44,7 +44,7 @@ import {
   ERR_LIMIT,
   MAX_ITEMS,
   MAX_LABEL_LENGTH,
-  anyAlertsEnabled as anyItemAlerts,
+  noAlertsCaption,
   defaultLabel,
   displayLabel,
   remove as removeItem,
@@ -238,13 +238,14 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   };
 
   // Sound and vibration follow the primary address' effective switches, as the single-address fields do
-  const anyAlertsEnabled = settings.notificationsEnabled || (settings.emergencyNotificationsEnabled ?? true);
+  // Sound and vibration follow the master switch (spec/SUBSCRIPTIONS.md section 7)
+  const anyAlertsEnabled = settings.alertsMaster ?? (settings.notificationsEnabled || (settings.emergencyNotificationsEnabled ?? true));
 
   // Multi-address store (step 2): every change goes through the sync, which mirrors the primary back
   const sync = getSubscriptionSync();
   const store = useMemo(() => sync.store(settings), [sync, settings]);
   const alertsMaster = settings.alertsMaster ?? sync.master(settings);
-  const noAddressAlerts = alertsMaster && store.items.length > 0 && !anyItemAlerts(alertsMaster, store);
+  const noAddressAlerts = noAlertsCaption(alertsMaster, store);
   const usedQueues = new Set(store.items.filter((i) => i.address === null).map((i) => i.queue));
   const freeQueues = QUEUES.filter((q) => !usedQueues.has(q.id));
 

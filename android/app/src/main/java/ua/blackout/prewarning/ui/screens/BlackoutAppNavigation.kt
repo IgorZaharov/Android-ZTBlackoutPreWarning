@@ -21,6 +21,7 @@ import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -51,6 +52,8 @@ import ua.blackout.prewarning.data.repository.SettingsRepository
 import ua.blackout.prewarning.data.repository.SubscriptionSync
 import ua.blackout.prewarning.core.StoreResult
 import ua.blackout.prewarning.core.Subscriptions
+import ua.blackout.prewarning.data.model.UserSettings
+import ua.blackout.prewarning.data.repository.OutageSnapshot
 import ua.blackout.prewarning.notification.AlarmScheduler
 import ua.blackout.prewarning.notification.ExactAlarmGate
 import ua.blackout.prewarning.notification.NotificationHelper
@@ -88,7 +91,10 @@ private fun smoothGaussianRadialBrush(
 
 @Composable
 fun BlackoutAppNavigation(
-    onThemeChanged: (Boolean) -> Unit = {}
+    onThemeChanged: (Boolean) -> Unit = {},
+    // Subscription id from a tapped notification: shown once on the main screen (spec/SUBSCRIPTIONS.md 9)
+    openSubscriptionId: String? = null,
+    onOpenSubscriptionHandled: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val appContext = remember { context.applicationContext }
@@ -103,6 +109,8 @@ fun BlackoutAppNavigation(
     val subscriptionSync = remember { SubscriptionSync(appContext) }
     var subscriptions by remember { mutableStateOf(subscriptionSync.ensureReady()) }
     var alertsMaster by remember { mutableStateOf(subscriptionSync.master()) }
+    // The address the main screen shows (step 4): session state, a cold start shows the primary (decision 5)
+    var shownSubscriptionId by rememberSaveable { mutableStateOf<String?>(null) }
 
     // Latest persisted settings; kept in sync by the preference listener below
     var currentSettings by remember { mutableStateOf(initialSettings) }
@@ -150,11 +158,19 @@ fun BlackoutAppNavigation(
 
     // Everything the screens show about outages comes from one snapshot of the stored state
     val addressKey = remember(selectedAddressQuery) { outageRepo.addressKey(selectedAddressQuery) }
+    // The shown item when it is not the primary; the primary is read through the mirrored settings as in 1.4.0
+    fun otherShownItem() = Subscriptions.viewItem(subscriptions, shownSubscriptionId)?.takeIf { it.id != subscriptions.primaryId }
+    fun shownSnapshot(
+        settings: UserSettings,
+        now: LocalDateTime = LocalDateTime.now(KYIV_ZONE),
+        primaryKey: String? = outageRepo.addressKey(settings.selectedAddressQuery)
+    ): OutageSnapshot = otherShownItem()?.let { outageRepo.snapshotFor(it, now) } ?: outageRepo.snapshot(settings, now, primaryKey)
+
     var snapshot by remember {
         mutableStateOf(outageRepo.snapshot(initialSettings, LocalDateTime.now(KYIV_ZONE)))
     }
     val recomputeSnapshot: () -> Unit = {
-        snapshot = outageRepo.snapshot(currentSettings, LocalDateTime.now(KYIV_ZONE), addressKey)
+        snapshot = shownSnapshot(currentSettings, LocalDateTime.now(KYIV_ZONE), addressKey)
     }
     var statusInfo by remember { mutableStateOf(snapshot.scheduleStatus()) }
     var isRefreshing by remember { mutableStateOf(false) }
@@ -179,8 +195,10 @@ fun BlackoutAppNavigation(
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
-    val exactAlarmMissing = remember(resumeTick, notificationsEnabled) {
-        notificationsEnabled && !ExactAlarmGate.canScheduleExact(appContext)
+    // Planned warnings of any address need exact alarms (spec/SUBSCRIPTIONS.md 8.1)
+    val anyPlannedActive = subscriptions.items.any { Subscriptions.plannedActive(alertsMaster, it) }
+    val exactAlarmMissing = remember(resumeTick, anyPlannedActive) {
+        anyPlannedActive && !ExactAlarmGate.canScheduleExact(appContext)
     }
 
     val isMainScreenVisible = pagerState.currentPage == 0 && !isRouletteOpen
@@ -228,7 +246,7 @@ fun BlackoutAppNavigation(
                         }
                     }
                 }
-                val result = outageRepo.refresh(settingsRepo.getSettings(), forceNetwork = force)
+                val result = outageRepo.refresh(settingsRepo.getSettings(), forceNetwork = force, shownId = otherShownItem()?.id)
                 try {
                     AlarmScheduler.syncAlarms(appContext)
                 } catch (_: Exception) {
@@ -239,7 +257,7 @@ fun BlackoutAppNavigation(
                 }
                 result
             }
-            snapshot = outcome.snapshot
+            snapshot = shownSnapshot(settingsRepo.getSettings())
             return outcome
         } finally {
             isRefreshing = false
@@ -258,11 +276,11 @@ fun BlackoutAppNavigation(
     }
 
     // Live countdown: once per second while the main screen is visible and the app is resumed (battery friendly)
-    LaunchedEffect(lifecycleOwner, isCountdownScreenActive, currentSettings, addressKey) {
+    LaunchedEffect(lifecycleOwner, isCountdownScreenActive, currentSettings, addressKey, shownSubscriptionId, subscriptions) {
         if (!isCountdownScreenActive) {
             val nowDt = LocalDateTime.now(KYIV_ZONE)
             currentTime = nowDt.toLocalTime()
-            snapshot = outageRepo.snapshot(currentSettings, nowDt, addressKey)
+            snapshot = shownSnapshot(currentSettings, nowDt, addressKey)
             statusInfo = snapshot.scheduleStatus()
             return@LaunchedEffect
         }
@@ -276,7 +294,7 @@ fun BlackoutAppNavigation(
             while (true) {
                 val nowDt = LocalDateTime.now(KYIV_ZONE)
                 currentTime = nowDt.toLocalTime()
-                val fresh = outageRepo.snapshot(currentSettings, nowDt, addressKey)
+                val fresh = shownSnapshot(currentSettings, nowDt, addressKey)
                 snapshot = fresh
                 val updatedStatus = fresh.scheduleStatus()
                 statusInfo = updatedStatus
@@ -308,14 +326,14 @@ fun BlackoutAppNavigation(
             currentLanguage = updated.language
             subscriptions = subscriptionSync.store()
             alertsMaster = subscriptionSync.master()
-            snapshot = outageRepo.snapshot(updated, LocalDateTime.now(KYIV_ZONE))
+            snapshot = shownSnapshot(updated)
         }
     }
 
     // Schedule cache or outage state changed (worker, widget, refresh): show it
     val stateListener = remember(settingsRepo, outageRepo) {
         SharedPreferences.OnSharedPreferenceChangeListener { _, _ ->
-            snapshot = outageRepo.snapshot(settingsRepo.getSettings(), LocalDateTime.now(KYIV_ZONE))
+            snapshot = shownSnapshot(settingsRepo.getSettings())
         }
     }
 
@@ -376,6 +394,22 @@ fun BlackoutAppNavigation(
         }
         runRefresh(force = false, resolveAddress = true)
         hasCompletedInitialScheduleFetch = true
+    }
+
+    // Another address is shown: poll its PowerOn too (its switches gate notifications only)
+    LaunchedEffect(shownSubscriptionId) {
+        if (hasCompletedInitialScheduleFetch && otherShownItem() != null) {
+            runRefresh(force = false, resolveAddress = false)
+        }
+    }
+
+    // A tapped notification shows its address on the main screen
+    LaunchedEffect(openSubscriptionId) {
+        val id = openSubscriptionId ?: return@LaunchedEffect
+        shownSubscriptionId = id
+        isRouletteOpen = false
+        pagerState.scrollToPage(0)
+        onOpenSubscriptionHandled()
     }
 
     // Manual refresh: always goes to the network and tells the user what the site answered
@@ -523,10 +557,21 @@ fun BlackoutAppNavigation(
         ) { page ->
             when (page) {
                 0 -> {
+                    val other = otherShownItem()
                     MainScreen(
-                        queue = queue,
-                        customQueueStatusText = customQueueStatusText,
-                        selectedAddress = selectedAddress,
+                        queue = if (other != null) other.queue.orEmpty() else queue,
+                        customQueueStatusText = if (other != null) other.queueStatusText else customQueueStatusText,
+                        selectedAddress = if (other != null) {
+                            other.address?.let { a -> a.text.ifBlank { Subscriptions.displayLabel(other) } }
+                        } else {
+                            selectedAddress
+                        },
+                        addresses = Subscriptions.switcherItems(subscriptions),
+                        primaryAddressId = subscriptions.primaryId,
+                        shownAddressId = Subscriptions.viewItem(subscriptions, shownSubscriptionId)?.id,
+                        onSelectAddress = { shownSubscriptionId = it },
+                        showNoAlertsCaption = Subscriptions.noAlertsCaption(alertsMaster, subscriptions),
+                        onOpenSettings = { coroutineScope.launch { pagerState.animateScrollToPage(1) } },
                         snapshot = snapshot,
                         statusInfo = statusInfo,
                         isRefreshing = isRefreshing,

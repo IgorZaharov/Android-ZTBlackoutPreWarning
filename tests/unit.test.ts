@@ -2424,6 +2424,16 @@ async function runUnitTestE_AddressLookupAndUnsetQueue() {
   const afterAddressBothOff = subSync.change(afterAddressEmergencyOff, (st) => setSubscriptionPlanned(st, primaryId, false)).settings;
   assert.equal(afterAddressBothOff.notificationsEnabled, false);
   assert.equal(afterAddressBothOff.soundEnabled, true, 'Item switches never mute sound (spec/SUBSCRIPTIONS.md section 7)');
+  // ... and saving / reading the settings masks sound with the master, not with the two mirrored booleans (step 4 fix)
+  saveUserSettings(afterAddressBothOff);
+  assert.equal(loadUserSettings().soundEnabled, true, 'A saved primary with both switches off keeps sound for the other addresses');
+  saveUserSettings({ ...afterAddressBothOff, alertsMaster: false });
+  assert.equal(loadUserSettings().soundEnabled, false, 'Master off reads sound as off');
+  resetAllAppDataToFirstLaunch();
+  assert.ok(
+    read(KT + 'data/repository/SettingsRepository.kt').includes('if (prefs.contains(SubscriptionRepository.KEY_MASTER)) {'),
+    'SettingsRepository.kt must mask sound and vibration with the stored master switch'
+  );
   const notificationHelperKt = read(KT + 'notification/NotificationHelper.kt');
   assert.ok(
     notificationHelperKt.includes('enabled: Boolean = settings.emergencyNotificationsEnabled') &&

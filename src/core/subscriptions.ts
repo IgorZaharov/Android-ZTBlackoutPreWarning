@@ -501,3 +501,20 @@ export function alertLabels(store: SubscriptionStore, memberIds: readonly string
   const head = labels.slice(0, 2).join(' · ');
   return labels.length > 2 ? `${head} +${labels.length - 2}` : head;
 }
+
+// --- Main screen (section 9) ---------------------------------------------------------------------
+
+/** The chips of the address switcher: every item in list order, or none with fewer than 2 items. */
+export function switcherItems(store: SubscriptionStore): Subscription[] {
+  return store.items.length >= 2 ? [...store.items] : [];
+}
+
+/** The item the main screen shows: the selected one if it still exists, else the primary. */
+export function viewItem(store: SubscriptionStore, selectedId: string | null): Subscription | null {
+  return store.items.find((i) => i.id === selectedId) ?? store.items.find((i) => i.id === store.primaryId) ?? null;
+}
+
+/** The master is on but no item has a switch on: "on" would silently mean nothing. */
+export function noAlertsCaption(master: boolean, store: SubscriptionStore): boolean {
+  return master && store.items.length > 0 && !anyAlertsEnabled(master, store);
+}

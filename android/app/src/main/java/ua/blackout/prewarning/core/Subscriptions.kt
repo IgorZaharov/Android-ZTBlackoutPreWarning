@@ -2,7 +2,7 @@ package ua.blackout.prewarning.core
 
 /**
  * Multi-address subscriptions: the stored model, its repair rules, the store operations, the
- * migration from single-address settings, the primary mirror and the alert grouping. Specified in `spec/SUBSCRIPTIONS.md`, golden cases in
+ * migration from single-address settings, the primary mirror, the alert grouping and the main-screen switcher. Specified in `spec/SUBSCRIPTIONS.md`, golden cases in
  * `spec/vectors/subscriptions.json`, mirrored in `src/core/subscriptions.ts`.
  *
  * The model is exchanged as plain maps (`toMap` / `fromMap`) so this package needs no JSON library;
@@ -414,6 +414,21 @@ object Subscriptions {
         val head = labels.take(2).joinToString(" · ")
         return if (labels.size > 2) "$head +${labels.size - 2}" else head
     }
+
+    // ---------------------------------------------------------------------------------------------
+    // Main screen (section 9)
+    // ---------------------------------------------------------------------------------------------
+
+    /** The chips of the address switcher: every item in list order, or none with fewer than 2 items. */
+    fun switcherItems(store: SubscriptionStore): List<Subscription> = if (store.items.size >= 2) store.items else emptyList()
+
+    /** The item the main screen shows: the selected one if it still exists, else the primary. */
+    fun viewItem(store: SubscriptionStore, selectedId: String?): Subscription? =
+        store.items.firstOrNull { it.id == selectedId } ?: store.primary
+
+    /** The master is on but no item has a switch on: "on" would silently mean nothing. */
+    fun noAlertsCaption(master: Boolean, store: SubscriptionStore): Boolean =
+        master && store.items.isNotEmpty() && !anyAlertsEnabled(master, store)
 }
 
 /** One planned pre-warning shared by every item on one queue with the same span (`spec/SUBSCRIPTIONS.md` 8.1). */

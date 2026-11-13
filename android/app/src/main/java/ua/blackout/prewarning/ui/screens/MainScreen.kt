@@ -12,6 +12,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
@@ -29,6 +30,7 @@ import androidx.compose.material.icons.filled.NotificationsOff
 import androidx.compose.material.icons.filled.OpenInNew
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Schedule
+import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -59,6 +61,8 @@ import ua.blackout.prewarning.R
 import ua.blackout.prewarning.core.IntervalStatus
 import ua.blackout.prewarning.core.Outage
 import ua.blackout.prewarning.core.OutageKind
+import ua.blackout.prewarning.core.Subscription
+import ua.blackout.prewarning.core.Subscriptions
 import ua.blackout.prewarning.data.KYIV_ZONE
 import ua.blackout.prewarning.data.model.BlackoutSlot
 import ua.blackout.prewarning.data.model.SlotStatus
@@ -176,7 +180,14 @@ fun MainScreen(
     onToggleNotifications: () -> Unit = {},
     onRefresh: () -> Unit = {},
     onOpenQueueSelection: () -> Unit = {},
-    onChangeLanguage: (String) -> Unit = {}
+    onChangeLanguage: (String) -> Unit = {},
+    // Address switcher (spec/SUBSCRIPTIONS.md 9): empty with fewer than 2 addresses, then Main looks as in 1.4.0
+    addresses: List<Subscription> = emptyList(),
+    primaryAddressId: String? = null,
+    shownAddressId: String? = null,
+    onSelectAddress: (String) -> Unit = {},
+    showNoAlertsCaption: Boolean = false,
+    onOpenSettings: () -> Unit = {}
 ) {
     val context = LocalContext.current
 
@@ -188,7 +199,8 @@ fun MainScreen(
     val tomorrowDate = todayDate.plusDays(1)
     val now = snapshot.now
 
-    var selectedDayTab by rememberSaveable { mutableStateOf(TAB_TODAY) }
+    // Another address starts on Today (spec/SUBSCRIPTIONS.md 9)
+    var selectedDayTab by rememberSaveable(shownAddressId) { mutableStateOf(TAB_TODAY) }
     val isTomorrowSelected = selectedDayTab == TAB_TOMORROW
     val activeDate = if (isTomorrowSelected) tomorrowDate else todayDate
 
@@ -290,8 +302,15 @@ fun MainScreen(
                 )
             }
 
+            // 1'. The master is on but no address has a switch on: say so, with a way to Settings
+            if (!isQueueUnselected && showNoAlertsCaption) {
+                NoAlertsCaption(lang = lang, onOpenSettings = onOpenSettings)
+            }
+
+            val hasSwitcher = addresses.isNotEmpty()
+
             // 1a. Featured emergency outage (active, overdue or the next upcoming one); finished ones never show here
-            if (!isQueueUnselected && featuredEmergency != null) {
+            if (!hasSwitcher && !isQueueUnselected && featuredEmergency != null) {
                 EmergencyBanner(outage = featuredEmergency, now = now, lang = lang)
             }
 
@@ -308,6 +327,20 @@ fun MainScreen(
             // 1c'. ztoe is up but publishes a notice instead of the table: quote it to the user
             if (siteNotice != null) {
                 SiteNoticeCard(text = siteNotice, lang = lang)
+            }
+
+            // 1c''. Address switcher: under the global banners, above everything of one address
+            if (hasSwitcher) {
+                AddressSwitcher(
+                    addresses = addresses,
+                    primaryId = primaryAddressId,
+                    shownId = shownAddressId,
+                    lang = lang,
+                    onSelect = onSelectAddress
+                )
+                if (!isQueueUnselected && featuredEmergency != null) {
+                    EmergencyBanner(outage = featuredEmergency, now = now, lang = lang)
+                }
             }
 
             // 1d. Custom ZTOE queue/house status message
@@ -779,6 +812,86 @@ private fun ExactAlarmCard(lang: String, onOpenSettings: () -> Unit) {
                         textAlign = TextAlign.Center
                     )
                 }
+            }
+        }
+    }
+}
+
+/** "No address has alerts turned on" under the header bell, with a link to Settings (spec/SUBSCRIPTIONS.md 9). */
+@Composable
+private fun NoAlertsCaption(lang: String, onOpenSettings: () -> Unit) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Text(
+            text = AppStrings.noAddressAlerts(lang),
+            style = ZtType.caption,
+            color = ZtColors.Accent,
+            modifier = Modifier.weight(1f)
+        )
+        Box(
+            modifier = Modifier
+                .heightIn(min = ZtMinTouch)
+                .clip(ZtShapes.Chip)
+                .clickable(role = Role.Button, onClick = onOpenSettings)
+                .padding(horizontal = 8.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                text = AppStrings.settingsTitle(lang),
+                style = ZtType.label.copy(fontWeight = FontWeight.Bold),
+                color = Color.White
+            )
+        }
+    }
+}
+
+/** One chip per address, the primary with a star; scrolls sideways when the labels do not fit. */
+@Composable
+private fun AddressSwitcher(
+    addresses: List<Subscription>,
+    primaryId: String?,
+    shownId: String?,
+    lang: String,
+    onSelect: (String) -> Unit
+) {
+    val selectedText = AppStrings.tabSelected(lang)
+    val primaryText = AppStrings.primaryBadge(lang)
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .horizontalScroll(rememberScrollState())
+            .selectableGroup(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        for (item in addresses) {
+            val selected = item.id == shownId
+            val isPrimary = item.id == primaryId
+            val label = Subscriptions.displayLabel(item)
+            Row(
+                modifier = Modifier
+                    .heightIn(min = ZtMinTouch)
+                    .clip(ZtShapes.Chip)
+                    .background(if (selected) Color(0x33FFFFFF) else Color(0x80141A29))
+                    .border(1.dp, if (selected) Color(0x66FFFFFF) else Color(0x1FFFFFFF), ZtShapes.Chip)
+                    .semantics { if (selected) stateDescription = selectedText }
+                    .selectable(selected = selected, role = Role.Tab, onClick = { onSelect(item.id) })
+                    .padding(horizontal = 14.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                if (isPrimary) {
+                    Icon(Icons.Default.Star, contentDescription = primaryText, tint = ZtColors.Accent, modifier = Modifier.size(16.dp))
+                }
+                Text(
+                    text = label,
+                    style = ZtType.label.copy(fontWeight = FontWeight.Bold),
+                    color = if (selected) Color.White else TabIdle,
+                    maxLines = 1,
+                    softWrap = false
+                )
             }
         }
     }

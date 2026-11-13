@@ -866,6 +866,34 @@ test('repository: emergencies are polled for every address that wants them, each
   assert.deepEqual(off.otherEvents, [], 'no END for an address while the master is off');
 });
 
+test('repository: the address shown on the main view is polled whatever its switches, with its own status line (spec/SUBSCRIPTIONS.md 9)', async () => {
+  const store: SubscriptionStore = {
+    primaryId: 'aaaa0001',
+    items: [
+      makeSubscription('aaaa0001', { address: kyivAddr('37'), queue: '2.2', queueSource: 'LOOKUP', createdAtMs: 1 }),
+      makeSubscription('aaaa0004', { address: kyivAddr('39'), queue: '3.1', queueSource: 'LOOKUP', plannedAlerts: false, emergencyAlerts: false, createdAtMs: 4 }),
+    ],
+  };
+  const { repo, poweron, notifiedOther } = makeRepo(() => ({ store, master: true }));
+  poweron.accidents.push(ACCIDENT_22_00_TO_23_30);
+  const shown = store.items[1];
+  assert.equal(repo.snapshotFor(shown).poweron, null, 'never polled yet: no status line');
+
+  // not shown and both switches off: not polled at all
+  await repo.refresh(settings22);
+  assert.equal(repo.snapshotFor(shown).poweron, null);
+
+  // shown: polled, its ledger and status are its own, but its switches still gate the notification
+  const out = await repo.refresh(settings22, false, true, shown.id);
+  assert.deepEqual(out.otherEvents, [], 'its emergency switch is off: no alert');
+  assert.equal(notifiedOther.length, 0);
+  const snap = repo.snapshotFor(shown);
+  assert.equal(snap.poweron?.ok, true, 'its own status line');
+  assert.equal(snap.queue, '3.1');
+  assert.ok(snap.featuredEmergency() !== null, 'the emergency at 39 is on its main view');
+  assert.equal(out.snapshot.poweron?.ok, true, 'the primary keeps its own status');
+});
+
 const ev = (kind: EmergencyEvent['kind'], start: string, eta: string | null, extra: Partial<EmergencyEvent> = {}): EmergencyEvent => ({
   kind,
   entryId: 'pw_x',

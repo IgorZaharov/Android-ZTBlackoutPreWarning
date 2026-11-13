@@ -160,6 +160,22 @@ class OutageStateStore(context: Context) {
         editor.apply()
     }
 
+    /** PowerOn status of a non-primary address (spec/SUBSCRIPTIONS.md 8.4); the primary keeps the keys above. */
+    fun poweron(addressKey: String): PowerOnSnapshot? {
+        if (!prefs.contains("poweron_checked_ms_$addressKey")) return null
+        return PowerOnSnapshot(
+            ok = prefs.getBoolean("poweron_ok_$addressKey", false),
+            checkedAtMs = prefs.getLong("poweron_checked_ms_$addressKey", 0L),
+            lastOkMs = prefs.getLong("poweron_last_ok_ms_$addressKey", 0L).takeIf { it > 0L }
+        )
+    }
+
+    fun savePowerOn(addressKey: String, ok: Boolean, nowMs: Long) {
+        val editor = prefs.edit().putBoolean("poweron_ok_$addressKey", ok).putLong("poweron_checked_ms_$addressKey", nowMs)
+        if (ok) editor.putLong("poweron_last_ok_ms_$addressKey", nowMs)
+        editor.apply()
+    }
+
     /** Forgets everything (used by "reset to defaults"). */
     fun clearAll() {
         prefs.edit().clear().apply()

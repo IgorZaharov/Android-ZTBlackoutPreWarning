@@ -75,6 +75,15 @@ export const DEFAULT_SETTINGS: UserSettings = {
 
 let memorySettings: UserSettings | null = null;
 
+/**
+ * Whether sound and vibration may be on: the master switch once it is known, else the 1.4.0 rule
+ * (spec/SUBSCRIPTIONS.md section 7), so a primary with both switches off never mutes the other addresses.
+ */
+function soundGate(s: UserSettings): boolean {
+  if (typeof s.alertsMaster === 'boolean') return s.alertsMaster;
+  return Boolean(s.notificationsEnabled || (s.emergencyNotificationsEnabled ?? true));
+}
+
 export function loadUserSettings(): UserSettings {
   try {
     if (typeof localStorage !== 'undefined') {
@@ -90,7 +99,7 @@ export function loadUserSettings(): UserSettings {
           activeEmergencyOutage: validEmergency,
           emergencyNotificationsEnabled: parsed.emergencyNotificationsEnabled ?? true
         };
-        const anyAlertsEnabled = Boolean(merged.notificationsEnabled || merged.emergencyNotificationsEnabled);
+        const anyAlertsEnabled = soundGate(merged);
         if (!anyAlertsEnabled) {
           merged.soundEnabled = false;
           merged.vibrationEnabled = false;
@@ -114,7 +123,7 @@ export function loadUserSettings(): UserSettings {
 export function saveUserSettings(settings: UserSettings): void {
   try {
     const emergencyEnabled = settings.emergencyNotificationsEnabled ?? true;
-    const anyAlertsEnabled = Boolean(settings.notificationsEnabled || emergencyEnabled);
+    const anyAlertsEnabled = soundGate({ ...settings, emergencyNotificationsEnabled: emergencyEnabled });
     const validEmergency = isValidEmergencyOutage(settings.activeEmergencyOutage)
       ? settings.activeEmergencyOutage
       : null;
@@ -459,6 +468,8 @@ export function checkAndTriggerGroupedAlerts(
       ),
       queue: group.queue,
       advanceMinutes: Math.max(minutesLeft, 0),
+      // a tap shows the first member, the primary when it is one
+      subscriptionId: group.memberIds[0],
     };
     deliver(record, settings.soundEnabled, settings.vibrationEnabled, onNotificationFired);
     fired.push(record);
@@ -517,7 +528,7 @@ export function triggerEmergencyEventAlerts(
   lang: 'uk' | 'en',
   now: LocalDateTime,
   onNotificationFired?: (record: NotificationRecord) => void,
-  options: { addressLine?: string | null; enabled?: boolean } = {}
+  options: { addressLine?: string | null; enabled?: boolean; subscriptionId?: string | null } = {}
 ): NotificationRecord[] {
   const emergencyEnabled = options.enabled ?? settings.emergencyNotificationsEnabled ?? true;
   if (!emergencyEnabled || events.length === 0) return [];
@@ -564,6 +575,7 @@ export function triggerEmergencyEventAlerts(
       message: address ? `${body}\n${address}` : body,
       queue: settings.queue || '—',
       advanceMinutes: 0,
+      ...(options.subscriptionId ? { subscriptionId: options.subscriptionId } : {}),
     };
     deliver(record, settings.soundEnabled, settings.vibrationEnabled, onNotificationFired);
     fired.push(record);

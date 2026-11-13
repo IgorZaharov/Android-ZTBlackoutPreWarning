@@ -524,6 +524,23 @@ function subscriptionVectors(): number {
       n++;
     }
   }
+
+  // Section 9: main-screen switcher
+  for (const c of v.main.switcherItems) {
+    assert.deepStrictEqual(Sub.switcherItems(storeOf(c.store)).map((i) => i.id), c.expect, c.name);
+    n++;
+  }
+  for (const c of v.main.viewItem) {
+    const store = storeOf(c.store);
+    for (const vc of c.cases) {
+      assert.equal(Sub.viewItem(store, vc.selectedId)?.id ?? null, vc.expect, `${c.name}: ${vc.selectedId}`);
+      n++;
+    }
+  }
+  for (const c of v.main.noAlertsCaption) {
+    assert.equal(Sub.noAlertsCaption(c.master, storeOf(c.store)), c.expect, c.name);
+    n++;
+  }
   return n;
 }
 

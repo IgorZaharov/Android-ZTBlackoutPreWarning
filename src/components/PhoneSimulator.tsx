@@ -19,10 +19,19 @@ import { AboutView } from './AboutView';
 import { WidgetSimulator } from './WidgetSimulator';
 import { ZhytomyrRouletteModal } from './ZhytomyrRouletteModal';
 import { cacheQueueSlotsForRoulette } from '../services/rouletteGame';
+import { noAlertsCaption, switcherItems, type SubscriptionStore } from '../core/subscriptions';
 
 interface PhoneSimulatorProps {
   /** One outage snapshot feeds the main screen and the three widgets (see OutageRepository.snapshot). */
   snapshot: OutageSnapshot;
+  /** The address the main screen shows (spec/SUBSCRIPTIONS.md 9); the primary when absent. */
+  mainSnapshot?: OutageSnapshot;
+  mainSettings?: UserSettings;
+  subscriptionStore?: SubscriptionStore;
+  shownSubscriptionId?: string | null;
+  onSelectSubscription?: (id: string) => void;
+  /** A tap on the heads-up card: shows its address on the main screen. */
+  onOpenNotification?: (record: NotificationRecord) => void;
   settings: UserSettings;
   lang: 'uk' | 'en';
   activeNotification: NotificationRecord | null;
@@ -40,6 +49,12 @@ interface PhoneSimulatorProps {
 
 export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
   snapshot,
+  mainSnapshot,
+  mainSettings,
+  subscriptionStore,
+  shownSubscriptionId = null,
+  onSelectSubscription,
+  onOpenNotification,
   settings,
   lang,
   activeNotification,
@@ -167,7 +182,15 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
                 <div className="w-9 h-9 rounded-xl bg-[#FF5E3A] flex items-center justify-center text-white shrink-0 mt-0.5 shadow-md">
                   <Zap className="w-4 h-4 fill-current" />
                 </div>
-                <div>
+                <div
+                  role={!imitatedNotification && onOpenNotification ? 'button' : undefined}
+                  tabIndex={!imitatedNotification && onOpenNotification ? 0 : undefined}
+                  data-testid="heads-up-open"
+                  onClick={() => {
+                    if (!imitatedNotification && activeNotification) onOpenNotification?.(activeNotification);
+                  }}
+                  className={!imitatedNotification && onOpenNotification ? 'cursor-pointer' : undefined}
+                >
                   <div className="flex items-center gap-2">
                     <span className="text-[11px] font-bold text-[#FF5E3A] uppercase tracking-wider">Світло в Житомирі</span>
                     <span className="text-[10px] text-sky-200/70 font-mono">· {t.now}</span>
@@ -211,8 +234,14 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
         >
           {activeTab === 'schedule' && (
             <MainView
-              snapshot={snapshot}
-              settings={settings}
+              snapshot={mainSnapshot ?? snapshot}
+              settings={mainSettings ?? settings}
+              addresses={subscriptionStore ? switcherItems(subscriptionStore) : []}
+              primaryAddressId={subscriptionStore?.primaryId ?? null}
+              shownAddressId={shownSubscriptionId}
+              onSelectAddress={onSelectSubscription}
+              showNoAlertsCaption={subscriptionStore ? noAlertsCaption(settings.alertsMaster ?? true, subscriptionStore) : false}
+              onOpenSettings={() => setActiveTab('settings')}
               lang={lang}
               onToggleNotifications={onToggleNotifications}
               onRefresh={onRefresh}

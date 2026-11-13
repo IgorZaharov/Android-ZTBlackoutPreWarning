@@ -256,4 +256,24 @@ class SubscriptionVectorsTest {
             }
         }
     }
+
+    @Test
+    fun mainScreen() {
+        val v = load().getJSONObject("main")
+        for (c in v.getJSONArray("switcherItems").objects()) {
+            assertEquals(c.getString("name"), c.getJSONArray("expect").let { a -> (0 until a.length()).map { a.getString(it) } },
+                Subscriptions.switcherItems(storeOf(c.getJSONObject("store"))).map { it.id })
+        }
+        for (c in v.getJSONArray("viewItem").objects()) {
+            val store = storeOf(c.getJSONObject("store"))
+            for (vc in c.getJSONArray("cases").objects()) {
+                val sel = vc.optStr("selectedId")
+                assertEquals(c.getString("name") + " " + sel, vc.optStr("expect"), Subscriptions.viewItem(store, sel)?.id)
+            }
+        }
+        for (c in v.getJSONArray("noAlertsCaption").objects()) {
+            assertEquals(c.getString("name"), c.getBoolean("expect"),
+                Subscriptions.noAlertsCaption(c.getBoolean("master"), storeOf(c.getJSONObject("store"))))
+        }
+    }
 }

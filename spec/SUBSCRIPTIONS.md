@@ -1,11 +1,12 @@
 # Subscriptions (multi-address) — store and migration
 
-Status: **steps 1 to 3 of the multi-address feature** (`docs/design/MULTI_ADDRESS.md`, owner decisions in
+Status: **steps 1 to 4 of the multi-address feature** (`docs/design/MULTI_ADDRESS.md`, owner decisions in
 its section 14). This file fixes the stored model, its repair rules, the store operations, the migration
 from single-address settings, (step 2) the mirror of the primary item into the single-address keys and
-(step 3) the alerts for every item. Since step 2 the Settings screen edits the store and the store is the
-source of truth; the main screen and widgets still read the single-address keys and so show the primary
-item, while since step 3 planned and emergency alerts cover every item. Golden cases: [`vectors/subscriptions.json`](vectors/subscriptions.json).
+(step 3) the alerts for every item and (step 4) the address switcher of the main screen. Since step 2 the
+Settings screen edits the store and the store is the source of truth; widgets still read the single-address
+keys and so show the primary item, since step 3 planned and emergency alerts cover every item, and since
+step 4 the main screen can show any item. Golden cases: [`vectors/subscriptions.json`](vectors/subscriptions.json).
 
 Pure code: Kotlin `core/Subscriptions.kt`, TypeScript `src/core/subscriptions.ts`. Both expose the model
 as plain maps (`toMap` / `fromMap`), so the core never depends on a JSON library; each platform turns
@@ -153,7 +154,11 @@ current sound and vibration values are remembered (`prev_sound_enabled`, `prev_v
 are switched off; when it turns the master on again they are restored. Setting the master to the value it
 already has changes nothing. Item switches never touch sound or vibration, so turning off both switches of
 the primary no longer mutes the alerts of the other items. (Step 2 applied the 1.4.0 rule to the two mirrored
-booleans instead.)
+booleans instead.) For the same reason, reading and saving the settings masks sound and vibration with
+the master when `alerts_master_enabled` is stored: master off reads and saves both as off. Only without a
+stored master (before the migration ran) the 1.4.0 rule applies: both are off when
+`notifications_enabled` and `emergency_notifications_enabled` are both off. The Settings rows for sound and
+vibration are enabled exactly when the master is on.
 
 ## 8. Alerts for every item (step 3)
 
@@ -211,3 +216,32 @@ failure and its own ledger under its address key, so one failing item never touc
 item are posted when `master AND item.emergencyAlerts`; their second line is `item.address.text` when not
 blank, else `displayLabel(item)`. The PowerOn status line of the main screen comes from the primary's fetch
 only. Emergencies are never merged across items (they are per house).
+
+Since step 4 the item shown on the main screen (section 9) is polled too, whatever its switches; its events
+are still posted only when `master AND item.emergencyAlerts`. The fetch result of a non-primary item is
+kept per address key (`poweron_ok_<key>`, `poweron_checked_ms_<key>`, `poweron_last_ok_ms_<key>`, same
+meaning as the primary's keys of `PERSISTENCE.md`) and is the PowerOn status line while that item is shown.
+
+## 9. Main screen: address switcher (step 4)
+
+```
+switcherItems(store)       = store.items in list order when there are 2 or more items, else []
+viewItem(store, selectedId) = the item with selectedId if it exists, else the primary item, else null
+noAlertsCaption(master, store) = master AND store.items not empty AND NOT anyAlertsEnabled(master, store)
+```
+
+* With `switcherItems` empty the main screen looks exactly as in 1.4.0. Otherwise a row of chips shows one
+  chip per item (`displayLabel`, the primary marked with a star), under the global banners (exact alarms,
+  site state) and above everything that belongs to one address (emergency banner, hero, day tabs, drum, rows).
+* `selectedId` is session state: a cold start shows the primary (owner decision 5). An id that no longer
+  exists (the item was removed) falls back to the primary. Selecting another item resets the day tab to Today.
+* The shown item supplies the queue title, the address caption, the ZTOE status text of a house without a
+  queue and the outages (`outagesFor(item.queue, item.address.key)`, local state only). The site state is
+  global (one site); the PowerOn line is the shown item's (section 8.4).
+* The header bell is the master switch (owner decision 4). When `noAlertsCaption` is true the header shows the
+  caption `Для жодної адреси сповіщення не ввімкнені` / `No address has alerts turned on` with a link to
+  Settings, so "on" never silently means nothing.
+* Tapping an alert opens the main screen with its item shown: a planned group opens its first member
+  (`memberIds[0]`, the primary when it is a member), an emergency the item it was polled for. A tap target that
+  no longer exists shows the primary.
+

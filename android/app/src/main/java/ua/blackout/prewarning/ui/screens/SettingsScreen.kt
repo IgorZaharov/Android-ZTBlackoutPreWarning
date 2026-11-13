@@ -391,10 +391,9 @@ fun SettingsScreen(
         }
 
         // 4. Alerts: the master switch for all addresses (owner decision 1), then sound and vibration.
-        // Sound and vibration follow the primary address' effective switches, as the single-address keys do.
-        val anyAlertsEnabled = notificationsEnabled || emergencyNotificationsEnabled
-        val noAddressAlerts = alertsMaster && subscriptions.items.isNotEmpty() &&
-            !Subscriptions.anyAlertsEnabled(alertsMaster, subscriptions)
+        // Sound and vibration follow the master switch (spec/SUBSCRIPTIONS.md section 7).
+        val anyAlertsEnabled = alertsMaster
+        val noAddressAlerts = Subscriptions.noAlertsCaption(alertsMaster, subscriptions)
         GlassCard(modifier = Modifier.fillMaxWidth(), contentPadding = PaddingValues18) {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 SwitchRow(

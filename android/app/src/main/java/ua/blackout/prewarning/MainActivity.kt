@@ -1,6 +1,7 @@
 package ua.blackout.prewarning
 
 import android.Manifest
+import android.content.Intent
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -24,6 +25,15 @@ class MainActivity : ComponentActivity() {
             // Notification permission granted or denied
         }
 
+    /** Subscription id from the notification the app was opened with; the main screen shows it once. */
+    private var openSubscriptionId by mutableStateOf<String?>(null)
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        intent.getStringExtra(NotificationHelper.EXTRA_SUBSCRIPTION_ID)?.let { openSubscriptionId = it }
+    }
+
     override fun onResume() {
         super.onResume()
         RouletteSoundEngine.setAppInForeground(true, this)
@@ -41,6 +51,8 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // a recreated activity (rotation) must not jump back to the notification's address
+        if (savedInstanceState == null) openSubscriptionId = intent?.getStringExtra(NotificationHelper.EXTRA_SUBSCRIPTION_ID)
 
         // Initialize Notification Channels
         NotificationHelper.createNotificationChannels(this)
@@ -60,7 +72,9 @@ class MainActivity : ComponentActivity() {
                     color = MaterialTheme.colorScheme.background
                 ) {
                     BlackoutAppNavigation(
-                        onThemeChanged = { isDarkMode = it }
+                        onThemeChanged = { isDarkMode = it },
+                        openSubscriptionId = openSubscriptionId,
+                        onOpenSubscriptionHandled = { openSubscriptionId = null }
                     )
                 }
             }

@@ -1162,6 +1162,9 @@ import java.time.LocalDate
 import java.time.LocalDateTime
 
 object NotificationHelper {
+    /** Intent extra of a notification tap: the subscription id to show on the main screen. */
+    const val EXTRA_SUBSCRIPTION_ID = "ua.blackout.prewarning.SUBSCRIPTION_ID"
+
     const val CHANNEL_SOUND_VIBE = "zt_blackout_sound_vibe_v2"
     const val CHANNEL_SOUND_ONLY = "zt_blackout_sound_only_v2"
     const val CHANNEL_VIBE_ONLY = "zt_blackout_vibe_only_v2"
@@ -1301,7 +1304,9 @@ object NotificationHelper {
         events: List<EmergencyEvent>,
         // Default: the primary address (mirrored settings); another subscription passes its own (spec/SUBSCRIPTIONS.md 8.4)
         addressLine: String? = settings.selectedAddress,
-        enabled: Boolean = settings.emergencyNotificationsEnabled
+        enabled: Boolean = settings.emergencyNotificationsEnabled,
+        // The subscription a tap shows on the main screen (spec/SUBSCRIPTIONS.md 9)
+        subscriptionId: String? = null
     ) {
         if (!enabled || events.isEmpty()) return
         val appContext = context.applicationContext
@@ -1337,7 +1342,8 @@ object NotificationHelper {
                 title = title,
                 body = if (address != null) "$body\\n$address" else body,
                 isTest = false,
-                isEmergencyAlert = true
+                isEmergencyAlert = true,
+                subscriptionId = subscriptionId
             )
         }
     }
@@ -1359,7 +1365,8 @@ object NotificationHelper {
         title: String,
         body: String,
         isTest: Boolean = false,
-        isEmergencyAlert: Boolean = false
+        isEmergencyAlert: Boolean = false,
+        subscriptionId: String? = null
     ) {
         val settings = SettingsRepository(context).getSettings()
         // The master switch silences every alert (owner decision 1); the per-address switches were
@@ -1394,6 +1401,7 @@ object NotificationHelper {
 
         val intent = Intent(context, MainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            if (subscriptionId != null) putExtra(EXTRA_SUBSCRIPTION_ID, subscriptionId)
         }
 
         val pendingIntent = PendingIntent.getActivity(
@@ -1553,7 +1561,9 @@ class AlarmReceiver : BroadcastReceiver() {
                 appContext,
                 AlarmCodes.codeFor(appContext, group.key),
                 AppStrings.plannedAlertTitle(lang),
-                body
+                body,
+                // a tap shows the first member, the primary when it is one (spec/SUBSCRIPTIONS.md 9)
+                subscriptionId = group.memberIds.firstOrNull()
             )
         }
     }
@@ -2703,6 +2713,7 @@ class BlackoutStripWidgetReceiver : BlackoutWidgetReceiver() {
     content: `package ua.blackout.prewarning
 
 import android.Manifest
+import android.content.Intent
 import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
@@ -2726,6 +2737,15 @@ class MainActivity : ComponentActivity() {
             // Notification permission granted or denied
         }
 
+    /** Subscription id from the notification the app was opened with; the main screen shows it once. */
+    private var openSubscriptionId by mutableStateOf<String?>(null)
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        intent.getStringExtra(NotificationHelper.EXTRA_SUBSCRIPTION_ID)?.let { openSubscriptionId = it }
+    }
+
     override fun onResume() {
         super.onResume()
         RouletteSoundEngine.setAppInForeground(true, this)
@@ -2743,6 +2763,8 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        // a recreated activity (rotation) must not jump back to the notification's address
+        if (savedInstanceState == null) openSubscriptionId = intent?.getStringExtra(NotificationHelper.EXTRA_SUBSCRIPTION_ID)
 
         // Initialize Notification Channels
         NotificationHelper.createNotificationChannels(this)
@@ -2762,7 +2784,9 @@ class MainActivity : ComponentActivity() {
                     color = MaterialTheme.colorScheme.background
                 ) {
                     BlackoutAppNavigation(
-                        onThemeChanged = { isDarkMode = it }
+                        onThemeChanged = { isDarkMode = it },
+                        openSubscriptionId = openSubscriptionId,
+                        onOpenSubscriptionHandled = { openSubscriptionId = null }
                     )
                 }
             }
@@ -2788,6 +2812,7 @@ import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
@@ -2805,6 +2830,7 @@ import androidx.compose.material.icons.filled.NotificationsOff
 import androidx.compose.material.icons.filled.OpenInNew
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Schedule
+import androidx.compose.material.icons.filled.Star
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -2835,6 +2861,8 @@ import ua.blackout.prewarning.R
 import ua.blackout.prewarning.core.IntervalStatus
 import ua.blackout.prewarning.core.Outage
 import ua.blackout.prewarning.core.OutageKind
+import ua.blackout.prewarning.core.Subscription
+import ua.blackout.prewarning.core.Subscriptions
 import ua.blackout.prewarning.data.KYIV_ZONE
 import ua.blackout.prewarning.data.model.BlackoutSlot
 import ua.blackout.prewarning.data.model.SlotStatus
@@ -2952,7 +2980,14 @@ fun MainScreen(
     onToggleNotifications: () -> Unit = {},
     onRefresh: () -> Unit = {},
     onOpenQueueSelection: () -> Unit = {},
-    onChangeLanguage: (String) -> Unit = {}
+    onChangeLanguage: (String) -> Unit = {},
+    // Address switcher (spec/SUBSCRIPTIONS.md 9): empty with fewer than 2 addresses, then Main looks as in 1.4.0
+    addresses: List<Subscription> = emptyList(),
+    primaryAddressId: String? = null,
+    shownAddressId: String? = null,
+    onSelectAddress: (String) -> Unit = {},
+    showNoAlertsCaption: Boolean = false,
+    onOpenSettings: () -> Unit = {}
 ) {
     val context = LocalContext.current
 
@@ -2964,7 +2999,8 @@ fun MainScreen(
     val tomorrowDate = todayDate.plusDays(1)
     val now = snapshot.now
 
-    var selectedDayTab by rememberSaveable { mutableStateOf(TAB_TODAY) }
+    // Another address starts on Today (spec/SUBSCRIPTIONS.md 9)
+    var selectedDayTab by rememberSaveable(shownAddressId) { mutableStateOf(TAB_TODAY) }
     val isTomorrowSelected = selectedDayTab == TAB_TOMORROW
     val activeDate = if (isTomorrowSelected) tomorrowDate else todayDate
 
@@ -3066,8 +3102,15 @@ fun MainScreen(
                 )
             }
 
+            // 1'. The master is on but no address has a switch on: say so, with a way to Settings
+            if (!isQueueUnselected && showNoAlertsCaption) {
+                NoAlertsCaption(lang = lang, onOpenSettings = onOpenSettings)
+            }
+
+            val hasSwitcher = addresses.isNotEmpty()
+
             // 1a. Featured emergency outage (active, overdue or the next upcoming one); finished ones never show here
-            if (!isQueueUnselected && featuredEmergency != null) {
+            if (!hasSwitcher && !isQueueUnselected && featuredEmergency != null) {
                 EmergencyBanner(outage = featuredEmergency, now = now, lang = lang)
             }
 
@@ -3084,6 +3127,20 @@ fun MainScreen(
             // 1c'. ztoe is up but publishes a notice instead of the table: quote it to the user
             if (siteNotice != null) {
                 SiteNoticeCard(text = siteNotice, lang = lang)
+            }
+
+            // 1c''. Address switcher: under the global banners, above everything of one address
+            if (hasSwitcher) {
+                AddressSwitcher(
+                    addresses = addresses,
+                    primaryId = primaryAddressId,
+                    shownId = shownAddressId,
+                    lang = lang,
+                    onSelect = onSelectAddress
+                )
+                if (!isQueueUnselected && featuredEmergency != null) {
+                    EmergencyBanner(outage = featuredEmergency, now = now, lang = lang)
+                }
             }
 
             // 1d. Custom ZTOE queue/house status message
@@ -3555,6 +3612,86 @@ private fun ExactAlarmCard(lang: String, onOpenSettings: () -> Unit) {
                         textAlign = TextAlign.Center
                     )
                 }
+            }
+        }
+    }
+}
+
+/** "No address has alerts turned on" under the header bell, with a link to Settings (spec/SUBSCRIPTIONS.md 9). */
+@Composable
+private fun NoAlertsCaption(lang: String, onOpenSettings: () -> Unit) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Text(
+            text = AppStrings.noAddressAlerts(lang),
+            style = ZtType.caption,
+            color = ZtColors.Accent,
+            modifier = Modifier.weight(1f)
+        )
+        Box(
+            modifier = Modifier
+                .heightIn(min = ZtMinTouch)
+                .clip(ZtShapes.Chip)
+                .clickable(role = Role.Button, onClick = onOpenSettings)
+                .padding(horizontal = 8.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            Text(
+                text = AppStrings.settingsTitle(lang),
+                style = ZtType.label.copy(fontWeight = FontWeight.Bold),
+                color = Color.White
+            )
+        }
+    }
+}
+
+/** One chip per address, the primary with a star; scrolls sideways when the labels do not fit. */
+@Composable
+private fun AddressSwitcher(
+    addresses: List<Subscription>,
+    primaryId: String?,
+    shownId: String?,
+    lang: String,
+    onSelect: (String) -> Unit
+) {
+    val selectedText = AppStrings.tabSelected(lang)
+    val primaryText = AppStrings.primaryBadge(lang)
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .horizontalScroll(rememberScrollState())
+            .selectableGroup(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        for (item in addresses) {
+            val selected = item.id == shownId
+            val isPrimary = item.id == primaryId
+            val label = Subscriptions.displayLabel(item)
+            Row(
+                modifier = Modifier
+                    .heightIn(min = ZtMinTouch)
+                    .clip(ZtShapes.Chip)
+                    .background(if (selected) Color(0x33FFFFFF) else Color(0x80141A29))
+                    .border(1.dp, if (selected) Color(0x66FFFFFF) else Color(0x1FFFFFFF), ZtShapes.Chip)
+                    .semantics { if (selected) stateDescription = selectedText }
+                    .selectable(selected = selected, role = Role.Tab, onClick = { onSelect(item.id) })
+                    .padding(horizontal = 14.dp, vertical = 8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                if (isPrimary) {
+                    Icon(Icons.Default.Star, contentDescription = primaryText, tint = ZtColors.Accent, modifier = Modifier.size(16.dp))
+                }
+                Text(
+                    text = label,
+                    style = ZtType.label.copy(fontWeight = FontWeight.Bold),
+                    color = if (selected) Color.White else TabIdle,
+                    maxLines = 1,
+                    softWrap = false
+                )
             }
         }
     }
@@ -4242,10 +4379,9 @@ fun SettingsScreen(
         }
 
         // 4. Alerts: the master switch for all addresses (owner decision 1), then sound and vibration.
-        // Sound and vibration follow the primary address' effective switches, as the single-address keys do.
-        val anyAlertsEnabled = notificationsEnabled || emergencyNotificationsEnabled
-        val noAddressAlerts = alertsMaster && subscriptions.items.isNotEmpty() &&
-            !Subscriptions.anyAlertsEnabled(alertsMaster, subscriptions)
+        // Sound and vibration follow the master switch (spec/SUBSCRIPTIONS.md section 7).
+        val anyAlertsEnabled = alertsMaster
+        val noAddressAlerts = Subscriptions.noAlertsCaption(alertsMaster, subscriptions)
         GlassCard(modifier = Modifier.fillMaxWidth(), contentPadding = PaddingValues18) {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 SwitchRow(
@@ -7619,6 +7755,7 @@ import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -7649,6 +7786,8 @@ import ua.blackout.prewarning.data.repository.SettingsRepository
 import ua.blackout.prewarning.data.repository.SubscriptionSync
 import ua.blackout.prewarning.core.StoreResult
 import ua.blackout.prewarning.core.Subscriptions
+import ua.blackout.prewarning.data.model.UserSettings
+import ua.blackout.prewarning.data.repository.OutageSnapshot
 import ua.blackout.prewarning.notification.AlarmScheduler
 import ua.blackout.prewarning.notification.ExactAlarmGate
 import ua.blackout.prewarning.notification.NotificationHelper
@@ -7686,7 +7825,10 @@ private fun smoothGaussianRadialBrush(
 
 @Composable
 fun BlackoutAppNavigation(
-    onThemeChanged: (Boolean) -> Unit = {}
+    onThemeChanged: (Boolean) -> Unit = {},
+    // Subscription id from a tapped notification: shown once on the main screen (spec/SUBSCRIPTIONS.md 9)
+    openSubscriptionId: String? = null,
+    onOpenSubscriptionHandled: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val appContext = remember { context.applicationContext }
@@ -7701,6 +7843,8 @@ fun BlackoutAppNavigation(
     val subscriptionSync = remember { SubscriptionSync(appContext) }
     var subscriptions by remember { mutableStateOf(subscriptionSync.ensureReady()) }
     var alertsMaster by remember { mutableStateOf(subscriptionSync.master()) }
+    // The address the main screen shows (step 4): session state, a cold start shows the primary (decision 5)
+    var shownSubscriptionId by rememberSaveable { mutableStateOf<String?>(null) }
 
     // Latest persisted settings; kept in sync by the preference listener below
     var currentSettings by remember { mutableStateOf(initialSettings) }
@@ -7748,11 +7892,19 @@ fun BlackoutAppNavigation(
 
     // Everything the screens show about outages comes from one snapshot of the stored state
     val addressKey = remember(selectedAddressQuery) { outageRepo.addressKey(selectedAddressQuery) }
+    // The shown item when it is not the primary; the primary is read through the mirrored settings as in 1.4.0
+    fun otherShownItem() = Subscriptions.viewItem(subscriptions, shownSubscriptionId)?.takeIf { it.id != subscriptions.primaryId }
+    fun shownSnapshot(
+        settings: UserSettings,
+        now: LocalDateTime = LocalDateTime.now(KYIV_ZONE),
+        primaryKey: String? = outageRepo.addressKey(settings.selectedAddressQuery)
+    ): OutageSnapshot = otherShownItem()?.let { outageRepo.snapshotFor(it, now) } ?: outageRepo.snapshot(settings, now, primaryKey)
+
     var snapshot by remember {
         mutableStateOf(outageRepo.snapshot(initialSettings, LocalDateTime.now(KYIV_ZONE)))
     }
     val recomputeSnapshot: () -> Unit = {
-        snapshot = outageRepo.snapshot(currentSettings, LocalDateTime.now(KYIV_ZONE), addressKey)
+        snapshot = shownSnapshot(currentSettings, LocalDateTime.now(KYIV_ZONE), addressKey)
     }
     var statusInfo by remember { mutableStateOf(snapshot.scheduleStatus()) }
     var isRefreshing by remember { mutableStateOf(false) }
@@ -7777,8 +7929,10 @@ fun BlackoutAppNavigation(
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
-    val exactAlarmMissing = remember(resumeTick, notificationsEnabled) {
-        notificationsEnabled && !ExactAlarmGate.canScheduleExact(appContext)
+    // Planned warnings of any address need exact alarms (spec/SUBSCRIPTIONS.md 8.1)
+    val anyPlannedActive = subscriptions.items.any { Subscriptions.plannedActive(alertsMaster, it) }
+    val exactAlarmMissing = remember(resumeTick, anyPlannedActive) {
+        anyPlannedActive && !ExactAlarmGate.canScheduleExact(appContext)
     }
 
     val isMainScreenVisible = pagerState.currentPage == 0 && !isRouletteOpen
@@ -7826,7 +7980,7 @@ fun BlackoutAppNavigation(
                         }
                     }
                 }
-                val result = outageRepo.refresh(settingsRepo.getSettings(), forceNetwork = force)
+                val result = outageRepo.refresh(settingsRepo.getSettings(), forceNetwork = force, shownId = otherShownItem()?.id)
                 try {
                     AlarmScheduler.syncAlarms(appContext)
                 } catch (_: Exception) {
@@ -7837,7 +7991,7 @@ fun BlackoutAppNavigation(
                 }
                 result
             }
-            snapshot = outcome.snapshot
+            snapshot = shownSnapshot(settingsRepo.getSettings())
             return outcome
         } finally {
             isRefreshing = false
@@ -7856,11 +8010,11 @@ fun BlackoutAppNavigation(
     }
 
     // Live countdown: once per second while the main screen is visible and the app is resumed (battery friendly)
-    LaunchedEffect(lifecycleOwner, isCountdownScreenActive, currentSettings, addressKey) {
+    LaunchedEffect(lifecycleOwner, isCountdownScreenActive, currentSettings, addressKey, shownSubscriptionId, subscriptions) {
         if (!isCountdownScreenActive) {
             val nowDt = LocalDateTime.now(KYIV_ZONE)
             currentTime = nowDt.toLocalTime()
-            snapshot = outageRepo.snapshot(currentSettings, nowDt, addressKey)
+            snapshot = shownSnapshot(currentSettings, nowDt, addressKey)
             statusInfo = snapshot.scheduleStatus()
             return@LaunchedEffect
         }
@@ -7874,7 +8028,7 @@ fun BlackoutAppNavigation(
             while (true) {
                 val nowDt = LocalDateTime.now(KYIV_ZONE)
                 currentTime = nowDt.toLocalTime()
-                val fresh = outageRepo.snapshot(currentSettings, nowDt, addressKey)
+                val fresh = shownSnapshot(currentSettings, nowDt, addressKey)
                 snapshot = fresh
                 val updatedStatus = fresh.scheduleStatus()
                 statusInfo = updatedStatus
@@ -7906,14 +8060,14 @@ fun BlackoutAppNavigation(
             currentLanguage = updated.language
             subscriptions = subscriptionSync.store()
             alertsMaster = subscriptionSync.master()
-            snapshot = outageRepo.snapshot(updated, LocalDateTime.now(KYIV_ZONE))
+            snapshot = shownSnapshot(updated)
         }
     }
 
     // Schedule cache or outage state changed (worker, widget, refresh): show it
     val stateListener = remember(settingsRepo, outageRepo) {
         SharedPreferences.OnSharedPreferenceChangeListener { _, _ ->
-            snapshot = outageRepo.snapshot(settingsRepo.getSettings(), LocalDateTime.now(KYIV_ZONE))
+            snapshot = shownSnapshot(settingsRepo.getSettings())
         }
     }
 
@@ -7974,6 +8128,22 @@ fun BlackoutAppNavigation(
         }
         runRefresh(force = false, resolveAddress = true)
         hasCompletedInitialScheduleFetch = true
+    }
+
+    // Another address is shown: poll its PowerOn too (its switches gate notifications only)
+    LaunchedEffect(shownSubscriptionId) {
+        if (hasCompletedInitialScheduleFetch && otherShownItem() != null) {
+            runRefresh(force = false, resolveAddress = false)
+        }
+    }
+
+    // A tapped notification shows its address on the main screen
+    LaunchedEffect(openSubscriptionId) {
+        val id = openSubscriptionId ?: return@LaunchedEffect
+        shownSubscriptionId = id
+        isRouletteOpen = false
+        pagerState.scrollToPage(0)
+        onOpenSubscriptionHandled()
     }
 
     // Manual refresh: always goes to the network and tells the user what the site answered
@@ -8121,10 +8291,21 @@ fun BlackoutAppNavigation(
         ) { page ->
             when (page) {
                 0 -> {
+                    val other = otherShownItem()
                     MainScreen(
-                        queue = queue,
-                        customQueueStatusText = customQueueStatusText,
-                        selectedAddress = selectedAddress,
+                        queue = if (other != null) other.queue.orEmpty() else queue,
+                        customQueueStatusText = if (other != null) other.queueStatusText else customQueueStatusText,
+                        selectedAddress = if (other != null) {
+                            other.address?.let { a -> a.text.ifBlank { Subscriptions.displayLabel(other) } }
+                        } else {
+                            selectedAddress
+                        },
+                        addresses = Subscriptions.switcherItems(subscriptions),
+                        primaryAddressId = subscriptions.primaryId,
+                        shownAddressId = Subscriptions.viewItem(subscriptions, shownSubscriptionId)?.id,
+                        onSelectAddress = { shownSubscriptionId = it },
+                        showNoAlertsCaption = Subscriptions.noAlertsCaption(alertsMaster, subscriptions),
+                        onOpenSettings = { coroutineScope.launch { pagerState.animateScrollToPage(1) } },
                         snapshot = snapshot,
                         statusInfo = statusInfo,
                         isRefreshing = isRefreshing,
@@ -14617,19 +14798,28 @@ class OutageRepository(context: Context) {
         settings: UserSettings,
         now: LocalDateTime = LocalDateTime.now(KYIV_ZONE),
         key: String? = addressKey(settings.selectedAddressQuery)
-    ): OutageSnapshot {
-        val q = settings.queue
-        return OutageSnapshot(
+    ): OutageSnapshot = snapshotOf(settings.queue, key, now, store.poweron())
+
+    /**
+     * The snapshot of one non-primary subscription for the main screen (spec/SUBSCRIPTIONS.md 9).
+     * The primary goes through [snapshot]; another item has its own PowerOn status under its address key.
+     */
+    fun snapshotFor(item: Subscription, now: LocalDateTime = LocalDateTime.now(KYIV_ZONE)): OutageSnapshot {
+        val key = item.address?.key
+        return snapshotOf(item.queue.orEmpty(), key, now, key?.let { store.poweron(it) })
+    }
+
+    private fun snapshotOf(q: String, key: String?, now: LocalDateTime, poweron: PowerOnSnapshot?): OutageSnapshot =
+        OutageSnapshot(
             now = now,
             queue = q,
             outages = outagesFor(q, key, now),
             plannedKnown = q.isBlank() || schedule.hasValidTodayCache(q),
             tomorrowPublished = q.isNotBlank() && schedule.hasTomorrowSchedule(q),
             site = store.site(),
-            poweron = store.poweron(),
+            poweron = poweron,
             hasAddress = key != null
         )
-    }
 
     /**
      * The outages of one queue and address key (either may be absent), local state only. One ztoe
@@ -14651,9 +14841,10 @@ class OutageRepository(context: Context) {
     /**
      * Refreshes ztoe (planned) and PowerOn (emergency + repair works) for the selected address.
      * Runs on a worker thread. A source that fails keeps its previous data and is reported as such;
-     * it never counts as "no outage".
+     * it never counts as "no outage". [shownId] is the item the main screen shows: it is polled whatever
+     * its switches (spec/SUBSCRIPTIONS.md 8.4).
      */
-    fun refresh(settings: UserSettings, forceNetwork: Boolean = false, notify: Boolean = true): RefreshOutcome {
+    fun refresh(settings: UserSettings, forceNetwork: Boolean = false, notify: Boolean = true, shownId: String? = null): RefreshOutcome {
         val nowMs = System.currentTimeMillis()
         var siteState: SiteState? = null
         var fetchStatus: FetchStatus? = null
@@ -14690,16 +14881,16 @@ class OutageRepository(context: Context) {
             events = polled?.second.orEmpty()
             store.savePowerOn(poweronOk, nowMs)
             if (notify && events.isNotEmpty() && settings.emergencyNotificationsEnabled) {
-                NotificationHelper.postEmergencyEvents(appContext, settings, key, events)
+                NotificationHelper.postEmergencyEvents(appContext, settings, key, events, subscriptionId = subs?.first?.primaryId)
             }
         }
-        if (subs != null) refreshOtherAddresses(settings, subs.first, subs.second, key, nowMs, notify)
+        if (subs != null) refreshOtherAddresses(settings, subs.first, subs.second, key, nowMs, notify, shownId)
         return RefreshOutcome(siteState, fetchStatus, poweronOk, events, snapshot(settings))
     }
 
     /**
-     * PowerOn for every other subscription that wants emergency alerts (spec/SUBSCRIPTIONS.md 8.4):
-     * own request, own failure, own ledger. The main screen's PowerOn status stays the primary's.
+     * PowerOn for every other subscription that wants emergency alerts, plus the one the main screen
+     * shows (spec/SUBSCRIPTIONS.md 8.4): own request, own failure, own ledger, own status line.
      */
     private fun refreshOtherAddresses(
         settings: UserSettings,
@@ -14707,17 +14898,23 @@ class OutageRepository(context: Context) {
         master: Boolean,
         primaryKey: String?,
         nowMs: Long,
-        notify: Boolean
+        notify: Boolean,
+        shownId: String?
     ) {
-        if (!master) return
         for (item in subs.items) {
             val a = item.address ?: continue
-            if (item.id == subs.primaryId || !item.emergencyAlerts) continue
+            if (item.id == subs.primaryId) continue
+            val alerts = master && item.emergencyAlerts
+            if (!alerts && item.id != shownId) continue
             val key = a.key
             if (key == primaryKey) continue
-            val polled = pollPowerOn(SelectedAddressQuery(a.remSlug, a.settlementId, a.streetId, a.house), key, nowMs) ?: continue
-            if (notify && polled.second.isNotEmpty()) {
-                NotificationHelper.postEmergencyEvents(appContext, settings, key, polled.second, addressLine(item), enabled = true)
+            val polled = pollPowerOn(SelectedAddressQuery(a.remSlug, a.settlementId, a.streetId, a.house), key, nowMs)
+            store.savePowerOn(key, polled?.first ?: false, nowMs)
+            if (polled == null) continue
+            if (notify && alerts && polled.second.isNotEmpty()) {
+                NotificationHelper.postEmergencyEvents(
+                    appContext, settings, key, polled.second, addressLine(item), enabled = true, subscriptionId = item.id
+                )
             }
         }
     }
@@ -14931,6 +15128,22 @@ class OutageStateStore(context: Context) {
     fun savePowerOn(ok: Boolean, nowMs: Long) {
         val editor = prefs.edit().putBoolean("poweron_ok", ok).putLong("poweron_checked_ms", nowMs)
         if (ok) editor.putLong("poweron_last_ok_ms", nowMs)
+        editor.apply()
+    }
+
+    /** PowerOn status of a non-primary address (spec/SUBSCRIPTIONS.md 8.4); the primary keeps the keys above. */
+    fun poweron(addressKey: String): PowerOnSnapshot? {
+        if (!prefs.contains("poweron_checked_ms_$addressKey")) return null
+        return PowerOnSnapshot(
+            ok = prefs.getBoolean("poweron_ok_$addressKey", false),
+            checkedAtMs = prefs.getLong("poweron_checked_ms_$addressKey", 0L),
+            lastOkMs = prefs.getLong("poweron_last_ok_ms_$addressKey", 0L).takeIf { it > 0L }
+        )
+    }
+
+    fun savePowerOn(addressKey: String, ok: Boolean, nowMs: Long) {
+        val editor = prefs.edit().putBoolean("poweron_ok_$addressKey", ok).putLong("poweron_checked_ms_$addressKey", nowMs)
+        if (ok) editor.putLong("poweron_last_ok_ms_$addressKey", nowMs)
         editor.apply()
     }
 
@@ -16129,7 +16342,7 @@ object OutageRowFormat {
 
 /**
  * Multi-address subscriptions: the stored model, its repair rules, the store operations, the
- * migration from single-address settings, the primary mirror and the alert grouping. Specified in \`spec/SUBSCRIPTIONS.md\`, golden cases in
+ * migration from single-address settings, the primary mirror, the alert grouping and the main-screen switcher. Specified in \`spec/SUBSCRIPTIONS.md\`, golden cases in
  * \`spec/vectors/subscriptions.json\`, mirrored in \`src/core/subscriptions.ts\`.
  *
  * The model is exchanged as plain maps (\`toMap\` / \`fromMap\`) so this package needs no JSON library;
@@ -16541,6 +16754,21 @@ object Subscriptions {
         val head = labels.take(2).joinToString(" · ")
         return if (labels.size > 2) "$head +\${labels.size - 2}" else head
     }
+
+    // ---------------------------------------------------------------------------------------------
+    // Main screen (section 9)
+    // ---------------------------------------------------------------------------------------------
+
+    /** The chips of the address switcher: every item in list order, or none with fewer than 2 items. */
+    fun switcherItems(store: SubscriptionStore): List<Subscription> = if (store.items.size >= 2) store.items else emptyList()
+
+    /** The item the main screen shows: the selected one if it still exists, else the primary. */
+    fun viewItem(store: SubscriptionStore, selectedId: String?): Subscription? =
+        store.items.firstOrNull { it.id == selectedId } ?: store.primary
+
+    /** The master is on but no item has a switch on: "on" would silently mean nothing. */
+    fun noAlertsCaption(master: Boolean, store: SubscriptionStore): Boolean =
+        master && store.items.isNotEmpty() && !anyAlertsEnabled(master, store)
 }
 
 /** One planned pre-warning shared by every item on one queue with the same span (\`spec/SUBSCRIPTIONS.md\` 8.1). */
