@@ -3,6 +3,10 @@
 ## [Unreleased]
 
 ### Changed
+- **Master alerts switch, phone test fixes** (`SettingsScreen.kt`, `SettingsRepository.kt`, `AppStrings.kt`, `SettingsView.tsx`, `i18n.ts`, `spec/SUBSCRIPTIONS.md` sections 5 and 7):
+  - While the master switch is off, every address's «Планові» and «Аварійні» switches show off and are locked, with a caption that the main switch turned them off. Each address keeps its own choice, so turning the master on shows and uses it again.
+  - Fix (Android): turning the master on again restores sound and vibration to their values before it was turned off. The master was stored before the old values were read, so "off" was remembered and restored.
+  - The «Тест сповіщення» and «Оновити дані» buttons at the bottom of Settings now have the same height when only one label wraps.
 - **One address per widget (multi-address step 5)** (`BlackoutGlanceWidget.kt`, `BlackoutWidgetReceiver.kt`, `WidgetBindings.kt`, `WidgetConfigActivity.kt`, `AlarmScheduler.kt`, `OutageRepository.kt`, `AppStrings.kt`, `AndroidManifest.xml`, the three `res/xml` widget providers, `WidgetSimulator.tsx`, `PhoneSimulator.tsx`, `App.tsx`, `outageRepository.ts`, `i18n.ts`, `spec/SUBSCRIPTIONS.md` section 10): each widget follows the primary address by default (owner decision 6) or shows one chosen address. On Android 12+ long-press the widget and choose reconfigure to pick «Адреса віджета»; older Android asks when the widget is placed (only with two or more addresses). In the web simulator a picker above the widgets does the same for all three.
   - With two or more addresses every widget prints the address label next to the queue; with one address the widgets look as before. A widget whose address was removed falls back to the primary and shows its label.
   - Tapping a widget opens the main screen with that address shown. Addresses on widgets are polled on PowerOn and get their own redraw alarms at power transitions.

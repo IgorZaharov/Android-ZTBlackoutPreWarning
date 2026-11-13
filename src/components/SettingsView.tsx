@@ -149,7 +149,7 @@ const ActionButton: React.FC<{
     onClick={onClick}
     disabled={busy}
     aria-busy={busy || undefined}
-    className={`flex min-h-12 disabled:cursor-default w-full cursor-pointer items-center justify-center gap-2 rounded-2xl px-3 py-2.5 text-center text-sm leading-5 transition-colors focus-visible:outline-2 focus-visible:outline-white ${
+    className={`flex h-full min-h-12 disabled:cursor-default w-full cursor-pointer items-center justify-center gap-2 rounded-2xl px-3 py-2.5 text-center text-sm leading-5 transition-colors focus-visible:outline-2 focus-visible:outline-white ${
       filled
         ? 'bg-[#FF5E3A] font-bold text-white shadow-md shadow-[#FF5E3A]/20 hover:bg-[#ff4b24]'
         : subdued
@@ -307,6 +307,11 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           </button>
         </div>
 
+        {!alertsMaster && store.items.length > 0 && (
+          <p data-testid="master-off-caption" className="text-[13px] font-medium leading-[19px] text-[#FBBF24]">
+            {t.masterOffCaption}
+          </p>
+        )}
         {store.items.map((item) => {
           const isPrimary = item.id === store.primaryId;
           const label = displayLabel(item);
@@ -363,8 +368,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 icon={<Bell className="h-5 w-5 text-white" />}
                 title={t.plannedShort}
                 hint={plannedDesc(lang, settings.advanceNoticeMinutes)}
-                checked={item.plannedAlerts}
-                enabled={item.queue !== null}
+                checked={alertsMaster && item.plannedAlerts}
+                enabled={alertsMaster && item.queue !== null}
                 onToggle={() => applySync(sync.change(settings, (st) => setPlanned(st, item.id, !item.plannedAlerts)))}
                 testId={`ios-switch-planned-${item.id}`}
               />
@@ -372,8 +377,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 icon={<AlertTriangle className="h-5 w-5 text-[#FF5E3A]" />}
                 title={t.emergencyShort}
                 hint={item.address ? t.emergencyDesc : t.emergencyNeedsAddress}
-                checked={item.emergencyAlerts && item.address !== null}
-                enabled={item.address !== null}
+                checked={alertsMaster && item.emergencyAlerts && item.address !== null}
+                enabled={alertsMaster && item.address !== null}
                 onToggle={() => applySync(sync.change(settings, (st) => setEmergency(st, item.id, !item.emergencyAlerts)))}
                 testId={`ios-switch-emergency-${item.id}`}
                 titleClassName="break-words leading-snug"

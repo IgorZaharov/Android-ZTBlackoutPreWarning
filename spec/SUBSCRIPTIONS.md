@@ -111,6 +111,11 @@ anyAlertsEnabled(master, store)              = master AND any item has plannedAl
 `master` is `alerts_master_enabled` (owner decision 1: one kill switch for planned and emergency).
 Toggles never hide data.
 
+**Settings display.** While the master is off, every item's `Планові` and `Аварійні` switches show **off** and
+are disabled, and the card shows the caption `Усі сповіщення вимкнені загальним перемикачем. Налаштування адрес
+збережені.` / `All alerts are off by the main switch. Each address keeps its settings.` The stored
+`plannedAlerts` / `emergencyAlerts` values are not changed, so turning the master on shows and uses them again.
+
 ## 6. Migration from single-address settings
 
 Runs once, when the store key is absent (or `fromMap` returned absent). Input = the 1.4.0 legacy
@@ -151,7 +156,8 @@ The two booleans are kept for rollback safety (design section 10 step 7); since 
 
 **Sound and vibration follow the master** (since step 3). When `setMaster` turns the master off, the
 current sound and vibration values are remembered (`prev_sound_enabled`, `prev_vibration_enabled`) and both
-are switched off; when it turns the master on again they are restored. Setting the master to the value it
+are switched off; the remembered values are the stored ones before the change, never the values masked by the
+new master (Android stores the master first, so it reads the raw `sound_enabled` / `vibration_enabled` keys); when it turns the master on again they are restored. Setting the master to the value it
 already has changes nothing. Item switches never touch sound or vibration, so turning off both switches of
 the primary no longer mutes the alerts of the other items. (Step 2 applied the 1.4.0 rule to the two mirrored
 booleans instead.) For the same reason, reading and saving the settings masks sound and vibration with

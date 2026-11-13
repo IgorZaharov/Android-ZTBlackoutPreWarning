@@ -324,6 +324,9 @@ object AppStrings {
     fun myAddressesDesc(lang: String) = if (lang == "uk") "Окремі сповіщення для кожної адреси" else "Separate alerts for each address"
     fun addressesCount(lang: String, n: Int, max: Int) = if (lang == "uk") "$n з $max" else "$n of $max"
     fun primaryBadge(lang: String) = if (lang == "uk") "Основна" else "Primary"
+    fun masterOffCaption(lang: String) =
+        if (lang == "uk") "Усі сповіщення вимкнені загальним перемикачем. Налаштування адрес збережені."
+        else "All alerts are off by the main switch. Each address keeps its settings."
     fun widgetConfigTitle(lang: String) = if (lang == "uk") "Адреса віджета" else "Widget address"
     fun widgetConfigDesc(lang: String) = if (lang == "uk") "Яку адресу показує цей віджет" else "Which address this widget shows"
     fun widgetFollowPrimary(lang: String) = if (lang == "uk") "Основна адреса (авто)" else "Primary address (auto)"

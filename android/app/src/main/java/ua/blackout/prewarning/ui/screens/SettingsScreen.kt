@@ -8,10 +8,12 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.defaultMinSize
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -283,6 +285,7 @@ fun SettingsScreen(
         // 1. My addresses: up to 5 addresses (or queues), each with its own planned / emergency switches
         MyAddressesCard(
             store = subscriptions,
+            alertsMaster = alertsMaster,
             advanceMinutes = advanceMinutes,
             lang = lang,
             onHelp = { showQueueHelpDialog = true },
@@ -529,9 +532,10 @@ fun SettingsScreen(
                     testButton(Modifier.fillMaxWidth())
                     refreshButton(Modifier.fillMaxWidth())
                 } else {
-                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        testButton(Modifier.weight(1f))
-                        refreshButton(Modifier.weight(1f))
+                    // Same height even when only one label wraps to two lines
+                    Row(modifier = Modifier.fillMaxWidth().height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        testButton(Modifier.weight(1f).fillMaxHeight())
+                        refreshButton(Modifier.weight(1f).fillMaxHeight())
                     }
                 }
 
@@ -670,6 +674,8 @@ private val PaddingValues18 = PaddingValues(18.dp)
 @Composable
 private fun MyAddressesCard(
     store: SubscriptionStore,
+    /** Master off: every address's switches show off and are locked; their own values are kept. */
+    alertsMaster: Boolean,
     advanceMinutes: Int,
     lang: String,
     onHelp: () -> Unit,
@@ -722,9 +728,13 @@ private fun MyAddressesCard(
                 }
             }
 
+            if (!alertsMaster && store.items.isNotEmpty()) {
+                Text(text = AppStrings.masterOffCaption(lang), style = ZtType.caption, color = ZtColors.ChipAmberText)
+            }
             store.items.forEach { item ->
                 SubscriptionBlock(
                     item = item,
+                    alertsMaster = alertsMaster,
                     isPrimary = item.id == store.primaryId,
                     advanceMinutes = advanceMinutes,
                     lang = lang,
@@ -772,6 +782,7 @@ private fun MyAddressesCard(
 @Composable
 private fun SubscriptionBlock(
     item: Subscription,
+    alertsMaster: Boolean,
     isPrimary: Boolean,
     advanceMinutes: Int,
     lang: String,
@@ -834,20 +845,20 @@ private fun SubscriptionBlock(
             iconTint = Color.White,
             title = AppStrings.plannedShort(lang),
             hint = AppStrings.plannedDesc(lang, advanceMinutes),
-            checked = item.plannedAlerts,
+            checked = alertsMaster && item.plannedAlerts,
             onCheckedChange = onSetPlanned,
             lang = lang,
-            enabled = item.queue != null
+            enabled = alertsMaster && item.queue != null
         )
         SwitchRow(
             icon = Icons.Default.Warning,
             iconTint = ZtColors.Accent,
             title = AppStrings.emergencyShort(lang),
             hint = if (item.address != null) AppStrings.emergencyDesc(lang) else AppStrings.emergencyNeedsAddress(lang),
-            checked = item.emergencyAlerts && item.address != null,
+            checked = alertsMaster && item.emergencyAlerts && item.address != null,
             onCheckedChange = onSetEmergency,
             lang = lang,
-            enabled = item.address != null
+            enabled = alertsMaster && item.address != null
         )
         if (!isPrimary) {
             ActionButton(

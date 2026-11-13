@@ -2402,6 +2402,27 @@ async function runUnitTestE_AddressLookupAndUnsetQueue() {
   );
   const afterMasterOn = subSync.setMaster(afterMasterOff, true);
   assert.equal(afterMasterOn.soundEnabled, true, 'Turning the master switch back on restores sound');
+  assert.equal(afterMasterOn.vibrationEnabled, false, 'Turning the master switch back on restores vibration as it was (off)');
+  // Master off -> saved and reloaded while off -> on: the values from before "off" come back, also when they differ
+  {
+    const mixed = { ...afterMasterOn, soundEnabled: false, vibrationEnabled: true, prevSoundEnabled: false, prevVibrationEnabled: true };
+    const off = subSync.setMaster(mixed, false);
+    saveUserSettings(off);
+    const reloaded = loadUserSettings();
+    assert.equal(reloaded.soundEnabled, false, 'Master off reads sound as off');
+    assert.equal(reloaded.vibrationEnabled, false, 'Master off reads vibration as off');
+    const on = subSync.setMaster(reloaded, true);
+    assert.equal(on.soundEnabled, false, 'Master on restores sound to its value before "off" (off)');
+    assert.equal(on.vibrationEnabled, true, 'Master on restores vibration to its value before "off" (on)');
+    subSync.setMaster(afterMasterOn, true);
+  }
+  // Android stores the master before applyMasterSound runs, so "off" must remember the raw keys, not getSettings()
+  assert.ok(
+    read('android/app/src/main/java/ua/blackout/prewarning/data/repository/SettingsRepository.kt').includes(
+      '.putBoolean("prev_sound_enabled", prefs.getBoolean("sound_enabled", true))'
+    ),
+    'SettingsRepository.applyMasterSound must remember the unmasked sound and vibration values'
+  );
   const fired = triggerEmergencyEventAlerts([startEvent], 'addr1', afterMasterOn, 'uk', now);
   assert.equal(fired.length, 1, 'An emergency START notifies while the master and the address switch are ON');
   assert.equal(

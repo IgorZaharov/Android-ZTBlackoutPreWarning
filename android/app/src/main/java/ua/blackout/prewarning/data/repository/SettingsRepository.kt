@@ -339,16 +339,17 @@ class SettingsRepository(context: Context) {
      * remembers and mutes them, on restores them. Called only when the master really changes.
      */
     fun applyMasterSound(masterOn: Boolean) {
-        val current = getSettings()
         if (masterOn) {
             prefs.edit()
                 .putBoolean("sound_enabled", prefs.getBoolean("prev_sound_enabled", true))
                 .putBoolean("vibration_enabled", prefs.getBoolean("prev_vibration_enabled", true))
                 .apply()
         } else {
+            // Raw keys, not getSettings(): the master is already stored as off, so getSettings() would
+            // mask both to false and the restore would bring back "off"
             prefs.edit()
-                .putBoolean("prev_sound_enabled", current.soundEnabled)
-                .putBoolean("prev_vibration_enabled", current.vibrationEnabled)
+                .putBoolean("prev_sound_enabled", prefs.getBoolean("sound_enabled", true))
+                .putBoolean("prev_vibration_enabled", prefs.getBoolean("vibration_enabled", true))
                 .putBoolean("sound_enabled", false)
                 .putBoolean("vibration_enabled", false)
                 .apply()
