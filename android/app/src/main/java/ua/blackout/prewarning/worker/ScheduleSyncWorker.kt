@@ -12,6 +12,7 @@ import kotlinx.coroutines.CancellationException
 import ua.blackout.prewarning.data.parser.ZtoeAddressLookup
 import ua.blackout.prewarning.data.repository.OutageRepository
 import ua.blackout.prewarning.data.repository.SettingsRepository
+import ua.blackout.prewarning.data.repository.SubscriptionSync
 import ua.blackout.prewarning.notification.AlarmScheduler
 import ua.blackout.prewarning.widget.BlackoutGlanceWidget
 import java.util.concurrent.TimeUnit
@@ -35,7 +36,8 @@ class ScheduleSyncWorker(
                     ZtoeAddressLookup.initDiskCache(appContext)
                     val lookup = ZtoeAddressLookup.checkAddressOnZtoeWebsite(addressQuery, settings.cityUrl)
                     if (lookup != null && (lookup.queue != settings.queue || lookup.statusText != settings.customQueueStatusText)) {
-                        settingsRepo.updateQueueAssignment(lookup.queue, lookup.statusText)
+                        // through the subscription store, which writes the primary back into these keys
+                        SubscriptionSync(appContext).assignPrimaryQueue(lookup.queue, lookup.statusText, null)
                     }
                 } catch (e: CancellationException) {
                     throw e

@@ -68,6 +68,26 @@ export const translations = {
     settingsSound: 'Звуковий сигнал сповіщення',
     settingsVibration: 'Вібрація при сповіщенні',
     settingsEmergencyOutages: 'Сповіщення про аварійні відключення',
+    myAddressesTitle: 'МОЇ АДРЕСИ',
+    myAddressesDesc: 'Окремі сповіщення для кожної адреси',
+    primaryBadge: 'Основна',
+    makePrimary: 'Зробити основною',
+    plannedShort: 'Планові',
+    emergencyShort: 'Аварійні',
+    emergencyDesc: 'Початок, зміна часу, відновлення',
+    emergencyNeedsAddress: 'Лише для адреси: за чергою аварійних даних немає',
+    queueOnlyCaption: 'Без адреси, лише черга',
+    addAddress: 'Додати адресу',
+    addQueueOnly: 'Або додати лише чергу',
+    addressDuplicate: 'Ця адреса вже є у списку',
+    addressAdded: 'Адресу додано',
+    removeAddress: 'Видалити',
+    removeConfirmTitle: 'Видалити адресу?',
+    renameAddress: 'Перейменувати',
+    renameHint: 'Порожньо — назва з адреси',
+    save: 'Зберегти',
+    masterHint: 'Головний вимикач для всіх адрес',
+    noAddressAlerts: 'Для жодної адреси сповіщення не ввімкнені',
     queueHelpSubtitle: '(Або закрийте це вікно та виберіть тільки чергу)',
     settingsTheme: 'Тема оформлення',
     settingsThemeSystem: 'Як у системі (за замовчуванням)',
@@ -299,6 +319,26 @@ export const translations = {
     settingsSound: 'Notification sound',
     settingsVibration: 'Vibration on alert',
     settingsEmergencyOutages: 'Emergency outage notifications',
+    myAddressesTitle: 'MY ADDRESSES',
+    myAddressesDesc: 'Separate alerts for each address',
+    primaryBadge: 'Primary',
+    makePrimary: 'Make primary',
+    plannedShort: 'Planned',
+    emergencyShort: 'Emergency',
+    emergencyDesc: 'Start, time change, restoration',
+    emergencyNeedsAddress: 'Address only: a queue alone has no emergency data',
+    queueOnlyCaption: 'No address, queue only',
+    addAddress: 'Add address',
+    addQueueOnly: 'Or add a queue only',
+    addressDuplicate: 'This address is already in the list',
+    addressAdded: 'Address added',
+    removeAddress: 'Remove',
+    removeConfirmTitle: 'Remove this address?',
+    renameAddress: 'Rename',
+    renameHint: 'Empty — name from the address',
+    save: 'Save',
+    masterHint: 'Master switch for all addresses',
+    noAddressAlerts: 'No address has alerts turned on',
     queueHelpSubtitle: '(Or close this window and select directly)',
     settingsTheme: 'App Theme',
     settingsThemeSystem: 'Follow System (Default)',
@@ -473,6 +513,16 @@ export const translations = {
 
 type Lang = 'uk' | 'en';
 const NBSP = ' ';
+
+// Multi-address ("Мої адреси"), mirrored in AppStrings.kt
+export const addressesCount = (lang: Lang, n: number, max: number): string => (lang === 'uk' ? `${n} з ${max}` : `${n} of ${max}`);
+export const plannedDesc = (lang: Lang, min: number): string =>
+  lang === 'uk' ? `За графіком, за ${min} хв до початку` : `Scheduled, ${min} min before start`;
+export const addressesLeft = (lang: Lang, n: number): string => (lang === 'uk' ? `Можна додати ще: ${n}` : `You can add ${n} more`);
+export const addressLimitReached = (lang: Lang, max: number): string =>
+  lang === 'uk' ? `Досягнуто ліміт: ${max} адрес` : `Limit reached: ${max} addresses`;
+export const removeConfirmBody = (lang: Lang, label: string): string =>
+  lang === 'uk' ? `«${label}» зникне зі списку разом зі своїми сповіщеннями.` : `"${label}" and its alerts will be removed.`;
 
 export const staleDataSince = (lang: Lang, hhmm: string): string =>
   lang === 'uk' ? `Показано збережений графік (дані за ${hhmm})` : `Showing the saved schedule (data from ${hhmm})`;

@@ -73,6 +73,19 @@ data class LegacySettings(
 
 data class MigrationResult(val store: SubscriptionStore, val alertsMaster: Boolean)
 
+/** Values for the single-address keys, written from the primary item (`spec/SUBSCRIPTIONS.md` section 7). */
+data class LegacyMirror(
+    val queue: String,
+    val customQueueStatusText: String?,
+    val selectedAddress: String?,
+    val remSlug: String,
+    val settlementId: String,
+    val streetId: String,
+    val house: String,
+    val notificationsEnabled: Boolean,
+    val emergencyNotificationsEnabled: Boolean
+)
+
 data class DroppedItem(val id: String?, val reason: String)
 
 data class RepairResult(val store: SubscriptionStore, val dropped: List<DroppedItem>)
@@ -258,6 +271,19 @@ object Subscriptions {
 
     fun rename(store: SubscriptionStore, id: String, raw: String?): StoreResult = update(store, id) { it.copy(label = cleanLabel(raw)) }
 
+    /** Result of a ZTOE lookup for an address item (`spec/SUBSCRIPTIONS.md` section 4). */
+    fun setQueueInfo(store: SubscriptionStore, id: String, queue: String?, statusText: String?, addressText: String?): StoreResult {
+        val item = store.items.firstOrNull { it.id == id } ?: return StoreResult.Error(ERR_NOT_FOUND)
+        val address = item.address ?: return StoreResult.Error(ERR_INVALID)
+        return update(store, id) {
+            it.copy(
+                queue = queue?.takeIf { q -> isValidQueue(q) },
+                queueStatusText = statusText?.takeIf { s -> s.isNotBlank() },
+                address = if (addressText.isNullOrBlank()) address else address.copy(text = addressText)
+            )
+        }
+    }
+
     private inline fun update(store: SubscriptionStore, id: String, change: (Subscription) -> Subscription): StoreResult {
         if (store.items.none { it.id == id }) return StoreResult.Error(ERR_NOT_FOUND)
         return StoreResult.Ok(store.copy(items = store.items.map { if (it.id == id) change(it) else it }))
@@ -274,6 +300,26 @@ object Subscriptions {
 
     fun anyAlertsEnabled(master: Boolean, store: SubscriptionStore): Boolean =
         master && store.items.any { it.plannedAlerts || it.emergencyAlerts }
+
+    // ---------------------------------------------------------------------------------------------
+    // Mirror of the primary item into the single-address keys (section 7)
+    // ---------------------------------------------------------------------------------------------
+
+    fun primaryMirror(store: SubscriptionStore, master: Boolean): LegacyMirror {
+        val p = store.primary
+        val a = p?.address
+        return LegacyMirror(
+            queue = p?.queue.orEmpty(),
+            customQueueStatusText = p?.queueStatusText,
+            selectedAddress = if (p != null && a != null) a.text.ifEmpty { displayLabel(p) } else null,
+            remSlug = a?.remSlug.orEmpty(),
+            settlementId = a?.settlementId.orEmpty(),
+            streetId = a?.streetId.orEmpty(),
+            house = a?.house.orEmpty(),
+            notificationsEnabled = master && (p?.plannedAlerts ?: true),
+            emergencyNotificationsEnabled = master && (p?.emergencyAlerts ?: true)
+        )
+    }
 
     // ---------------------------------------------------------------------------------------------
     // Migration

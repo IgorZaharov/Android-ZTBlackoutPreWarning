@@ -20,6 +20,7 @@ import {
 } from 'lucide-react';
 import { UserSettings, NotificationRecord, Language } from './types';
 import { checkAddressOnZtoeWebsite, prefetchAddressIndexInBackground } from './services/ztoeAddressLookup';
+import { getSubscriptionSync } from './services/subscriptionSync';
 import {
   loadUserSettings,
   saveUserSettings,
@@ -28,8 +29,7 @@ import {
   triggerEmergencyEventAlerts,
   DEFAULT_SETTINGS,
   clearNotifiedHistory,
-  resetAllAppDataToFirstLaunch,
-  toggleMasterNotifications
+  resetAllAppDataToFirstLaunch
 } from './services/alertManager';
 import { resolveLanguage, translations } from './services/i18n';
 import { getInterpolatedTimePalette } from './services/timeOfDayPalette';
@@ -52,7 +52,12 @@ type RefreshStatus = 'SUCCESS' | 'NO_INTERNET' | 'NO_QUEUES_FOUND';
 const SIMULATED_EMERGENCY_ID = 'simulator-emergency';
 
 export default function App() {
-  const [settings, setSettings] = useState<UserSettings>(() => loadUserSettings());
+  // The multi-address store is migrated on first start; the master switch is copied into the settings
+  // so the bells show it (spec/SUBSCRIPTIONS.md section 7)
+  const [settings, setSettings] = useState<UserSettings>(() => {
+    const loaded = loadUserSettings();
+    return { ...loaded, alertsMaster: getSubscriptionSync().master(loaded) };
+  });
   // Bumped after every refresh so the outage snapshot is rebuilt from the freshly stored state
   const [dataVersion, setDataVersion] = useState(0);
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -103,10 +108,19 @@ export default function App() {
       if (currentSettings.selectedAddressQuery && (!currentSettings.queue || currentSettings.queue.trim() === '')) {
         const latest = await checkAddressOnZtoeWebsite(currentSettings.selectedAddressQuery, currentSettings.url);
         if (latest && ((latest.queue || '') !== currentSettings.queue || latest.statusText !== currentSettings.customQueueStatusText)) {
-          effective = { ...currentSettings, queue: latest.queue || '', customQueueStatusText: latest.queue ? undefined : latest.statusText };
-          skipNextSettingsRefresh.current = true;
-          setSettings(effective);
-          saveUserSettings(effective);
+          // into the primary subscription, which is mirrored back into the single-address fields
+          const synced = getSubscriptionSync().assignPrimaryQueue(
+            currentSettings,
+            latest.queue || null,
+            latest.queue ? null : (latest.statusText ?? null),
+            null
+          );
+          if (synced.result.ok) {
+            effective = synced.settings;
+            skipNextSettingsRefresh.current = true;
+            setSettings(effective);
+            saveUserSettings(effective);
+          }
         }
       }
 
@@ -256,10 +270,10 @@ export default function App() {
     saveUserSettings(newSettings);
   };
 
-  // Master notification toggle saves/restores sound & vibration states
+  // The bells (main header, widget) are the master switch for all addresses (owner decision 4)
   const handleToggleNotifications = () => {
-    const updated = toggleMasterNotifications(settings);
-    handleUpdateSettings(updated);
+    const sync = getSubscriptionSync();
+    handleUpdateSettings(sync.setMaster(settings, !sync.master(settings)));
   };
 
   const handleSendTestAlert = () => {
@@ -269,6 +283,7 @@ export default function App() {
   };
 
   const handleResetDefaults = () => {
+    getSubscriptionSync().clear();
     clearNotifiedHistory();
     getOutageStateStore().clearAll();
     getScheduleCache().clear();
@@ -277,6 +292,7 @@ export default function App() {
   };
 
   const handleResetAllAppDataFirstLaunch = () => {
+    getSubscriptionSync().clear();
     const freshSettings = resetAllAppDataToFirstLaunch();
     resetAllRouletteProgress();
     setSettings(freshSettings);

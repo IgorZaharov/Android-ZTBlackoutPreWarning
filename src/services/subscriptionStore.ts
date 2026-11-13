@@ -3,8 +3,8 @@
  * multi-address store as JSON under KEY_STORE and the kill switch under KEY_MASTER. The rules live in
  * src/core/subscriptions.ts; this class only encodes, reads and writes.
  *
- * Step 1 of the feature: nothing calls this at runtime yet. The Settings UI (step 2) runs
- * ensureMigrated on start and then treats the store as the source of truth.
+ * Used through subscriptionSync.ts, which runs ensureMigrated before every read or change and
+ * mirrors the primary item into the single-address settings (multi-address step 2).
  */
 import {
   EMPTY_STORE,
@@ -100,6 +100,16 @@ export class SubscriptionRepository {
     const result = op(this.store());
     if (result.ok) this.set(KEY_STORE, encode(result.store));
     return result;
+  }
+
+  /** Removes the store and the master switch; the next read migrates again (reset to first launch). */
+  clear(): void {
+    try {
+      this.storage.removeItem(KEY_STORE);
+      this.storage.removeItem(KEY_MASTER);
+    } catch {
+      // blocked storage: nothing was stored
+    }
   }
 
   /** A fresh id that no current item uses. */

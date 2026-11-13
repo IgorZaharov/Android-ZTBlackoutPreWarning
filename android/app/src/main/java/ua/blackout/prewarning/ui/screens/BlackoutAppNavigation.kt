@@ -48,6 +48,9 @@ import ua.blackout.prewarning.data.repository.OutageStateStore
 import ua.blackout.prewarning.data.repository.RefreshOutcome
 import ua.blackout.prewarning.data.repository.ScheduleRepository
 import ua.blackout.prewarning.data.repository.SettingsRepository
+import ua.blackout.prewarning.data.repository.SubscriptionSync
+import ua.blackout.prewarning.core.StoreResult
+import ua.blackout.prewarning.core.Subscriptions
 import ua.blackout.prewarning.notification.AlarmScheduler
 import ua.blackout.prewarning.notification.ExactAlarmGate
 import ua.blackout.prewarning.notification.NotificationHelper
@@ -96,6 +99,10 @@ fun BlackoutAppNavigation(
     val outageRepo = remember { OutageRepository(appContext) }
     val outageStore = remember { OutageStateStore(appContext) }
     val initialSettings = remember { settingsRepo.getSettings() }
+    // Multi-address store (step 2): Settings edits it, the primary is mirrored into the keys above
+    val subscriptionSync = remember { SubscriptionSync(appContext) }
+    var subscriptions by remember { mutableStateOf(subscriptionSync.ensureReady()) }
+    var alertsMaster by remember { mutableStateOf(subscriptionSync.master()) }
 
     // Latest persisted settings; kept in sync by the preference listener below
     var currentSettings by remember { mutableStateOf(initialSettings) }
@@ -216,9 +223,8 @@ fun BlackoutAppNavigation(
                         }
                         val nextLabel = lookup.addressLabel.takeIf { it.isNotBlank() } ?: current.selectedAddress
                         if (nextQueue != current.queue || nextStatus != current.customQueueStatusText || nextLabel != current.selectedAddress) {
-                            settingsRepo.saveSettings(
-                                current.copy(queue = nextQueue, customQueueStatusText = nextStatus, selectedAddress = nextLabel)
-                            )
+                            // into the primary subscription, which is mirrored back into these keys
+                            subscriptionSync.assignPrimaryQueue(nextQueue, nextStatus, nextLabel)
                         }
                     }
                 }
@@ -300,6 +306,8 @@ fun BlackoutAppNavigation(
             soundEnabled = updated.soundEnabled
             vibrationEnabled = updated.vibrationEnabled
             currentLanguage = updated.language
+            subscriptions = subscriptionSync.store()
+            alertsMaster = subscriptionSync.master()
             snapshot = outageRepo.snapshot(updated, LocalDateTime.now(KYIV_ZONE))
         }
     }
@@ -381,6 +389,34 @@ fun BlackoutAppNavigation(
                 SiteState.NO_INTERNET -> AppStrings.siteStateNoInternet(resolvedLang)
             }
             showAppBanner(message)
+        }
+    }
+
+    val syncAlarmsAndWidgets: () -> Unit = {
+        coroutineScope.launch(Dispatchers.IO) {
+            try {
+                AlarmScheduler.syncAlarms(appContext)
+                BlackoutGlanceWidget.syncAllWidgets(appContext)
+            } catch (_: Exception) {}
+        }
+    }
+
+    /** Shows why a store change was refused; on success alarms and widgets follow the new primary mirror. */
+    val onStoreResult: (StoreResult) -> Boolean = { result ->
+        when (result) {
+            is StoreResult.Ok -> {
+                subscriptions = result.store
+                syncAlarmsAndWidgets()
+                true
+            }
+            is StoreResult.Error -> {
+                when (result.code) {
+                    Subscriptions.ERR_DUPLICATE -> showAppBanner(AppStrings.addressDuplicate(resolvedLang))
+                    Subscriptions.ERR_LIMIT -> showAppBanner(AppStrings.addressLimitReached(resolvedLang, Subscriptions.MAX_ITEMS))
+                    else -> Unit
+                }
+                false
+            }
         }
     }
 
@@ -503,23 +539,17 @@ fun BlackoutAppNavigation(
                                 }
                             }
                         },
-                        notificationsEnabled = notificationsEnabled,
+                        // the header bell is the master switch for all addresses (owner decision 4)
+                        notificationsEnabled = alertsMaster,
                         lastUpdated = lastUpdated,
                         nextUpdated = nextUpdated,
                         currentTime = currentTime,
                         lang = resolvedLang,
                         selectedLanguage = currentLanguage,
                         onToggleNotifications = {
-                            val updated = settingsRepo.updateNotificationsEnabled(!notificationsEnabled)
-                            notificationsEnabled = updated.notificationsEnabled
-                            soundEnabled = updated.soundEnabled
-                            vibrationEnabled = updated.vibrationEnabled
-                            coroutineScope.launch(Dispatchers.IO) {
-                                try {
-                                    AlarmScheduler.syncAlarms(appContext)
-                                    BlackoutGlanceWidget.syncAllWidgets(appContext)
-                                } catch (_: Exception) {}
-                            }
+                            subscriptionSync.setMaster(!alertsMaster)
+                            alertsMaster = subscriptionSync.master()
+                            syncAlarmsAndWidgets()
                         },
                         onRefresh = {
                             performManualRefresh()
@@ -545,7 +575,8 @@ fun BlackoutAppNavigation(
                 1 -> {
                     SettingsScreen(
                         currentQueue = queue,
-                        customQueueStatusText = customQueueStatusText,
+                        subscriptions = subscriptions,
+                        alertsMaster = alertsMaster,
                         selectedAddressQuery = selectedAddressQuery,
                         siteUrl = siteUrl,
                         advanceMinutes = advanceMinutes,
@@ -558,47 +589,25 @@ fun BlackoutAppNavigation(
                         lang = resolvedLang,
                         autoOpenQueueHelp = autoOpenQueueHelp,
                         onAutoOpenQueueHelpHandled = { autoOpenQueueHelp = false },
-                        onQueueSelected = { newQueue ->
-                            val wasUnselected = queue.isBlank() && customQueueStatusText.isNullOrBlank() && selectedAddressQuery == null
-                            val current = settingsRepo.getSettings()
-                            settingsRepo.saveSettings(
-                                current.copy(
-                                    queue = newQueue,
-                                    customQueueStatusText = null,
-                                    selectedAddress = null,
-                                    selectedAddressQuery = null,
-                                    activeEmergencyOutage = null
-                                )
-                            )
-                            if (wasUnselected) {
-                                coroutineScope.launch {
-                                    pagerState.animateScrollToPage(0)
-                                }
-                            }
-                            coroutineScope.launch {
-                                runRefresh(force = false, resolveAddress = false)
+                        onAddAddress = { resolvedQueue, statusText, addressLabel, query ->
+                            val wasEmpty = subscriptions.items.isEmpty()
+                            val ok = onStoreResult(subscriptionSync.addFromLookup(resolvedQueue, statusText, addressLabel, query))
+                            if (ok) {
+                                showAppBanner(AppStrings.addressAdded(resolvedLang))
+                                // the first address becomes the primary: show it on the main screen
+                                if (wasEmpty) coroutineScope.launch { pagerState.animateScrollToPage(0) }
                             }
                         },
-                        onAddressQueueResolved = { resolvedQueue, statusText, addressLabel, query ->
-                            val current = settingsRepo.getSettings()
-                            settingsRepo.saveSettings(
-                                current.copy(
-                                    queue = resolvedQueue,
-                                    customQueueStatusText = statusText,
-                                    selectedAddress = addressLabel,
-                                    selectedAddressQuery = query,
-                                    activeEmergencyOutage = null
-                                )
-                            )
-                            coroutineScope.launch {
-                                pagerState.animateScrollToPage(0)
-                            }
-                            // The first refresh of the new address fetches its planned schedule and its emergencies;
-                            // an outage that is already over is recorded silently, an active one notifies once.
-                            coroutineScope.launch {
-                                runRefresh(force = false, resolveAddress = false)
-                            }
+                        onAddQueueOnly = { newQueue ->
+                            val wasEmpty = subscriptions.items.isEmpty()
+                            val ok = onStoreResult(subscriptionSync.addQueueOnly(newQueue))
+                            if (ok && wasEmpty) coroutineScope.launch { pagerState.animateScrollToPage(0) }
                         },
+                        onRemoveSubscription = { id -> onStoreResult(subscriptionSync.change { Subscriptions.remove(it, id) }) },
+                        onMakePrimary = { id -> onStoreResult(subscriptionSync.change { Subscriptions.setPrimary(it, id) }) },
+                        onSetPlanned = { id, on -> onStoreResult(subscriptionSync.change { Subscriptions.setPlanned(it, id, on) }) },
+                        onSetEmergency = { id, on -> onStoreResult(subscriptionSync.change { Subscriptions.setEmergency(it, id, on) }) },
+                        onRenameSubscription = { id, label -> onStoreResult(subscriptionSync.change { Subscriptions.rename(it, id, label) }) },
                         onSiteUrlChanged = { newUrl ->
                             siteUrl = newUrl
                             val current = settingsRepo.getSettings()
@@ -626,23 +635,10 @@ fun BlackoutAppNavigation(
                                 )
                             }
                         },
-                        onToggleNotifications = { newEnabled ->
-                            val updated = settingsRepo.updateNotificationsEnabled(newEnabled)
-                            notificationsEnabled = updated.notificationsEnabled
-                            soundEnabled = updated.soundEnabled
-                            vibrationEnabled = updated.vibrationEnabled
-                            coroutineScope.launch(Dispatchers.IO) {
-                                try {
-                                    AlarmScheduler.syncAlarms(appContext)
-                                    BlackoutGlanceWidget.syncAllWidgets(appContext)
-                                } catch (_: Exception) {}
-                            }
-                        },
-                        onToggleEmergencyNotifications = { newEmergencyEnabled ->
-                            val updated = settingsRepo.updateEmergencyNotificationsEnabled(newEmergencyEnabled)
-                            emergencyNotificationsEnabled = updated.emergencyNotificationsEnabled
-                            soundEnabled = updated.soundEnabled
-                            vibrationEnabled = updated.vibrationEnabled
+                        onToggleMaster = { on ->
+                            subscriptionSync.setMaster(on)
+                            alertsMaster = subscriptionSync.master()
+                            syncAlarmsAndWidgets()
                         },
                         onToggleSound = {
                             soundEnabled = it

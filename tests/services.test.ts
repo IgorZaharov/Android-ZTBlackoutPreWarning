@@ -26,8 +26,10 @@ import {
   encode as subEncode,
   randomId as subRandomId,
 } from '../src/services/subscriptionStore';
+import { SubscriptionSync } from '../src/services/subscriptionSync';
 import {
   add as subAdd,
+  setPrimary as setSubscriptionPrimary,
   makeSubscription,
   type LegacySettings,
   type SubscriptionAddress,
@@ -972,6 +974,72 @@ test('subscriptions: newItemId skips ids in use and randomId has the id shape', 
   repo.ensureMigrated(() => subLegacy());
   assert.equal(repo.newItemId(), 'aaaa0002');
   for (let i = 0; i < 50; i++) assert.match(subRandomId(), /^[a-z0-9]{8}$/);
+});
+
+/** aaaa0001, aaaa0002, … (the migration on first use takes one id too, even for an empty store). */
+const counterIds = () => {
+  let n = 0;
+  return () => `aaaa${String(++n).padStart(4, '0')}`;
+};
+
+test('subscription sync: first address becomes primary and is mirrored into the settings', () => {
+  const sync = new SubscriptionSync(new SubscriptionRepository(createMemoryStorage(), () => 5, counterIds()));
+  const empty = { ...DEFAULT_SETTINGS };
+  assert.equal(sync.store(empty).items.length, 0, 'first launch migrates to an empty store');
+  const added = sync.addFromLookup(empty, '5.2', undefined, SUB_ADDRESS.text, {
+    remId: 'zhytomyr',
+    settlementId: '16657',
+    streetId: 'st_123',
+    house: '77',
+  });
+  assert.equal(added.result.ok, true);
+  assert.equal(added.settings.queue, '5.2');
+  assert.equal(added.settings.selectedAddress, SUB_ADDRESS.text);
+  assert.deepStrictEqual(added.settings.selectedAddressQuery, { remId: 'zhytomyr', settlementId: '16657', streetId: 'st_123', house: '77' });
+  assert.equal(added.settings.alertsMaster, true);
+
+  // a second (queue-only) item does not change the mirror
+  const second = sync.addQueueOnly(added.settings, '3.1');
+  assert.equal(second.result.ok, true);
+  assert.equal(second.settings.queue, '5.2');
+  // making it primary does
+  const primary = sync.change(second.settings, (s) => setSubscriptionPrimary(s, 'aaaa0003'));
+  assert.equal(primary.settings.queue, '3.1');
+  assert.equal(primary.settings.selectedAddressQuery, undefined);
+  assert.equal(primary.settings.selectedAddress, undefined);
+});
+
+test('subscription sync: a refused change keeps the settings', () => {
+  const sync = new SubscriptionSync(new SubscriptionRepository(createMemoryStorage(), () => 5, counterIds()));
+  const s1 = sync.addQueueOnly({ ...DEFAULT_SETTINGS }, '1.1').settings;
+  const dup = sync.addQueueOnly(s1, '1.1');
+  assert.equal(dup.result.ok, false);
+  assert.equal(dup.settings, s1);
+});
+
+test('subscription sync: background lookup updates the primary queue and the mirror', () => {
+  const sync = new SubscriptionSync(new SubscriptionRepository(createMemoryStorage(), () => 5, counterIds()));
+  const legacy = {
+    ...DEFAULT_SETTINGS,
+    queue: '',
+    customQueueStatusText: 'Не підлягає відключенням',
+    selectedAddress: SUB_ADDRESS.text,
+    selectedAddressQuery: { remId: 'zhytomyr', settlementId: '16657', streetId: 'st_123', house: '77' },
+  };
+  const r = sync.assignPrimaryQueue(legacy, '4.2', null, null);
+  assert.equal(r.result.ok, true);
+  assert.equal(r.settings.queue, '4.2');
+  assert.equal(r.settings.customQueueStatusText, undefined);
+  assert.equal(sync.store(r.settings).items[0].queue, '4.2');
+});
+
+test('subscription sync: clear forgets the store so the next start migrates again', () => {
+  const storage = createMemoryStorage();
+  const sync = new SubscriptionSync(new SubscriptionRepository(storage, () => 5, counterIds()));
+  sync.addQueueOnly({ ...DEFAULT_SETTINGS }, '1.1');
+  sync.clear();
+  assert.equal(storage.getItem(SUB_KEY_STORE), null);
+  assert.equal(sync.store({ ...DEFAULT_SETTINGS }).items.length, 0);
 });
 
 // -------------------------------------------------------------------------------------------------

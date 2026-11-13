@@ -7,9 +7,13 @@ import {
   Globe,
   HelpCircle,
   Loader2,
+  Pencil,
+  Plus,
   RotateCcw,
   Send,
   Sliders,
+  Star,
+  Trash2,
   Vibrate,
   Volume2,
   X,
@@ -34,8 +38,31 @@ import {
   type ZtoeSettlementOption,
   type ZtoeStreetOption
 } from '../services/ztoeAddressLookup';
-import { toggleEmergencyNotifications, toggleMasterNotifications } from '../services/alertManager';
-import { rangeMinutes, translations } from '../services/i18n';
+import { getSubscriptionSync, type SyncResult } from '../services/subscriptionSync';
+import {
+  ERR_DUPLICATE,
+  ERR_LIMIT,
+  MAX_ITEMS,
+  MAX_LABEL_LENGTH,
+  anyAlertsEnabled as anyItemAlerts,
+  defaultLabel,
+  displayLabel,
+  remove as removeItem,
+  rename as renameItem,
+  setEmergency,
+  setPlanned,
+  setPrimary,
+  type Subscription,
+} from '../core/subscriptions';
+import {
+  addressLimitReached,
+  addressesCount,
+  addressesLeft,
+  plannedDesc,
+  rangeMinutes,
+  removeConfirmBody,
+  translations,
+} from '../services/i18n';
 import { HouseKey } from '../core/addressKeys';
 import { GlassCard, TEXT_SECONDARY, TEXT_TERTIARY } from './GlassCard';
 import { SearchablePickerField, type PickerItem } from './SearchablePickerField';
@@ -174,6 +201,9 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const [confirmResetOpen, setConfirmResetOpen] = useState(false);
   const [showQueueHelp, setShowQueueHelp] = useState(Boolean(autoOpenQueueHelp));
+  const [removeCandidate, setRemoveCandidate] = useState<Subscription | null>(null);
+  const [renameCandidate, setRenameCandidate] = useState<Subscription | null>(null);
+  const [renameText, setRenameText] = useState('');
   const [verification, setVerification] = useState<{ isChecking: boolean; status: RefreshStatus }>({ isChecking: true, status: 'SUCCESS' });
 
   useEffect(() => {
@@ -207,8 +237,27 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     showToast(status === 'NO_INTERNET' ? t.errorNoInternet : status === 'NO_QUEUES_FOUND' ? t.errorNoQueuesFound : t.refreshSuccessToast);
   };
 
+  // Sound and vibration follow the primary address' effective switches, as the single-address fields do
   const anyAlertsEnabled = settings.notificationsEnabled || (settings.emergencyNotificationsEnabled ?? true);
-  const hasCustomStatus = Boolean(settings.customQueueStatusText && settings.customQueueStatusText.trim() !== '');
+
+  // Multi-address store (step 2): every change goes through the sync, which mirrors the primary back
+  const sync = getSubscriptionSync();
+  const store = useMemo(() => sync.store(settings), [sync, settings]);
+  const alertsMaster = settings.alertsMaster ?? sync.master(settings);
+  const noAddressAlerts = alertsMaster && store.items.length > 0 && !anyItemAlerts(alertsMaster, store);
+  const usedQueues = new Set(store.items.filter((i) => i.address === null).map((i) => i.queue));
+  const freeQueues = QUEUES.filter((q) => !usedQueues.has(q.id));
+
+  /** Saves the mirrored settings, or says why the store refused the change. */
+  const applySync = ({ result, settings: next }: SyncResult): boolean => {
+    if (result.ok) {
+      onUpdateSettings(next);
+      return true;
+    }
+    if (result.code === ERR_DUPLICATE) showToast(t.addressDuplicate);
+    else if (result.code === ERR_LIMIT) showToast(addressLimitReached(lang, MAX_ITEMS));
+    return false;
+  };
   const isSiteVerified = !verification.isChecking && verification.status === 'SUCCESS';
   const minShort = t.minShort;
 
@@ -240,14 +289,19 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         <h2 className="text-xl font-extrabold leading-7 tracking-tight text-white">{t.settingsTitle}</h2>
       </div>
 
-      {/* 1. Queue selection */}
-      <GlassCard padding={18} className="flex flex-col gap-3">
-        <div className="flex items-center justify-between gap-3">
+      {/* 1. My addresses: up to 5 addresses (or queues), each with its own planned / emergency switches */}
+      <GlassCard data-testid="my-addresses-card" padding={18} className="flex flex-col gap-3">
+        <div className="flex items-center justify-between gap-2">
           <div className="flex min-w-0 flex-1 flex-col gap-0.5">
-            <Overline>{t.queueTitle}</Overline>
-            <span className={`text-[13px] font-medium leading-[19px] ${TEXT_SECONDARY}`}>{t.queueDesc}</span>
+            <Overline>{t.myAddressesTitle}</Overline>
+            <span className={`text-[13px] font-medium leading-[19px] ${TEXT_SECONDARY}`}>{t.myAddressesDesc}</span>
           </div>
-          {/* 48 px touch target around the 40 px "?" tile */}
+          {store.items.length > 0 && (
+            <span data-testid="my-addresses-count" className="shrink-0 rounded-full bg-white/10 px-2.5 py-1 text-xs font-bold text-white/80">
+              {addressesCount(lang, store.items.length, MAX_ITEMS)}
+            </span>
+          )}
+          {/* 48 px touch target around the 40 px "?" tile; opens the address lookup */}
           <button
             type="button"
             data-testid="settings-queue-help-btn"
@@ -262,37 +316,126 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           </button>
         </div>
 
-        <select
-          aria-label={t.queueTitle}
-          data-testid="settings-queue-select"
-          value={hasCustomStatus ? '__custom' : settings.queue}
-          onChange={(e) => {
-            if (e.target.value === '__custom') return;
-            onUpdateSettings({
-              ...settings,
-              queue: e.target.value,
-              customQueueStatusText: undefined,
-              selectedAddress: undefined,
-              selectedAddressQuery: undefined,
-              activeEmergencyOutage: null
-            });
-          }}
-          className={fieldClass}
-        >
-          {hasCustomStatus && (
-            <option value="__custom" className="bg-[#141A29] text-white">
-              {t.noQueueNotDisconnected}
-            </option>
-          )}
-          <option value="" className="bg-[#141A29] text-white">
-            {t.selectQueueAction}
-          </option>
-          {QUEUES.map((q) => (
-            <option key={q.id} value={q.id} className="bg-[#141A29] text-white">
-              {t.queue} {q.id}
-            </option>
-          ))}
-        </select>
+        {store.items.map((item) => {
+          const isPrimary = item.id === store.primaryId;
+          const label = displayLabel(item);
+          const caption = item.address ? (item.address.text.trim() ? item.address.text : null) : t.queueOnlyCaption;
+          return (
+            <div
+              key={item.id}
+              data-testid={`subscription-${item.id}`}
+              className={`flex flex-col gap-1.5 rounded-2xl border bg-white/[0.08] px-3.5 py-3 ${isPrimary ? 'border-[#FF5E3A]/35' : 'border-white/10'}`}
+            >
+              <div className="flex items-center gap-1.5">
+                <div className="flex min-w-0 flex-1 flex-wrap gap-1.5">
+                  {/* a queue-only item already says "Черга X" in its label */}
+                  {item.address !== null && (
+                    <span className="rounded-full bg-white/10 px-2.5 py-1 text-xs font-bold text-white/80">
+                      {item.queue !== null ? `${t.queue} ${item.queue}` : item.queueStatusText ? t.noQueueNotDisconnected : t.selectQueueAction}
+                    </span>
+                  )}
+                  {isPrimary && (
+                    <span className="flex items-center gap-1 rounded-full bg-white/10 px-2.5 py-1 text-xs font-bold text-white">
+                      <Star className="h-3.5 w-3.5 fill-current" aria-hidden="true" />
+                      {t.primaryBadge}
+                    </span>
+                  )}
+                </div>
+                <button
+                  type="button"
+                  aria-label={`${t.renameAddress}: ${label}`}
+                  onClick={() => {
+                    setRenameText(item.label);
+                    setRenameCandidate(item);
+                  }}
+                  className="flex h-12 w-12 shrink-0 cursor-pointer items-center justify-center"
+                >
+                  <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-white/10 text-white">
+                    <Pencil className="h-4 w-4" aria-hidden="true" />
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  aria-label={`${t.removeAddress}: ${label}`}
+                  data-testid={`subscription-remove-${item.id}`}
+                  onClick={() => setRemoveCandidate(item)}
+                  className="flex h-12 w-12 shrink-0 cursor-pointer items-center justify-center"
+                >
+                  <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-red-500/20 text-red-300">
+                    <Trash2 className="h-4 w-4" aria-hidden="true" />
+                  </span>
+                </button>
+              </div>
+              <span className="text-base font-bold leading-[23px] text-white">{label}</span>
+              {caption && <span className={`text-[13px] font-medium leading-[19px] ${TEXT_SECONDARY}`}>{caption}</span>}
+              <SwitchRow
+                icon={<Bell className="h-5 w-5 text-white" />}
+                title={t.plannedShort}
+                hint={plannedDesc(lang, settings.advanceNoticeMinutes)}
+                checked={item.plannedAlerts}
+                enabled={item.queue !== null}
+                onToggle={() => applySync(sync.change(settings, (st) => setPlanned(st, item.id, !item.plannedAlerts)))}
+                testId={`ios-switch-planned-${item.id}`}
+              />
+              <SwitchRow
+                icon={<AlertTriangle className="h-5 w-5 text-[#FF5E3A]" />}
+                title={t.emergencyShort}
+                hint={item.address ? t.emergencyDesc : t.emergencyNeedsAddress}
+                checked={item.emergencyAlerts && item.address !== null}
+                enabled={item.address !== null}
+                onToggle={() => applySync(sync.change(settings, (st) => setEmergency(st, item.id, !item.emergencyAlerts)))}
+                testId={`ios-switch-emergency-${item.id}`}
+                titleClassName="break-words leading-snug"
+              />
+              {!isPrimary && (
+                <ActionButton
+                  text={t.makePrimary}
+                  icon={<Star className="h-4 w-4" aria-hidden="true" />}
+                  onClick={() => applySync(sync.change(settings, (st) => setPrimary(st, item.id)))}
+                  testId={`subscription-make-primary-${item.id}`}
+                />
+              )}
+            </div>
+          );
+        })}
+
+        {store.items.length < MAX_ITEMS ? (
+          <>
+            <ActionButton
+              text={t.addAddress}
+              icon={<Plus className="h-4 w-4" aria-hidden="true" />}
+              filled
+              onClick={() => setShowQueueHelp(true)}
+              testId="add-address-btn"
+            />
+            <select
+              aria-label={t.addQueueOnly}
+              data-testid="settings-queue-select"
+              value=""
+              onChange={(e) => {
+                const q = e.target.value;
+                if (!q) return;
+                const wasEmpty = store.items.length === 0;
+                if (applySync(sync.addQueueOnly(settings, q)) && wasEmpty) onNavigateToMain?.();
+              }}
+              className={fieldClass}
+            >
+              <option value="" className="bg-[#141A29] text-white">
+                {t.addQueueOnly}
+              </option>
+              {freeQueues.map((q) => (
+                <option key={q.id} value={q.id} className="bg-[#141A29] text-white">
+                  {t.queue} {q.id}
+                </option>
+              ))}
+            </select>
+            {store.items.length > 0 && (
+              <p className={`text-[13px] font-medium leading-[19px] ${TEXT_TERTIARY}`}>{addressesLeft(lang, MAX_ITEMS - store.items.length)}</p>
+            )}
+          </>
+        ) : (
+          <p className={`text-[13px] font-medium leading-[19px] ${TEXT_SECONDARY}`}>{addressLimitReached(lang, MAX_ITEMS)}</p>
+        )}
       </GlassCard>
 
       {/* 2. Site address with a strict check against valid-urls.json and the live table */}
@@ -372,16 +515,21 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         </div>
       </GlassCard>
 
-      {/* 4. Planned alerts: master switch, then sound and vibration (shared by planned and emergency alerts) */}
+      {/* 4. Alerts: the master switch for all addresses (owner decision 1), then sound and vibration */}
       <GlassCard padding={18} className="flex flex-col gap-2">
         <SwitchRow
           icon={<Bell className="h-5 w-5 text-white" />}
           title={t.notifications}
-          hint={t.notificationsHint}
-          checked={settings.notificationsEnabled}
-          onToggle={() => onUpdateSettings(toggleMasterNotifications(settings))}
+          hint={t.masterHint}
+          checked={alertsMaster}
+          onToggle={() => onUpdateSettings(sync.setMaster(settings, !alertsMaster))}
           testId="ios-switch-notifications"
         />
+        {noAddressAlerts && (
+          <p data-testid="no-address-alerts" className="text-[13px] font-medium leading-[19px] text-[#FF5E3A]">
+            {t.noAddressAlerts}
+          </p>
+        )}
         <Divider />
         <SwitchRow
           icon={<Volume2 className={`h-5 w-5 ${anyAlertsEnabled ? 'text-[#BAE6FD]/70' : 'text-[#BAE6FD]/30'}`} />}
@@ -409,19 +557,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         <p className={`pt-0.5 text-[13px] font-medium leading-[19px] ${TEXT_TERTIARY}`}>{t.soundVibrationHint}</p>
       </GlassCard>
 
-      {/* 4b. Emergency outage switch: its own card, independent of the planned alerts above; always visible, ON by default */}
-      <GlassCard data-testid="emergency-outage-switch-block" padding={18}>
-        <SwitchRow
-          icon={<AlertTriangle className="h-5 w-5 text-[#FF5E3A]" />}
-          title={t.emergencyNotifications}
-          hint={t.emergencyHint}
-          checked={settings.emergencyNotificationsEnabled ?? true}
-          onToggle={() => onUpdateSettings(toggleEmergencyNotifications(settings))}
-          testId="ios-switch-emergency-notifications"
-          rowTestId="emergency-outage-switch-row"
-          titleClassName="break-words leading-snug"
-        />
-      </GlassCard>
 
       {/* 5. Language */}
       <GlassCard padding={18} className="flex flex-col gap-2.5">
@@ -539,12 +674,76 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           lang={lang}
           onDismiss={() => setShowQueueHelp(false)}
           onApply={(next, toast) => {
-            onUpdateSettings(next);
+            const wasEmpty = store.items.length === 0;
+            const synced = next.selectedAddressQuery
+              ? sync.addFromLookup(settings, next.queue, next.customQueueStatusText, next.selectedAddress ?? '', next.selectedAddressQuery)
+              : sync.addQueueOnly(settings, next.queue);
             setShowQueueHelp(false);
-            onNavigateToMain?.();
-            showToast(toast);
+            if (applySync(synced)) {
+              // the first address becomes the primary: show it on the main screen
+              if (wasEmpty) onNavigateToMain?.();
+              showToast(wasEmpty ? toast : t.addressAdded);
+            }
           }}
         />
+        </ModalPortal>
+      )}
+
+      {removeCandidate && (
+        <ModalPortal>
+          <div role="dialog" aria-modal="true" aria-labelledby="remove-address-title" className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+            <div className="flex w-full max-w-sm flex-col gap-3 rounded-3xl border border-white/15 bg-[#141A29] p-5 shadow-2xl">
+              <h3 id="remove-address-title" className="text-xl font-extrabold leading-7 text-white">{t.removeConfirmTitle}</h3>
+              <p className={`text-[15px] leading-[22px] ${TEXT_SECONDARY}`}>{removeConfirmBody(lang, displayLabel(removeCandidate))}</p>
+              <div className="flex gap-2">
+                <ActionButton text={t.cancel} onClick={() => setRemoveCandidate(null)} />
+                <ActionButton
+                  text={t.removeAddress}
+                  filled
+                  testId="confirm-remove-address"
+                  onClick={() => {
+                    const id = removeCandidate.id;
+                    setRemoveCandidate(null);
+                    applySync(sync.change(settings, (st) => removeItem(st, id)));
+                  }}
+                />
+              </div>
+            </div>
+          </div>
+        </ModalPortal>
+      )}
+
+      {renameCandidate && (
+        <ModalPortal>
+          <div role="dialog" aria-modal="true" aria-labelledby="rename-address-title" className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+            <div className="flex w-full max-w-sm flex-col gap-3 rounded-3xl border border-white/15 bg-[#141A29] p-5 shadow-2xl">
+              <h3 id="rename-address-title" className="text-xl font-extrabold leading-7 text-white">{t.renameAddress}</h3>
+              <input
+                type="text"
+                value={renameText}
+                maxLength={MAX_LABEL_LENGTH}
+                placeholder={defaultLabel(renameCandidate)}
+                aria-label={t.renameAddress}
+                data-testid="rename-address-input"
+                onChange={(e) => setRenameText(e.target.value)}
+                className="min-h-14 w-full rounded-2xl border border-white/20 bg-white/[0.08] px-4 py-2 text-base font-medium text-white placeholder:text-white/40 focus:border-[#FF5E3A] focus:outline-none"
+              />
+              <p className={`text-[13px] leading-[19px] ${TEXT_TERTIARY}`}>{t.renameHint}</p>
+              <div className="flex gap-2">
+                <ActionButton text={t.cancel} onClick={() => setRenameCandidate(null)} />
+                <ActionButton
+                  text={t.save}
+                  filled
+                  testId="confirm-rename-address"
+                  onClick={() => {
+                    const id = renameCandidate.id;
+                    setRenameCandidate(null);
+                    applySync(sync.change(settings, (st) => renameItem(st, id, renameText)));
+                  }}
+                />
+              </div>
+            </div>
+          </div>
         </ModalPortal>
       )}
     </div>

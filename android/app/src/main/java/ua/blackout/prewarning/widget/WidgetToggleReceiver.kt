@@ -6,7 +6,7 @@ import android.content.Intent
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import ua.blackout.prewarning.data.repository.SettingsRepository
+import ua.blackout.prewarning.data.repository.SubscriptionSync
 import ua.blackout.prewarning.notification.AlarmScheduler
 
 /**
@@ -22,10 +22,9 @@ class WidgetToggleReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent?) {
         val pendingResult = goAsync()
         val appContext = context.applicationContext
-        val settingsRepo = SettingsRepository(appContext)
-        val current = settingsRepo.getSettings()
-        val newState = !current.notificationsEnabled
-        settingsRepo.updateNotificationsEnabled(newState)
+        // The widget bell is the master switch for all addresses (multi-address owner decision 4)
+        val sync = SubscriptionSync(appContext)
+        sync.setMaster(!sync.master())
 
         CoroutineScope(Dispatchers.IO).launch {
             try {

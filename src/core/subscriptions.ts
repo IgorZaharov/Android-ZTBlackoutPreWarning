@@ -296,6 +296,26 @@ export function remove(store: SubscriptionStore, id: string): StoreResult {
   return ok({ primaryId, items: rest });
 }
 
+/** Result of a ZTOE lookup for an address item (spec/SUBSCRIPTIONS.md section 4). */
+export function setQueueInfo(
+  store: SubscriptionStore,
+  id: string,
+  queue: string | null,
+  statusText: string | null,
+  addressText: string | null,
+): StoreResult {
+  const item = store.items.find((s) => s.id === id);
+  if (!item) return fail(ERR_NOT_FOUND);
+  const address = item.address;
+  if (!address) return fail(ERR_INVALID);
+  return update(store, id, (s) => ({
+    ...s,
+    queue: isValidQueue(queue) ? queue : null,
+    queueStatusText: statusText !== null && !isBlank(statusText) ? statusText : null,
+    address: addressText === null || isBlank(addressText) ? address : { ...address, text: addressText },
+  }));
+}
+
 function update(store: SubscriptionStore, id: string, change: (s: Subscription) => Subscription): StoreResult {
   if (!store.items.some((s) => s.id === id)) return fail(ERR_NOT_FOUND);
   return ok({ ...store, items: store.items.map((s) => (s.id === id ? change(s) : s)) });
@@ -325,6 +345,42 @@ export const emergencyActive = (master: boolean, item: Subscription, poweronIdsK
 
 export const anyAlertsEnabled = (master: boolean, store: SubscriptionStore): boolean =>
   master && store.items.some((s) => s.plannedAlerts || s.emergencyAlerts);
+
+// -------------------------------------------------------------------------------------------------
+// Mirror of the primary item into the single-address keys (section 7)
+// -------------------------------------------------------------------------------------------------
+
+/** Values for the single-address keys, written from the primary item. */
+export interface LegacyMirror {
+  queue: string;
+  customQueueStatusText: string | null;
+  selectedAddress: string | null;
+  remSlug: string;
+  settlementId: string;
+  streetId: string;
+  house: string;
+  notificationsEnabled: boolean;
+  emergencyNotificationsEnabled: boolean;
+}
+
+export const primaryOf = (store: SubscriptionStore): Subscription | null =>
+  store.items.find((s) => s.id === store.primaryId) ?? null;
+
+export function primaryMirror(store: SubscriptionStore, master: boolean): LegacyMirror {
+  const p = primaryOf(store);
+  const a = p?.address ?? null;
+  return {
+    queue: p?.queue ?? '',
+    customQueueStatusText: p?.queueStatusText ?? null,
+    selectedAddress: p && a ? (a.text.length > 0 ? a.text : displayLabel(p)) : null,
+    remSlug: a?.remSlug ?? '',
+    settlementId: a?.settlementId ?? '',
+    streetId: a?.streetId ?? '',
+    house: a?.house ?? '',
+    notificationsEnabled: master && (p?.plannedAlerts ?? true),
+    emergencyNotificationsEnabled: master && (p?.emergencyAlerts ?? true),
+  };
+}
 
 // -------------------------------------------------------------------------------------------------
 // Migration

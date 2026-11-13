@@ -1572,6 +1572,7 @@ import kotlinx.coroutines.CancellationException
 import ua.blackout.prewarning.data.parser.ZtoeAddressLookup
 import ua.blackout.prewarning.data.repository.OutageRepository
 import ua.blackout.prewarning.data.repository.SettingsRepository
+import ua.blackout.prewarning.data.repository.SubscriptionSync
 import ua.blackout.prewarning.notification.AlarmScheduler
 import ua.blackout.prewarning.widget.BlackoutGlanceWidget
 import java.util.concurrent.TimeUnit
@@ -1595,7 +1596,8 @@ class ScheduleSyncWorker(
                     ZtoeAddressLookup.initDiskCache(appContext)
                     val lookup = ZtoeAddressLookup.checkAddressOnZtoeWebsite(addressQuery, settings.cityUrl)
                     if (lookup != null && (lookup.queue != settings.queue || lookup.statusText != settings.customQueueStatusText)) {
-                        settingsRepo.updateQueueAssignment(lookup.queue, lookup.statusText)
+                        // through the subscription store, which writes the primary back into these keys
+                        SubscriptionSync(appContext).assignPrimaryQueue(lookup.queue, lookup.statusText, null)
                     }
                 } catch (e: CancellationException) {
                     throw e
@@ -1727,6 +1729,7 @@ import ua.blackout.prewarning.data.model.UserSettings
 import ua.blackout.prewarning.data.repository.OutageRepository
 import ua.blackout.prewarning.data.repository.OutageSnapshot
 import ua.blackout.prewarning.data.repository.SettingsRepository
+import ua.blackout.prewarning.data.repository.SubscriptionSync
 import ua.blackout.prewarning.notification.AlarmScheduler
 import ua.blackout.prewarning.ui.AppStrings
 import java.time.Instant
@@ -1882,13 +1885,14 @@ open class BlackoutGlanceWidget(private val forceBigLayout: Boolean = false) : G
             if (smallIds.isEmpty() && bigIds.isEmpty() && stripIds.isEmpty()) return
 
             val settings = SettingsRepository(appCtx).getSettings()
+            val alertsMaster = SubscriptionSync(appCtx).master()
             val resolvedLang = AppStrings.resolveLang(settings.language)
             val nowMs = System.currentTimeMillis()
 
             suspend fun touch(gId: GlanceId) {
                 updateAppWidgetState(appCtx, PreferencesGlanceStateDefinition, gId) { prefs ->
                     prefs.toMutablePreferences().apply {
-                        this[KEY_NOTIFICATIONS_ENABLED] = settings.notificationsEnabled
+                        this[KEY_NOTIFICATIONS_ENABLED] = alertsMaster
                         this[KEY_QUEUE] = settings.queue
                         this[KEY_LANGUAGE] = resolvedLang
                         this[KEY_REFRESH_TICK] = nowMs
@@ -2157,7 +2161,8 @@ open class BlackoutGlanceWidget(private val forceBigLayout: Boolean = false) : G
             val model = buildWidgetModel(currentSettings, outageRepo.snapshot(currentSettings))
 
             val resolvedLang = model.lang
-            val notificationsEnabled = currentSettings.notificationsEnabled
+            // the bell shows and toggles the master switch for all addresses (owner decision 4)
+            val notificationsEnabled = SubscriptionSync(appContext).master()
             val isUnclear = model.isUnclear
             val isBlackoutNow = model.isOffNow
             val countdownText = model.countdown
@@ -2539,10 +2544,9 @@ class ToggleAlertsActionCallback : ActionCallback {
         parameters: ActionParameters
     ) {
         val appContext = context.applicationContext
-        val settingsRepo = SettingsRepository(appContext)
-        val current = settingsRepo.getSettings()
-        val newState = !current.notificationsEnabled
-        settingsRepo.updateNotificationsEnabled(newState)
+        // The widget bell is the master switch for all addresses (multi-address owner decision 4)
+        val sync = SubscriptionSync(appContext)
+        sync.setMaster(!sync.master())
         try {
             AlarmScheduler.syncAlarms(appContext)
         } catch (_: Exception) {}
@@ -3871,14 +3875,18 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AlarmOff
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.HelpOutline
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Send
+import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.Vibration
 import androidx.compose.material.icons.filled.VolumeUp
@@ -3928,6 +3936,9 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import ua.blackout.prewarning.core.Subscription
+import ua.blackout.prewarning.core.SubscriptionStore
+import ua.blackout.prewarning.core.Subscriptions
 import ua.blackout.prewarning.data.model.SelectedAddressQuery
 import ua.blackout.prewarning.data.parser.AddressLookupResult
 import ua.blackout.prewarning.data.parser.FetchStatus
@@ -3973,7 +3984,8 @@ private const val ZTOE_SEARCH_URL = "https://www.ztoe.com.ua/unhooking-search.ph
 @Composable
 fun SettingsScreen(
     currentQueue: String = "",
-    customQueueStatusText: String? = null,
+    subscriptions: SubscriptionStore = SubscriptionStore.EMPTY,
+    alertsMaster: Boolean = true,
     selectedAddressQuery: SelectedAddressQuery? = null,
     siteUrl: String = ZTOE_SEARCH_URL,
     // CRITICAL CONSTANTS — Default values: advanceMinutes = 15, refreshMinutes = 30. Never modify on your own.
@@ -3987,18 +3999,22 @@ fun SettingsScreen(
     lang: String = "uk",
     autoOpenQueueHelp: Boolean = false,
     onAutoOpenQueueHelpHandled: () -> Unit = {},
-    onQueueSelected: (String) -> Unit = {},
-    onAddressQueueResolved: (
+    onAddAddress: (
         queue: String,
         statusText: String?,
         addressLabel: String,
         query: SelectedAddressQuery
     ) -> Unit = { _, _, _, _ -> },
+    onAddQueueOnly: (String) -> Unit = {},
+    onRemoveSubscription: (String) -> Unit = {},
+    onMakePrimary: (String) -> Unit = {},
+    onSetPlanned: (id: String, on: Boolean) -> Unit = { _, _ -> },
+    onSetEmergency: (id: String, on: Boolean) -> Unit = { _, _ -> },
+    onRenameSubscription: (id: String, label: String) -> Unit = { _, _ -> },
+    onToggleMaster: (Boolean) -> Unit = {},
     onSiteUrlChanged: (String) -> Unit = {},
     onAdvanceMinutesChanged: (Int) -> Unit = {},
     onRefreshMinutesChanged: (Int) -> Unit = {},
-    onToggleNotifications: (Boolean) -> Unit = {},
-    onToggleEmergencyNotifications: (Boolean) -> Unit = {},
     onToggleSound: (Boolean) -> Unit = {},
     onToggleVibration: (Boolean) -> Unit = {},
     onLanguageSelected: (String) -> Unit = {},
@@ -4013,6 +4029,8 @@ fun SettingsScreen(
     val context = LocalContext.current
     var showQueueHelpDialog by remember { mutableStateOf(false) }
     var showResetConfirmDialog by remember { mutableStateOf(false) }
+    var removeCandidate by remember { mutableStateOf<Subscription?>(null) }
+    var renameCandidate by remember { mutableStateOf<Subscription?>(null) }
 
     LaunchedEffect(autoOpenQueueHelp) {
         if (autoOpenQueueHelp) {
@@ -4046,12 +4064,6 @@ fun SettingsScreen(
 
     val isChecking = isVerifyingUrl || !urlChecked
     val isSiteVerifiedSuccess = isUrlInValidList && urlFetchStatus == FetchStatus.SUCCESS
-
-    val queueFieldDisplay = when {
-        !customQueueStatusText.isNullOrBlank() -> AppStrings.noQueueNotDisconnected(lang)
-        currentQueue.isBlank() -> AppStrings.selectQueueAction(lang)
-        else -> "\${AppStrings.queue(lang)} $currentQueue"
-    }
 
     val minShort = AppStrings.minShort(lang)
 
@@ -4110,49 +4122,19 @@ fun SettingsScreen(
             }
         }
 
-        // 1. Queue selection
-        GlassCard(modifier = Modifier.fillMaxWidth(), contentPadding = PaddingValues18) {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column(
-                        modifier = Modifier.weight(1f).padding(end = 12.dp),
-                        verticalArrangement = Arrangement.spacedBy(2.dp)
-                    ) {
-                        Text(text = AppStrings.queueTitle(lang), style = ZtType.overline, color = Color.White)
-                        Text(text = AppStrings.queueDesc(lang), style = ZtType.caption, color = ZtColors.TextSecondary)
-                    }
-                    // 48 dp touch target around the 40 dp "?" tile
-                    Box(
-                        modifier = Modifier
-                            .size(ZtMinTouch)
-                            .clickable(role = Role.Button, onClickLabel = AppStrings.queueHelpTitle(lang)) { showQueueHelpDialog = true }
-                            .semantics { contentDescription = AppStrings.queueHelpTitle(lang) },
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(40.dp)
-                                .clip(RoundedCornerShape(16.dp))
-                                .background(ZtColors.Accent)
-                                .border(1.dp, Color(0x40FFFFFF), RoundedCornerShape(16.dp)),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(Icons.Default.HelpOutline, contentDescription = null, tint = Color.White, modifier = Modifier.size(20.dp))
-                        }
-                    }
-                }
-
-                GlassDropdown(
-                    value = queueFieldDisplay,
-                    options = QUEUES.map { "\${AppStrings.queue(lang)} $it" },
-                    onSelect = { onQueueSelected(QUEUES[it]) }
-                )
-            }
-        }
+        // 1. My addresses: up to 5 addresses (or queues), each with its own planned / emergency switches
+        MyAddressesCard(
+            store = subscriptions,
+            advanceMinutes = advanceMinutes,
+            lang = lang,
+            onHelp = { showQueueHelpDialog = true },
+            onAddQueueOnly = onAddQueueOnly,
+            onRemove = { removeCandidate = it },
+            onRename = { renameCandidate = it },
+            onMakePrimary = onMakePrimary,
+            onSetPlanned = onSetPlanned,
+            onSetEmergency = onSetEmergency
+        )
 
         // 2. Site address with a strict check against valid-urls.json and the live table
         GlassCard(modifier = Modifier.fillMaxWidth(), contentPadding = PaddingValues18) {
@@ -4253,19 +4235,25 @@ fun SettingsScreen(
             }
         }
 
-        // 4. Planned alerts: master switch, then sound and vibration (shared by planned and emergency alerts)
+        // 4. Alerts: the master switch for all addresses (owner decision 1), then sound and vibration.
+        // Sound and vibration follow the primary address' effective switches, as the single-address keys do.
         val anyAlertsEnabled = notificationsEnabled || emergencyNotificationsEnabled
+        val noAddressAlerts = alertsMaster && subscriptions.items.isNotEmpty() &&
+            !Subscriptions.anyAlertsEnabled(alertsMaster, subscriptions)
         GlassCard(modifier = Modifier.fillMaxWidth(), contentPadding = PaddingValues18) {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 SwitchRow(
                     icon = Icons.Default.Notifications,
                     iconTint = Color.White,
                     title = AppStrings.notifications(lang),
-                    hint = AppStrings.notificationsHint(lang),
-                    checked = notificationsEnabled,
-                    onCheckedChange = onToggleNotifications,
+                    hint = AppStrings.masterHint(lang),
+                    checked = alertsMaster,
+                    onCheckedChange = onToggleMaster,
                     lang = lang
                 )
+                if (noAddressAlerts) {
+                    Text(text = AppStrings.noAddressAlerts(lang), style = ZtType.caption, color = ZtColors.Accent)
+                }
                 Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(ZtColors.Divider))
                 SwitchRow(
                     icon = Icons.Default.VolumeUp,
@@ -4295,19 +4283,6 @@ fun SettingsScreen(
                     modifier = Modifier.padding(top = 2.dp)
                 )
             }
-        }
-
-        // 4b. Emergency Power Outages Switch (own card: independent of the planned alerts above; always visible, ON by default)
-        GlassCard(modifier = Modifier.fillMaxWidth(), contentPadding = PaddingValues18) {
-            SwitchRow(
-                icon = Icons.Default.Warning,
-                iconTint = ZtColors.Accent,
-                title = AppStrings.emergencyNotifications(lang),
-                hint = AppStrings.emergencyHint(lang),
-                checked = emergencyNotificationsEnabled,
-                onCheckedChange = onToggleEmergencyNotifications,
-                lang = lang
-            )
         }
 
         // 5. Language
@@ -4422,10 +4397,81 @@ fun SettingsScreen(
             saved = selectedAddressQuery,
             onDismiss = { showQueueHelpDialog = false },
             onApply = { queue, statusText, addressLabel, query ->
-                onAddressQueueResolved(queue, statusText, addressLabel, query)
+                onAddAddress(queue, statusText, addressLabel, query)
                 showQueueHelpDialog = false
             },
             onShowAppBanner = onShowAppBanner
+        )
+    }
+
+    removeCandidate?.let { item ->
+        AlertDialog(
+            onDismissRequest = { removeCandidate = null },
+            title = { Text(AppStrings.removeConfirmTitle(lang), style = ZtType.heading, color = Color.White) },
+            text = {
+                Text(
+                    AppStrings.removeConfirmBody(lang, Subscriptions.displayLabel(item)),
+                    style = ZtType.body,
+                    color = ZtColors.TextSecondary
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        onRemoveSubscription(item.id)
+                        removeCandidate = null
+                    },
+                    modifier = Modifier.heightIn(min = ZtMinTouch)
+                ) {
+                    Text(AppStrings.removeAddress(lang), style = ZtType.label, color = ZtColors.Accent, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { removeCandidate = null }, modifier = Modifier.heightIn(min = ZtMinTouch)) {
+                    Text(AppStrings.cancel(lang), style = ZtType.label, color = Color.White)
+                }
+            },
+            containerColor = ZtColors.CardSolid
+        )
+    }
+
+    renameCandidate?.let { item ->
+        var text by remember(item.id) { mutableStateOf(item.label) }
+        AlertDialog(
+            onDismissRequest = { renameCandidate = null },
+            title = { Text(AppStrings.renameAddress(lang), style = ZtType.heading, color = Color.White) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(
+                        value = text,
+                        onValueChange = { text = it.take(Subscriptions.MAX_LABEL_LENGTH) },
+                        singleLine = true,
+                        textStyle = ZtType.body,
+                        placeholder = { Text(Subscriptions.defaultLabel(item), style = ZtType.body, color = ZtColors.TextTertiary) },
+                        modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp),
+                        shape = ZtShapes.Control,
+                        colors = glassFieldColors()
+                    )
+                    Text(AppStrings.renameHint(lang), style = ZtType.caption, color = ZtColors.TextTertiary)
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        onRenameSubscription(item.id, text)
+                        renameCandidate = null
+                    },
+                    modifier = Modifier.heightIn(min = ZtMinTouch)
+                ) {
+                    Text(AppStrings.save(lang), style = ZtType.label, color = ZtColors.Accent, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { renameCandidate = null }, modifier = Modifier.heightIn(min = ZtMinTouch)) {
+                    Text(AppStrings.cancel(lang), style = ZtType.label, color = Color.White)
+                }
+            },
+            containerColor = ZtColors.CardSolid
         )
     }
 
@@ -4457,6 +4503,226 @@ fun SettingsScreen(
 }
 
 private val PaddingValues18 = PaddingValues(18.dp)
+
+// =============================================================================================
+// "Мої адреси" card (multi-address step 2, spec/SUBSCRIPTIONS.md, mockup frame 1)
+// =============================================================================================
+
+@Composable
+private fun MyAddressesCard(
+    store: SubscriptionStore,
+    advanceMinutes: Int,
+    lang: String,
+    onHelp: () -> Unit,
+    onAddQueueOnly: (String) -> Unit,
+    onRemove: (Subscription) -> Unit,
+    onRename: (Subscription) -> Unit,
+    onMakePrimary: (String) -> Unit,
+    onSetPlanned: (String, Boolean) -> Unit,
+    onSetEmergency: (String, Boolean) -> Unit
+) {
+    val count = store.items.size
+    val canAdd = count < Subscriptions.MAX_ITEMS
+    GlassCard(modifier = Modifier.fillMaxWidth(), contentPadding = PaddingValues18) {
+        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(text = AppStrings.myAddressesTitle(lang), style = ZtType.overline, color = Color.White)
+                    Text(text = AppStrings.myAddressesDesc(lang), style = ZtType.caption, color = ZtColors.TextSecondary)
+                }
+                if (count > 0) {
+                    StatusChip(
+                        text = AppStrings.addressesCount(lang, count, Subscriptions.MAX_ITEMS),
+                        background = ZtColors.ChipGrey,
+                        foreground = ZtColors.ChipGreyText,
+                        icon = null
+                    )
+                }
+                // 48 dp touch target around the 40 dp "?" tile; opens the address lookup
+                Box(
+                    modifier = Modifier
+                        .size(ZtMinTouch)
+                        .clickable(role = Role.Button, onClickLabel = AppStrings.queueHelpTitle(lang), onClick = onHelp)
+                        .semantics { contentDescription = AppStrings.queueHelpTitle(lang) },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(40.dp)
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(ZtColors.Accent)
+                            .border(1.dp, Color(0x40FFFFFF), RoundedCornerShape(16.dp)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(Icons.Default.HelpOutline, contentDescription = null, tint = Color.White, modifier = Modifier.size(20.dp))
+                    }
+                }
+            }
+
+            store.items.forEach { item ->
+                SubscriptionBlock(
+                    item = item,
+                    isPrimary = item.id == store.primaryId,
+                    advanceMinutes = advanceMinutes,
+                    lang = lang,
+                    onRemove = { onRemove(item) },
+                    onRename = { onRename(item) },
+                    onMakePrimary = { onMakePrimary(item.id) },
+                    onSetPlanned = { onSetPlanned(item.id, it) },
+                    onSetEmergency = { onSetEmergency(item.id, it) }
+                )
+            }
+
+            if (canAdd) {
+                ActionButton(
+                    text = AppStrings.addAddress(lang),
+                    icon = Icons.Default.Add,
+                    filled = true,
+                    onClick = onHelp,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                val used = store.items.mapNotNull { if (it.address == null) it.queue else null }.toSet()
+                val free = QUEUES.filter { it !in used }
+                GlassDropdown(
+                    value = AppStrings.addQueueOnly(lang),
+                    options = free.map { "\${AppStrings.queue(lang)} $it" },
+                    onSelect = { onAddQueueOnly(free[it]) }
+                )
+                if (count > 0) {
+                    Text(
+                        text = AppStrings.addressesLeft(lang, Subscriptions.MAX_ITEMS - count),
+                        style = ZtType.caption,
+                        color = ZtColors.TextTertiary
+                    )
+                }
+            } else {
+                Text(
+                    text = AppStrings.addressLimitReached(lang, Subscriptions.MAX_ITEMS),
+                    style = ZtType.caption,
+                    color = ZtColors.TextSecondary
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun SubscriptionBlock(
+    item: Subscription,
+    isPrimary: Boolean,
+    advanceMinutes: Int,
+    lang: String,
+    onRemove: () -> Unit,
+    onRename: () -> Unit,
+    onMakePrimary: () -> Unit,
+    onSetPlanned: (Boolean) -> Unit,
+    onSetEmergency: (Boolean) -> Unit
+) {
+    val shape = RoundedCornerShape(16.dp)
+    val label = Subscriptions.displayLabel(item)
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(shape)
+            .background(Color(0x14FFFFFF))
+            .border(1.dp, if (isPrimary) Color(0x59FF5E3A) else Color(0x1AFFFFFF), shape)
+            .padding(horizontal = 14.dp, vertical = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            @OptIn(ExperimentalLayoutApi::class)
+            FlowRow(
+                modifier = Modifier.weight(1f),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                // a queue-only item already says "Черга X" in its label
+                if (item.address != null) {
+                    StatusChip(
+                        text = when {
+                            item.queue != null -> "\${AppStrings.queue(lang)} \${item.queue}"
+                            !item.queueStatusText.isNullOrBlank() -> AppStrings.noQueueNotDisconnected(lang)
+                            else -> AppStrings.selectQueueAction(lang)
+                        },
+                        background = ZtColors.ChipGrey,
+                        foreground = ZtColors.ChipGreyText,
+                        icon = null
+                    )
+                }
+                if (isPrimary) {
+                    StatusChip(
+                        text = AppStrings.primaryBadge(lang),
+                        background = ZtColors.ChipGrey,
+                        foreground = Color.White,
+                        icon = Icons.Default.Star
+                    )
+                }
+            }
+            IconTile(icon = Icons.Default.Edit, description = "\${AppStrings.renameAddress(lang)}: $label", onClick = onRename)
+            IconTile(icon = Icons.Default.Delete, description = "\${AppStrings.removeAddress(lang)}: $label", onClick = onRemove, danger = true)
+        }
+        Text(text = label, style = ZtType.subhead, color = Color.White)
+        val caption = item.address?.text?.takeIf { it.isNotBlank() } ?: if (item.address == null) AppStrings.queueOnlyCaption(lang) else null
+        if (caption != null) {
+            Text(text = caption, style = ZtType.caption, color = ZtColors.TextSecondary)
+        }
+        SwitchRow(
+            icon = Icons.Default.Notifications,
+            iconTint = Color.White,
+            title = AppStrings.plannedShort(lang),
+            hint = AppStrings.plannedDesc(lang, advanceMinutes),
+            checked = item.plannedAlerts,
+            onCheckedChange = onSetPlanned,
+            lang = lang,
+            enabled = item.queue != null
+        )
+        SwitchRow(
+            icon = Icons.Default.Warning,
+            iconTint = ZtColors.Accent,
+            title = AppStrings.emergencyShort(lang),
+            hint = if (item.address != null) AppStrings.emergencyDesc(lang) else AppStrings.emergencyNeedsAddress(lang),
+            checked = item.emergencyAlerts && item.address != null,
+            onCheckedChange = onSetEmergency,
+            lang = lang,
+            enabled = item.address != null
+        )
+        if (!isPrimary) {
+            ActionButton(
+                text = AppStrings.makePrimary(lang),
+                icon = Icons.Default.Star,
+                filled = false,
+                onClick = onMakePrimary,
+                modifier = Modifier.fillMaxWidth()
+            )
+        }
+    }
+}
+
+/** 48 dp touch target around a 36 dp icon tile. */
+@Composable
+private fun IconTile(icon: ImageVector, description: String, onClick: () -> Unit, danger: Boolean = false) {
+    Box(
+        modifier = Modifier
+            .size(ZtMinTouch)
+            .clickable(role = Role.Button, onClick = onClick)
+            .semantics { contentDescription = description },
+        contentAlignment = Alignment.Center
+    ) {
+        Box(
+            modifier = Modifier
+                .size(36.dp)
+                .clip(RoundedCornerShape(12.dp))
+                .background(if (danger) Color(0x33EF4444) else Color(0x1AFFFFFF)),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(icon, contentDescription = null, tint = if (danger) Color(0xFFFCA5A5) else Color.White, modifier = Modifier.size(18.dp))
+        }
+    }
+}
 
 // =============================================================================================
 // Small building blocks
@@ -7374,6 +7640,9 @@ import ua.blackout.prewarning.data.repository.OutageStateStore
 import ua.blackout.prewarning.data.repository.RefreshOutcome
 import ua.blackout.prewarning.data.repository.ScheduleRepository
 import ua.blackout.prewarning.data.repository.SettingsRepository
+import ua.blackout.prewarning.data.repository.SubscriptionSync
+import ua.blackout.prewarning.core.StoreResult
+import ua.blackout.prewarning.core.Subscriptions
 import ua.blackout.prewarning.notification.AlarmScheduler
 import ua.blackout.prewarning.notification.ExactAlarmGate
 import ua.blackout.prewarning.notification.NotificationHelper
@@ -7422,6 +7691,10 @@ fun BlackoutAppNavigation(
     val outageRepo = remember { OutageRepository(appContext) }
     val outageStore = remember { OutageStateStore(appContext) }
     val initialSettings = remember { settingsRepo.getSettings() }
+    // Multi-address store (step 2): Settings edits it, the primary is mirrored into the keys above
+    val subscriptionSync = remember { SubscriptionSync(appContext) }
+    var subscriptions by remember { mutableStateOf(subscriptionSync.ensureReady()) }
+    var alertsMaster by remember { mutableStateOf(subscriptionSync.master()) }
 
     // Latest persisted settings; kept in sync by the preference listener below
     var currentSettings by remember { mutableStateOf(initialSettings) }
@@ -7542,9 +7815,8 @@ fun BlackoutAppNavigation(
                         }
                         val nextLabel = lookup.addressLabel.takeIf { it.isNotBlank() } ?: current.selectedAddress
                         if (nextQueue != current.queue || nextStatus != current.customQueueStatusText || nextLabel != current.selectedAddress) {
-                            settingsRepo.saveSettings(
-                                current.copy(queue = nextQueue, customQueueStatusText = nextStatus, selectedAddress = nextLabel)
-                            )
+                            // into the primary subscription, which is mirrored back into these keys
+                            subscriptionSync.assignPrimaryQueue(nextQueue, nextStatus, nextLabel)
                         }
                     }
                 }
@@ -7626,6 +7898,8 @@ fun BlackoutAppNavigation(
             soundEnabled = updated.soundEnabled
             vibrationEnabled = updated.vibrationEnabled
             currentLanguage = updated.language
+            subscriptions = subscriptionSync.store()
+            alertsMaster = subscriptionSync.master()
             snapshot = outageRepo.snapshot(updated, LocalDateTime.now(KYIV_ZONE))
         }
     }
@@ -7707,6 +7981,34 @@ fun BlackoutAppNavigation(
                 SiteState.NO_INTERNET -> AppStrings.siteStateNoInternet(resolvedLang)
             }
             showAppBanner(message)
+        }
+    }
+
+    val syncAlarmsAndWidgets: () -> Unit = {
+        coroutineScope.launch(Dispatchers.IO) {
+            try {
+                AlarmScheduler.syncAlarms(appContext)
+                BlackoutGlanceWidget.syncAllWidgets(appContext)
+            } catch (_: Exception) {}
+        }
+    }
+
+    /** Shows why a store change was refused; on success alarms and widgets follow the new primary mirror. */
+    val onStoreResult: (StoreResult) -> Boolean = { result ->
+        when (result) {
+            is StoreResult.Ok -> {
+                subscriptions = result.store
+                syncAlarmsAndWidgets()
+                true
+            }
+            is StoreResult.Error -> {
+                when (result.code) {
+                    Subscriptions.ERR_DUPLICATE -> showAppBanner(AppStrings.addressDuplicate(resolvedLang))
+                    Subscriptions.ERR_LIMIT -> showAppBanner(AppStrings.addressLimitReached(resolvedLang, Subscriptions.MAX_ITEMS))
+                    else -> Unit
+                }
+                false
+            }
         }
     }
 
@@ -7829,23 +8131,17 @@ fun BlackoutAppNavigation(
                                 }
                             }
                         },
-                        notificationsEnabled = notificationsEnabled,
+                        // the header bell is the master switch for all addresses (owner decision 4)
+                        notificationsEnabled = alertsMaster,
                         lastUpdated = lastUpdated,
                         nextUpdated = nextUpdated,
                         currentTime = currentTime,
                         lang = resolvedLang,
                         selectedLanguage = currentLanguage,
                         onToggleNotifications = {
-                            val updated = settingsRepo.updateNotificationsEnabled(!notificationsEnabled)
-                            notificationsEnabled = updated.notificationsEnabled
-                            soundEnabled = updated.soundEnabled
-                            vibrationEnabled = updated.vibrationEnabled
-                            coroutineScope.launch(Dispatchers.IO) {
-                                try {
-                                    AlarmScheduler.syncAlarms(appContext)
-                                    BlackoutGlanceWidget.syncAllWidgets(appContext)
-                                } catch (_: Exception) {}
-                            }
+                            subscriptionSync.setMaster(!alertsMaster)
+                            alertsMaster = subscriptionSync.master()
+                            syncAlarmsAndWidgets()
                         },
                         onRefresh = {
                             performManualRefresh()
@@ -7871,7 +8167,8 @@ fun BlackoutAppNavigation(
                 1 -> {
                     SettingsScreen(
                         currentQueue = queue,
-                        customQueueStatusText = customQueueStatusText,
+                        subscriptions = subscriptions,
+                        alertsMaster = alertsMaster,
                         selectedAddressQuery = selectedAddressQuery,
                         siteUrl = siteUrl,
                         advanceMinutes = advanceMinutes,
@@ -7884,47 +8181,25 @@ fun BlackoutAppNavigation(
                         lang = resolvedLang,
                         autoOpenQueueHelp = autoOpenQueueHelp,
                         onAutoOpenQueueHelpHandled = { autoOpenQueueHelp = false },
-                        onQueueSelected = { newQueue ->
-                            val wasUnselected = queue.isBlank() && customQueueStatusText.isNullOrBlank() && selectedAddressQuery == null
-                            val current = settingsRepo.getSettings()
-                            settingsRepo.saveSettings(
-                                current.copy(
-                                    queue = newQueue,
-                                    customQueueStatusText = null,
-                                    selectedAddress = null,
-                                    selectedAddressQuery = null,
-                                    activeEmergencyOutage = null
-                                )
-                            )
-                            if (wasUnselected) {
-                                coroutineScope.launch {
-                                    pagerState.animateScrollToPage(0)
-                                }
-                            }
-                            coroutineScope.launch {
-                                runRefresh(force = false, resolveAddress = false)
+                        onAddAddress = { resolvedQueue, statusText, addressLabel, query ->
+                            val wasEmpty = subscriptions.items.isEmpty()
+                            val ok = onStoreResult(subscriptionSync.addFromLookup(resolvedQueue, statusText, addressLabel, query))
+                            if (ok) {
+                                showAppBanner(AppStrings.addressAdded(resolvedLang))
+                                // the first address becomes the primary: show it on the main screen
+                                if (wasEmpty) coroutineScope.launch { pagerState.animateScrollToPage(0) }
                             }
                         },
-                        onAddressQueueResolved = { resolvedQueue, statusText, addressLabel, query ->
-                            val current = settingsRepo.getSettings()
-                            settingsRepo.saveSettings(
-                                current.copy(
-                                    queue = resolvedQueue,
-                                    customQueueStatusText = statusText,
-                                    selectedAddress = addressLabel,
-                                    selectedAddressQuery = query,
-                                    activeEmergencyOutage = null
-                                )
-                            )
-                            coroutineScope.launch {
-                                pagerState.animateScrollToPage(0)
-                            }
-                            // The first refresh of the new address fetches its planned schedule and its emergencies;
-                            // an outage that is already over is recorded silently, an active one notifies once.
-                            coroutineScope.launch {
-                                runRefresh(force = false, resolveAddress = false)
-                            }
+                        onAddQueueOnly = { newQueue ->
+                            val wasEmpty = subscriptions.items.isEmpty()
+                            val ok = onStoreResult(subscriptionSync.addQueueOnly(newQueue))
+                            if (ok && wasEmpty) coroutineScope.launch { pagerState.animateScrollToPage(0) }
                         },
+                        onRemoveSubscription = { id -> onStoreResult(subscriptionSync.change { Subscriptions.remove(it, id) }) },
+                        onMakePrimary = { id -> onStoreResult(subscriptionSync.change { Subscriptions.setPrimary(it, id) }) },
+                        onSetPlanned = { id, on -> onStoreResult(subscriptionSync.change { Subscriptions.setPlanned(it, id, on) }) },
+                        onSetEmergency = { id, on -> onStoreResult(subscriptionSync.change { Subscriptions.setEmergency(it, id, on) }) },
+                        onRenameSubscription = { id, label -> onStoreResult(subscriptionSync.change { Subscriptions.rename(it, id, label) }) },
                         onSiteUrlChanged = { newUrl ->
                             siteUrl = newUrl
                             val current = settingsRepo.getSettings()
@@ -7952,23 +8227,10 @@ fun BlackoutAppNavigation(
                                 )
                             }
                         },
-                        onToggleNotifications = { newEnabled ->
-                            val updated = settingsRepo.updateNotificationsEnabled(newEnabled)
-                            notificationsEnabled = updated.notificationsEnabled
-                            soundEnabled = updated.soundEnabled
-                            vibrationEnabled = updated.vibrationEnabled
-                            coroutineScope.launch(Dispatchers.IO) {
-                                try {
-                                    AlarmScheduler.syncAlarms(appContext)
-                                    BlackoutGlanceWidget.syncAllWidgets(appContext)
-                                } catch (_: Exception) {}
-                            }
-                        },
-                        onToggleEmergencyNotifications = { newEmergencyEnabled ->
-                            val updated = settingsRepo.updateEmergencyNotificationsEnabled(newEmergencyEnabled)
-                            emergencyNotificationsEnabled = updated.emergencyNotificationsEnabled
-                            soundEnabled = updated.soundEnabled
-                            vibrationEnabled = updated.vibrationEnabled
+                        onToggleMaster = { on ->
+                            subscriptionSync.setMaster(on)
+                            alertsMaster = subscriptionSync.master()
+                            syncAlarmsAndWidgets()
                         },
                         onToggleSound = {
                             soundEnabled = it
@@ -15880,6 +16142,19 @@ data class LegacySettings(
 
 data class MigrationResult(val store: SubscriptionStore, val alertsMaster: Boolean)
 
+/** Values for the single-address keys, written from the primary item (\`spec/SUBSCRIPTIONS.md\` section 7). */
+data class LegacyMirror(
+    val queue: String,
+    val customQueueStatusText: String?,
+    val selectedAddress: String?,
+    val remSlug: String,
+    val settlementId: String,
+    val streetId: String,
+    val house: String,
+    val notificationsEnabled: Boolean,
+    val emergencyNotificationsEnabled: Boolean
+)
+
 data class DroppedItem(val id: String?, val reason: String)
 
 data class RepairResult(val store: SubscriptionStore, val dropped: List<DroppedItem>)
@@ -16065,6 +16340,19 @@ object Subscriptions {
 
     fun rename(store: SubscriptionStore, id: String, raw: String?): StoreResult = update(store, id) { it.copy(label = cleanLabel(raw)) }
 
+    /** Result of a ZTOE lookup for an address item (\`spec/SUBSCRIPTIONS.md\` section 4). */
+    fun setQueueInfo(store: SubscriptionStore, id: String, queue: String?, statusText: String?, addressText: String?): StoreResult {
+        val item = store.items.firstOrNull { it.id == id } ?: return StoreResult.Error(ERR_NOT_FOUND)
+        val address = item.address ?: return StoreResult.Error(ERR_INVALID)
+        return update(store, id) {
+            it.copy(
+                queue = queue?.takeIf { q -> isValidQueue(q) },
+                queueStatusText = statusText?.takeIf { s -> s.isNotBlank() },
+                address = if (addressText.isNullOrBlank()) address else address.copy(text = addressText)
+            )
+        }
+    }
+
     private inline fun update(store: SubscriptionStore, id: String, change: (Subscription) -> Subscription): StoreResult {
         if (store.items.none { it.id == id }) return StoreResult.Error(ERR_NOT_FOUND)
         return StoreResult.Ok(store.copy(items = store.items.map { if (it.id == id) change(it) else it }))
@@ -16081,6 +16369,26 @@ object Subscriptions {
 
     fun anyAlertsEnabled(master: Boolean, store: SubscriptionStore): Boolean =
         master && store.items.any { it.plannedAlerts || it.emergencyAlerts }
+
+    // ---------------------------------------------------------------------------------------------
+    // Mirror of the primary item into the single-address keys (section 7)
+    // ---------------------------------------------------------------------------------------------
+
+    fun primaryMirror(store: SubscriptionStore, master: Boolean): LegacyMirror {
+        val p = store.primary
+        val a = p?.address
+        return LegacyMirror(
+            queue = p?.queue.orEmpty(),
+            customQueueStatusText = p?.queueStatusText,
+            selectedAddress = if (p != null && a != null) a.text.ifEmpty { displayLabel(p) } else null,
+            remSlug = a?.remSlug.orEmpty(),
+            settlementId = a?.settlementId.orEmpty(),
+            streetId = a?.streetId.orEmpty(),
+            house = a?.house.orEmpty(),
+            notificationsEnabled = master && (p?.plannedAlerts ?: true),
+            emergencyNotificationsEnabled = master && (p?.emergencyAlerts ?: true)
+        )
+    }
 
     // ---------------------------------------------------------------------------------------------
     // Migration
@@ -16141,9 +16449,8 @@ import java.security.SecureRandom
  * [KEY_STORE] and the kill switch [KEY_MASTER], both in the user settings file so they travel with a
  * device backup. The rules live in [Subscriptions]; this class only encodes, reads and writes.
  *
- * Step 1 of the feature: nothing calls this at runtime yet. The Settings UI (step 2) runs
- * [ensureMigrated] on start and then treats the store as the source of truth. Running the migration
- * earlier would freeze a copy of the 1.4.0 address that later settings changes would not update.
+ * Used through [SubscriptionSync], which runs [ensureMigrated] before every read or change and
+ * writes the primary item back into the single-address keys (multi-address step 2).
  */
 class SubscriptionRepository(
     private val prefs: SharedPreferences,
@@ -16266,6 +16573,104 @@ class SubscriptionRepository(
             val id = random()
             if (id !in used && Subscriptions.isValidId(id)) return id
         }
+    }
+}
+`
+  },
+  {
+    path: 'app/src/main/java/ua/blackout/prewarning/data/repository/SubscriptionSync.kt',
+    language: 'kotlin',
+    description: 'Changes the subscription store and mirrors the primary address into the single-address settings',
+    content: `package ua.blackout.prewarning.data.repository
+
+import android.content.Context
+import ua.blackout.prewarning.core.QueueSource
+import ua.blackout.prewarning.core.StoreResult
+import ua.blackout.prewarning.core.Subscription
+import ua.blackout.prewarning.core.SubscriptionAddress
+import ua.blackout.prewarning.core.SubscriptionStore
+import ua.blackout.prewarning.core.Subscriptions
+import ua.blackout.prewarning.data.model.SelectedAddressQuery
+
+/**
+ * The one way to change addresses and alert switches since multi-address step 2
+ * (\`spec/SUBSCRIPTIONS.md\` section 7). Every call runs the one-time migration first, changes the
+ * subscription store, then writes the primary item into the single-address keys that the main
+ * screen, widgets, alarms and the worker still read. Callers sync alarms and widgets themselves.
+ */
+class SubscriptionSync(context: Context) {
+    private val appContext = context.applicationContext
+    private val settingsRepo = SettingsRepository(appContext)
+    private val repo = SubscriptionRepository(appContext)
+
+    fun ensureReady(): SubscriptionStore = repo.ensureMigrated {
+        val s = settingsRepo.getSettings()
+        SubscriptionRepository.legacyFrom(s, SubscriptionRepository.resolveStreetName(s.selectedAddressQuery?.streetId))
+    }
+
+    fun store(): SubscriptionStore {
+        ensureReady()
+        return repo.store()
+    }
+
+    fun master(): Boolean {
+        ensureReady()
+        return repo.alertsMaster()
+    }
+
+    fun setMaster(on: Boolean) {
+        ensureReady()
+        repo.setAlertsMaster(on)
+        mirror()
+    }
+
+    /** Applies [op] to the store; on success writes the mirror. */
+    fun change(op: (SubscriptionStore) -> StoreResult): StoreResult {
+        ensureReady()
+        val result = repo.mutate(op)
+        if (result is StoreResult.Ok) mirror()
+        return result
+    }
+
+    fun addFromLookup(queue: String, statusText: String?, addressText: String, query: SelectedAddressQuery): StoreResult {
+        ensureReady()
+        val item = Subscription(
+            id = repo.newItemId(),
+            address = SubscriptionAddress(
+                remSlug = query.remId,
+                settlementId = query.settlementId,
+                streetId = query.streetId,
+                streetName = SubscriptionRepository.resolveStreetName(query.streetId).orEmpty(),
+                house = query.house,
+                text = addressText
+            ),
+            queue = queue.takeIf { Subscriptions.isValidQueue(it) },
+            queueSource = QueueSource.LOOKUP,
+            queueStatusText = statusText?.takeIf { it.isNotBlank() },
+            createdAtMs = System.currentTimeMillis()
+        )
+        return change { Subscriptions.add(it, item) }
+    }
+
+    fun addQueueOnly(queue: String): StoreResult {
+        ensureReady()
+        val item = Subscription(
+            id = repo.newItemId(),
+            queue = queue,
+            queueSource = QueueSource.MANUAL,
+            createdAtMs = System.currentTimeMillis()
+        )
+        return change { Subscriptions.add(it, item) }
+    }
+
+    /** A background ZTOE lookup for the primary address found its queue (or "no queue"). */
+    fun assignPrimaryQueue(queue: String?, statusText: String?, addressText: String?): StoreResult = change { s ->
+        val id = s.primaryId ?: return@change StoreResult.Error(Subscriptions.ERR_NOT_FOUND)
+        Subscriptions.setQueueInfo(s, id, queue, statusText, addressText)
+    }
+
+    fun mirror() {
+        settingsRepo.applyPrimaryMirror(Subscriptions.primaryMirror(repo.store(), repo.alertsMaster()))
     }
 }
 `

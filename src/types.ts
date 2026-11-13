@@ -65,6 +65,11 @@ export interface UserSettings {
   advanceNoticeMinutes: number; // default 15
   notificationsEnabled: boolean;
   emergencyNotificationsEnabled?: boolean;
+  /**
+   * Copy of the multi-address master switch (spec/SUBSCRIPTIONS.md section 7), written by
+   * subscriptionSync.ts so the bells can show it; the store's `alerts_master_enabled` is the source.
+   */
+  alertsMaster?: boolean;
   soundEnabled: boolean;
   vibrationEnabled: boolean;
   prevSoundEnabled?: boolean;

@@ -1,9 +1,10 @@
 # Subscriptions (multi-address) — store and migration
 
-Status: **step 1 of the multi-address feature** (`docs/design/MULTI_ADDRESS.md`, owner decisions in its
-section 14). This file fixes the stored model, its repair rules, the store operations and the migration
-from single-address settings. Nothing reads the store at runtime yet; the Settings UI (step 2) makes it
-the source of truth. Golden cases: [`vectors/subscriptions.json`](vectors/subscriptions.json).
+Status: **steps 1 and 2 of the multi-address feature** (`docs/design/MULTI_ADDRESS.md`, owner decisions in
+its section 14). This file fixes the stored model, its repair rules, the store operations, the migration
+from single-address settings and (step 2) the mirror of the primary item into the single-address keys.
+Since step 2 the Settings screen edits the store and the store is the source of truth; everything that
+still reads the single-address keys (main screen, widgets, alarms, worker) sees the primary item. Golden cases: [`vectors/subscriptions.json`](vectors/subscriptions.json).
 
 Pure code: Kotlin `core/Subscriptions.kt`, TypeScript `src/core/subscriptions.ts`. Both expose the model
 as plain maps (`toMap` / `fromMap`), so the core never depends on a JSON library; each platform turns
@@ -96,6 +97,7 @@ Each returns either the new store or an error code; the input store is never cha
 | `setPrimary(id)` | `not_found` | |
 | `setPlanned(id, on)`, `setEmergency(id, on)` | `not_found` | |
 | `rename(id, raw)` | `not_found` | stores `cleanLabel(raw)`; empty -> automatic |
+| `setQueueInfo(id, queue, statusText, addressText)` | `not_found`, `invalid` (item has no address) | result of a ZTOE lookup for an address item: `queue` (invalid -> null), `queueStatusText` (blank -> null); `address.text` = `addressText` when that is not blank, else unchanged. `queueSource` is unchanged |
 
 ## 5. Effective switches (derived)
 
@@ -126,3 +128,23 @@ settings plus the street name the platform resolved for `selected_street`, a new
 
 Storage: the store is the string key `zt_subscriptions_v1` and the master is the boolean
 `alerts_master_enabled`, both in the user settings file (backed up with it, `PERSISTENCE.md` section 5).
+
+## 7. Mirror of the primary item (step 2, until steps 3–5 read the store)
+
+Main screen, widgets, alarms and the worker still read the single-address keys of `PERSISTENCE.md`
+section 1. After every change of the store or of the master switch, the platform writes
+`primaryMirror(store, master)` into those keys; the store is never derived back from them.
+
+| Key | Value (`p` = primary item, null when the store is empty) |
+|---|---|
+| `queue` | `p.queue`, or `""` |
+| `custom_queue_status_text` | `p.queueStatusText`, or null |
+| `selected_address` | `p.address.text` if not empty, else `displayLabel(p)` when `p` has an address, else null |
+| `selected_rem`, `selected_settlement`, `selected_street`, `selected_house` | the fields of `p.address`, or `""` |
+| `notifications_enabled` | `master AND (p == null OR p.plannedAlerts)` |
+| `emergency_notifications_enabled` | `master AND (p == null OR p.emergencyAlerts)` |
+
+So the master switch silences both kinds for the primary (owner decision 1) without changing the code
+that reads these keys, and the other items get no alerts yet (step 3, fan-out). Sound and vibration keep
+their 1.4.0 rule on the two booleans: when both become false the current values are remembered and
+switched off, when one becomes true again they are restored.

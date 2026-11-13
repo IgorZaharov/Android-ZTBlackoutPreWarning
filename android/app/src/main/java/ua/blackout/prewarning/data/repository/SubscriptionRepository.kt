@@ -18,9 +18,8 @@ import java.security.SecureRandom
  * [KEY_STORE] and the kill switch [KEY_MASTER], both in the user settings file so they travel with a
  * device backup. The rules live in [Subscriptions]; this class only encodes, reads and writes.
  *
- * Step 1 of the feature: nothing calls this at runtime yet. The Settings UI (step 2) runs
- * [ensureMigrated] on start and then treats the store as the source of truth. Running the migration
- * earlier would freeze a copy of the 1.4.0 address that later settings changes would not update.
+ * Used through [SubscriptionSync], which runs [ensureMigrated] before every read or change and
+ * writes the primary item back into the single-address keys (multi-address step 2).
  */
 class SubscriptionRepository(
     private val prefs: SharedPreferences,

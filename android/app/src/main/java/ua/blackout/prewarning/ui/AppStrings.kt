@@ -309,6 +309,37 @@ object AppStrings {
         if (lang == "uk") "Попередження за графіком: за вибраний час до початку відключення" else "Schedule alerts: shortly before a planned outage starts"
     fun emergencyHint(lang: String) = if (lang == "uk") "Аварійні сповіщення працюють окремо від планових" else "Emergency alerts work separately from planned ones"
     fun soundVibrationHint(lang: String) = if (lang == "uk") "Звук і вібрація діють для всіх сповіщень" else "Sound and vibration apply to all alerts"
+
+    // Multi-address ("Мої адреси"), mirrored in src/services/i18n.ts
+    fun myAddressesTitle(lang: String) = if (lang == "uk") "МОЇ АДРЕСИ" else "MY ADDRESSES"
+    fun myAddressesDesc(lang: String) = if (lang == "uk") "Окремі сповіщення для кожної адреси" else "Separate alerts for each address"
+    fun addressesCount(lang: String, n: Int, max: Int) = if (lang == "uk") "$n з $max" else "$n of $max"
+    fun primaryBadge(lang: String) = if (lang == "uk") "Основна" else "Primary"
+    fun makePrimary(lang: String) = if (lang == "uk") "Зробити основною" else "Make primary"
+    fun plannedShort(lang: String) = if (lang == "uk") "Планові" else "Planned"
+    fun plannedDesc(lang: String, min: Int) =
+        if (lang == "uk") "За графіком, за $min${NBSP}хв до початку" else "Scheduled, $min${NBSP}min before start"
+    fun emergencyShort(lang: String) = if (lang == "uk") "Аварійні" else "Emergency"
+    fun emergencyDesc(lang: String) = if (lang == "uk") "Початок, зміна часу, відновлення" else "Start, time change, restoration"
+    fun emergencyNeedsAddress(lang: String) =
+        if (lang == "uk") "Лише для адреси: за чергою аварійних даних немає" else "Address only: a queue alone has no emergency data"
+    fun queueOnlyCaption(lang: String) = if (lang == "uk") "Без адреси, лише черга" else "No address, queue only"
+    fun addAddress(lang: String) = if (lang == "uk") "Додати адресу" else "Add address"
+    fun addQueueOnly(lang: String) = if (lang == "uk") "Або додати лише чергу" else "Or add a queue only"
+    fun addressesLeft(lang: String, n: Int) = if (lang == "uk") "Можна додати ще: $n" else "You can add $n more"
+    fun addressLimitReached(lang: String, max: Int) = if (lang == "uk") "Досягнуто ліміт: $max адрес" else "Limit reached: $max addresses"
+    fun addressDuplicate(lang: String) = if (lang == "uk") "Ця адреса вже є у списку" else "This address is already in the list"
+    fun addressAdded(lang: String) = if (lang == "uk") "Адресу додано" else "Address added"
+    fun removeAddress(lang: String) = if (lang == "uk") "Видалити" else "Remove"
+    fun removeConfirmTitle(lang: String) = if (lang == "uk") "Видалити адресу?" else "Remove this address?"
+    fun removeConfirmBody(lang: String, label: String) =
+        if (lang == "uk") "«$label» зникне зі списку разом зі своїми сповіщеннями." else "\"$label\" and its alerts will be removed."
+    fun renameAddress(lang: String) = if (lang == "uk") "Перейменувати" else "Rename"
+    fun renameHint(lang: String) = if (lang == "uk") "Порожньо — назва з адреси" else "Empty — name from the address"
+    fun save(lang: String) = if (lang == "uk") "Зберегти" else "Save"
+    fun masterHint(lang: String) = if (lang == "uk") "Головний вимикач для всіх адрес" else "Master switch for all addresses"
+    fun noAddressAlerts(lang: String) =
+        if (lang == "uk") "Для жодної адреси сповіщення не ввімкнені" else "No address has alerts turned on"
     fun advanceNoticeHint(lang: String) = if (lang == "uk") "Для планових сповіщень" else "For planned alerts"
     fun refreshFloorHint(lang: String) =
         if (lang == "uk") "Android перевіряє не частіше ніж раз на 15 хв" else "Android checks at most once every 15 min"

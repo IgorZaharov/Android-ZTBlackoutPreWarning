@@ -430,6 +430,7 @@ function subscriptionVectors(): number {
         case 'setPlanned': result = Sub.setPlanned(store, s.id, s.on); break;
         case 'setEmergency': result = Sub.setEmergency(store, s.id, s.on); break;
         case 'rename': result = Sub.rename(store, s.id, s.label); break;
+        case 'setQueueInfo': result = Sub.setQueueInfo(store, s.id, optStr(s, 'queue'), optStr(s, 'statusText'), optStr(s, 'addressText')); break;
         default: throw new Error(`unknown op in ${label}`);
       }
       const expectError = optStr(s, 'expectError');
@@ -447,6 +448,11 @@ function subscriptionVectors(): number {
     for (const [id, text] of Object.entries((c.expectDisplayLabels ?? {}) as Record<string, string>)) {
       assert.equal(Sub.displayLabel(store.items.find((s) => s.id === id)!), text, `${c.name}: ${id}`);
     }
+  }
+
+  for (const c of v.mirror) {
+    assert.deepStrictEqual(Sub.primaryMirror(storeOf(c.store), c.master), c.expect, c.name);
+    n++;
   }
 
   for (const c of v.effective.items) {

@@ -1,6 +1,6 @@
 # Multi-address subscriptions — logic draft
 
-Status: **draft, not implemented; owner decisions recorded 2026-11-13** ([section 14](#14-owner-decisions-2026-11-13)). v1.4.0 builds only the foundations listed in [section 13](#13-what-v140-builds-and-what-comes-later); the feature itself is a later release (plan M6 for iOS, a matching Android release before or with it).
+Status: **in progress.** Owner decisions recorded 2026-11-13 ([section 14](#14-owner-decisions-2026-11-13)). Step 1 (store and migration) and step 2 (Settings card, master switch, primary mirror) are implemented, see `spec/SUBSCRIPTIONS.md`; until step 3 (alarm fan-out) only the primary address gets alerts. The "no address has alerts" caption of section 8 is shown in Settings under the master switch; the Main-screen caption comes with the switcher (step 4). v1.4.0 builds only the foundations listed in [section 13](#13-what-v140-builds-and-what-comes-later); the feature itself is a later release (plan M6 for iOS, a matching Android release before or with it).
 Look: [`multi-address-mockup.html`](multi-address-mockup.html) (screenshot: [`multi-address-mockup.png`](multi-address-mockup.png)).
 Owner brief: *"Draft the logic and a UI mockup for subscribing to several addresses, each with separate notification toggles. Example: all notifications for address A, only emergency for address B."*
 

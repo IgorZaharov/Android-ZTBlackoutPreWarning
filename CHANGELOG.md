@@ -2,6 +2,11 @@
 
 ## [Unreleased]
 
+### Changed
+- **Settings: "Мої адреси" replaces the queue card (multi-address step 2)** (`SettingsScreen.kt`, `SettingsView.tsx`, `BlackoutAppNavigation.kt`, `App.tsx`, `AppStrings.kt`, `i18n.ts`): up to 5 addresses or queues, each with its own "Планові" and "Аварійні" switches, a star for the primary one, rename and remove (with confirmation). "Додати адресу" opens the same searchable lookup as the "?" button; "Або додати лише чергу" adds a queue without an address. The separate emergency card is gone: emergency alerts are switched per address.
+- **One master switch for all alerts** (`SettingsScreen.kt`, `SettingsView.tsx`, `MainScreen.kt` via `BlackoutAppNavigation.kt`, `MainView.tsx`, `BlackoutGlanceWidget.kt`, `WidgetToggleReceiver.kt`, `WidgetSimulator.tsx`): "Увімкнути сповіщення", the bell on the main screen and the widget bell now switch planned **and** emergency alerts for every address (owner decisions 1 and 4). When the master is on but no address has alerts, Settings says so.
+- **The store is the source of truth** (`SubscriptionSync.kt`, `subscriptionSync.ts`, `SettingsRepository.kt`, `ScheduleSyncWorker.kt`, `spec/SUBSCRIPTIONS.md` section 7): every change goes through the subscription store, and the primary address is written back into the single-address settings that the main screen, widgets, alarms and the worker read. Until the alarm fan-out (step 3) lands, only the primary address gets alerts; the other addresses are stored and shown in Settings. Do not release before step 3.
+
 ### Added
 - **Multi-address store, step 1 (not active yet)** (`core/Subscriptions.kt`, `src/core/subscriptions.ts`, `SubscriptionRepository.kt`, `subscriptionStore.ts`, `spec/SUBSCRIPTIONS.md`, `spec/vectors/subscriptions.json`): the model for up to 5 addresses, each with its own "Планові" / "Аварійні" switches, plus a master switch for both. Includes repair rules, add / remove / primary / rename operations, labels ("Київська 77", "Черга 5.2") and the one-time migration from the 1.4.0 single-address settings. Nothing reads the store at runtime yet; the Settings UI comes next. Golden vectors run on both Kotlin and TypeScript. `StreetKey.isTypeWord` is new in `core/AddressKeys.kt` and `addressKeys.ts`.
 

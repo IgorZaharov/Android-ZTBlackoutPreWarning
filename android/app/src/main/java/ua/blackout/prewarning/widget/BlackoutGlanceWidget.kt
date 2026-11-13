@@ -56,6 +56,7 @@ import ua.blackout.prewarning.data.model.UserSettings
 import ua.blackout.prewarning.data.repository.OutageRepository
 import ua.blackout.prewarning.data.repository.OutageSnapshot
 import ua.blackout.prewarning.data.repository.SettingsRepository
+import ua.blackout.prewarning.data.repository.SubscriptionSync
 import ua.blackout.prewarning.notification.AlarmScheduler
 import ua.blackout.prewarning.ui.AppStrings
 import java.time.Instant
@@ -211,13 +212,14 @@ open class BlackoutGlanceWidget(private val forceBigLayout: Boolean = false) : G
             if (smallIds.isEmpty() && bigIds.isEmpty() && stripIds.isEmpty()) return
 
             val settings = SettingsRepository(appCtx).getSettings()
+            val alertsMaster = SubscriptionSync(appCtx).master()
             val resolvedLang = AppStrings.resolveLang(settings.language)
             val nowMs = System.currentTimeMillis()
 
             suspend fun touch(gId: GlanceId) {
                 updateAppWidgetState(appCtx, PreferencesGlanceStateDefinition, gId) { prefs ->
                     prefs.toMutablePreferences().apply {
-                        this[KEY_NOTIFICATIONS_ENABLED] = settings.notificationsEnabled
+                        this[KEY_NOTIFICATIONS_ENABLED] = alertsMaster
                         this[KEY_QUEUE] = settings.queue
                         this[KEY_LANGUAGE] = resolvedLang
                         this[KEY_REFRESH_TICK] = nowMs
@@ -486,7 +488,8 @@ open class BlackoutGlanceWidget(private val forceBigLayout: Boolean = false) : G
             val model = buildWidgetModel(currentSettings, outageRepo.snapshot(currentSettings))
 
             val resolvedLang = model.lang
-            val notificationsEnabled = currentSettings.notificationsEnabled
+            // the bell shows and toggles the master switch for all addresses (owner decision 4)
+            val notificationsEnabled = SubscriptionSync(appContext).master()
             val isUnclear = model.isUnclear
             val isBlackoutNow = model.isOffNow
             val countdownText = model.countdown
@@ -868,10 +871,9 @@ class ToggleAlertsActionCallback : ActionCallback {
         parameters: ActionParameters
     ) {
         val appContext = context.applicationContext
-        val settingsRepo = SettingsRepository(appContext)
-        val current = settingsRepo.getSettings()
-        val newState = !current.notificationsEnabled
-        settingsRepo.updateNotificationsEnabled(newState)
+        // The widget bell is the master switch for all addresses (multi-address owner decision 4)
+        val sync = SubscriptionSync(appContext)
+        sync.setMaster(!sync.master())
         try {
             AlarmScheduler.syncAlarms(appContext)
         } catch (_: Exception) {}

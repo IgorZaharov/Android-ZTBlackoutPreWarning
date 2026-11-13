@@ -166,6 +166,8 @@ export const MainView: React.FC<MainViewProps> = ({
   onChangeLanguage,
 }) => {
   const t = translations[lang];
+  // the header bell shows and toggles the master switch for all addresses (owner decision 4)
+  const alertsOn = settings.alertsMaster ?? settings.notificationsEnabled;
   const [selectedDayTab, setSelectedDayTab] = useState<'today' | 'tomorrow'>('today');
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
@@ -317,7 +319,7 @@ export const MainView: React.FC<MainViewProps> = ({
         <button
           type="button"
           role="switch"
-          aria-checked={settings.notificationsEnabled}
+          aria-checked={alertsOn}
           aria-label={t.notifications}
           title={t.quickToggleAlerts}
           data-testid="main-notifications-switch"
@@ -327,15 +329,15 @@ export const MainView: React.FC<MainViewProps> = ({
         >
           <span
             className={`flex h-[34px] w-[58px] items-center rounded-full p-1 shadow-lg transition-colors duration-300 motion-reduce:transition-none ${
-              settings.notificationsEnabled ? 'bg-[#FF5E3A] shadow-[#FF5E3A]/30' : 'border border-white/15 bg-white/15'
+              alertsOn ? 'bg-[#FF5E3A] shadow-[#FF5E3A]/30' : 'border border-white/15 bg-white/15'
             }`}
           >
             <span
               className={`flex h-[26px] w-[26px] items-center justify-center rounded-full bg-white shadow-md transition-transform duration-300 motion-reduce:transition-none ${
-                settings.notificationsEnabled ? 'translate-x-6' : 'translate-x-0'
+                alertsOn ? 'translate-x-6' : 'translate-x-0'
               }`}
             >
-              {settings.notificationsEnabled ? (
+              {alertsOn ? (
                 <Bell className="h-4 w-4 stroke-[2.5] text-[#FF5E3A]" aria-hidden="true" />
               ) : (
                 <BellOff className="h-4 w-4 stroke-[2] text-zinc-500" aria-hidden="true" />

@@ -2,6 +2,7 @@ package ua.blackout.prewarning.data.repository
 
 import android.content.Context
 import android.content.SharedPreferences
+import ua.blackout.prewarning.core.LegacyMirror
 import ua.blackout.prewarning.data.model.EmergencyOutageInfo
 import ua.blackout.prewarning.data.model.SelectedAddressQuery
 import ua.blackout.prewarning.data.model.UserSettings
@@ -320,6 +321,38 @@ class SettingsRepository(context: Context) {
                 .apply()
         }
         return getSettings()
+    }
+
+    /**
+     * Writes the primary subscription into the single-address keys (`spec/SUBSCRIPTIONS.md`
+     * section 7). Targeted: sound, vibration, timers, site and language are untouched, except that
+     * sound and vibration follow the 1.4.0 rule when both alert switches go off or come back on.
+     */
+    fun applyPrimaryMirror(m: LegacyMirror) {
+        val current = getSettings()
+        val anyWasEnabled = current.notificationsEnabled || current.emergencyNotificationsEnabled
+        val anyNowEnabled = m.notificationsEnabled || m.emergencyNotificationsEnabled
+        val editor = prefs.edit()
+            .putString("queue", m.queue)
+            .putString("custom_queue_status_text", m.customQueueStatusText ?: "")
+            .putString("selected_address", m.selectedAddress ?: "")
+            .putString("selected_rem", m.remSlug)
+            .putString("selected_settlement", m.settlementId)
+            .putString("selected_street", m.streetId)
+            .putString("selected_house", m.house)
+            .putBoolean("notifications_enabled", m.notificationsEnabled)
+            .putBoolean("emergency_notifications_enabled", m.emergencyNotificationsEnabled)
+        when {
+            anyWasEnabled && !anyNowEnabled -> editor
+                .putBoolean("prev_sound_enabled", current.soundEnabled)
+                .putBoolean("prev_vibration_enabled", current.vibrationEnabled)
+                .putBoolean("sound_enabled", false)
+                .putBoolean("vibration_enabled", false)
+            !anyWasEnabled && anyNowEnabled -> editor
+                .putBoolean("sound_enabled", prefs.getBoolean("prev_sound_enabled", true))
+                .putBoolean("vibration_enabled", prefs.getBoolean("prev_vibration_enabled", true))
+            else -> editor
+        }.apply()
     }
 
     /**

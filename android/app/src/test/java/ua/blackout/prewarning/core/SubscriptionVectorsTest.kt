@@ -127,6 +127,9 @@ class SubscriptionVectorsTest {
                     "setPlanned" -> Subscriptions.setPlanned(store, s.getString("id"), s.getBoolean("on"))
                     "setEmergency" -> Subscriptions.setEmergency(store, s.getString("id"), s.getBoolean("on"))
                     "rename" -> Subscriptions.rename(store, s.getString("id"), s.getString("label"))
+                    "setQueueInfo" -> Subscriptions.setQueueInfo(
+                        store, s.getString("id"), s.optStr("queue"), s.optStr("statusText"), s.optStr("addressText")
+                    )
                     else -> error("unknown op in $label")
                 }
                 val expectError = s.optStr("expectError")
@@ -148,6 +151,30 @@ class SubscriptionVectorsTest {
                     assertEquals("$name: $id", labels.getString(id), Subscriptions.displayLabel(store.items.single { it.id == id }))
                 }
             }
+        }
+    }
+
+    @Test
+    fun mirror() {
+        for (c in load().getJSONArray("mirror").objects()) {
+            val name = c.getString("name")
+            val m = Subscriptions.primaryMirror(storeOf(c.getJSONObject("store")), c.getBoolean("master"))
+            val e = c.getJSONObject("expect")
+            assertEquals(
+                name,
+                LegacyMirror(
+                    queue = e.getString("queue"),
+                    customQueueStatusText = e.optStr("customQueueStatusText"),
+                    selectedAddress = e.optStr("selectedAddress"),
+                    remSlug = e.getString("remSlug"),
+                    settlementId = e.getString("settlementId"),
+                    streetId = e.getString("streetId"),
+                    house = e.getString("house"),
+                    notificationsEnabled = e.getBoolean("notificationsEnabled"),
+                    emergencyNotificationsEnabled = e.getBoolean("emergencyNotificationsEnabled")
+                ),
+                m
+            )
         }
     }
 

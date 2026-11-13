@@ -2275,12 +2275,14 @@ async function runUnitTestE_AddressLookupAndUnsetQueue() {
     loadUserSettings,
     saveUserSettings,
     resetAllAppDataToFirstLaunch,
-    toggleMasterNotifications,
-    toggleEmergencyNotifications,
     triggerEmergencyEventAlerts,
     clearNotifiedHistory,
   } = await import('../src/services/alertManager');
   const { parseLocalDateTime } = await import('../src/core/localTime');
+  const { SubscriptionSync } = await import('../src/services/subscriptionSync');
+  const { SubscriptionRepository } = await import('../src/services/subscriptionStore');
+  const { createMemoryStorage } = await import('../src/services/storage');
+  const { setEmergency: setSubscriptionEmergency } = await import('../src/core/subscriptions');
 
   const read = (rel: string) => fs.readFileSync(path.join(ROOT_DIR, rel), 'utf-8');
   const KT = 'android/app/src/main/java/ua/blackout/prewarning/';
@@ -2357,10 +2359,12 @@ async function runUnitTestE_AddressLookupAndUnsetQueue() {
   assert.ok(!addressLookupKt.includes('getKyivska37DemoEmergencyOutage'), 'ZtoeAddressLookup.kt must not contain the demo emergency');
   assert.ok(!/fun\s+\w*[Dd]efaultHouses/.test(addressLookupKt), 'ZtoeAddressLookup.kt must not invent default house lists');
 
-  // 5. Emergency switch: ON by default, independent of the master switch, keeps sound / vibration
+  // 5. Alert switches (multi-address step 2): per-address "Аварійні" ON by default; the master switch is a
+  //    kill switch for planned AND emergency alerts (owner decision 1, spec/SUBSCRIPTIONS.md section 7);
+  //    sound / vibration are remembered when everything goes off and restored when alerts come back
   assert.equal(translations.uk.settingsEmergencyOutages, 'Сповіщення про аварійні відключення');
   assert.equal(translations.en.settingsEmergencyOutages, 'Emergency outage notifications');
-  assert.equal(DEFAULT_SETTINGS.emergencyNotificationsEnabled, true, 'Emergency switch must be ON by default');
+  assert.equal(DEFAULT_SETTINGS.emergencyNotificationsEnabled, true, 'Emergency alerts must be ON by default');
   resetAllAppDataToFirstLaunch();
   clearNotifiedHistory();
   const initial = {
@@ -2373,12 +2377,14 @@ async function runUnitTestE_AddressLookupAndUnsetQueue() {
     prevSoundEnabled: true,
     prevVibrationEnabled: false,
   };
-  saveUserSettings(initial);
-  const afterMainOff = toggleMasterNotifications(loadUserSettings(), false);
-  assert.equal(afterMainOff.notificationsEnabled, false);
-  assert.equal(afterMainOff.emergencyNotificationsEnabled, true, 'The master switch must not turn emergency notifications off');
-  assert.equal(afterMainOff.soundEnabled, true, 'Sound stays on while the emergency switch is on');
-  assert.equal(afterMainOff.vibrationEnabled, false);
+  const subSync = new SubscriptionSync(new SubscriptionRepository(createMemoryStorage(), () => 1, () => 'abcd1234'));
+  assert.equal(subSync.ensureReady(initial).items[0].emergencyAlerts, true, 'A migrated address keeps emergency alerts ON');
+  const afterMasterOff = subSync.setMaster(initial, false);
+  assert.equal(afterMasterOff.notificationsEnabled, false);
+  assert.equal(afterMasterOff.emergencyNotificationsEnabled, false, 'The master switch must turn emergency alerts off too (owner decision 1)');
+  assert.equal(afterMasterOff.soundEnabled, false);
+  assert.equal(afterMasterOff.prevSoundEnabled, true);
+  assert.equal(afterMasterOff.alertsMaster, false);
 
   const now = parseLocalDateTime('2026-11-13T18:00');
   const startEvent = {
@@ -2389,24 +2395,30 @@ async function runUnitTestE_AddressLookupAndUnsetQueue() {
     upcoming: false,
     earlyEnd: false,
   };
-  const fired = triggerEmergencyEventAlerts([startEvent], 'addr1', afterMainOff, 'uk', now);
-  assert.equal(fired.length, 1, 'An emergency START must notify even when the master switch is OFF');
   assert.equal(
-    triggerEmergencyEventAlerts([startEvent], 'addr1', afterMainOff, 'uk', now).length,
+    triggerEmergencyEventAlerts([startEvent], 'addr1', afterMasterOff, 'uk', now).length,
+    0,
+    'No emergency notification while the master switch is OFF'
+  );
+  const afterMasterOn = subSync.setMaster(afterMasterOff, true);
+  assert.equal(afterMasterOn.soundEnabled, true, 'Turning the master switch back on restores sound');
+  const fired = triggerEmergencyEventAlerts([startEvent], 'addr1', afterMasterOn, 'uk', now);
+  assert.equal(fired.length, 1, 'An emergency START notifies while the master and the address switch are ON');
+  assert.equal(
+    triggerEmergencyEventAlerts([startEvent], 'addr1', afterMasterOn, 'uk', now).length,
     0,
     'The same emergency event must be announced only once'
   );
-  const afterBothOff = toggleEmergencyNotifications(afterMainOff, false);
-  assert.equal(afterBothOff.emergencyNotificationsEnabled, false);
-  assert.equal(afterBothOff.soundEnabled, false);
-  assert.equal(afterBothOff.prevSoundEnabled, true);
-  const afterEmergBackOn = toggleEmergencyNotifications(afterBothOff, true);
-  assert.equal(afterEmergBackOn.soundEnabled, true, 'Turning the emergency switch back on restores sound');
+  const primaryId = subSync.store(afterMasterOn).primaryId as string;
+  const afterAddressEmergencyOff = subSync.change(afterMasterOn, (st) => setSubscriptionEmergency(st, primaryId, false)).settings;
+  assert.equal(afterAddressEmergencyOff.emergencyNotificationsEnabled, false);
+  assert.equal(afterAddressEmergencyOff.notificationsEnabled, true, 'The address switch for emergencies leaves planned alerts on');
+  assert.equal(afterAddressEmergencyOff.soundEnabled, true, 'Sound stays on while planned alerts are on');
   clearNotifiedHistory();
   assert.equal(
-    triggerEmergencyEventAlerts([{ ...startEvent, entryId: 'e2' }], 'addr1', { ...afterBothOff, notificationsEnabled: true }, 'uk', now).length,
+    triggerEmergencyEventAlerts([{ ...startEvent, entryId: 'e2' }], 'addr1', afterAddressEmergencyOff, 'uk', now).length,
     0,
-    'No emergency notification while the emergency switch is OFF'
+    'No emergency notification while the address switch for emergencies is OFF'
   );
   const notificationHelperKt = read(KT + 'notification/NotificationHelper.kt');
   assert.ok(
@@ -2426,12 +2438,14 @@ async function runUnitTestE_AddressLookupAndUnsetQueue() {
       appStringsKt.includes('(Or close this window and select directly)') &&
       appStringsKt.includes('Сповіщення про аварійні відключення') &&
       settingsScreenKt.includes('AppStrings.queueHelpAddressSubtitle(lang)') &&
-      settingsScreenKt.includes('AppStrings.emergencyNotifications(lang)') &&
+      settingsScreenKt.includes('MyAddressesCard(') &&
+      settingsScreenKt.includes('AppStrings.emergencyShort(lang)') &&
+      settingsScreenKt.includes('AppStrings.masterHint(lang)') &&
       settingsScreenKt.includes('SearchablePickerField(') &&
       settingsScreenKt.includes('DialogProperties(usePlatformDefaultWidth = false)') &&
       settingsScreenKt.includes('Icons.Default.HelpOutline') &&
       settingsScreenKt.includes('.size(40.dp)'),
-    'SettingsScreen.kt must keep the "?" address lookup with searchable pickers, the localized subtitle and the emergency switch'
+    'SettingsScreen.kt must keep the "?" address lookup with searchable pickers, the localized subtitle, the "Мої адреси" card with per-address emergency switches and the master switch'
   );
 
   // 7. Upgrade safety: versionCode offset +300, debug keystore written unconditionally
@@ -2490,11 +2504,12 @@ async function runUnitTestE_AddressLookupAndUnsetQueue() {
       mainViewTsx.includes('data-testid="first-start-language-switch"') &&
       mainViewTsx.includes('siteNoticeTitle(lang)') &&
       settingsViewTsx.includes('<SearchablePickerField') &&
-      settingsViewTsx.includes('testId="ios-switch-emergency-notifications"') &&
+      settingsViewTsx.includes('data-testid="my-addresses-card"') &&
+      settingsViewTsx.includes('testId={`ios-switch-emergency-${item.id}`}') &&
       settingsViewTsx.includes('data-testid="ztoe-address-lookup-subtitle"') &&
       widgetSimTsx.includes('data-testid="widget-strip"') &&
       (translations.uk as Record<string, string>).widgetStripName === 'Світло в Житомирі (Графік)',
-    'MainView.tsx, SettingsView.tsx and WidgetSimulator.tsx must mirror the first launch, notice card, searchable pickers, emergency switch and strip widget'
+    'MainView.tsx, SettingsView.tsx and WidgetSimulator.tsx must mirror the first launch, notice card, searchable pickers, the "Мої адреси" card with per-address emergency switches and strip widget'
   );
 
   console.log('Unit Test E PASSED: Address lookup, duplicate streets, first launch, emergency switch, widgets and exact alarms verified.');

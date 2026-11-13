@@ -30,14 +30,18 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AlarmOff
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.HelpOutline
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Notifications
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Send
+import androidx.compose.material.icons.filled.Star
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.Vibration
 import androidx.compose.material.icons.filled.VolumeUp
@@ -87,6 +91,9 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import ua.blackout.prewarning.core.Subscription
+import ua.blackout.prewarning.core.SubscriptionStore
+import ua.blackout.prewarning.core.Subscriptions
 import ua.blackout.prewarning.data.model.SelectedAddressQuery
 import ua.blackout.prewarning.data.parser.AddressLookupResult
 import ua.blackout.prewarning.data.parser.FetchStatus
@@ -132,7 +139,8 @@ private const val ZTOE_SEARCH_URL = "https://www.ztoe.com.ua/unhooking-search.ph
 @Composable
 fun SettingsScreen(
     currentQueue: String = "",
-    customQueueStatusText: String? = null,
+    subscriptions: SubscriptionStore = SubscriptionStore.EMPTY,
+    alertsMaster: Boolean = true,
     selectedAddressQuery: SelectedAddressQuery? = null,
     siteUrl: String = ZTOE_SEARCH_URL,
     // CRITICAL CONSTANTS — Default values: advanceMinutes = 15, refreshMinutes = 30. Never modify on your own.
@@ -146,18 +154,22 @@ fun SettingsScreen(
     lang: String = "uk",
     autoOpenQueueHelp: Boolean = false,
     onAutoOpenQueueHelpHandled: () -> Unit = {},
-    onQueueSelected: (String) -> Unit = {},
-    onAddressQueueResolved: (
+    onAddAddress: (
         queue: String,
         statusText: String?,
         addressLabel: String,
         query: SelectedAddressQuery
     ) -> Unit = { _, _, _, _ -> },
+    onAddQueueOnly: (String) -> Unit = {},
+    onRemoveSubscription: (String) -> Unit = {},
+    onMakePrimary: (String) -> Unit = {},
+    onSetPlanned: (id: String, on: Boolean) -> Unit = { _, _ -> },
+    onSetEmergency: (id: String, on: Boolean) -> Unit = { _, _ -> },
+    onRenameSubscription: (id: String, label: String) -> Unit = { _, _ -> },
+    onToggleMaster: (Boolean) -> Unit = {},
     onSiteUrlChanged: (String) -> Unit = {},
     onAdvanceMinutesChanged: (Int) -> Unit = {},
     onRefreshMinutesChanged: (Int) -> Unit = {},
-    onToggleNotifications: (Boolean) -> Unit = {},
-    onToggleEmergencyNotifications: (Boolean) -> Unit = {},
     onToggleSound: (Boolean) -> Unit = {},
     onToggleVibration: (Boolean) -> Unit = {},
     onLanguageSelected: (String) -> Unit = {},
@@ -172,6 +184,8 @@ fun SettingsScreen(
     val context = LocalContext.current
     var showQueueHelpDialog by remember { mutableStateOf(false) }
     var showResetConfirmDialog by remember { mutableStateOf(false) }
+    var removeCandidate by remember { mutableStateOf<Subscription?>(null) }
+    var renameCandidate by remember { mutableStateOf<Subscription?>(null) }
 
     LaunchedEffect(autoOpenQueueHelp) {
         if (autoOpenQueueHelp) {
@@ -205,12 +219,6 @@ fun SettingsScreen(
 
     val isChecking = isVerifyingUrl || !urlChecked
     val isSiteVerifiedSuccess = isUrlInValidList && urlFetchStatus == FetchStatus.SUCCESS
-
-    val queueFieldDisplay = when {
-        !customQueueStatusText.isNullOrBlank() -> AppStrings.noQueueNotDisconnected(lang)
-        currentQueue.isBlank() -> AppStrings.selectQueueAction(lang)
-        else -> "${AppStrings.queue(lang)} $currentQueue"
-    }
 
     val minShort = AppStrings.minShort(lang)
 
@@ -269,49 +277,19 @@ fun SettingsScreen(
             }
         }
 
-        // 1. Queue selection
-        GlassCard(modifier = Modifier.fillMaxWidth(), contentPadding = PaddingValues18) {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column(
-                        modifier = Modifier.weight(1f).padding(end = 12.dp),
-                        verticalArrangement = Arrangement.spacedBy(2.dp)
-                    ) {
-                        Text(text = AppStrings.queueTitle(lang), style = ZtType.overline, color = Color.White)
-                        Text(text = AppStrings.queueDesc(lang), style = ZtType.caption, color = ZtColors.TextSecondary)
-                    }
-                    // 48 dp touch target around the 40 dp "?" tile
-                    Box(
-                        modifier = Modifier
-                            .size(ZtMinTouch)
-                            .clickable(role = Role.Button, onClickLabel = AppStrings.queueHelpTitle(lang)) { showQueueHelpDialog = true }
-                            .semantics { contentDescription = AppStrings.queueHelpTitle(lang) },
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(40.dp)
-                                .clip(RoundedCornerShape(16.dp))
-                                .background(ZtColors.Accent)
-                                .border(1.dp, Color(0x40FFFFFF), RoundedCornerShape(16.dp)),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(Icons.Default.HelpOutline, contentDescription = null, tint = Color.White, modifier = Modifier.size(20.dp))
-                        }
-                    }
-                }
-
-                GlassDropdown(
-                    value = queueFieldDisplay,
-                    options = QUEUES.map { "${AppStrings.queue(lang)} $it" },
-                    onSelect = { onQueueSelected(QUEUES[it]) }
-                )
-            }
-        }
+        // 1. My addresses: up to 5 addresses (or queues), each with its own planned / emergency switches
+        MyAddressesCard(
+            store = subscriptions,
+            advanceMinutes = advanceMinutes,
+            lang = lang,
+            onHelp = { showQueueHelpDialog = true },
+            onAddQueueOnly = onAddQueueOnly,
+            onRemove = { removeCandidate = it },
+            onRename = { renameCandidate = it },
+            onMakePrimary = onMakePrimary,
+            onSetPlanned = onSetPlanned,
+            onSetEmergency = onSetEmergency
+        )
 
         // 2. Site address with a strict check against valid-urls.json and the live table
         GlassCard(modifier = Modifier.fillMaxWidth(), contentPadding = PaddingValues18) {
@@ -412,19 +390,25 @@ fun SettingsScreen(
             }
         }
 
-        // 4. Planned alerts: master switch, then sound and vibration (shared by planned and emergency alerts)
+        // 4. Alerts: the master switch for all addresses (owner decision 1), then sound and vibration.
+        // Sound and vibration follow the primary address' effective switches, as the single-address keys do.
         val anyAlertsEnabled = notificationsEnabled || emergencyNotificationsEnabled
+        val noAddressAlerts = alertsMaster && subscriptions.items.isNotEmpty() &&
+            !Subscriptions.anyAlertsEnabled(alertsMaster, subscriptions)
         GlassCard(modifier = Modifier.fillMaxWidth(), contentPadding = PaddingValues18) {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 SwitchRow(
                     icon = Icons.Default.Notifications,
                     iconTint = Color.White,
                     title = AppStrings.notifications(lang),
-                    hint = AppStrings.notificationsHint(lang),
-                    checked = notificationsEnabled,
-                    onCheckedChange = onToggleNotifications,
+                    hint = AppStrings.masterHint(lang),
+                    checked = alertsMaster,
+                    onCheckedChange = onToggleMaster,
                     lang = lang
                 )
+                if (noAddressAlerts) {
+                    Text(text = AppStrings.noAddressAlerts(lang), style = ZtType.caption, color = ZtColors.Accent)
+                }
                 Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(ZtColors.Divider))
                 SwitchRow(
                     icon = Icons.Default.VolumeUp,
@@ -454,19 +438,6 @@ fun SettingsScreen(
                     modifier = Modifier.padding(top = 2.dp)
                 )
             }
-        }
-
-        // 4b. Emergency Power Outages Switch (own card: independent of the planned alerts above; always visible, ON by default)
-        GlassCard(modifier = Modifier.fillMaxWidth(), contentPadding = PaddingValues18) {
-            SwitchRow(
-                icon = Icons.Default.Warning,
-                iconTint = ZtColors.Accent,
-                title = AppStrings.emergencyNotifications(lang),
-                hint = AppStrings.emergencyHint(lang),
-                checked = emergencyNotificationsEnabled,
-                onCheckedChange = onToggleEmergencyNotifications,
-                lang = lang
-            )
         }
 
         // 5. Language
@@ -581,10 +552,81 @@ fun SettingsScreen(
             saved = selectedAddressQuery,
             onDismiss = { showQueueHelpDialog = false },
             onApply = { queue, statusText, addressLabel, query ->
-                onAddressQueueResolved(queue, statusText, addressLabel, query)
+                onAddAddress(queue, statusText, addressLabel, query)
                 showQueueHelpDialog = false
             },
             onShowAppBanner = onShowAppBanner
+        )
+    }
+
+    removeCandidate?.let { item ->
+        AlertDialog(
+            onDismissRequest = { removeCandidate = null },
+            title = { Text(AppStrings.removeConfirmTitle(lang), style = ZtType.heading, color = Color.White) },
+            text = {
+                Text(
+                    AppStrings.removeConfirmBody(lang, Subscriptions.displayLabel(item)),
+                    style = ZtType.body,
+                    color = ZtColors.TextSecondary
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        onRemoveSubscription(item.id)
+                        removeCandidate = null
+                    },
+                    modifier = Modifier.heightIn(min = ZtMinTouch)
+                ) {
+                    Text(AppStrings.removeAddress(lang), style = ZtType.label, color = ZtColors.Accent, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { removeCandidate = null }, modifier = Modifier.heightIn(min = ZtMinTouch)) {
+                    Text(AppStrings.cancel(lang), style = ZtType.label, color = Color.White)
+                }
+            },
+            containerColor = ZtColors.CardSolid
+        )
+    }
+
+    renameCandidate?.let { item ->
+        var text by remember(item.id) { mutableStateOf(item.label) }
+        AlertDialog(
+            onDismissRequest = { renameCandidate = null },
+            title = { Text(AppStrings.renameAddress(lang), style = ZtType.heading, color = Color.White) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(
+                        value = text,
+                        onValueChange = { text = it.take(Subscriptions.MAX_LABEL_LENGTH) },
+                        singleLine = true,
+                        textStyle = ZtType.body,
+                        placeholder = { Text(Subscriptions.defaultLabel(item), style = ZtType.body, color = ZtColors.TextTertiary) },
+                        modifier = Modifier.fillMaxWidth().heightIn(min = 56.dp),
+                        shape = ZtShapes.Control,
+                        colors = glassFieldColors()
+                    )
+                    Text(AppStrings.renameHint(lang), style = ZtType.caption, color = ZtColors.TextTertiary)
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        onRenameSubscription(item.id, text)
+                        renameCandidate = null
+                    },
+                    modifier = Modifier.heightIn(min = ZtMinTouch)
+                ) {
+                    Text(AppStrings.save(lang), style = ZtType.label, color = ZtColors.Accent, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { renameCandidate = null }, modifier = Modifier.heightIn(min = ZtMinTouch)) {
+                    Text(AppStrings.cancel(lang), style = ZtType.label, color = Color.White)
+                }
+            },
+            containerColor = ZtColors.CardSolid
         )
     }
 
@@ -616,6 +658,226 @@ fun SettingsScreen(
 }
 
 private val PaddingValues18 = PaddingValues(18.dp)
+
+// =============================================================================================
+// "Мої адреси" card (multi-address step 2, spec/SUBSCRIPTIONS.md, mockup frame 1)
+// =============================================================================================
+
+@Composable
+private fun MyAddressesCard(
+    store: SubscriptionStore,
+    advanceMinutes: Int,
+    lang: String,
+    onHelp: () -> Unit,
+    onAddQueueOnly: (String) -> Unit,
+    onRemove: (Subscription) -> Unit,
+    onRename: (Subscription) -> Unit,
+    onMakePrimary: (String) -> Unit,
+    onSetPlanned: (String, Boolean) -> Unit,
+    onSetEmergency: (String, Boolean) -> Unit
+) {
+    val count = store.items.size
+    val canAdd = count < Subscriptions.MAX_ITEMS
+    GlassCard(modifier = Modifier.fillMaxWidth(), contentPadding = PaddingValues18) {
+        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text(text = AppStrings.myAddressesTitle(lang), style = ZtType.overline, color = Color.White)
+                    Text(text = AppStrings.myAddressesDesc(lang), style = ZtType.caption, color = ZtColors.TextSecondary)
+                }
+                if (count > 0) {
+                    StatusChip(
+                        text = AppStrings.addressesCount(lang, count, Subscriptions.MAX_ITEMS),
+                        background = ZtColors.ChipGrey,
+                        foreground = ZtColors.ChipGreyText,
+                        icon = null
+                    )
+                }
+                // 48 dp touch target around the 40 dp "?" tile; opens the address lookup
+                Box(
+                    modifier = Modifier
+                        .size(ZtMinTouch)
+                        .clickable(role = Role.Button, onClickLabel = AppStrings.queueHelpTitle(lang), onClick = onHelp)
+                        .semantics { contentDescription = AppStrings.queueHelpTitle(lang) },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(40.dp)
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(ZtColors.Accent)
+                            .border(1.dp, Color(0x40FFFFFF), RoundedCornerShape(16.dp)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(Icons.Default.HelpOutline, contentDescription = null, tint = Color.White, modifier = Modifier.size(20.dp))
+                    }
+                }
+            }
+
+            store.items.forEach { item ->
+                SubscriptionBlock(
+                    item = item,
+                    isPrimary = item.id == store.primaryId,
+                    advanceMinutes = advanceMinutes,
+                    lang = lang,
+                    onRemove = { onRemove(item) },
+                    onRename = { onRename(item) },
+                    onMakePrimary = { onMakePrimary(item.id) },
+                    onSetPlanned = { onSetPlanned(item.id, it) },
+                    onSetEmergency = { onSetEmergency(item.id, it) }
+                )
+            }
+
+            if (canAdd) {
+                ActionButton(
+                    text = AppStrings.addAddress(lang),
+                    icon = Icons.Default.Add,
+                    filled = true,
+                    onClick = onHelp,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                val used = store.items.mapNotNull { if (it.address == null) it.queue else null }.toSet()
+                val free = QUEUES.filter { it !in used }
+                GlassDropdown(
+                    value = AppStrings.addQueueOnly(lang),
+                    options = free.map { "${AppStrings.queue(lang)} $it" },
+                    onSelect = { onAddQueueOnly(free[it]) }
+                )
+                if (count > 0) {
+                    Text(
+                        text = AppStrings.addressesLeft(lang, Subscriptions.MAX_ITEMS - count),
+                        style = ZtType.caption,
+                        color = ZtColors.TextTertiary
+                    )
+                }
+            } else {
+                Text(
+                    text = AppStrings.addressLimitReached(lang, Subscriptions.MAX_ITEMS),
+                    style = ZtType.caption,
+                    color = ZtColors.TextSecondary
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun SubscriptionBlock(
+    item: Subscription,
+    isPrimary: Boolean,
+    advanceMinutes: Int,
+    lang: String,
+    onRemove: () -> Unit,
+    onRename: () -> Unit,
+    onMakePrimary: () -> Unit,
+    onSetPlanned: (Boolean) -> Unit,
+    onSetEmergency: (Boolean) -> Unit
+) {
+    val shape = RoundedCornerShape(16.dp)
+    val label = Subscriptions.displayLabel(item)
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(shape)
+            .background(Color(0x14FFFFFF))
+            .border(1.dp, if (isPrimary) Color(0x59FF5E3A) else Color(0x1AFFFFFF), shape)
+            .padding(horizontal = 14.dp, vertical = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            @OptIn(ExperimentalLayoutApi::class)
+            FlowRow(
+                modifier = Modifier.weight(1f),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                // a queue-only item already says "Черга X" in its label
+                if (item.address != null) {
+                    StatusChip(
+                        text = when {
+                            item.queue != null -> "${AppStrings.queue(lang)} ${item.queue}"
+                            !item.queueStatusText.isNullOrBlank() -> AppStrings.noQueueNotDisconnected(lang)
+                            else -> AppStrings.selectQueueAction(lang)
+                        },
+                        background = ZtColors.ChipGrey,
+                        foreground = ZtColors.ChipGreyText,
+                        icon = null
+                    )
+                }
+                if (isPrimary) {
+                    StatusChip(
+                        text = AppStrings.primaryBadge(lang),
+                        background = ZtColors.ChipGrey,
+                        foreground = Color.White,
+                        icon = Icons.Default.Star
+                    )
+                }
+            }
+            IconTile(icon = Icons.Default.Edit, description = "${AppStrings.renameAddress(lang)}: $label", onClick = onRename)
+            IconTile(icon = Icons.Default.Delete, description = "${AppStrings.removeAddress(lang)}: $label", onClick = onRemove, danger = true)
+        }
+        Text(text = label, style = ZtType.subhead, color = Color.White)
+        val caption = item.address?.text?.takeIf { it.isNotBlank() } ?: if (item.address == null) AppStrings.queueOnlyCaption(lang) else null
+        if (caption != null) {
+            Text(text = caption, style = ZtType.caption, color = ZtColors.TextSecondary)
+        }
+        SwitchRow(
+            icon = Icons.Default.Notifications,
+            iconTint = Color.White,
+            title = AppStrings.plannedShort(lang),
+            hint = AppStrings.plannedDesc(lang, advanceMinutes),
+            checked = item.plannedAlerts,
+            onCheckedChange = onSetPlanned,
+            lang = lang,
+            enabled = item.queue != null
+        )
+        SwitchRow(
+            icon = Icons.Default.Warning,
+            iconTint = ZtColors.Accent,
+            title = AppStrings.emergencyShort(lang),
+            hint = if (item.address != null) AppStrings.emergencyDesc(lang) else AppStrings.emergencyNeedsAddress(lang),
+            checked = item.emergencyAlerts && item.address != null,
+            onCheckedChange = onSetEmergency,
+            lang = lang,
+            enabled = item.address != null
+        )
+        if (!isPrimary) {
+            ActionButton(
+                text = AppStrings.makePrimary(lang),
+                icon = Icons.Default.Star,
+                filled = false,
+                onClick = onMakePrimary,
+                modifier = Modifier.fillMaxWidth()
+            )
+        }
+    }
+}
+
+/** 48 dp touch target around a 36 dp icon tile. */
+@Composable
+private fun IconTile(icon: ImageVector, description: String, onClick: () -> Unit, danger: Boolean = false) {
+    Box(
+        modifier = Modifier
+            .size(ZtMinTouch)
+            .clickable(role = Role.Button, onClick = onClick)
+            .semantics { contentDescription = description },
+        contentAlignment = Alignment.Center
+    ) {
+        Box(
+            modifier = Modifier
+                .size(36.dp)
+                .clip(RoundedCornerShape(12.dp))
+                .background(if (danger) Color(0x33EF4444) else Color(0x1AFFFFFF)),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(icon, contentDescription = null, tint = if (danger) Color(0xFFFCA5A5) else Color.White, modifier = Modifier.size(18.dp))
+        }
+    }
+}
 
 // =============================================================================================
 // Small building blocks

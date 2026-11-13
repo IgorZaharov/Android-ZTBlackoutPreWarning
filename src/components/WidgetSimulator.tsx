@@ -160,16 +160,18 @@ export const WidgetSimulator: React.FC<WidgetSimulatorProps> = ({
   const nowStr = `${String(model.nowHour).padStart(2, '0')}:${String(model.nowMinute).padStart(2, '0')}`;
   const stripDescription = model.isUnclear ? t.outagesUnclear : `${model.queueHeader}. ${model.isOffNow ? (isUk ? 'СВІТЛА НЕМАЄ' : 'POWER OFF') : isUk ? 'СВІТЛО Є' : 'POWER ON'}`;
 
+  // the bell shows and toggles the master switch for all addresses (owner decision 4)
+  const alertsOn = settings.alertsMaster ?? settings.notificationsEnabled;
   const refreshTitle = t.refreshBtn;
-  const toggleTitle = settings.notificationsEnabled ? (isUk ? 'Вимкнути сповіщення' : 'Mute alerts') : isUk ? 'Увімкнути сповіщення' : 'Enable alerts';
+  const toggleTitle = alertsOn ? (isUk ? 'Вимкнути сповіщення' : 'Mute alerts') : isUk ? 'Увімкнути сповіщення' : 'Enable alerts';
 
   const buttons = (
     <div className="flex items-center gap-2">
       <RoundButton testId="widget-refresh" onClick={() => onRefresh?.()} title={refreshTitle}>
         <RefreshCw className={`h-4 w-4 ${isRefreshing ? 'animate-spin' : ''}`} aria-hidden="true" />
       </RoundButton>
-      <RoundButton testId="widget-toggle-alerts" onClick={onToggleNotifications} title={toggleTitle} active={settings.notificationsEnabled} pressed={settings.notificationsEnabled}>
-        {settings.notificationsEnabled ? <Bell className="h-4 w-4 fill-current" aria-hidden="true" /> : <BellOff className="h-4 w-4 stroke-[2]" aria-hidden="true" />}
+      <RoundButton testId="widget-toggle-alerts" onClick={onToggleNotifications} title={toggleTitle} active={alertsOn} pressed={alertsOn}>
+        {alertsOn ? <Bell className="h-4 w-4 fill-current" aria-hidden="true" /> : <BellOff className="h-4 w-4 stroke-[2]" aria-hidden="true" />}
       </RoundButton>
     </div>
   );
