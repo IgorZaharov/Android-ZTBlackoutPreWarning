@@ -48,8 +48,10 @@ ios/
                                   SettingsRepository, SubscriptionRepository, SubscriptionSync,
                                   AlertRegistry, DonationsRepository, AppGroupFiles
     Design/                       ZtTokens, Glass (Liquid Glass + fallback), TimeOfDayPalette, OutageRowFormat
+    Notifications/                NotificationPlanner, AlertRegistry (shared: the widget bell/refresh intents re-sync alerts,
+                                  like Android's WidgetToggleReceiver)
     AppStrings.swift
-  App/                            SwiftUI app: UI/, Notifications/, Background/
+  App/                            SwiftUI app: UI/, Background/
   Widget/                         WidgetKit extension: 3 widgets, AppIntents, AddressEntity
   Tests/                          SpecVectorsTests (reads ../spec/vectors directly), parser fixtures, PickerSearch
   UITests/                        screenshot flow for CI and App Store screenshots
@@ -97,7 +99,7 @@ Not verified until the first CI screenshots: how `glassEffect` renders inside a 
 
 | # | Risk (guideline) | Change |
 |---|---|---|
-| R1 | Reviewer is outside Ukraine; if `ztoe.com.ua` or the PowerOn API block non-UA addresses the app looks broken (2.1 App Completeness) | M0 CI job requests both hosts from the US runner and records the result. If blocked: first-launch state explains it, cached schedule is kept, and the review notes include a screen recording made in Ukraine. Site-unreachable state already never clears the schedule (`SITE_STATE.md`) |
+| R1 | Reviewer is outside Ukraine; if `ztoe.com.ua` or the PowerOn API block non-UA addresses the app looks broken (2.1 App Completeness) | M0 CI job requests both hosts from the US runner and records the result. If blocked: first-launch state explains it, cached schedule is kept, and the review notes include a screen recording made in Ukraine. Site-unreachable state already never clears the schedule (`SITE_STATE.md`) <br>**Result 2026-11-14 (CI run 43591868854, GitHub-hosted runner outside Ukraine):** ztoe schedule GET 200 (242 KB, table marker found), ztoe `all=1` POST 200 (1.3 MB), PowerOn `pw_otgs` 200, PowerOn `pw_accidents` 200. Not blocked today; the job runs on every iOS push, so a later block shows up in CI |
 | R2 | Unofficial use of the utility's name (5.2.1 / 5.2.2) | No ZTOE logo anywhere. `disclaimerText` ("not an official service, data from ztoe.com.ua") shown in About **and** once on first launch. Review notes explain that both data sources are public pages/APIs |
 | R3 | Donations (3.2.2 (iv): funds only outside the app) | Donation and Facebook links open in Safari with `openURL` — never in a web view or `SFSafariViewController`. Each donation link is labelled as an external link. `donations.json` semantics unchanged |
 | R4 | Background modes declared but unused (2.5.4) | `UIBackgroundModes` = `fetch` only. `processing` is removed (the app has no `BGProcessingTask`). `BGTaskSchedulerPermittedIdentifiers` = `ua.blackout.prewarning.sync` |

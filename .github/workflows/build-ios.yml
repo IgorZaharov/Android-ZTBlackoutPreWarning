@@ -101,6 +101,7 @@ jobs:
         working-directory: ios
         run: |
           set -o pipefail
+          mkdir -p build
           xcodebuild test \
             -project SvitloZhytomyr.xcodeproj \
             -scheme ZTPreBlackout \
@@ -182,6 +183,7 @@ jobs:
         working-directory: ios
         run: |
           set -o pipefail
+          mkdir -p build
           KEY_PATH="$RUNNER_TEMP/AuthKey_${ASC_KEY_ID}.p8"
           printf '%s' "$ASC_KEY_P8" > "$KEY_PATH"
           echo "KEY_PATH=$KEY_PATH" >> "$GITHUB_ENV"
