@@ -119,7 +119,12 @@ public enum WidgetState {
 /// PowerOn whatever its switches (spec/SUBSCRIPTIONS.md 10).
 public enum WidgetBindings {
     public static func shownItemIds() async -> [String] {
-        let configs = (try? await WidgetCenter.shared.currentConfigurations()) ?? []
+        // the async `currentConfigurations()` needs iOS 18; the completion form works on iOS 17
+        let configs: [WidgetInfo] = await withCheckedContinuation { cont in
+            WidgetCenter.shared.getCurrentConfigurations { result in
+                cont.resume(returning: (try? result.get()) ?? [])
+            }
+        }
         let bound: [String?] = configs.map { $0.widgetConfigurationIntent(of: SelectAddressIntent.self)?.boundId }
         return Subscriptions.widgetItemIds(SubscriptionSync.shared.store(), boundIds: bound)
     }
