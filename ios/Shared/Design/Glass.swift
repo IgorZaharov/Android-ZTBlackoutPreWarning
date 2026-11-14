@@ -182,7 +182,11 @@ struct ZtGlassChipModifier: ViewModifier {
         switch GlassEnvironment(mode: mode, reduceTransparency: reduceTransparency).render {
         case .liquid:
             if #available(iOS 26.0, *) {
-                label.glassEffect(Glass.regular.tint(tone.fill), in: Capsule())
+                // Tone fill over glass tinted with the dark card colour, so the chip text keeps its
+                // contrast on the bright day palette too
+                label
+                    .background { Capsule().fill(tone.fill) }
+                    .glassEffect(Glass.regular.tint(ZtColors.card), in: Capsule())
             } else {
                 label.background { materialChip }
             }
@@ -201,6 +205,7 @@ struct ZtGlassChipModifier: ViewModifier {
     private var materialChip: some View {
         ZStack {
             Capsule().fill(.ultraThinMaterial).environment(\.colorScheme, .dark)
+            Capsule().fill(ZtColors.card)
             Capsule().fill(tone.fill)
             Capsule().strokeBorder(ZtColors.cardBorder, lineWidth: 1)
         }
@@ -292,23 +297,64 @@ struct ZtButtonStyleModifier: ViewModifier {
                 case .regular: content.buttonStyle(.glass).tint(tint).controlSize(.large)
                 }
             } else {
-                bordered(content)
+                bordered(content, solid: false)
             }
         } else {
-            bordered(content)
+            bordered(content, solid: GlassEnvironment(mode: mode, reduceTransparency: reduceTransparency).render == .solid)
         }
     }
 
     @ViewBuilder
-    private func bordered(_ content: Content) -> some View {
+    private func bordered(_ content: Content, solid: Bool) -> some View {
         switch kind {
         case .prominent:
             content.buttonStyle(.borderedProminent).tint(tint).controlSize(.large)
                 .buttonBorderShape(.roundedRectangle(radius: ZtRadius.control))
         case .regular:
-            content.buttonStyle(.bordered).tint(tint).controlSize(.large)
-                .buttonBorderShape(.roundedRectangle(radius: ZtRadius.control))
+            // A system .bordered button draws a 15 % tint fill: white text on it vanishes on the bright
+            // day palette, so the secondary button is a dark card surface instead
+            content.buttonStyle(ZtSurfaceButtonStyle(solid: solid, tint: tint))
         }
+    }
+}
+
+/// Secondary button before iOS 26 and under Reduce Transparency: dark card surface (material, card fill,
+/// lit rim; solid card when `solid`), radius 16, label in `tint`, press scale 0.96.
+struct ZtSurfaceButtonStyle: ButtonStyle {
+    var solid: Bool
+    var tint: Color
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.isEnabled) private var isEnabled
+
+    func makeBody(configuration: Configuration) -> some View {
+        let shape = RoundedRectangle(cornerRadius: ZtRadius.control, style: .continuous)
+        return configuration.label
+            .foregroundStyle(tint)
+            .padding(.horizontal, 20)
+            .padding(.vertical, 14)
+            .frame(minHeight: ZtMinTouch)
+            .background {
+                if solid {
+                    shape.fill(ZtColors.cardSolid)
+                } else {
+                    ZStack {
+                        shape.fill(.ultraThinMaterial).environment(\.colorScheme, .dark)
+                        shape.fill(ZtColors.card)
+                        shape.fill(ZtGlassTokens.sheen)
+                    }
+                }
+            }
+            .overlay {
+                if solid {
+                    shape.strokeBorder(ZtColors.cardBorder, lineWidth: 1)
+                } else {
+                    shape.strokeBorder(ZtGlassTokens.rim, lineWidth: 1)
+                }
+            }
+            .opacity(isEnabled ? 1 : 0.5)
+            .scaleEffect(configuration.isPressed && !reduceMotion ? ZtMotion.pressScale : 1)
+            .animation(.easeOut(duration: ZtMotion.pressDuration), value: configuration.isPressed)
     }
 }
 

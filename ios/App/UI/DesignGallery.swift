@@ -97,7 +97,7 @@ struct DesignGallery: View {
                 }
             }
 
-            HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 12) {
                 Button(AppStrings.refreshBtn(lang)) {}
                     .ztButtonStyle(.prominent)
                 Button(AppStrings.testAlertBtn(lang)) {}

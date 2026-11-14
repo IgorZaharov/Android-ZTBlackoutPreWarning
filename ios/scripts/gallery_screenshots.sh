@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Screenshots of the M3 design gallery (ios/App/UI/DesignGallery.swift) on one booted simulator.
 # Usage: gallery_screenshots.sh <simulator-udid> <output-dir>
-# Every page x glass recipe x palette (02:00 = darkest night, 14:30 = brightest day), then the
-# components page once more with the system Reduce Transparency switch on (best effort: the simulator
-# may need a respring to pick it up; the forced "solid" recipe above shows the same look either way).
+# Every page x glass recipe x palette (02:00 = darkest night, 14:30 = brightest day). The "solid" recipe
+# is what Reduce Transparency shows; the simulator ignores `defaults write com.apple.Accessibility
+# ReduceTransparencyEnabled` without a respring (tried in CI run 43617814350), so it is forced instead.
 set -uo pipefail
 
 UDID="$1"
@@ -29,10 +29,6 @@ for page in components drum rows; do
     done
   done
 done
-
-xcrun simctl spawn "$UDID" defaults write com.apple.Accessibility ReduceTransparencyEnabled -bool YES || true
-shot "components-system-reduce-transparency-1430" -ZTGallery components -ZTGlassMode automatic -ZTGalleryTime 14:30
-xcrun simctl spawn "$UDID" defaults write com.apple.Accessibility ReduceTransparencyEnabled -bool NO || true
 
 xcrun simctl terminate "$UDID" "$BUNDLE" >/dev/null 2>&1 || true
 echo "$(ls "$OUT" | wc -l | tr -d ' ') gallery screenshots in $OUT"
