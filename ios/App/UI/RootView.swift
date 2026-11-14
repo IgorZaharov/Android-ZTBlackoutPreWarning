@@ -102,8 +102,11 @@ struct RootView: View {
             switch phase {
             // a widget or a background refresh may have written while the app was away; the permission
             // may have changed in iOS Settings; the warnings are re-planned
-            case .active: model.foreground()
-            // ask iOS for the next background refresh (BackgroundRefresh.swift)
+            case .active:
+                model.foreground()
+                // ask iOS for the next background refresh (BackgroundRefresh.swift); the scene is set up,
+                // so its `.backgroundTask` handler is registered
+                BackgroundRefresh.schedule()
             case .background: BackgroundRefresh.schedule()
             default: break
             }

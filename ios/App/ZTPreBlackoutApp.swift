@@ -11,7 +11,8 @@ struct ZTPreBlackoutApp: App {
         ZtoeAddressLookup.initDiskCache()
         UNUserNotificationCenter.current().delegate = ForegroundNotificationDelegate.shared
         AppModel.applyLaunchSeed()
-        BackgroundRefresh.schedule()
+        // BackgroundRefresh.schedule() runs once the scene is active: iOS asserts on a request submitted
+        // before `.backgroundTask` below has registered its handler
     }
 
     var body: some Scene {
