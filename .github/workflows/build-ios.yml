@@ -110,7 +110,7 @@ jobs:
             -resultBundlePath build/Tests.xcresult \
             CODE_SIGNING_ALLOWED=NO \
             CURRENT_PROJECT_VERSION=${{ github.run_number }} \
-            | tee build/xcodebuild-test.log | grep -E '^(Test Suite|Test Case .*(passed|failed)|.*error:|\*\* )' || true
+            | tee build/xcodebuild-test.log | grep -E '^(Test Suite|Test Case .*(passed|failed)|\[vectors\]|.*error:|\*\* )' || true
           grep -q '\*\* TEST SUCCEEDED \*\*' build/xcodebuild-test.log
 
       - name: Launch the app and take a screenshot

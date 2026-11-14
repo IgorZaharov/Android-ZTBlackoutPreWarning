@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | Written | 2026-11-14 |
-| Status | Approved 2026-11-14. **M0 done** on branch `feat/ios-port` (CI run 43592016418: Xcode 26.5, iPhone Air simulator iOS 26.5, 4 unit tests green, app 1.4.0 (build 2) with the widget extension embedded, launch screenshot taken, geo-check passed). Next: M1. |
+| Status | Approved 2026-11-14. **M0 done** (CI run 43592016418: Xcode 26.5, iOS 26.5 simulator, app 1.4.0 with the widget embedded, geo-check passed). **M1 done** (CI run 43595050371: Swift core in `ios/Shared/Core/`, 41 XCTests green: all 7 vector files incl. `subscriptions.json` and `site_notice.json`, entity checks, Kyiv DST, 18 PickerSearch cases). Next: M2 data layer. |
 | Source of truth | `spec/` + `spec/vectors/` (behaviour), `android/.../ui/AppStrings.kt` (strings), Android 1.4.0 (`7fe08f0`) for everything the spec does not cover |
 | Builds on | [`IOS_HANDOVER_v1.4.0.md`](IOS_HANDOVER_v1.4.0.md). The handover keeps the file mapping (§4), the corrected ids (§5), the iOS constraints (§6) and the strings (§7). This plan replaces its milestones (§8) and adds what came after it: multi-address (`spec/SUBSCRIPTIONS.md`), the site notice card, the strip widget, Liquid Glass and App Review work. |
 
