@@ -98,9 +98,21 @@ struct RootView: View {
                 try? await Task.sleep(for: delay)
             }
         }
-        .onChange(of: scenePhase) { _, phase in
-            // a widget or a background refresh may have written while the app was away
-            if phase == .active { model.reload() }
+        .onChange(of: scenePhase, initial: true) { _, phase in
+            switch phase {
+            // a widget or a background refresh may have written while the app was away; the permission
+            // may have changed in iOS Settings; the warnings are re-planned
+            case .active: model.foreground()
+            // ask iOS for the next background refresh (BackgroundRefresh.swift)
+            case .background: BackgroundRefresh.schedule()
+            default: break
+            }
+        }
+        // a tapped notification shows its address (also when the tap launched the app)
+        .onReceive(NotificationRouter.shared.$tapped) { tap in
+            guard let tap else { return }
+            model.openFromNotification(tap.subscriptionId)
+            NotificationRouter.shared.tapped = nil
         }
         .onOpenURL { _ in model.go(to: 0) }
     }

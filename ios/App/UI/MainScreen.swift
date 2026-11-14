@@ -1,4 +1,5 @@
 import SwiftUI
+import UserNotifications
 
 /// Main page (port of Android ui/screens/MainScreen.kt 1.4.0): header with the notification bell,
 /// banners, address switcher, hero countdown, Today/Tomorrow, the drum with the day's outages, last
@@ -43,6 +44,10 @@ struct MainScreen: View {
 
                     if !isQueueUnselected && Subscriptions.noAlertsCaption(master: model.alertsMaster, store: model.subscriptions) {
                         noAlertsCaption
+                    }
+                    // iOS asks for notifications only now, after a queue or address was chosen (App Review item R5)
+                    if !isQueueUnselected && model.alertsMaster && model.notificationAuth == .notDetermined {
+                        NotificationAskCard(lang: lang) { model.allowNotifications() }
                     }
                     if switcher.isEmpty, !isQueueUnselected, let featured {
                         EmergencyBanner(outage: featured, now: snapshot.now, lang: lang)
@@ -353,6 +358,30 @@ private struct NotificationPill: View {
         .accessibilityLabel(Text(verbatim: AppStrings.notifications(lang)))
         .accessibilityValue(Text(verbatim: enabled ? AppStrings.switchOn(lang) : AppStrings.switchOff(lang)))
         .accessibilityAddTraits(.isToggle)
+    }
+}
+
+/// Why the app wants notifications, with the button that makes iOS ask (App Review item R5). Without
+/// permission everything else works; Settings later links to the iPhone settings.
+private struct NotificationAskCard: View {
+    let lang: String
+    let onAllow: () -> Void
+
+    var body: some View {
+        ZtGlassCard(border: Color(argb: 0x59FF5E3A)) {
+            HStack(alignment: .top, spacing: 12) {
+                Circle().fill(ZtColors.accent).frame(width: 36, height: 36)
+                    .overlay { Image(systemName: "bell.badge.fill").font(.system(size: 16, weight: .semibold)).foregroundStyle(Color.white) }
+                    .accessibilityHidden(true)
+                VStack(alignment: .leading, spacing: 8) {
+                    Text(verbatim: AppStrings.notificationsAskTitleIos(lang)).ztText(ZtType.subhead).foregroundStyle(Color.white)
+                    Text(verbatim: AppStrings.notificationsAskBodyIos(lang)).ztText(ZtType.caption).foregroundStyle(UiColors.textSecondaryHi)
+                    ActionButton(text: AppStrings.notificationsAskButtonIos(lang), icon: "bell.fill", filled: true, action: onAllow)
+                        .padding(.top, 2)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
     }
 }
 

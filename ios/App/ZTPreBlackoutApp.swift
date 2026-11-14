@@ -11,6 +11,7 @@ struct ZTPreBlackoutApp: App {
         ZtoeAddressLookup.initDiskCache()
         UNUserNotificationCenter.current().delegate = ForegroundNotificationDelegate.shared
         AppModel.applyLaunchSeed()
+        BackgroundRefresh.schedule()
     }
 
     var body: some Scene {
@@ -20,6 +21,10 @@ struct ZTPreBlackoutApp: App {
             } else {
                 RootView()
             }
+        }
+        // iOS runs it when it sees fit (BackgroundRefresh.swift, plan milestone M5)
+        .backgroundTask(.appRefresh(BackgroundRefresh.identifier)) {
+            await BackgroundRefresh.run()
         }
     }
 }

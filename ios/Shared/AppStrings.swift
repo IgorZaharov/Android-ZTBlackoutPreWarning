@@ -314,5 +314,8 @@ public enum AppStrings {
     public static func externalLinkIos(_ lang: String) -> String { lang == "uk" ? "Відкривається в Safari" : "Opens in Safari" }
     public static func notificationsDeniedIos(_ lang: String) -> String { lang == "uk" ? "Сповіщення вимкнені в налаштуваннях iPhone" : "Notifications are turned off in the iPhone settings" }
     public static func openIosSettings(_ lang: String) -> String { lang == "uk" ? "Відкрити налаштування" : "Open settings" }
+    public static func notificationsAskTitleIos(_ lang: String) -> String { lang == "uk" ? "Увімкніть попередження" : "Turn on warnings" }
+    public static func notificationsAskBodyIos(_ lang: String) -> String { lang == "uk" ? "Застосунок попередить перед відключенням за графіком і повідомить про аварійні відключення. Без дозволу графік працює, але без сповіщень." : "The app warns you before a scheduled outage and tells you about emergency outages. Without permission the schedule still works, just without notifications." }
+    public static func notificationsAskButtonIos(_ lang: String) -> String { lang == "uk" ? "Дозволити сповіщення" : "Allow notifications" }
     public static let PRIVACY_POLICY_URL_IOS = "https://github.com/IgorZaharov/Android-ZTBlackoutPreWarning/blob/main/PRIVACY_POLICY.md"
 }

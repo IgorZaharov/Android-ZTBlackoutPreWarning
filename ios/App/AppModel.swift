@@ -1,5 +1,6 @@
 import Foundation
 import SwiftUI
+import UserNotifications
 import WidgetKit
 
 /// State and actions of the three pages (port of Android `ui/screens/BlackoutAppNavigation.kt`).
@@ -48,6 +49,8 @@ final class AppModel: ObservableObject {
     }
     /// Main's "Select queue" asks Settings to open the address lookup at once.
     @Published var autoOpenQueueHelp = false
+    /// iOS notification permission; `.authorized` until read, so the ask card never flashes.
+    @Published private(set) var notificationAuth: UNAuthorizationStatus = .authorized
 
     private var hasCompletedInitialScheduleFetch = false
     private var bannerTask: Task<Void, Never>?
@@ -159,6 +162,7 @@ final class AppModel: ObservableObject {
             }
         }
         let outcome = await outageRepo.refresh(settingsRepo.getSettings(), forceNetwork: force, shownId: otherShownItem?.id)
+        await NotificationSync.shared.deliverEmergency(outcome.batches)
         syncWidgets()
         reload()
         return outcome
@@ -218,9 +222,39 @@ final class AppModel: ObservableObject {
         )
     }
 
+    /// Re-plans the pre-warnings and redraws the widgets from the stored state (Android
+    /// `syncAlarmsAndWidgets`). Called after every refresh and every change of addresses or settings.
     private func syncWidgets() {
-        // Alerts are re-planned in milestone M5; widgets read the same stores (M6).
         WidgetCenter.shared.reloadAllTimelines()
+        Task { await NotificationSync.shared.syncPlanned() }
+    }
+
+    // MARK: - Notification permission (App Review item R5)
+
+    /// The app came to the foreground: re-read the stores (a widget or a background refresh may have
+    /// written), the permission (it may have changed in iOS Settings) and re-plan the warnings.
+    func foreground() {
+        reload()
+        Task {
+            notificationAuth = await NotificationSync.shared.authorizationStatus()
+            await NotificationSync.shared.syncPlanned()
+        }
+    }
+
+    /// The ask card's button: iOS asks once; afterwards Settings links to the iPhone settings.
+    func allowNotifications() {
+        Task {
+            await NotificationSync.shared.requestAuthorization()
+            notificationAuth = await NotificationSync.shared.authorizationStatus()
+        }
+    }
+
+    /// A tapped notification shows its address on the main page (spec/SUBSCRIPTIONS.md 9).
+    func openFromNotification(_ subscriptionId: String?) {
+        if let id = subscriptionId, subscriptions.items.contains(where: { $0.id == id }) {
+            shownSubscriptionId = id
+        }
+        go(to: 0)
     }
 
     // MARK: - In-app banner (replaces Android's toast)
@@ -274,6 +308,8 @@ final class AppModel: ObservableObject {
         change(&s)
         settingsRepo.saveSettings(s)
         reload()
+        // the warnings carry the advance notice, the sound and the language in their text
+        syncWidgets()
     }
 
     /// The header bell and the Settings master switch: all addresses at once (owner decision 4).
@@ -292,7 +328,6 @@ final class AppModel: ObservableObject {
 
     func setLanguage(_ code: String) {
         save { $0.language = code }
-        syncWidgets()
     }
 
     func sendTestAlert() {

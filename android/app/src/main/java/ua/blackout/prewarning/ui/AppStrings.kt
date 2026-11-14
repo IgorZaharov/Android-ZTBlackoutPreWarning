@@ -388,6 +388,11 @@ object AppStrings {
     fun notificationsDeniedIos(lang: String) =
         if (lang == "uk") "Сповіщення вимкнені в налаштуваннях iPhone" else "Notifications are turned off in the iPhone settings"
     fun openIosSettings(lang: String) = if (lang == "uk") "Відкрити налаштування" else "Open settings"
+    // Permission card on Main, shown once a queue or address is chosen (App Review item R5)
+    fun notificationsAskTitleIos(lang: String) = if (lang == "uk") "Увімкніть попередження" else "Turn on warnings"
+    fun notificationsAskBodyIos(lang: String) =
+        if (lang == "uk") "Застосунок попередить перед відключенням за графіком і повідомить про аварійні відключення. Без дозволу графік працює, але без сповіщень." else "The app warns you before a scheduled outage and tells you about emergency outages. Without permission the schedule still works, just without notifications."
+    fun notificationsAskButtonIos(lang: String) = if (lang == "uk") "Дозволити сповіщення" else "Allow notifications"
     const val PRIVACY_POLICY_URL_IOS = "https://github.com/IgorZaharov/Android-ZTBlackoutPreWarning/blob/main/PRIVACY_POLICY.md"
     // --- end iOS only ---
 }
