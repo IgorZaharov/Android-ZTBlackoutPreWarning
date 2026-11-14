@@ -37,6 +37,7 @@ struct MainScreen: View {
 
         ZStack {
             ScrollView {
+              ScrollViewReader { proxy in
                 VStack(spacing: 16) {
                     header(queue: queue, hideQueue: isQueueUnselected || hasCustomNoQueueStatus || queue.ktIsBlank, address: formattedAddress, interactive: !isQueueUnselected)
 
@@ -133,6 +134,7 @@ struct MainScreen: View {
                             SiteStatusChipRow(snapshot: snapshot, lang: lang)
                         }
                     }
+                    .id("main-status")
 
                     LinkCard(title: AppStrings.emergencyOutagesLabel(lang), url: AppStrings.EMERGENCY_OUTAGES_URL, tile: Color(argb: 0xFF1877F2), enabled: !isQueueUnselected, lang: lang) {
                         Text(verbatim: "f").font(.system(size: 24, weight: .black, design: .rounded)).foregroundStyle(Color.white)
@@ -146,6 +148,8 @@ struct MainScreen: View {
                 }
                 .padding(.horizontal, 16)
                 .padding(.vertical, 12)
+                .launchScroll(proxy, active: model.page == 0)
+              }
             }
             .scrollDisabled(isQueueUnselected)
             .opacity(isQueueUnselected ? 0.15 : 1)

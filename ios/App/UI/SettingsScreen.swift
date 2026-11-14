@@ -34,6 +34,7 @@ struct SettingsScreen: View {
         let master = model.alertsMaster
         let minShort = AppStrings.minShort(lang)
         ScrollView {
+          ScrollViewReader { proxy in
             VStack(spacing: 16) {
                 HStack(spacing: 10) {
                     Image(systemName: "slider.horizontal.3").font(.system(size: 20, weight: .semibold)).foregroundStyle(ZtColors.accent)
@@ -113,6 +114,7 @@ struct SettingsScreen: View {
                             .padding(.top, 2)
                     }
                 }
+                .id("settings-alerts")
 
                 // emergency follow-ups for all addresses; the start is always announced (spec/NOTIFICATIONS.md 2.4)
                 ZtGlassCard(padding: 18) {
@@ -133,7 +135,7 @@ struct SettingsScreen: View {
                     }
                 }
 
-                languageCard
+                languageCard.id("settings-actions")
 
                 // diagnostics and actions
                 ZtGlassCard(padding: 18) {
@@ -152,6 +154,8 @@ struct SettingsScreen: View {
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
+            .launchScroll(proxy, active: isVisible)
+          }
         }
         .scrollDismissesKeyboard(.interactively)
         .onAppear { urlText = settings.cityUrl }
@@ -159,6 +163,19 @@ struct SettingsScreen: View {
         // live URL check against valid-urls.json and the real table; waits until the page is on screen
         .task(id: "\(settings.cityUrl)|\(settings.queue)|\(isVisible)") { await verifyUrl() }
         .task(id: scenePhase) { notificationsDenied = await TestAlert.isDenied() }
+        // CI screenshots only: `-ZTDialog reset|remove|rename` opens that dialog once Settings is shown
+        .task(id: isVisible) {
+            guard isVisible, let dialog = UserDefaults.standard.string(forKey: "ZTDialog") else { return }
+            try? await Task.sleep(for: .seconds(2))
+            switch dialog {
+            case "reset": showReset = true
+            case "remove": removeCandidate = model.subscriptions.items.last
+            case "rename":
+                renameText = model.subscriptions.items.first?.label ?? ""
+                renameCandidate = model.subscriptions.items.first
+            default: break
+            }
+        }
         .onChange(of: model.autoOpenQueueHelp, initial: true) { _, open in
             if open {
                 showLookup = true

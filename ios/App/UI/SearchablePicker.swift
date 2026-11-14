@@ -23,6 +23,8 @@ struct SearchablePickerField: View {
     var onRetry: (() -> Void)? = nil
     var kind: PickerSearch.Kind = .TEXT
     var disabledHint: String? = nil
+    /// CI screenshots only: opens the list as soon as the field appears.
+    var autoOpen: Bool = false
     let onSelect: (PickerItem) -> Void
 
     @State private var open = false
@@ -58,6 +60,11 @@ struct SearchablePickerField: View {
             .disabled(!enabled)
             .accessibilityLabel(Text(verbatim: "\(label), \(shown)"))
             .accessibilityHint(Text(verbatim: !enabled ? (disabledHint ?? "") : ""))
+        }
+        .task {
+            guard autoOpen else { return }
+            try? await Task.sleep(for: .seconds(1))
+            withoutAnimation { open = true }
         }
         .fullScreenCover(isPresented: $open) {
             PickerList(

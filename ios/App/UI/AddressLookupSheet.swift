@@ -234,7 +234,9 @@ struct AddressLookupSheet: View {
                 loading: streetsState.loading,
                 loadFailed: streetsState.failed && !settlementId.ktIsBlank,
                 onRetry: { streetsState.retry += 1 },
-                disabledHint: AppStrings.pickerChooseFirst(lang)
+                disabledHint: AppStrings.pickerChooseFirst(lang),
+                // CI screenshots only: `-ZTPicker street` opens the street list (ios/scripts/gallery_screenshots.sh)
+                autoOpen: UserDefaults.standard.string(forKey: "ZTPicker") == "street"
             ) { item in
                 if item.id != streetId {
                     streetId = item.id

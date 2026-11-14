@@ -40,6 +40,16 @@ WAIT=12 shot screen-lookup -ZTLang uk -ZTLookup 1
 WAIT=15 shot screen-main -ZTLang uk -ZTSeedQueues 5.2,3.1 -ZTPage 0
 WAIT=10 shot screen-settings -ZTLang uk -ZTPage 1
 WAIT=8 shot screen-about -ZTLang uk -ZTPage 2
+# lower parts of the pages, the dialogs and the searchable street list:
+# -ZTScroll <card id> scrolls the page in front, -ZTDialog opens a Settings dialog,
+# -ZTPicker street opens the street list of the "?" lookup.
+WAIT=10 shot screen-main-status -ZTLang uk -ZTPage 0 -ZTScroll main-status
+WAIT=8 shot screen-settings-alerts -ZTLang uk -ZTPage 1 -ZTScroll settings-alerts
+WAIT=8 shot screen-settings-actions -ZTLang uk -ZTPage 1 -ZTScroll settings-actions
+WAIT=7 shot screen-dialog-remove -ZTLang uk -ZTPage 1 -ZTDialog remove
+WAIT=7 shot screen-dialog-rename -ZTLang uk -ZTPage 1 -ZTDialog rename
+WAIT=7 shot screen-dialog-reset -ZTLang uk -ZTPage 1 -ZTDialog reset
+WAIT=18 shot screen-picker-streets -ZTLang uk -ZTLookup 1 -ZTPicker street
 WAIT=10 shot screen-main-en -ZTLang en -ZTPage 0
 
 xcrun simctl terminate "$UDID" "$BUNDLE" >/dev/null 2>&1 || true

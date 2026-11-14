@@ -255,3 +255,17 @@ func openExternal(_ url: String) {
     guard let u = URL(string: url) else { return }
     UIApplication.shared.open(u)
 }
+
+// MARK: - CI screenshots
+
+/// CI screenshots only (ios/scripts/gallery_screenshots.sh): `-ZTScroll <id>` scrolls the page in front
+/// to the card with that id once the page is shown. People never pass launch arguments.
+extension View {
+    func launchScroll(_ proxy: ScrollViewProxy, active: Bool) -> some View {
+        task(id: active) {
+            guard active, let target = UserDefaults.standard.string(forKey: "ZTScroll") else { return }
+            try? await Task.sleep(for: .seconds(2))
+            proxy.scrollTo(target, anchor: .top)
+        }
+    }
+}
