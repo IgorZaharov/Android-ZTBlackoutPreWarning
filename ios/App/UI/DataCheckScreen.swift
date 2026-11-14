@@ -54,7 +54,10 @@ struct DataCheckScreen: View {
             let planned = OutageEngine.buildPlanned(today: now.date, todayOff: repo.todayOffCells(q), tomorrowOff: repo.tomorrowOffCells(q))
             func line(_ date: LocalDate) -> String {
                 let rows = OutageEngine.dayView(planned, date: date, now: now).rows
-                return rows.isEmpty ? "—" : rows.map { "\(OutageEngine.formatSpanTime($0.from)) – \(OutageEngine.formatSpanTime($0.to))" }.joined(separator: ", ")
+                // A start prints "00:00"; only an end at midnight prints "24:00" (OutageEngine.formatSpanTime)
+                return rows.isEmpty ? "—" : rows.map {
+                    String(format: "%02d:%02d – %@", $0.from.hour, $0.from.minute, OutageEngine.formatSpanTime($0.to))
+                }.joined(separator: ", ")
             }
             return (q, line(now.date), line(now.date.plusDays(1)))
         }

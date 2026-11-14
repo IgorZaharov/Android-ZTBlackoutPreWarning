@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | Written | 2026-11-14 |
-| Status | Approved 2026-11-14. **M0 done** (CI run 43592016418: Xcode 26.5, iOS 26.5 simulator, app 1.4.0 with the widget embedded, geo-check passed). **M1 done** (CI run 43595050371: Swift core in `ios/Shared/Core/`, 41 XCTests green: all 7 vector files incl. `subscriptions.json` and `site_notice.json`, entity checks, Kyiv DST, 18 PickerSearch cases). Next: M2 data layer. |
+| Status | Approved 2026-11-14. **M0 done** (CI run 43592016418). **M1 done** (CI run 43595050371: Swift core, all 7 vector files). **M2 done** (CI run 43601680758: data layer in `ios/Shared/Data/`, 73 XCTests green incl. a saved live page for all 12 queues, PowerOnClientTest and StreetDedupTest ports; live CI fetch parsed all 12 queues from ztoe.com.ua, resolved PowerOn city 333 / street 4757, loaded 19 REMs and 103 settlements). The 1.3.5 screens are removed; the app shows an interim data-check screen until M4. Next: M3 design system and Liquid Glass. |
 | Source of truth | `spec/` + `spec/vectors/` (behaviour), `android/.../ui/AppStrings.kt` (strings), Android 1.4.0 (`7fe08f0`) for everything the spec does not cover |
 | Builds on | [`IOS_HANDOVER_v1.4.0.md`](IOS_HANDOVER_v1.4.0.md). The handover keeps the file mapping (§4), the corrected ids (§5), the iOS constraints (§6) and the strings (§7). This plan replaces its milestones (§8) and adds what came after it: multi-address (`spec/SUBSCRIPTIONS.md`), the site notice card, the strip widget, Liquid Glass and App Review work. |
 

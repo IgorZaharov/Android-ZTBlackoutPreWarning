@@ -23,7 +23,8 @@ final class LiveFetchTests: XCTestCase {
         for q in UserSettings.ALL_QUEUES {
             let planned = OutageEngine.buildPlanned(today: now.date, todayOff: repo.todayOffCells(q), tomorrowOff: repo.tomorrowOffCells(q))
             let rows = OutageEngine.dayView(planned, date: now.date, now: now).rows
-            let text = rows.map { "\(OutageEngine.formatSpanTime($0.from))–\(OutageEngine.formatSpanTime($0.to))" }.joined(separator: ", ")
+            let text = rows.map { String(format: "%02d:%02d–%@", $0.from.hour, $0.from.minute, OutageEngine.formatSpanTime($0.to)) }
+                .joined(separator: ", ")
             print("[live] \(q): \(text.isEmpty ? "no outages" : text)")
             XCTAssertNotNil(repo.todayOffCells(q), "queue \(q) missing from today's table")
         }
