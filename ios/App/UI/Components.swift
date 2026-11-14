@@ -122,6 +122,8 @@ struct ActionButton: View {
     /// Work is running: the icon rotates, taps are ignored and `busyText` is announced.
     var busy: Bool = false
     var busyText: String? = nil
+    /// Fills the height its row gives it, so two buttons side by side stay equal when one label wraps.
+    var fillHeight: Bool = false
     let action: () -> Void
 
     var body: some View {
@@ -136,7 +138,7 @@ struct ActionButton: View {
                     .multilineTextAlignment(.center)
             }
             .foregroundStyle(content)
-            .frame(maxWidth: .infinity, minHeight: ZtMinTouch)
+            .frame(maxWidth: .infinity, minHeight: ZtMinTouch, maxHeight: fillHeight ? .infinity : nil)
             .padding(.horizontal, 12)
             .background {
                 let shape = RoundedRectangle(cornerRadius: ZtRadius.control)

@@ -141,10 +141,12 @@ struct SettingsScreen: View {
                 ZtGlassCard(padding: 18) {
                     VStack(spacing: 10) {
                         if typeSize.isAccessibilitySize {
-                            testButton
-                            refreshButton
+                            testButton(fill: false)
+                            refreshButton(fill: false)
                         } else {
-                            HStack(spacing: 8) { testButton; refreshButton }.fixedSize(horizontal: false, vertical: true)
+                            // same height even when only one label wraps to two lines (as on Android)
+                            HStack(spacing: 8) { testButton(fill: true); refreshButton(fill: true) }
+                                .fixedSize(horizontal: false, vertical: true)
                         }
                         ActionButton(text: AppStrings.resetDefaultsBtn(lang), icon: "arrow.counterclockwise", subdued: true) { showReset = true }
                     }
@@ -218,12 +220,12 @@ struct SettingsScreen: View {
         }
     }
 
-    private var testButton: some View {
-        ActionButton(text: AppStrings.testAlertBtn(lang), icon: "paperplane.fill", filled: true) { model.sendTestAlert() }
+    private func testButton(fill: Bool) -> some View {
+        ActionButton(text: AppStrings.testAlertBtn(lang), icon: "paperplane.fill", filled: true, fillHeight: fill) { model.sendTestAlert() }
     }
 
-    private var refreshButton: some View {
-        ActionButton(text: AppStrings.refreshBtn(lang), icon: "arrow.clockwise", busy: model.isRefreshing, busyText: AppStrings.refreshing(lang)) {
+    private func refreshButton(fill: Bool) -> some View {
+        ActionButton(text: AppStrings.refreshBtn(lang), icon: "arrow.clockwise", busy: model.isRefreshing, busyText: AppStrings.refreshing(lang), fillHeight: fill) {
             model.manualRefresh()
         }
     }
