@@ -373,4 +373,21 @@ object AppStrings {
     fun refreshFloorHint(lang: String) =
         if (lang == "uk") "Android перевіряє не частіше ніж раз на 15 хв" else "Android checks at most once every 15 min"
     // --- end settings v1.4.0 ---
+
+    // =========================================================================================
+    // iOS only (docs/ios/IOS_PORT_PLAN.md sections 2 and 7): not shown on Android. Kept here so the
+    // strings have one source; scripts/ios-strings.cjs generates ios/Shared/AppStrings.swift from this file.
+    // =========================================================================================
+    fun refreshFloorHintIos(lang: String) =
+        if (lang == "uk") "У фоні iOS сама вирішує, коли перевіряти; аварійні сповіщення — за можливості" else "In the background iOS decides when to check; emergency alerts are best effort"
+    fun soundHintIos(lang: String) = if (lang == "uk") "Звук діє для всіх сповіщень" else "Sound applies to all alerts"
+    fun aboutDesktopNoticeIos(lang: String) =
+        if (lang == "uk") "Застосунок є офіційною iOS-версією проєкту UA Blackout Pre-Warning для ПК." else "Official iOS version of the desktop UA Blackout Pre-Warning project."
+    fun privacyPolicyIos(lang: String) = if (lang == "uk") "Політика конфіденційності" else "Privacy policy"
+    fun externalLinkIos(lang: String) = if (lang == "uk") "Відкривається в Safari" else "Opens in Safari"
+    fun notificationsDeniedIos(lang: String) =
+        if (lang == "uk") "Сповіщення вимкнені в налаштуваннях iPhone" else "Notifications are turned off in the iPhone settings"
+    fun openIosSettings(lang: String) = if (lang == "uk") "Відкрити налаштування" else "Open settings"
+    const val PRIVACY_POLICY_URL_IOS = "https://github.com/IgorZaharov/Android-ZTBlackoutPreWarning/blob/main/PRIVACY_POLICY.md"
+    // --- end iOS only ---
 }

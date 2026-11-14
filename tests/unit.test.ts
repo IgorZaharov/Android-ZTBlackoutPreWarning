@@ -2611,6 +2611,15 @@ function runUnitTestG_IosPort() {
   for (const rel of walk('ios').filter((f) => /\.(swift|plist|yml)$/.test(f))) {
     assert.ok(!/roulette/i.test(read(rel)), `${rel} must not contain the roulette (iOS v1 ships without it)`);
   }
+
+  // One source of strings (plan section 7): ios/Shared/AppStrings.swift is generated from AppStrings.kt,
+  // and the hand-ported functions carry every Kotlin literal. Run `node scripts/ios-strings.cjs` to update.
+  try {
+    execSync('node scripts/ios-strings.cjs --check', { cwd: ROOT_DIR, encoding: 'utf-8', stdio: 'pipe' });
+  } catch (err) {
+    const e = err as { stdout?: string; stderr?: string };
+    assert.fail(`iOS strings out of sync with AppStrings.kt:\n${e.stderr || e.stdout || err}`);
+  }
   console.log('Unit Test G PASSED: iOS copies, invariants and scope verified.');
 }
 

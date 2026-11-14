@@ -56,8 +56,8 @@ struct BlackoutWidgetEntryView: View {
     @Environment(\.widgetFamily) private var family
 
     var body: some View {
-        let lang = AppStrings.resolveLanguage("SYSTEM")
-        let status = Text(entry.isUnclear ? AppStrings.schedulesUnclear(lang)
+        let lang = AppStrings.resolveLang("SYSTEM")
+        let status = Text(entry.isUnclear ? AppStrings.outagesUnclear(lang)
                           : entry.isOff ? AppStrings.widgetPowerOff(lang) : AppStrings.widgetPowerOn(lang))
             .ztText(ZtType.subhead)
             .foregroundStyle(entry.isUnclear ? ZtColors.statusUnclear : entry.isOff ? ZtColors.statusOff : ZtColors.statusOn)

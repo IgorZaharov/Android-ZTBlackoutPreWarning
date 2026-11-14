@@ -1,4 +1,5 @@
 import SwiftUI
+import UserNotifications
 
 @main
 struct ZTPreBlackoutApp: App {
@@ -8,6 +9,8 @@ struct ZTPreBlackoutApp: App {
     init() {
         NetworkProbe.start()
         ZtoeAddressLookup.initDiskCache()
+        UNUserNotificationCenter.current().delegate = ForegroundNotificationDelegate.shared
+        AppModel.applyLaunchSeed()
     }
 
     var body: some Scene {
@@ -15,8 +18,7 @@ struct ZTPreBlackoutApp: App {
             if let gallery {
                 gallery
             } else {
-                // Interim screen of milestone M2 (data layer); replaced by the 1.4.0 screens in M4.
-                DataCheckScreen()
+                RootView()
             }
         }
     }

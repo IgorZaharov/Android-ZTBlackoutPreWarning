@@ -61,6 +61,7 @@ Asserted in `tests/unit.test.ts` and `android/app/src/test/.../ZtoeParserTest.kt
 ## Synced / generated files
 
 - `valid-urls.json` and `donations.json` at root are canonical; copies live in `public/`, `android/app/src/main/assets/` and `ios/Resources/`. Keep all four in sync (`npm test` checks it).
+- `ios/Shared/AppStrings.swift` is generated from `AppStrings.kt` by `node scripts/ios-strings.cjs` (only its MANUAL block is hand-written); `npm test` fails when it is stale. iOS-only strings go into `AppStrings.kt` first, marked iOS-only.
 - `src/data/androidProjectFiles.ts` embeds Android sources for the web code explorer. `scripts/generate_android_project.cjs` refreshes that file from `android/` but **re-creates any file that is missing from `android/` out of its stale TS copy** — delete the entries of removed Android files from the TS data first, and never run it from a state where `android/` is incomplete.
 - After changing `android/`, rebuild the downloadable archive: `python3 -m zipfile -c public/Android-ZTBlackoutPreWarning.zip android`.
 - `android/app/keystore/debug.keystore` is intentionally committed (stable signature for in-place upgrades); `versionCode = (GITHUB_RUN_NUMBER ?: 300) + 300`. Do not change `.github/`, the keystore or the signing/`versionCode` blocks without the owner.
