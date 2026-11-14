@@ -33,6 +33,17 @@
 	<array>
 		<string>ua.blackout.prewarning.sync</string>
 	</array>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>ua.blackout.prewarning.widget</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>svitlozt</string>
+			</array>
+		</dict>
+	</array>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>fetch</string>

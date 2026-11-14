@@ -161,7 +161,9 @@ final class AppModel: ObservableObject {
                 }
             }
         }
-        let outcome = await outageRepo.refresh(settingsRepo.getSettings(), forceNetwork: force, shownId: otherShownItem?.id)
+        // the addresses on placed widgets are polled too, whatever their switches (spec/SUBSCRIPTIONS.md 10)
+        let outcome = await outageRepo.refresh(settingsRepo.getSettings(), forceNetwork: force, shownId: otherShownItem?.id,
+                                               widgetItemIds: await WidgetBindings.shownItemIds())
         await NotificationSync.shared.deliverEmergency(outcome.batches)
         syncWidgets()
         reload()
@@ -249,7 +251,7 @@ final class AppModel: ObservableObject {
         }
     }
 
-    /// A tapped notification shows its address on the main page (spec/SUBSCRIPTIONS.md 9).
+    /// A tapped notification or widget shows its address on the main page (spec/SUBSCRIPTIONS.md 9 and 10).
     func openFromNotification(_ subscriptionId: String?) {
         if let id = subscriptionId, subscriptions.items.contains(where: { $0.id == id }) {
             shownSubscriptionId = id

@@ -31,6 +31,13 @@ for page in components drum rows; do
   done
 done
 
+# M6 widgets: the three widget views at home-screen size, full colour and tinted (ios/App/UI/DesignGallery.swift)
+for time in 02:00 14:30; do
+  for page in widgets widgets-large widgets-tinted; do
+    shot "${page}-${time/:/}" -ZTGallery "$page" -ZTGalleryTime "$time"
+  done
+done
+
 # M4 screens with live data (docs/ios/IOS_PORT_PLAN.md: compared side by side with Android 1.4.0).
 # The order matters: the seed below writes two queue-only addresses that the later shots keep.
 # -ZTLang writes the language setting, -ZTSeedQueues adds addresses to an empty store,

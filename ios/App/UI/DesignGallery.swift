@@ -6,12 +6,12 @@ import UIKit
 /// each glass recipe and on the darkest and the brightest time-of-day palette.
 ///
 /// Launch arguments (read from the UserDefaults argument domain):
-/// - `-ZTGallery components|drum|rows`
+/// - `-ZTGallery components|drum|rows|widgets|widgets-large|widgets-tinted`
 /// - `-ZTGlassMode automatic|fallback|solid` (solid = what Reduce Transparency shows)
 /// - `-ZTGalleryTime HH:mm` Kyiv time of the background palette (default 02:00)
 /// - `-ZTGalleryLang uk|en`
 struct DesignGallery: View {
-    enum Page: String, CaseIterable { case components, drum, rows }
+    enum Page: String, CaseIterable { case components, drum, rows, widgets, widgetsLarge = "widgets-large", widgetsTinted = "widgets-tinted" }
 
     let page: Page
     let mode: ZtGlassMode
@@ -50,6 +50,9 @@ struct DesignGallery: View {
                     case .components: components
                     case .drum: drums
                     case .rows: rows
+                    case .widgets: widgetPage(large: false, look: .fullColor)
+                    case .widgetsLarge: widgetPage(large: true, look: .fullColor)
+                    case .widgetsTinted: widgetPage(large: false, look: .tinted)
                     }
                 }
                 .padding(16)
@@ -197,6 +200,49 @@ struct DesignGallery: View {
                     TimelineBar(slots: Self.slots(Self.today), currentHour: 12, currentMinute: 40, lang: lang, tickEvery: 6)
                         .frame(width: 300)
                 }
+            }
+        }
+    }
+
+    // MARK: - Pages 4-6: widgets (milestone M6)
+
+    /// The sample day as a widget would see it at 12:40, with an address label (two addresses).
+    private var widgetModel: WidgetModel {
+        let snapshot = OutageSnapshot(now: Self.now, queue: "5.2", outages: Self.outages, plannedKnown: true,
+                                      tomorrowPublished: true, site: nil, poweron: nil, hasAddress: true)
+        return WidgetModelBuilder.build(queue: "5.2", statusText: nil, snapshot: snapshot, lang: lang, label: "Київська 1")
+    }
+
+    /// One widget at its home-screen size with the system's 16 pt content margins. The tinted look is shown
+    /// grey on a plain glass-like card: on a device iOS paints the accentable parts in the chosen tint.
+    private func widgetFrame<V: View>(_ w: CGFloat, _ h: CGFloat, look: WidgetLook, @ViewBuilder _ content: () -> V) -> some View {
+        content()
+            .padding(16)
+            .frame(width: w, height: h)
+            .background {
+                if look == .fullColor {
+                    WidgetBackground(date: KyivTime.date(of: LocalDateTime(year: 2026, month: 11, day: 13, hour: hour, minute: minute)!))
+                } else {
+                    Color.white.opacity(0.18)
+                }
+            }
+            .grayscale(look == .tinted ? 1 : 0)
+            .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+    }
+
+    private func widgetPage(large: Bool, look: WidgetLook) -> some View {
+        let m = widgetModel
+        return VStack(alignment: .leading, spacing: 14) {
+            if large {
+                caption("large · Big widget")
+                widgetFrame(364, 382, look: look) { BigWidgetView(model: m, master: true, refreshing: false, look: look, large: true) }
+            } else {
+                caption("small · bell on")
+                widgetFrame(170, 170, look: look) { SmallWidgetView(model: m, master: true, refreshing: false, look: look) }
+                caption("medium · Big widget · bell off")
+                widgetFrame(364, 170, look: look) { BigWidgetView(model: m, master: false, refreshing: false, look: look, large: false) }
+                caption("medium · «Графік»")
+                widgetFrame(364, 170, look: look) { StripWidgetView(model: m, look: look) }
             }
         }
     }

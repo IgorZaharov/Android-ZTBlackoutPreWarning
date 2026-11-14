@@ -39,7 +39,8 @@ enum BackgroundRefresh {
         }
 
         if !Task.isCancelled {
-            let outcome = await OutageRepository.shared.refresh(SettingsRepository.shared.getSettings())
+            let outcome = await OutageRepository.shared.refresh(SettingsRepository.shared.getSettings(),
+                                                                widgetItemIds: await WidgetBindings.shownItemIds())
             await NotificationSync.shared.deliverEmergency(outcome.batches)
         }
         await NotificationSync.shared.syncPlanned()

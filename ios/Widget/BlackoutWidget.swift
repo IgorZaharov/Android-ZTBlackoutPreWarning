@@ -1,103 +1,137 @@
+import AppIntents
 import SwiftUI
 import WidgetKit
 
-// Interim widget of milestone M2/M3: power state and countdown of the primary address from the shared
-// data layer (local state only); the medium size also draws the shared drum (TimelineBar) on the
-// time-of-day background, so the design layer is proven inside WidgetKit. M6 replaces it with the three
-// 1.4.0 widgets (small, big, «Графік»).
+// The three 1.4.0 widgets (plan milestone M6; Android widget/BlackoutGlanceWidget.kt): Small (status,
+// countdown, buttons), Big (medium and large: buttons, countdown, drum; the large one adds the next
+// outage and today's rows) and «Графік» (info line and drum). Each widget shows its own address
+// (`SelectAddressIntent`, default: follow the primary). The views and intents are in ios/Shared/Widget.
 
-struct BlackoutWidgetEntry: TimelineEntry {
+struct BlackoutEntry: TimelineEntry {
     let date: Date
-    let isOff: Bool
-    let isUnclear: Bool
-    let queue: String
-    let next: String
-    /// Today's 48 drum cells; empty when unclear.
-    var slots: [BlackoutSlot] = []
-    var hour = 12
-    var minute = 0
+    let model: WidgetModel
+    let master: Bool
+    let refreshing: Bool
 }
 
-struct BlackoutWidgetProvider: TimelineProvider {
-    private func entry(at date: Date) -> BlackoutWidgetEntry {
-        let settings = SettingsRepository.shared.getSettings()
-        let snap = OutageRepository.shared.snapshot(settings, now: KyivTime.localDateTime(of: date))
-        let st = snap.scheduleStatus()
-        return BlackoutWidgetEntry(date: date, isOff: st.isBlackoutNow, isUnclear: st.isUnclear,
-                                   queue: settings.queue, next: st.nextSlotTime,
-                                   slots: snap.slotsFor(snap.today), hour: snap.now.hour, minute: snap.now.minute)
+struct BlackoutProvider: AppIntentTimelineProvider {
+    func placeholder(in context: Context) -> BlackoutEntry {
+        entries(for: SelectAddressIntent(), dates: [Date()]).first!
     }
 
-    func placeholder(in context: Context) -> BlackoutWidgetEntry {
-        BlackoutWidgetEntry(date: Date(), isOff: false, isUnclear: false, queue: "1.1", next: "18:00 – 21:00")
+    func snapshot(for configuration: SelectAddressIntent, in context: Context) async -> BlackoutEntry {
+        entries(for: configuration, dates: [Date()]).first!
     }
 
-    func getSnapshot(in context: Context, completion: @escaping (BlackoutWidgetEntry) -> Void) {
-        completion(entry(at: Date()))
-    }
-
-    func getTimeline(in context: Context, completion: @escaping (Timeline<BlackoutWidgetEntry>) -> Void) {
-        // One entry now and one at every power transition of the next 24 hours (widgets cannot tick)
+    /// Widgets can not tick: one entry every minute for the next 90 minutes (the countdown has minutes,
+    /// no seconds) and one at every power transition of the next 48 hours; then WidgetKit asks again.
+    /// The app reloads all timelines after every refresh and settings change.
+    func timeline(for configuration: SelectAddressIntent, in context: Context) async -> Timeline<BlackoutEntry> {
         let now = Date()
-        let settings = SettingsRepository.shared.getSettings()
+        let source = WidgetModelBuilder.source(boundId: configuration.boundId, at: now)
         let kyivNow = KyivTime.localDateTime(of: now)
-        let outages = OutageRepository.shared.outagesFor(queue: settings.queue,
-                                                          key: OutageRepository.shared.addressKey(settings.selectedAddressQuery),
-                                                          now: kyivNow)
-        let transitions = OutageEngine.transitions(outages, from: kyivNow, to: kyivNow.plusHours(24))
-        let dates = [now] + transitions.map { KyivTime.date(of: $0.at) }.filter { $0 > now }
-        let entries = dates.map { entry(at: $0) }
-        completion(Timeline(entries: entries, policy: .after(now.addingTimeInterval(30 * 60))))
+        let transitions = OutageEngine.transitions(source.snapshot.outages, from: kyivNow, to: kyivNow.plusHours(48))
+        let dates = WidgetModelBuilder.entryDates(now: now, transitions: transitions)
+        return Timeline(entries: entries(for: configuration, dates: dates, source: source), policy: .after(now.addingTimeInterval(90 * 60)))
+    }
+
+    private func entries(for configuration: SelectAddressIntent, dates: [Date], source: WidgetModelBuilder.Source? = nil) -> [BlackoutEntry] {
+        let src = source ?? WidgetModelBuilder.source(boundId: configuration.boundId, at: dates.first ?? Date())
+        let master = SubscriptionSync.shared.master()
+        let refreshing = WidgetState.isRefreshing()
+        return dates.map { BlackoutEntry(date: $0, model: src.model(at: $0), master: master, refreshing: refreshing) }
     }
 }
 
-struct BlackoutWidgetEntryView: View {
-    let entry: BlackoutWidgetEntry
+/// A tap opens the main screen with the widget's address shown (spec/SUBSCRIPTIONS.md 9 and 10).
+private func openURL(_ itemId: String?) -> URL {
+    var c = URLComponents()
+    c.scheme = "svitlozt"
+    c.host = "open"
+    if let itemId { c.queryItems = [URLQueryItem(name: "item", value: itemId)] }
+    return c.url!
+}
+
+struct SmallEntryView: View {
+    let entry: BlackoutEntry
+    @Environment(\.widgetRenderingMode) private var mode
+
+    var body: some View {
+        SmallWidgetView(model: entry.model, master: entry.master, refreshing: entry.refreshing, look: WidgetLook(mode))
+            .widgetURL(openURL(entry.model.itemId))
+            .containerBackground(for: .widget) { WidgetBackground(date: entry.date) }
+    }
+}
+
+struct BigEntryView: View {
+    let entry: BlackoutEntry
+    @Environment(\.widgetRenderingMode) private var mode
     @Environment(\.widgetFamily) private var family
 
     var body: some View {
-        let lang = AppStrings.resolveLang("SYSTEM")
-        let status = Text(entry.isUnclear ? AppStrings.outagesUnclear(lang)
-                          : entry.isOff ? AppStrings.widgetPowerOff(lang) : AppStrings.widgetPowerOn(lang))
-            .ztText(ZtType.subhead)
-            .foregroundStyle(entry.isUnclear ? ZtColors.statusUnclear : entry.isOff ? ZtColors.statusOff : ZtColors.statusOn)
-        Group {
-            if family == .systemMedium {
-                // One info line above the drum: the drum alone is about 97 pt of the ~126 pt the widget has
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack(spacing: 8) {
-                        status.lineLimit(1)
-                        Spacer(minLength: 0)
-                        Text(entry.next).ztText(ZtType.captionMono).foregroundStyle(ZtColors.textSecondary).lineLimit(1)
-                    }
-                    TimelineBar(slots: entry.slots, currentHour: entry.hour, currentMinute: entry.minute,
-                                lang: lang, tickEvery: 6)
-                }
-            } else {
-                VStack(alignment: .leading, spacing: 4) {
-                    status
-                    if !entry.queue.isEmpty {
-                        Text(entry.queue).ztText(ZtType.captionMono).foregroundStyle(ZtColors.textPrimary)
-                    }
-                    Text(entry.next).ztText(ZtType.captionMono).foregroundStyle(ZtColors.textSecondary)
-                }
-            }
+        BigWidgetView(model: entry.model, master: entry.master, refreshing: entry.refreshing, look: WidgetLook(mode),
+                      large: family == .systemLarge)
+            .widgetURL(openURL(entry.model.itemId))
+            .containerBackground(for: .widget) { WidgetBackground(date: entry.date) }
+    }
+}
+
+struct StripEntryView: View {
+    let entry: BlackoutEntry
+    @Environment(\.widgetRenderingMode) private var mode
+
+    var body: some View {
+        StripWidgetView(model: entry.model, look: WidgetLook(mode))
+            .widgetURL(openURL(entry.model.itemId))
+            .containerBackground(for: .widget) { WidgetBackground(date: entry.date) }
+    }
+}
+
+struct BlackoutSmallWidget: Widget {
+    // the interim widget's kind, so a widget placed from an earlier build keeps working
+    let kind = "BlackoutWidget"
+
+    var body: some WidgetConfiguration {
+        AppIntentConfiguration(kind: kind, intent: SelectAddressIntent.self, provider: BlackoutProvider()) { entry in
+            SmallEntryView(entry: entry)
         }
-        .containerBackground(for: .widget) {
-            AmbientBackground(palette: TimeOfDayPalette.current(now: entry.date), frozenSeconds: 0)
+        .configurationDisplayName(AppStrings.APP_NAME)
+        .description("СВІТЛО Є / СВІТЛА НЕМАЄ, відлік і сповіщення")
+        .supportedFamilies([.systemSmall])
+    }
+}
+
+struct BlackoutBigWidget: Widget {
+    let kind = "BlackoutBigWidget"
+
+    var body: some WidgetConfiguration {
+        AppIntentConfiguration(kind: kind, intent: SelectAddressIntent.self, provider: BlackoutProvider()) { entry in
+            BigEntryView(entry: entry)
         }
+        .configurationDisplayName(AppStrings.APP_NAME)
+        .description("Відлік, шкала доби та сповіщення")
+        .supportedFamilies([.systemMedium, .systemLarge])
+    }
+}
+
+struct BlackoutStripWidget: Widget {
+    let kind = "BlackoutStripWidget"
+
+    var body: some WidgetConfiguration {
+        AppIntentConfiguration(kind: kind, intent: SelectAddressIntent.self, provider: BlackoutProvider()) { entry in
+            StripEntryView(entry: entry)
+        }
+        .configurationDisplayName("Графік")
+        .description("Шкала доби")
+        .supportedFamilies([.systemMedium])
     }
 }
 
 @main
-struct BlackoutWidget: Widget {
-    let kind = "BlackoutWidget"
-
-    var body: some WidgetConfiguration {
-        StaticConfiguration(kind: kind, provider: BlackoutWidgetProvider()) { entry in
-            BlackoutWidgetEntryView(entry: entry)
-        }
-        .configurationDisplayName(AppStrings.APP_NAME)
-        .supportedFamilies([.systemSmall, .systemMedium])
+struct BlackoutWidgets: WidgetBundle {
+    var body: some Widget {
+        BlackoutSmallWidget()
+        BlackoutBigWidget()
+        BlackoutStripWidget()
     }
 }
