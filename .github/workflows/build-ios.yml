@@ -132,6 +132,10 @@ jobs:
           plutil -p "$APP/Info.plist" | grep -E 'CFBundle(ShortVersionString|Version|DisplayName)'
           ls "$APP/PlugIns"
 
+      - name: Design gallery screenshots (M3)
+        working-directory: ios
+        run: bash scripts/gallery_screenshots.sh "${{ steps.sim.outputs.udid }}" build/screenshots/gallery-ios26
+
       - name: Upload screenshots
         if: always()
         uses: actions/upload-artifact@v4
@@ -148,6 +152,67 @@ jobs:
           path: |
             ios/build/Tests.xcresult
             ios/build/xcodebuild-test.log
+          if-no-files-found: ignore
+
+  gallery-ios17:
+    # Plan section 4: the iOS 17-25 material fallback on a real iOS 17 runtime. The macos-26 image ships
+    # only iOS 26 runtimes, so this job downloads iOS 17.5 first. Best effort: if the download fails the
+    # build-test job still shows the same recipe through the forced "fallback" gallery mode.
+    name: Design gallery on iOS 17 (best effort)
+    runs-on: macos-26
+    timeout-minutes: 60
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select newest Xcode 26
+        run: |
+          XCODE=$(ls -d /Applications/Xcode_26*.app | sort -V | tail -1)
+          sudo xcode-select -s "$XCODE/Contents/Developer"
+          xcodebuild -version
+
+      - name: Download the iOS 17.5 simulator runtime and create an iPhone 15
+        id: sim
+        run: |
+          set -e
+          xcodebuild -downloadPlatform iOS -buildVersion 17.5
+          RUNTIME=$(xcrun simctl list runtimes -j | python3 -c 'import json,sys; r=[x["identifier"] for x in json.load(sys.stdin)["runtimes"] if x["identifier"].startswith("com.apple.CoreSimulator.SimRuntime.iOS-17")]; print(r[-1])')
+          UDID=$(xcrun simctl create "Gallery iPhone 15" com.apple.CoreSimulator.SimDeviceType.iPhone-15 "$RUNTIME")
+          echo "Using $RUNTIME $UDID"
+          echo "udid=$UDID" >> "$GITHUB_OUTPUT"
+
+      - name: Generate the Xcode project and build for the simulator
+        working-directory: ios
+        run: |
+          set -o pipefail
+          command -v xcodegen >/dev/null || brew install xcodegen
+          xcodegen generate
+          mkdir -p build
+          xcodebuild build \
+            -project SvitloZhytomyr.xcodeproj \
+            -scheme ZTPreBlackout \
+            -destination "id=${{ steps.sim.outputs.udid }}" \
+            -derivedDataPath build/DD \
+            CODE_SIGNING_ALLOWED=NO \
+            | tee build/xcodebuild-ios17.log | grep -E '(error:|\*\* )' || true
+          grep -q '\*\* BUILD SUCCEEDED \*\*' build/xcodebuild-ios17.log
+
+      - name: Gallery screenshots on iOS 17
+        working-directory: ios
+        run: |
+          UDID=${{ steps.sim.outputs.udid }}
+          xcrun simctl boot "$UDID" 2>/dev/null || true
+          xcrun simctl bootstatus "$UDID" -b
+          xcrun simctl status_bar "$UDID" override --time 9:41 --batteryState charged --batteryLevel 100 --cellularBars 4 || true
+          xcrun simctl install "$UDID" build/DD/Build/Products/Debug-iphonesimulator/ZTPreBlackout.app
+          bash scripts/gallery_screenshots.sh "$UDID" build/screenshots/gallery-ios17
+
+      - name: Upload screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-gallery-ios17
+          path: ios/build/screenshots
           if-no-files-found: ignore
 
   testflight:

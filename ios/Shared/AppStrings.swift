@@ -183,4 +183,43 @@ public enum AppStrings {
         }
         return "Черга \(queue): відключення через \(advanceMinutes) хв (\(intervalText))."
     }
+
+    // =========================================================================================
+    // v1.4.0 strings of the design layer (drum, outage rows, site chips). Copied literally from
+    // android/.../ui/AppStrings.kt (same names, `lang == "uk"` like Kotlin); M4 ports the rest.
+    // =========================================================================================
+    private static let NBSP = "\u{00A0}"
+
+    public static func outagesUnclear(_ lang: String) -> String { lang == "uk" ? "Графіки не діють" : "Outages unclear" }
+
+    public static func siteStateWithTable(_ lang: String) -> String { lang == "uk" ? "Сайт ZTOE доступний, графік опубліковано" : "ZTOE site online, schedule published" }
+    public static func siteStateNoTable(_ lang: String) -> String { lang == "uk" ? "Сайт ZTOE доступний, але графіка немає" : "ZTOE site online, but no schedule table" }
+    public static func siteStateUnreachable(_ lang: String) -> String { lang == "uk" ? "Сайт ZTOE недоступний, інтернет є" : "ZTOE site unreachable, your internet works" }
+    public static func siteStateNoInternet(_ lang: String) -> String { lang == "uk" ? "Немає інтернету" : "No internet connection" }
+
+    public static func kindPlanned(_ lang: String) -> String { lang == "uk" ? "Планове" : "Planned" }
+    public static func kindRepair(_ lang: String) -> String { lang == "uk" ? "Планові роботи" : "Planned works" }
+    public static func kindEmergency(_ lang: String) -> String { lang == "uk" ? "Аварійне" : "Emergency" }
+    public static func rowFinished(_ lang: String) -> String { lang == "uk" ? "завершено" : "finished" }
+    public static func rowOverdue(_ lang: String) -> String { lang == "uk" ? "очікується відновлення" : "restoration pending" }
+    public static func rowFromEarlier(_ lang: String, _ whenText: String) -> String { lang == "uk" ? "з \(whenText)" : "from \(whenText)" }
+    public static func rowUntilLater(_ lang: String, _ whenText: String) -> String { lang == "uk" ? "до \(whenText)" : "until \(whenText)" }
+    public static func rowMayContinue(_ lang: String) -> String { lang == "uk" ? "можливе продовження" : "may continue" }
+
+    /// "2 год", "1 год 30 хв", "45 хв" with non-breaking spaces so a value never splits across lines.
+    public static func durationText(_ lang: String, _ totalMinutes: Int) -> String {
+        let m = max(0, totalMinutes)
+        let h = m / 60
+        let mm = m % 60
+        let hUnit = lang == "uk" ? "год" : "h"
+        let mUnit = lang == "uk" ? "хв" : "min"
+        if h > 0 && mm > 0 { return "\(h)\(NBSP)\(hUnit) \(mm)\(NBSP)\(mUnit)" }
+        if h > 0 { return "\(h)\(NBSP)\(hUnit)" }
+        return "\(mm)\(NBSP)\(mUnit)"
+    }
+
+    public static func drumTitle(_ lang: String) -> String { lang == "uk" ? "Шкала доби" : "Day timeline" }
+    public static func drumNoOutages(_ lang: String) -> String { lang == "uk" ? "відключень немає" : "no outages" }
+    public static func drumPowerOffAt(_ lang: String, _ spans: String) -> String { lang == "uk" ? "без світла: \(spans)" : "no power: \(spans)" }
+    public static func drumEmergencyMark(_ lang: String) -> String { lang == "uk" ? "аварійне" : "emergency" }
 }
