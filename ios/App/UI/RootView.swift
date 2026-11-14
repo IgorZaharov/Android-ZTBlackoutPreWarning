@@ -28,6 +28,7 @@ struct RootView: View {
                               pagePosition: pagePosition, dimmed: unselected)
 
             GeometryReader { outer in
+              ScrollViewReader { proxy in
                 ScrollView(.horizontal) {
                     HStack(spacing: 0) {
                         ForEach(0..<3, id: \.self) { index in
@@ -54,6 +55,16 @@ struct RootView: View {
                 .scrollIndicators(.hidden)
                 .scrollDisabled(unselected)
                 .onPreferenceChange(PagerOffset.self) { pagePosition = $0 }
+                // a page asked for by the app (dock, "Select queue", reset); also the one a launch
+                // argument set before the first layout, which scrollPosition alone ignores
+                .onChange(of: model.pageJump) { _, jump in
+                    withAnimation(ZtMotion.pageGlide) { proxy.scrollTo(jump.page, anchor: .leading) }
+                }
+                .onAppear {
+                    let start = model.pageJump.page
+                    if start != 0 { DispatchQueue.main.async { proxy.scrollTo(start, anchor: .leading) } }
+                }
+              }
             }
 
             if let message = model.bannerMessage {
@@ -66,7 +77,7 @@ struct RootView: View {
         }
         .overlay(alignment: .bottom) {
             Dock(page: page, enabled: !unselected) { target in
-                withAnimation(ZtMotion.pageGlide) { model.page = target }
+                model.go(to: target)
             }
             .padding(.bottom, 16)
             .opacity(unselected ? 0.15 : 1)
@@ -91,7 +102,7 @@ struct RootView: View {
             // a widget or a background refresh may have written while the app was away
             if phase == .active { model.reload() }
         }
-        .onOpenURL { _ in withAnimation(ZtMotion.pageGlide) { model.page = 0 } }
+        .onOpenURL { _ in model.go(to: 0) }
     }
 
     @ViewBuilder

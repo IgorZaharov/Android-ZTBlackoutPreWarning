@@ -193,7 +193,7 @@ struct MainScreen: View {
                 .foregroundStyle(ZtColors.accent)
                 .frame(maxWidth: .infinity, alignment: .leading)
             Button {
-                withAnimation(ZtMotion.pageGlide) { model.page = 1 }
+                model.go(to: 1)
             } label: {
                 Text(verbatim: AppStrings.settingsTitle(lang))
                     .ztText(ZtType.label.weight(.bold))
@@ -550,7 +550,7 @@ private struct FirstLaunchOverlay: View {
         VStack(spacing: 24) {
             Button {
                 model.autoOpenQueueHelp = true
-                withAnimation(ZtMotion.pageGlide) { model.page = 1 }
+                model.go(to: 1)
             } label: {
                 VStack(spacing: 6) {
                     // white label on the accent fill (owner request; large bold title)

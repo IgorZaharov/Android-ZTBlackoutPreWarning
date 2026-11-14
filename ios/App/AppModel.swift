@@ -31,8 +31,21 @@ final class AppModel: ObservableObject {
     @Published private(set) var statusInfo: ScheduleStatusInfo
     @Published private(set) var isRefreshing = false
     @Published private(set) var bannerMessage: String?
-    /// 0 = main, 1 = settings, 2 = about.
+    /// 0 = main, 1 = settings, 2 = about. Follows the pager (swipes write it back).
     @Published var page: Int? = 0
+    /// A page change the app asks for (dock, "Select queue", reset): RootView scrolls the pager to it.
+    /// The pager's `scrollPosition` alone ignores a value set before its first layout.
+    @Published private(set) var pageJump = PageJump(page: 0, seq: 0)
+
+    struct PageJump: Equatable {
+        let page: Int
+        let seq: Int
+    }
+
+    func go(to target: Int) {
+        page = target
+        pageJump = PageJump(page: target, seq: pageJump.seq + 1)
+    }
     /// Main's "Select queue" asks Settings to open the address lookup at once.
     @Published var autoOpenQueueHelp = false
 
@@ -49,9 +62,9 @@ final class AppModel: ObservableObject {
         statusInfo = snap.scheduleStatus()
         // CI screenshots: `-ZTPage 0|1|2` opens a page, `-ZTLookup 1` the address lookup
         let d = UserDefaults.standard
-        if let p = d.string(forKey: "ZTPage").flatMap(Int.init), (0...2).contains(p) { page = p }
+        if let p = d.string(forKey: "ZTPage").flatMap(Int.init), (0...2).contains(p) { go(to: p) }
         if d.bool(forKey: "ZTLookup") {
-            page = 1
+            go(to: 1)
             autoOpenQueueHelp = true
         }
     }
@@ -299,7 +312,7 @@ final class AppModel: ObservableObject {
         outageStore.clearAll()
         shownSubscriptionId = nil
         subscriptions = sync.ensureReady()
-        withAnimation(ZtMotion.pageGlide) { page = 0 }
+        go(to: 0)
         syncWidgets()
         reload()
         showBanner(AppStrings.settingsReset(lang))
