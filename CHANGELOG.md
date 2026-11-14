@@ -1,5 +1,16 @@
 # Changelog
 
+## [Unreleased] - iOS port
+
+### Added
+- **iOS app moved into this repository, milestone M0** (`docs/ios/IOS_PORT_PLAN.md`): `ios/` holds the SwiftUI app, the WidgetKit extension and the XCTest target, copied from `IgorZaharov/iOS-ZTPreBlackoutNotification` at `effe5a6` (1.3.5 level) into the layout of the plan (`ios/Shared/{Core,Data,Design}`, `ios/App`, `ios/Widget`, `ios/Tests`). The screens (`AboutScreen.swift`, `BlackoutAppNavigation.swift`, `MainScreen.swift`, `SettingsScreen.swift`, `TimelineBar.swift`) and the widget (`BlackoutWidget.swift`, `WidgetIntents.swift`) are unchanged apart from the points below and are reworked to 1.4.0 in later milestones.
+- **iOS CI** (`.github/workflows/build-ios.yml`): Xcode 26 on a macOS runner generates the project with XcodeGen, runs the unit tests on an iPhone simulator and saves a launch screenshot; a second job probes `www.ztoe.com.ua` and the PowerOn API from outside Ukraine (App Review); tag `ios-v*` or a manual run archives and uploads to TestFlight with an App Store Connect API key. The workflow never runs on `main` and never publishes a GitHub Release.
+- `npm test` (Unit Test G) checks that `valid-urls.json` and `donations.json` are identical in all four places, the iOS app name, widget labels, version and that the iOS app has no roulette. The changelog rule now also covers `ios/App/UI/` and `ios/Widget/`.
+
+### Changed
+- iOS: the «Житомирська Рулетка» mini-game is left out of the iOS app (owner decision, App Store age rating), together with its photo-library permission texts.
+- iOS: version and build number come from `MARKETING_VERSION` / `CURRENT_PROJECT_VERSION` (was hard-coded 1.3.4); only the `fetch` background mode is declared (unused `processing` removed); iPhone only; Ukrainian and English declared as app languages; the privacy manifests list the App Group reason for `UserDefaults`; the donations list is read from this repository.
+
 ## [1.4.0] - 2026-11-13
 
 ### Added

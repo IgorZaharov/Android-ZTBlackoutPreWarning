@@ -482,8 +482,10 @@ function runUnitTestB() {
       .map((line) => line.trim().split(/\s+/).pop() || '')
       .filter(
         (f) =>
-          (f.endsWith('.kt') || f.endsWith('.tsx')) &&
-          (f.includes('ui/') || f.includes('components/') || f.includes('widget/'))
+          (((f.endsWith('.kt') || f.endsWith('.tsx')) &&
+            (f.includes('ui/') || f.includes('components/') || f.includes('widget/'))) ||
+            // iOS port: SwiftUI screens and the WidgetKit extension follow the same rule.
+            (f.endsWith('.swift') && (f.startsWith('ios/App/UI/') || f.startsWith('ios/Widget/'))))
       );
 
     for (const file of modifiedFiles) {
@@ -2568,12 +2570,57 @@ function runUnitTestF_GlassCards() {
   console.log('Unit Test F PASSED: Shared glass cards verified on Web and Android.');
 }
 
+function runUnitTestG_IosPort() {
+  console.log('--- Running Unit Test G: iOS port (synced copies, invariants, no roulette) ---');
+  const read = (rel: string) => fs.readFileSync(path.join(ROOT_DIR, rel), 'utf-8');
+
+  // valid-urls.json and donations.json: the root file is canonical; public/, Android assets and iOS
+  // resources are byte-identical copies (CLAUDE.md "Synced / generated files").
+  for (const name of ['valid-urls.json', 'donations.json']) {
+    const canonical = read(name);
+    for (const dir of ['public', 'android/app/src/main/assets', 'ios/Resources']) {
+      assert.equal(read(`${dir}/${name}`), canonical, `${dir}/${name} must be identical to /${name}`);
+    }
+  }
+
+  // Invariants shared with Android and web.
+  const infoPlist = read('ios/App/Info.plist');
+  assert.ok(
+    infoPlist.includes('<key>CFBundleDisplayName</key>\n\t<string>Світло в Житомирі</string>'),
+    'iOS CFBundleDisplayName must be "Світло в Житомирі"'
+  );
+  assert.ok(infoPlist.includes('$(MARKETING_VERSION)'), 'iOS Info.plist must take the version from MARKETING_VERSION');
+  assert.ok(!infoPlist.includes('<string>processing</string>'), 'iOS must not declare the unused processing background mode');
+  const stringsSwift = read('ios/Shared/AppStrings.swift');
+  assert.ok(stringsSwift.includes('"Світло в Житомирі"'), 'AppStrings.swift must carry the app name');
+  assert.ok(stringsSwift.includes('"СВІТЛО Є"') && stringsSwift.includes('"СВІТЛА НЕМАЄ"'), 'iOS widget labels');
+  assert.ok(stringsSwift.includes('"Зрозуміло"'), 'iOS queue help button');
+
+  // iOS marketing version follows the Android versionName.
+  const gradle = read('android/app/build.gradle.kts');
+  const versionName = (gradle.match(/versionName\s*=\s*(?:\w+\s*\?:\s*)?"([^"]+)"/) || [])[1];
+  const projectYml = read('ios/project.yml');
+  assert.ok(versionName, 'versionName not found in build.gradle.kts');
+  assert.ok(projectYml.includes(`MARKETING_VERSION: "${versionName}"`), `ios/project.yml MARKETING_VERSION must be ${versionName}`);
+
+  // Owner decision D3 (docs/ios/IOS_PORT_PLAN.md): no roulette mini-game in the iOS app.
+  const walk = (dir: string): string[] =>
+    fs.readdirSync(path.join(ROOT_DIR, dir), { withFileTypes: true }).flatMap((e) =>
+      e.isDirectory() ? walk(`${dir}/${e.name}`) : [`${dir}/${e.name}`]
+    );
+  for (const rel of walk('ios').filter((f) => /\.(swift|plist|yml)$/.test(f))) {
+    assert.ok(!/roulette/i.test(read(rel)), `${rel} must not contain the roulette (iOS v1 ships without it)`);
+  }
+  console.log('Unit Test G PASSED: iOS copies, invariants and scope verified.');
+}
+
 async function main() {
   await runUnitTestA();
   runUnitTestB();
   await runUnitTestC_ZhytomyrRoulette();
   await runUnitTestE_AddressLookupAndUnsetQueue();
   runUnitTestF_GlassCards();
+  runUnitTestG_IosPort();
 }
 
 main().catch((err) => {

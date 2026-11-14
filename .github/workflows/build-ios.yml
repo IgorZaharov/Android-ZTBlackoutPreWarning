@@ -1,0 +1,235 @@
+name: iOS build, tests and TestFlight
+
+# iOS port (docs/ios/IOS_PORT_PLAN.md). Independent of build-apk.yml:
+# - never runs on a push to main/master and never publishes a GitHub Release;
+# - iOS tags are ios-v* (build-apk.yml reacts to v* only, which does not match ios-v*).
+on:
+  push:
+    branches: [ "feat/ios-**", "ios/**" ]
+    tags: [ "ios-v*" ]
+  pull_request:
+    paths:
+      - "ios/**"
+      - "spec/**"
+      - "valid-urls.json"
+      - "donations.json"
+      - ".github/workflows/build-ios.yml"
+  workflow_dispatch:
+    inputs:
+      upload:
+        description: "Archive and upload to TestFlight"
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ios-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  spec:
+    name: npm test (spec vectors, invariants, synced copies)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - run: npm install
+      - run: npm test
+
+  geo-check:
+    # App Review item R1: the reviewer is outside Ukraine. Records whether both data hosts answer a US address.
+    name: Data hosts reachable from outside Ukraine
+    runs-on: ubuntu-latest
+    steps:
+      - name: Probe ztoe.com.ua and PowerOn
+        run: |
+          probe() {
+            local name="$1" url="$2" accept="$3" data="$4"
+            local args=(-sS -o body.bin -w '%{http_code} %{size_download} %{time_total}' --max-time 30 -A 'Mozilla/5.0 (iPhone; CPU iPhone OS 26_0 like Mac OS X)')
+            [ -n "$accept" ] && args+=(-H "Accept: $accept")
+            [ -n "$data" ] && args+=(--data "$data")
+            local out
+            out=$(curl "${args[@]}" "$url" 2>&1) || true
+            local marker="-"
+            if [ -s body.bin ]; then
+              if iconv -f WINDOWS-1251 -t UTF-8 body.bin 2>/dev/null | grep -q 'Графіки погодинних'; then marker="schedule-marker"; fi
+              if grep -q '"hydra:member"\|"member"' body.bin; then marker="json-members"; fi
+            fi
+            echo "| $name | \`$url\` | $out | $marker |" >> "$GITHUB_STEP_SUMMARY"
+            echo "$name -> $out ($marker)"
+          }
+          echo "### Geo-check from $(curl -s --max-time 10 https://ipinfo.io/country || echo '?') runner" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Host | URL | HTTP code, bytes, seconds | Content |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|---|---|---|---|" >> "$GITHUB_STEP_SUMMARY"
+          probe "ztoe schedule (GET)" "https://www.ztoe.com.ua/unhooking-search.php" "" ""
+          probe "ztoe streets of Zhytomyr (POST all=1)" "https://www.ztoe.com.ua/unhooking-search.php" "" "rem_id=7&naspunkt_id=16657&all=1"
+          probe "PowerOn REM list" "https://api-ztoe-poweron.inneti.net/api/pw_otgs?pagination=false" "application/ld+json" ""
+          probe "PowerOn accidents, one street" "https://api-ztoe-poweron.inneti.net/api/pw_accidents?street.id%5B%5D=4757&switchSubReason%5B%5D=0&switchSubReason%5B%5D=1&switchSubReason%5B%5D=3&pagination=false" "application/ld+json" ""
+
+  build-test:
+    name: Build, unit tests, simulator screenshot (Xcode 26)
+    runs-on: macos-26
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Select newest Xcode 26
+        run: |
+          XCODE=$(ls -d /Applications/Xcode_26*.app 2>/dev/null | sort -V | tail -1)
+          if [ -z "$XCODE" ]; then echo "No Xcode 26 on this image:"; ls -d /Applications/Xcode*; exit 1; fi
+          sudo xcode-select -s "$XCODE/Contents/Developer"
+          xcodebuild -version
+          xcrun simctl list runtimes
+
+      - name: Generate the Xcode project
+        working-directory: ios
+        run: |
+          command -v xcodegen >/dev/null || brew install xcodegen
+          xcodegen generate
+
+      - name: Pick an iPhone simulator
+        id: sim
+        run: |
+          UDID=$(python3 ios/scripts/pick_simulator.py)
+          echo "udid=$UDID" >> "$GITHUB_OUTPUT"
+
+      - name: Build and run unit tests
+        working-directory: ios
+        run: |
+          set -o pipefail
+          xcodebuild test \
+            -project SvitloZhytomyr.xcodeproj \
+            -scheme ZTPreBlackout \
+            -destination "id=${{ steps.sim.outputs.udid }}" \
+            -derivedDataPath build/DD \
+            -resultBundlePath build/Tests.xcresult \
+            CODE_SIGNING_ALLOWED=NO \
+            CURRENT_PROJECT_VERSION=${{ github.run_number }} \
+            | tee build/xcodebuild-test.log | grep -E '^(Test Suite|Test Case .*(passed|failed)|.*error:|\*\* )' || true
+          grep -q '\*\* TEST SUCCEEDED \*\*' build/xcodebuild-test.log
+
+      - name: Launch the app and take a screenshot
+        working-directory: ios
+        run: |
+          UDID=${{ steps.sim.outputs.udid }}
+          APP=build/DD/Build/Products/Debug-iphonesimulator/ZTPreBlackout.app
+          mkdir -p build/screenshots
+          xcrun simctl boot "$UDID" 2>/dev/null || true
+          xcrun simctl bootstatus "$UDID" -b
+          xcrun simctl status_bar "$UDID" override --time 9:41 --batteryState charged --batteryLevel 100 --cellularBars 4 || true
+          xcrun simctl install "$UDID" "$APP"
+          xcrun simctl launch "$UDID" ua.blackout.prewarning
+          sleep 20
+          xcrun simctl io "$UDID" screenshot build/screenshots/main-launch.png
+          plutil -p "$APP/Info.plist" | grep -E 'CFBundle(ShortVersionString|Version|DisplayName)'
+          ls "$APP/PlugIns"
+
+      - name: Upload screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-screenshots
+          path: ios/build/screenshots
+          if-no-files-found: ignore
+
+      - name: Upload test results on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-test-results
+          path: |
+            ios/build/Tests.xcresult
+            ios/build/xcodebuild-test.log
+          if-no-files-found: ignore
+
+  testflight:
+    name: Archive and upload to TestFlight
+    needs: [ spec, build-test ]
+    if: startsWith(github.ref, 'refs/tags/ios-v') || (github.event_name == 'workflow_dispatch' && inputs.upload)
+    runs-on: macos-26
+    timeout-minutes: 45
+    env:
+      ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+      ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+      ASC_KEY_P8: ${{ secrets.ASC_KEY_P8 }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check signing secrets
+        run: |
+          missing=""
+          for v in ASC_KEY_ID ASC_ISSUER_ID ASC_KEY_P8 APPLE_TEAM_ID; do [ -z "${!v}" ] && missing="$missing $v"; done
+          if [ -n "$missing" ]; then echo "::error::Missing repository secrets:$missing (see docs/ios/IOS_PORT_PLAN.md section 8)"; exit 1; fi
+
+      - name: Select newest Xcode 26
+        run: |
+          XCODE=$(ls -d /Applications/Xcode_26*.app | sort -V | tail -1)
+          sudo xcode-select -s "$XCODE/Contents/Developer"
+          xcodebuild -version
+
+      - name: Generate the Xcode project
+        working-directory: ios
+        run: |
+          command -v xcodegen >/dev/null || brew install xcodegen
+          xcodegen generate
+
+      - name: Archive (cloud-managed signing via the App Store Connect API key)
+        working-directory: ios
+        run: |
+          set -o pipefail
+          KEY_PATH="$RUNNER_TEMP/AuthKey_${ASC_KEY_ID}.p8"
+          printf '%s' "$ASC_KEY_P8" > "$KEY_PATH"
+          echo "KEY_PATH=$KEY_PATH" >> "$GITHUB_ENV"
+          xcodebuild archive \
+            -project SvitloZhytomyr.xcodeproj \
+            -scheme ZTPreBlackout \
+            -configuration Release \
+            -destination "generic/platform=iOS" \
+            -archivePath build/ZTPreBlackout.xcarchive \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath "$KEY_PATH" \
+            -authenticationKeyID "$ASC_KEY_ID" \
+            -authenticationKeyIssuerID "$ASC_ISSUER_ID" \
+            DEVELOPMENT_TEAM="$APPLE_TEAM_ID" \
+            CODE_SIGN_STYLE=Automatic \
+            CURRENT_PROJECT_VERSION=${{ github.run_number }} \
+            | tee build/archive.log | grep -E '(error:|warning: .*sign|\*\* )' || true
+          grep -q '\*\* ARCHIVE SUCCEEDED \*\*' build/archive.log
+
+      - name: Export and upload to App Store Connect
+        working-directory: ios
+        run: |
+          set -o pipefail
+          cat > build/ExportOptions.plist <<EOF
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+            <key>method</key><string>app-store-connect</string>
+            <key>destination</key><string>upload</string>
+            <key>teamID</key><string>${APPLE_TEAM_ID}</string>
+            <key>signingStyle</key><string>automatic</string>
+            <key>uploadSymbols</key><true/>
+            <key>manageAppVersionAndBuildNumber</key><false/>
+          </dict>
+          </plist>
+          EOF
+          xcodebuild -exportArchive \
+            -archivePath build/ZTPreBlackout.xcarchive \
+            -exportOptionsPlist build/ExportOptions.plist \
+            -exportPath build/export \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath "$KEY_PATH" \
+            -authenticationKeyID "$ASC_KEY_ID" \
+            -authenticationKeyIssuerID "$ASC_ISSUER_ID" \
+            | tee build/export.log | grep -E '(error:|Upload|\*\* )' || true
+          grep -q '\*\* EXPORT SUCCEEDED \*\*' build/export.log
+
+      - name: Remove the API key file
+        if: always()
+        run: rm -f "$RUNNER_TEMP"/AuthKey_*.p8
