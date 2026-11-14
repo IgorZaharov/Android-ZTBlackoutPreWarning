@@ -11,7 +11,7 @@ public final class DonationsRepository {
     ]
 
     private var defaults: UserDefaults {
-        UserDefaults(suiteName: ScheduleRepository.APP_GROUP_ID) ?? .standard
+        AppGroup.suite
     }
 
     public func getDonationsWithDailyRefresh(nowMs: Int64 = Int64(Date().timeIntervalSince1970 * 1000), forceRefresh: Bool = false) async -> [DonationItem] {

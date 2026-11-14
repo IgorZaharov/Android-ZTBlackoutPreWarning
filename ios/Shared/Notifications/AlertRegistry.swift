@@ -1,54 +1,73 @@
 import Foundation
 
+/// Keys that were already notified, so an alert is never posted twice (mirror of android
+/// AlertRegistry.kt, spec/PERSISTENCE.md section 4). Store `zt_notified_blackouts_v1`.
 public final class AlertRegistry {
     public static let shared = AlertRegistry()
-    public static let PREFS_KEY = "zt_alert_registry_v1"
+    public static let MAX_STORED_ENTRIES = 300
+    private static let WEEK_MS: Int64 = 7 * 24 * 60 * 60 * 1000
 
-    private var defaults: UserDefaults {
-        UserDefaults(suiteName: ScheduleRepository.APP_GROUP_ID) ?? .standard
+    let prefs: Prefs
+    private let lock = NSLock()
+    private let nowMs: () -> Int64
+
+    public init(prefs: Prefs = Prefs("zt_notified_blackouts_v1"),
+                nowMs: @escaping () -> Int64 = { Int64(Date().timeIntervalSince1970 * 1000) }) {
+        self.prefs = prefs
+        self.nowMs = nowMs
     }
 
-    public static let MAX_STORED_ENTRIES = 100
+    public func hasNotified(_ key: String) -> Bool { prefs.bool("notified_\(key)", false) }
 
-    public func hasNotified(slotId: String) -> Bool {
-        let set = Set(defaults.stringArray(forKey: Self.PREFS_KEY) ?? [])
-        return set.contains(slotId)
-    }
+    public func hasFired(_ key: String) -> Bool { hasNotified(key) }
 
-    public func markNotified(slotId: String, now: Date = Date()) {
-        let todayStr = KyivZone.todayIsoString(now: now)
-        let tomorrowStr = KyivZone.tomorrowIsoString(now: now)
-        var list = (defaults.stringArray(forKey: Self.PREFS_KEY) ?? []).filter { id in
-            !id.hasPrefix("block_") || id.hasPrefix("block_\(todayStr)_") || id.hasPrefix("block_\(tomorrowStr)_")
-        }
-        if !list.contains(slotId) {
-            list.append(slotId)
-        }
-        if list.count > Self.MAX_STORED_ENTRIES {
-            list = Array(list.suffix(Self.MAX_STORED_ENTRIES))
-        }
-        defaults.set(list, forKey: Self.PREFS_KEY)
-    }
+    public func markFired(_ key: String) { markNotified(key) }
 
-    public func resetFutureSlotsOnTimeChange(queue: String, todayStr: String, currentMinuteOfDay: Int, advanceNoticeMinutes: Int) {
-        let existing = defaults.stringArray(forKey: Self.PREFS_KEY) ?? []
-        let filtered = existing.filter { id in
-            guard id.hasPrefix("block_\(todayStr)_"), id.hasSuffix("_Q\(queue)") else {
-                return true
+    /// Marks `key` with a timestamp, prunes entries older than 7 days and keeps at most
+    /// MAX_STORED_ENTRIES (300: up to 5 addresses share it).
+    public func markNotified(_ key: String) {
+        lock.lock(); defer { lock.unlock() }
+        let now = nowMs()
+        let cutoff = now - Self.WEEK_MS
+        var stamps: [(key: String, at: Int64)] = []
+        for k in prefs.keys() where k.hasPrefix("ts_") {
+            let old = String(k.dropFirst(3))
+            let at = prefs.int64(k, 0)
+            if at < cutoff {
+                prefs.remove(k)
+                prefs.remove("notified_\(old)")
+            } else {
+                stamps.append((old, at))
             }
-            let parts = id.split(separator: "_")
-            guard parts.count >= 4 else { return true }
-            let startStr = String(parts[2])
-            let hm = startStr.split(separator: ":")
-            guard hm.count == 2, let h = Int(hm[0]), let m = Int(hm[1]) else { return true }
-            let blockStartMin = h * 60 + m
-            let alertMin = blockStartMin - advanceNoticeMinutes
-            return currentMinuteOfDay >= alertMin
         }
-        defaults.set(filtered, forKey: Self.PREFS_KEY)
+        if stamps.count >= Self.MAX_STORED_ENTRIES {
+            let oldestFirst = stamps.stableSorted { $0.at < $1.at }
+            let excess = stamps.count - Self.MAX_STORED_ENTRIES + 1
+            for s in oldestFirst.prefix(excess) {
+                prefs.remove("ts_\(s.key)")
+                prefs.remove("notified_\(s.key)")
+            }
+        }
+        prefs.set("notified_\(key)", true)
+        prefs.set("ts_\(key)", now)
     }
 
-    public func clearAll() {
-        defaults.removeObject(forKey: Self.PREFS_KEY)
+    /// When the clock was set back, clears keys whose notification time now lies in the future and the
+    /// given blocks whose alert time is in the future again.
+    public func resetFutureSlotsOnTimeChange(nowMs: Int64, futureBlockIds: Set<String>) {
+        lock.lock(); defer { lock.unlock() }
+        for k in prefs.keys() where k.hasPrefix("ts_") && prefs.int64(k, 0) > nowMs {
+            prefs.remove(k)
+            prefs.remove("notified_\(k.dropFirst(3))")
+        }
+        for id in futureBlockIds {
+            prefs.remove("notified_\(id)")
+            prefs.remove("ts_\(id)")
+        }
+    }
+
+    public func clearHistory() {
+        lock.lock(); defer { lock.unlock() }
+        prefs.clear()
     }
 }

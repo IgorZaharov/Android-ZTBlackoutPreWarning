@@ -3,13 +3,14 @@ import SwiftUI
 @main
 struct ZTPreBlackoutApp: App {
     init() {
-        BackgroundSyncManager.shared.registerBackgroundTasks()
-        BackgroundSyncManager.shared.schedulePeriodicWork()
+        NetworkProbe.start()
+        ZtoeAddressLookup.initDiskCache()
     }
 
     var body: some Scene {
         WindowGroup {
-            BlackoutAppNavigation()
+            // Interim screen of milestone M2 (data layer); replaced by the 1.4.0 screens in M4.
+            DataCheckScreen()
         }
     }
 }

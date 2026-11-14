@@ -1,149 +1,89 @@
 import Foundation
 
-public enum SlotStatus: String, Codable, Equatable {
+// Mirror of android data/model/Models.kt (1.4.0). The retired 1.3.x emergency model
+// (EmergencyOutageInfo, active_emergency_outage_*) is not ported: emergencies come from PowerOn
+// through OutageRepository and the EmergencyLedger.
+
+public enum SlotStatus: String, Codable, Hashable, Sendable {
     case POWER_ON
     case POWER_OFF
 }
 
-public struct BlackoutSlot: Codable, Equatable, Identifiable {
-    public var id: Int { index }
-    public let index: Int
-    public let startMinute: Int
-    public let endMinute: Int
-    public let label: String
-    public let status: SlotStatus
-    public let isEmergency: Bool
+/// The address chosen in the "?" dialog: ztoe REM slug, settlement option id, street option id, house.
+public struct SelectedAddressQuery: Hashable, Sendable {
+    public var remId: String
+    public var settlementId: String
+    public var streetId: String
+    public var house: String
 
-    public init(index: Int, startMinute: Int, endMinute: Int, label: String, status: SlotStatus, isEmergency: Bool = false) {
-        self.index = index
+    public init(remId: String, settlementId: String, streetId: String, house: String) {
+        self.remId = remId
+        self.settlementId = settlementId
+        self.streetId = streetId
+        self.house = house
+    }
+}
+
+/// One half-hour cell in the shape the drum chart and widgets draw (Kotlin `BlackoutSlot`).
+public struct BlackoutSlot: Hashable, Identifiable, Sendable {
+    /// Unique key: "<date>_<start>_Q<queue>".
+    public var id: String
+    public var startHour: Int
+    public var endHour: Int
+    public var startMinute: Int
+    public var endMinute: Int
+    public var startTimeStr: String
+    public var endTimeStr: String
+    public var status: SlotStatus
+    public var isEmergency: Bool
+    /// Off because of the planned ztoe schedule (or repair works). With `isEmergency` both overlap on the drum.
+    public var isPlanned: Bool
+
+    public init(
+        id: String, startHour: Int, endHour: Int, startMinute: Int, endMinute: Int,
+        startTimeStr: String, endTimeStr: String, status: SlotStatus,
+        isEmergency: Bool = false, isPlanned: Bool? = nil
+    ) {
+        self.id = id
+        self.startHour = startHour
+        self.endHour = endHour
         self.startMinute = startMinute
         self.endMinute = endMinute
-        self.label = label
+        self.startTimeStr = startTimeStr
+        self.endTimeStr = endTimeStr
         self.status = status
         self.isEmergency = isEmergency
+        self.isPlanned = isPlanned ?? (status == .POWER_OFF && !isEmergency)
     }
+
+    public var label: String { "\(startTimeStr) - \(endTimeStr)" }
 }
 
-public struct DetailedInterval: Codable, Equatable, Identifiable {
-    public var id: String { "\(startStr)-\(endStr)" }
-    public let startStr: String
-    public let endStr: String
-    public let startMinuteOfDay: Int
-    public let endMinuteOfDay: Int
-    public let durationHours: Double
-    public let isEmergency: Bool
+// CRITICAL CONSTANTS — DO NOT MODIFY DEFAULT VALUES (advanceNoticeMinutes = 15, refreshIntervalMinutes = 30) UNLESS EXPLICITLY REQUESTED
+public struct UserSettings: Hashable, Sendable {
+    public var cityUrl: String = "https://www.ztoe.com.ua/unhooking-search.php"
+    public var queue: String = ""
+    public var customQueueStatusText: String? = nil
+    public var selectedAddress: String? = nil
+    public var selectedAddressQuery: SelectedAddressQuery? = nil
+    public var refreshIntervalMinutes: Int = 30
+    public var advanceNoticeMinutes: Int = 15
+    public var notificationsEnabled: Bool = true
+    public var emergencyNotificationsEnabled: Bool = true
+    public var soundEnabled: Bool = true
+    public var vibrationEnabled: Bool = true
+    public var prevSoundEnabled: Bool = true
+    public var prevVibrationEnabled: Bool = true
+    /// Notify when the estimated restoration of an emergency moves (ETA_CHANGED), all addresses (spec/NOTIFICATIONS.md 2.4).
+    public var emergencyEtaAlerts: Bool = true
+    /// Notify when an emergency ends (END), all addresses. The start always notifies.
+    public var emergencyEndAlerts: Bool = true
+    /// "SYSTEM", "DARK", "LIGHT"
+    public var themeMode: String = "SYSTEM"
+    /// "SYSTEM", "UK", "EN"
+    public var language: String = "SYSTEM"
 
-    public init(
-        startStr: String,
-        endStr: String,
-        startMinuteOfDay: Int,
-        endMinuteOfDay: Int,
-        durationHours: Double,
-        isEmergency: Bool = false
-    ) {
-        self.startStr = startStr
-        self.endStr = endStr
-        self.startMinuteOfDay = startMinuteOfDay
-        self.endMinuteOfDay = endMinuteOfDay
-        self.durationHours = durationHours
-        self.isEmergency = isEmergency
-    }
-}
-
-public struct StatusAndCountdown: Equatable {
-    public let isBlackoutNow: Bool
-    public let isUnclear: Bool
-    public let countdownText: String
-    public let nextSlotTime: String
-    public let currentOrNextInterval: DetailedInterval?
-
-    public init(
-        isBlackoutNow: Bool,
-        isUnclear: Bool = false,
-        countdownText: String,
-        nextSlotTime: String,
-        currentOrNextInterval: DetailedInterval? = nil
-    ) {
-        self.isBlackoutNow = isBlackoutNow
-        self.isUnclear = isUnclear
-        self.countdownText = countdownText
-        self.nextSlotTime = nextSlotTime
-        self.currentOrNextInterval = currentOrNextInterval
-    }
-}
-
-public enum FetchStatus: String, Codable, Equatable {
-    case SUCCESS
-    case NO_INTERNET
-    case NO_QUEUES_FOUND
-}
-
-public struct FullScheduleResult: Equatable {
-    public let status: FetchStatus
-    public let todaySchedules: [String: [BlackoutSlot]]
-    public let tomorrowSchedules: [String: [BlackoutSlot]]
-    public let updatedAt: String
-}
-
-public struct UserSettings: Codable, Equatable {
-    public var queue: String
-    public var customQueueStatusText: String?
-    public var selectedAddress: String?
-    public var selectedRem: String?
-    public var selectedSettlement: String?
-    public var selectedStreet: String?
-    public var selectedHouse: String?
-    public var activeEmergencyOutageStart: String?
-    public var activeEmergencyOutageRestore: String?
-    public var url: String
-    public var advanceNoticeMinutes: Int
-    public var refreshIntervalMinutes: Int
-    public var notificationsEnabled: Bool
-    public var emergencyNotificationsEnabled: Bool
-    public var soundEnabled: Bool
-    public var vibrationEnabled: Bool
-    public var language: String
-    public var theme: String
-
-    public init(
-        queue: String = "",
-        customQueueStatusText: String? = nil,
-        selectedAddress: String? = nil,
-        selectedRem: String? = nil,
-        selectedSettlement: String? = nil,
-        selectedStreet: String? = nil,
-        selectedHouse: String? = nil,
-        activeEmergencyOutageStart: String? = nil,
-        activeEmergencyOutageRestore: String? = nil,
-        url: String = "https://www.ztoe.com.ua/unhooking-search.php",
-        advanceNoticeMinutes: Int = 15,
-        refreshIntervalMinutes: Int = 30,
-        notificationsEnabled: Bool = true,
-        emergencyNotificationsEnabled: Bool = true,
-        soundEnabled: Bool = true,
-        vibrationEnabled: Bool = true,
-        language: String = "system",
-        theme: String = "system"
-    ) {
-        self.queue = queue
-        self.customQueueStatusText = customQueueStatusText
-        self.selectedAddress = selectedAddress
-        self.selectedRem = selectedRem
-        self.selectedSettlement = selectedSettlement
-        self.selectedStreet = selectedStreet
-        self.selectedHouse = selectedHouse
-        self.activeEmergencyOutageStart = activeEmergencyOutageStart
-        self.activeEmergencyOutageRestore = activeEmergencyOutageRestore
-        self.url = url
-        self.advanceNoticeMinutes = advanceNoticeMinutes
-        self.refreshIntervalMinutes = refreshIntervalMinutes
-        self.notificationsEnabled = notificationsEnabled
-        self.emergencyNotificationsEnabled = emergencyNotificationsEnabled
-        self.soundEnabled = soundEnabled
-        self.vibrationEnabled = vibrationEnabled
-        self.language = language
-        self.theme = theme
-    }
+    public init() {}
 
     public static let ALL_QUEUES: [String] = [
         "1.1", "1.2", "2.1", "2.2", "3.1", "3.2",

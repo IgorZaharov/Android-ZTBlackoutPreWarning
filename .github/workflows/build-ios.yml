@@ -99,6 +99,9 @@ jobs:
 
       - name: Build and run unit tests
         working-directory: ios
+        env:
+          # LiveFetchTests talk to ztoe.com.ua and PowerOn only when this is set (xcodebuild passes TEST_RUNNER_* to the tests)
+          TEST_RUNNER_ZT_LIVE: "1"
         run: |
           set -o pipefail
           mkdir -p build
@@ -110,7 +113,7 @@ jobs:
             -resultBundlePath build/Tests.xcresult \
             CODE_SIGNING_ALLOWED=NO \
             CURRENT_PROJECT_VERSION=${{ github.run_number }} \
-            | tee build/xcodebuild-test.log | grep -E '^(Test Suite|Test Case .*(passed|failed)|\[vectors\]|.*error:|\*\* )' || true
+            | tee build/xcodebuild-test.log | grep -E '^(Test Suite|Test Case .*(passed|failed|skipped)|\[vectors\]|\[live\]|.*error:|\*\* )' || true
           grep -q '\*\* TEST SUCCEEDED \*\*' build/xcodebuild-test.log
 
       - name: Launch the app and take a screenshot

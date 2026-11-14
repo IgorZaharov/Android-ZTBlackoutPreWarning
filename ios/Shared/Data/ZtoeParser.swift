@@ -1,362 +1,342 @@
 import Foundation
-import CoreFoundation
 
-public final class ZtoeParser {
-    public static let shared = ZtoeParser()
-    private static let cacheLock = NSLock()
-    private static var lastEtag: String?
-    private static var lastHtmlCache: String?
+public enum FetchStatus: String, Sendable {
+    case SUCCESS
+    case NO_INTERNET
+    case NO_QUEUES_FOUND
+}
 
-    // Pre-compiled static regular expressions to eliminate ~72 regex compilations per HTML refresh
-    private static let leafTableRegex = try? NSRegularExpression(pattern: "(?is)<table\\b[^>]*>(?:(?!</?table\\b).)*</table>")
-    private static let trRegex = try? NSRegularExpression(pattern: "(?is)<tr\\b[^>]*>(.*?)</tr>")
-    private static let tdRegex = try? NSRegularExpression(pattern: "(?is)<t[dh]\\b([^>]*)>(.*?)</t[dh]>")
-    private static let stripTagsRegex = try? NSRegularExpression(pattern: "<[^>]+>")
+/// Result of one schedule refresh (mirror of android `ScheduleFetchResult`). Cells are `true` where
+/// power is off: 48 half-hours (or 24 hours on an hourly table; OutageEngine.normalizeSlots handles both).
+public struct ScheduleFetchResult: Sendable {
+    public var todayOff: [Bool]?
+    public var tomorrowOff: [Bool]?
+    public var hasTomorrowSchedule: Bool
+    public var status: FetchStatus
+    /// What the user is told about the site.
+    public var siteState: SiteState
+    public var failure: FetchFailure
+    /// Text of the "УВАГА! ВАЖЛИВА ІНФОРМАЦІЯ!" notice when the page has no schedule table (core/SiteNotice).
+    public var notice: String?
 
-    private static var defaults: UserDefaults {
-        UserDefaults(suiteName: ScheduleRepository.APP_GROUP_ID) ?? .standard
+    public init(
+        todayOff: [Bool]?, tomorrowOff: [Bool]?, hasTomorrowSchedule: Bool, status: FetchStatus = .SUCCESS,
+        siteState: SiteState? = nil, failure: FetchFailure = .NONE, notice: String? = nil
+    ) {
+        self.todayOff = todayOff
+        self.tomorrowOff = tomorrowOff
+        self.hasTomorrowSchedule = hasTomorrowSchedule
+        self.status = status
+        self.siteState = siteState ?? {
+            switch status {
+            case .SUCCESS: return .AVAILABLE_WITH_TABLE
+            case .NO_QUEUES_FOUND: return .AVAILABLE_NO_TABLE
+            case .NO_INTERNET: return .SITE_UNREACHABLE
+            }
+        }()
+        self.failure = failure
+        self.notice = notice
     }
+}
 
-    public static let DEFAULT_VALID_URLS: [String] = [
+// =========================================================================================
+// CRITICAL SECTION — DO NOT MODIFY UNLESS EXPLICITLY REQUESTED
+// ztoe HTML table parser and URL validator for https://www.ztoe.com.ua/unhooking-search.php
+// (mirror of android data/parser/ZtoeParser.kt; regex scanner instead of Jsoup, same rules)
+// =========================================================================================
+public enum ZtoeParser {
+    private static let leafTableRegex = Rx("(?is)<table\\b[^>]*>(?:(?!</?table\\b).)*</table>")
+    private static let trRegex = Rx("(?is)<tr\\b[^>]*>(.*?)</tr>")
+    private static let cellRegex = Rx("(?is)<(t[dh])\\b([^>]*)>(.*?)</t[dh]>")
+    private static let fullDateRegex = Rx("(?<!\\d)(\\d{1,2})\\.(\\d{1,2})\\.(\\d{4})(?!\\d)")
+    private static let shortDateRegex = Rx("(?<!\\d)(\\d{1,2})\\.(\\d{1,2})(?!\\.\\d|\\d)")
+
+    public static let DEFAULT_VALID_URLS = [
         "https://www.ztoe.com.ua/unhooking-search.php",
         "https://example.com"
     ]
 
-    public static func isValidScheduleUrl(_ urlStr: String, validUrls: [String] = DEFAULT_VALID_URLS) -> Bool {
-        let trimmed = urlStr.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        guard trimmed.hasPrefix("https://") || trimmed.hasPrefix("http://") else { return false }
-        return validUrls.contains { allowed in
-            let normAllowed = allowed.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-            return trimmed == normAllowed || trimmed.hasPrefix(normAllowed + "?") || trimmed.hasPrefix(normAllowed + "#")
-        }
+    public static let ALL_QUEUES = UserSettings.ALL_QUEUES
+
+    /// URLs from the bundled valid-urls.json (app and widget both bundle it), else the defaults.
+    public static let validUrls: [String] = {
+        guard let url = Bundle.main.url(forResource: "valid-urls", withExtension: "json"),
+              let text = try? String(contentsOf: url, encoding: .utf8) else { return DEFAULT_VALID_URLS }
+        let quoted = Rx("\"([^\"]+)\"")
+        let ns = text as NSString
+        let found = quoted.re.matches(in: text, range: NSRange(location: 0, length: ns.length))
+            .compactMap { Rx.group($0, 1, in: ns)?.ktTrim() }
+            .filter { !$0.isEmpty }
+        return found.isEmpty ? DEFAULT_VALID_URLS : found
+    }()
+
+    private static func strip(_ url: String) -> String {
+        var t = url.ktTrim()
+        if t.hasSuffix("/") { t.removeLast() }
+        return t
     }
 
-    public static func decodeWindows1251(_ data: Data) -> String {
-        let cfEnc = CFStringEncodings.windowsCyrillic.rawValue
-        let nsEnc = CFStringConvertEncodingToNSStringEncoding(CFStringEncoding(cfEnc))
-        if let decoded = String(data: data, encoding: String.Encoding(rawValue: nsEnc)),
-           (decoded.contains("черга") || decoded.contains("Черга") || decoded.contains("Графік") || decoded.contains("<table")) {
-            return decoded
-        }
-        return String(data: data, encoding: .utf8) ?? String(decoding: data, as: UTF8.self)
+    public static func isValidUrl(_ url: String) -> Bool {
+        let trimmed = strip(url)
+        if trimmed.isEmpty { return false }
+        return validUrls.contains { strip($0).caseInsensitiveCompare(trimmed) == .orderedSame }
     }
 
+    // MARK: - In-memory page cache (20 s), like the Android parser
+
+    private static let memoryLock = NSLock()
+    private static var cachedHtml: (url: String, date: LocalDate, atMs: Int64, html: String)?
+    private static let DOC_MEMORY_CACHE_MS: Int64 = 20_000
+
+    static func clearMemoryCacheForTesting() {
+        memoryLock.lock(); cachedHtml = nil; memoryLock.unlock()
+    }
+
+    // MARK: - Fetch
+
+    /// Fetches the page, caches all 12 queues and returns `queue`'s cells. A failed refresh never erases
+    /// a schedule that is still valid for today (spec/SITE_STATE.md).
     public static func fetchFullSchedule(
-        urlStr: String,
+        url: String,
+        queue: String,
+        forceNetwork: Bool = false,
+        repo: ScheduleRepository = .shared,
+        http: HttpClient = URLSessionHttp.shared,
         now: Date = Date()
-    ) async -> FullScheduleResult {
-        guard isValidScheduleUrl(urlStr), let url = URL(string: urlStr) else {
-            ScheduleRepository.shared.clearAllSchedulesOnUnclearState()
-            return FullScheduleResult(status: .NO_QUEUES_FOUND, todaySchedules: [:], tomorrowSchedules: [:], updatedAt: "")
+    ) async -> ScheduleFetchResult {
+        let today = KyivTime.localDateTime(of: now).date
+        let cleanUrl = url.ktTrim()
+
+        func failed(_ failure: FetchFailure) -> ScheduleFetchResult {
+            ScheduleFetchResult(
+                todayOff: nil, tomorrowOff: nil, hasTomorrowSchedule: false, status: .NO_INTERNET,
+                siteState: SiteStateResolver.resolve(failure: failure, hasTodayTable: false, networkValidated: NetworkProbe.isValidated()),
+                failure: failure
+            )
+        }
+        func noTable(_ html: String? = nil) -> ScheduleFetchResult {
+            ScheduleFetchResult(
+                todayOff: nil, tomorrowOff: nil, hasTomorrowSchedule: false, status: .NO_QUEUES_FOUND,
+                siteState: .AVAILABLE_NO_TABLE, notice: html.flatMap { SiteNotice.extract($0) }
+            )
         }
 
-        var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 15.0)
-        request.setValue("gzip, deflate", forHTTPHeaderField: "Accept-Encoding")
-        request.setValue("Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15", forHTTPHeaderField: "User-Agent")
-
-        cacheLock.lock()
-        let currentEtag = lastEtag ?? defaults.string(forKey: "ztoe_last_etag")
-        let currentHtmlCache = lastHtmlCache ?? defaults.string(forKey: "ztoe_last_html_cache")
-        cacheLock.unlock()
-
-        if let etag = currentEtag, !etag.isEmpty {
-            request.setValue(etag, forHTTPHeaderField: "If-None-Match")
+        if !isValidUrl(url) {
+            repo.clearScheduleCache() // a schedule from a non-whitelisted source is meaningless
+            return noTable()
         }
+        let q = queue.ktTrim()
+        let nowMs = Int64(now.timeIntervalSince1970 * 1000)
+        let canUseConditional = !forceNetwork && !q.isEmpty && repo.hasValidTodayCache(q) && repo.hasTomorrowSchedule(q)
 
-        do {
-            let (data, response) = try await URLSession.shared.data(for: request)
-            guard let httpResp = response as? HTTPURLResponse else {
-                ScheduleRepository.shared.clearAllSchedulesOnUnclearState()
-                return FullScheduleResult(status: .NO_INTERNET, todaySchedules: [:], tomorrowSchedules: [:], updatedAt: "")
-            }
-
-            let html: String
-            if httpResp.statusCode == 304, let cached = currentHtmlCache, !cached.isEmpty {
-                html = cached
-            } else if (200...299).contains(httpResp.statusCode) {
-                html = decodeWindows1251(data)
-                if let newEtag = httpResp.value(forHTTPHeaderField: "ETag") {
-                    cacheLock.lock()
-                    lastEtag = newEtag
-                    lastHtmlCache = html
-                    defaults.set(newEtag, forKey: "ztoe_last_etag")
-                    defaults.set(html, forKey: "ztoe_last_html_cache")
-                    cacheLock.unlock()
-                }
-            } else {
-                ScheduleRepository.shared.clearAllSchedulesOnUnclearState()
-                return FullScheduleResult(status: .NO_INTERNET, todaySchedules: [:], tomorrowSchedules: [:], updatedAt: "")
-            }
-
-            return parseHtmlFullSchedules(html: html, now: now)
-        } catch {
-            ScheduleRepository.shared.clearAllSchedulesOnUnclearState()
-            return FullScheduleResult(status: .NO_INTERNET, todaySchedules: [:], tomorrowSchedules: [:], updatedAt: "")
+        var html: String?
+        memoryLock.lock()
+        if !forceNetwork, let c = cachedHtml, c.url == cleanUrl, c.date == today, (0..<DOC_MEMORY_CACHE_MS).contains(nowMs - c.atMs) {
+            html = c.html
         }
-    }
+        memoryLock.unlock()
 
-    public static func parseHtmlFullSchedules(html: String, now: Date = Date()) -> FullScheduleResult {
-        let leafTables = extractLeafTables(from: html)
-        if leafTables.isEmpty {
-            ScheduleRepository.shared.clearAllSchedulesOnUnclearState()
-            return FullScheduleResult(status: .NO_QUEUES_FOUND, todaySchedules: [:], tomorrowSchedules: [:], updatedAt: "")
-        }
-
-        let cal = KyivZone.calendar
-        let todayComps = cal.dateComponents([.year, .month, .day], from: now)
-        let tomorrowDate = cal.date(byAdding: .day, value: 1, to: now) ?? now.addingTimeInterval(86400)
-        let tomorrowComps = cal.dateComponents([.year, .month, .day], from: tomorrowDate)
-
-        var todayTable: String?
-        var tomorrowTable: String?
-
-        for table in leafTables {
-            let headerText = extractFirstTwoRowsText(from: table)
-            if todayTable == nil, tableMatchesDate(headerText: headerText, comps: todayComps) {
-                todayTable = table
-            } else if tomorrowTable == nil, tableMatchesDate(headerText: headerText, comps: tomorrowComps) {
-                tomorrowTable = table
-            }
-        }
-
-        if todayTable == nil {
-            todayTable = leafTables.first { countMatchingQueues(in: $0) >= 6 } ?? leafTables.first
-        }
-
-        var todayMap: [String: [BlackoutSlot]] = [:]
-        var tomorrowMap: [String: [BlackoutSlot]] = [:]
-
-        if let tTable = todayTable {
-            for q in UserSettings.ALL_QUEUES {
-                if let slots = extractQueueSlotsFromTable(tableHtml: tTable, targetQueue: q) {
-                    todayMap[q] = slots
-                }
-            }
-        }
-
-        if let tomTable = tomorrowTable {
-            for q in UserSettings.ALL_QUEUES {
-                if let slots = extractQueueSlotsFromTable(tableHtml: tomTable, targetQueue: q) {
-                    tomorrowMap[q] = slots
-                }
-            }
-        }
-
-        if todayMap.isEmpty {
-            ScheduleRepository.shared.clearAllSchedulesOnUnclearState()
-            return FullScheduleResult(status: .NO_QUEUES_FOUND, todaySchedules: [:], tomorrowSchedules: [:], updatedAt: "")
-        }
-
-        let comps = cal.dateComponents([.hour, .minute], from: now)
-        let updatedAt = String(format: "%02d:%02d", comps.hour ?? 0, comps.minute ?? 0)
-        ScheduleRepository.shared.saveAllSchedulesBatch(todaySchedules: todayMap, tomorrowSchedules: tomorrowMap, now: now)
-
-        return FullScheduleResult(
-            status: .SUCCESS,
-            todaySchedules: todayMap,
-            tomorrowSchedules: tomorrowMap,
-            updatedAt: updatedAt
-        )
-    }
-
-    public static func extractLeafTables(from html: String) -> [String] {
-        guard let regex = leafTableRegex else { return [] }
-        let nsHtml = html as NSString
-        let matches = regex.matches(in: html, range: NSRange(location: 0, length: nsHtml.length))
-        return matches.map { nsHtml.substring(with: $0.range) }
-    }
-
-    private static func extractFirstTwoRowsText(from tableHtml: String) -> String {
-        guard let regex = trRegex else { return tableHtml }
-        let nsTable = tableHtml as NSString
-        let matches = regex.matches(in: tableHtml, range: NSRange(location: 0, length: nsTable.length))
-        let rows = matches.prefix(2).map { stripTags(nsTable.substring(with: $0.range)) }
-        return rows.joined(separator: " ")
-    }
-
-    public static func tableMatchesDate(headerText: String, comps: DateComponents) -> Bool {
-        guard let day = comps.day, let month = comps.month, let year = comps.year else { return false }
-        let d2 = String(format: "%02d", day)
-        let m2 = String(format: "%02d", month)
-        let y4 = String(format: "%04d", year)
-        let y2 = String(format: "%02d", year % 100)
-
-        let numericPatterns = [
-            "\\b\(d2)[./-]\(m2)[./-]\(y4)\\b",
-            "\\b\(day)[./-]\(m2)[./-]\(y4)\\b",
-            "\\b\(d2)[./-]\(m2)[./-]\(y2)\\b"
-        ]
-        for pat in numericPatterns {
-            if let rx = try? NSRegularExpression(pattern: pat, options: .caseInsensitive),
-               rx.firstMatch(in: headerText, range: NSRange(location: 0, length: (headerText as NSString).length)) != nil {
-                return true
-            }
-        }
-
-        let ukMonths: [Int: String] = [
-            1: "січня", 2: "лютого", 3: "березня", 4: "квітня",
-            5: "травня", 6: "червня", 7: "липня", 8: "серпня",
-            9: "вересня", 10: "жовтня", 11: "листопада", 12: "грудня"
-        ]
-        if let mName = ukMonths[month] {
-            let wordPat = "\\b0?\(day)\\s+\(mName)(?:\\s+\(y4))?\\b"
-            if let rx = try? NSRegularExpression(pattern: wordPat, options: .caseInsensitive),
-               rx.firstMatch(in: headerText, range: NSRange(location: 0, length: (headerText as NSString).length)) != nil {
-                return true
-            }
-        }
-        return false
-    }
-
-    private static func countMatchingQueues(in tableHtml: String) -> Int {
-        UserSettings.ALL_QUEUES.filter { extractQueueSlotsFromTable(tableHtml: tableHtml, targetQueue: $0) != nil }.count
-    }
-
-    public static func extractQueueSlotsFromTable(tableHtml: String, targetQueue: String) -> [BlackoutSlot]? {
-        guard let trRegex = Self.trRegex,
-              let tdRegex = Self.tdRegex else { return nil }
-
-        let nsTable = tableHtml as NSString
-        let trMatches = trRegex.matches(in: tableHtml, range: NSRange(location: 0, length: nsTable.length))
-
-        for trMatch in trMatches {
-            let rowHtml = nsTable.substring(with: trMatch.range)
-            let nsRow = rowHtml as NSString
-            let tdMatches = tdRegex.matches(in: rowHtml, range: NSRange(location: 0, length: nsRow.length))
-            if tdMatches.count < 24 { continue }
-
-            let cells: [(attrs: String, text: String)] = tdMatches.map { match in
-                let attrs = nsRow.substring(with: match.range(at: 1))
-                let inner = stripTags(nsRow.substring(with: match.range(at: 2)))
-                return (attrs: attrs, text: inner)
-            }
-
-            let matchesQueue = cells.prefix(3).contains { cell in
-                let clean = cell.text.replacingOccurrences(of: ",", with: ".").trimmingCharacters(in: .whitespacesAndNewlines)
-                return clean == targetQueue || clean == "Черга \(targetQueue)" || clean == "\(targetQueue) черга" || clean == "Підчерга \(targetQueue)"
-            }
-            if !matchesQueue { continue }
-
-            let dataCells = cells.filter { cell in
-                let attrLower = cell.attrs.lowercased().replacingOccurrences(of: " ", with: "")
-                return !attrLower.contains("width:3pt") && !attrLower.contains("width:1pt") && !attrLower.contains("width=\"3\"")
-            }
-
-            let slotCount = dataCells.count >= 48 ? 48 : (dataCells.count >= 24 ? 24 : 0)
-            if slotCount == 0 { continue }
-
-            let scheduleCells = Array(dataCells.suffix(slotCount))
-            if slotCount == 24 {
-                var expanded: [BlackoutSlot] = []
-                for (hourIdx, cell) in scheduleCells.enumerated() {
-                    let isOff = isCellPowerOff(attrs: cell.attrs, text: cell.text)
-                    let status: SlotStatus = isOff ? .POWER_OFF : .POWER_ON
-                    for half in 0..<2 {
-                        let slotIdx = hourIdx * 2 + half
-                        let startMin = slotIdx * 30
-                        let endMin = startMin + 30
-                        expanded.append(BlackoutSlot(
-                            index: slotIdx,
-                            startMinute: startMin,
-                            endMinute: endMin,
-                            label: formatSlotLabel(startMin: startMin, endMin: endMin),
-                            status: status
-                        ))
+        if html == nil {
+            guard let requestUrl = URL(string: cleanUrl) else { return noTable() }
+            var request = URLRequest(url: requestUrl)
+            request.setValue(Http.userAgent, forHTTPHeaderField: "User-Agent")
+            if canUseConditional, let etag = repo.etag { request.setValue(etag, forHTTPHeaderField: "If-None-Match") }
+            do {
+                let response = try await http.send(request)
+                if response.status == 304 {
+                    // Not modified: reuse the cached schedule with zero transfer or parsing
+                    if canUseConditional, let cached = repo.todayOffCells(q) {
+                        let tomorrow = repo.tomorrowOffCells(q)
+                        return ScheduleFetchResult(todayOff: cached, tomorrowOff: tomorrow, hasTomorrowSchedule: tomorrow != nil)
                     }
+                    return noTable()
                 }
-                return expanded
-            } else {
-                return scheduleCells.enumerated().map { idx, cell in
-                    let startMin = idx * 30
-                    let endMin = startMin + 30
-                    let status: SlotStatus = isCellPowerOff(attrs: cell.attrs, text: cell.text) ? .POWER_OFF : .POWER_ON
-                    return BlackoutSlot(
-                        index: idx,
-                        startMinute: startMin,
-                        endMinute: endMin,
-                        label: formatSlotLabel(startMin: startMin, endMin: endMin),
-                        status: status
-                    )
-                }
+                guard (200...299).contains(response.status) else { throw HttpError.status(response.status) }
+                if let etag = response.header("ETag"), !etag.ktIsBlank { repo.etag = etag }
+                let page = Cp1251.decode(response.body, contentType: response.header("Content-Type"))
+                html = page
+                memoryLock.lock()
+                cachedHtml = (cleanUrl, today, nowMs, page)
+                memoryLock.unlock()
+            } catch {
+                return failed(Http.failure(of: error))
             }
         }
-        return nil
-    }
+        guard let page = html else { return noTable() }
 
-    public static func isCellPowerOff(attrs: String, text: String) -> Bool {
-        let attr = attrs.lowercased()
-        let txt = text.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
-
-        let hasRedAttr =
-            attr.contains("#ff3333") ||
-            attr.contains("#ff3b30") ||
-            attr.contains("#ff0000") ||
-            attr.contains("background:red") ||
-            attr.contains("background-color:red") ||
-            attr.contains("rgb(255, 51, 51)") ||
-            attr.contains("rgb(255,51,51)") ||
-            attr.contains("rgb(255, 0, 0)") ||
-            attr.contains("rgb(255,0,0)") ||
-            attr.contains("danger")
-
-        let hasOffText =
-            txt == "вимк" ||
-            txt == "відкл" ||
-            txt == "в" ||
-            txt == "-"
-
-        return hasRedAttr || hasOffText
-    }
-
-    private static func formatSlotLabel(startMin: Int, endMin: Int) -> String {
-        let sh = startMin / 60
-        let sm = startMin % 60
-        let eh = endMin / 60
-        let em = endMin % 60
-        return String(format: "%02d:%02d - %02d:%02d", sh, sm, eh, em)
-    }
-
-    public static func decodeHtmlEntities(_ raw: String) -> String {
-        guard !raw.isEmpty else { return "" }
-        var result = raw.replacingOccurrences(of: "&amp;", with: "&", options: .caseInsensitive)
-        let apostropheEntities = ["&#039;", "&#39;", "&#x27;", "&#x0027;", "&apos;", "&#8217;", "&#146;", "&#0146;", "&rsquo;", "&lsquo;"]
-        for entity in apostropheEntities {
-            result = result.replacingOccurrences(of: entity, with: "'", options: .caseInsensitive)
+        let all = parseAllQueuesSinglePass(page, today: today)
+        if !all.isEmpty {
+            repo.saveAllSchedulesBatch(all.mapValues { (today: $0.todayOff ?? [], tomorrow: $0.tomorrowOff) }, activeQueue: q)
+        } else {
+            return noTable(page)
         }
-        result = result
-            .replacingOccurrences(of: "&quot;", with: "\"", options: .caseInsensitive)
-            .replacingOccurrences(of: "&#34;", with: "\"", options: .caseInsensitive)
-            .replacingOccurrences(of: "&#034;", with: "\"", options: .caseInsensitive)
-            .replacingOccurrences(of: "&nbsp;", with: " ", options: .caseInsensitive)
-            .replacingOccurrences(of: "&#160;", with: " ", options: .caseInsensitive)
-            .replacingOccurrences(of: "&#0160;", with: " ", options: .caseInsensitive)
-            .replacingOccurrences(of: "&lt;", with: "<", options: .caseInsensitive)
-            .replacingOccurrences(of: "&gt;", with: ">", options: .caseInsensitive)
+        if q.isEmpty {
+            return ScheduleFetchResult(todayOff: nil, tomorrowOff: nil, hasTomorrowSchedule: false, status: .SUCCESS)
+        }
+        var result = all[q] ?? parseDocumentFull(page, queue: q, today: today)
+        // The page and its table are there even when this queue's row is missing
+        result.siteState = .AVAILABLE_WITH_TABLE
         return result
     }
 
-    public static func isValidOutageTimestamp(_ value: String?) -> Bool {
-        guard let val = value?.trimmingCharacters(in: .whitespacesAndNewlines), !val.isEmpty else {
-            return false
-        }
-        let lower = val.lowercased()
-        if lower.contains("не вимикається") || lower.contains("за винятком") {
-            return false
-        }
-        let pattern = "^(\\d{2}\\.\\d{2}(?:\\.\\d{2,4})?\\s+)?\\d{1,2}:\\d{2}$"
-        guard let rx = try? NSRegularExpression(pattern: pattern) else { return false }
-        let nsVal = val as NSString
-        return rx.firstMatch(in: val, range: NSRange(location: 0, length: nsVal.length)) != nil
+    // MARK: - Parsing (pure, tested with saved pages)
+
+    struct Cell {
+        let isHeader: Bool
+        let attrs: String
+        let html: String
+        var text: String { Html.text(html) }
     }
 
-    private static func stripTags(_ html: String) -> String {
-        guard let regex = stripTagsRegex else {
-            return decodeHtmlEntities(html)
-                .trimmingCharacters(in: .whitespacesAndNewlines)
+    static func rows(_ tableHtml: String) -> [[Cell]] {
+        let ns = tableHtml as NSString
+        return trRegex.re.matches(in: tableHtml, range: NSRange(location: 0, length: ns.length)).map { tr in
+            let rowHtml = Rx.group(tr, 1, in: ns) ?? ""
+            let rns = rowHtml as NSString
+            return cellRegex.re.matches(in: rowHtml, range: NSRange(location: 0, length: rns.length)).map { m in
+                Cell(
+                    isHeader: (Rx.group(m, 1, in: rns) ?? "").lowercased() == "th",
+                    attrs: Rx.group(m, 2, in: rns) ?? "",
+                    html: Rx.group(m, 3, in: rns) ?? ""
+                )
+            }
         }
-        let nsHtml = html as NSString
-        let stripped = regex.stringByReplacingMatches(in: html, range: NSRange(location: 0, length: nsHtml.length), withTemplate: "")
-        return decodeHtmlEntities(stripped)
-            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// Value of one HTML attribute inside a tag's attribute text (`style="..."`, `bgcolor=red`).
+    private static let attributeRegexes: [String: Rx] = Dictionary(uniqueKeysWithValues: ["style", "bgcolor", "class"].map { name in
+        (name, Rx("(?i)(?<![\\w-])\(name)\\s*=\\s*(?:\"([^\"]*)\"|'([^']*)'|([^\\s>]+))"))
+    })
+
+    static func attribute(_ name: String, in attrs: String) -> String {
+        guard let rx = attributeRegexes[name], let m = rx.firstMatch(in: attrs) else { return "" }
+        let ns = attrs as NSString
+        return Rx.group(m, 1, in: ns) ?? Rx.group(m, 2, in: ns) ?? Rx.group(m, 3, in: ns) ?? ""
+    }
+
+    private static func matchesTableDate(_ headerText: String, _ date: LocalDate) -> Bool {
+        let ns = headerText as NSString
+        let range = NSRange(location: 0, length: ns.length)
+        let full = fullDateRegex.re.matches(in: headerText, range: range)
+        func n(_ m: NSTextCheckingResult, _ i: Int) -> Int? { Rx.group(m, i, in: ns).flatMap { Int($0) } }
+        if !full.isEmpty {
+            return full.contains { n($0, 1) == date.day && n($0, 2) == date.month && n($0, 3) == date.year }
+        }
+        return shortDateRegex.re.matches(in: headerText, range: range).contains { n($0, 1) == date.day && n($0, 2) == date.month }
+    }
+
+    /// Leaf tables (no nested table) with at least 12 rows that list queues 1.1 and 6.2.
+    private static func scheduleTables(_ html: String) -> [(html: String, header: String)] {
+        let ns = html as NSString
+        return leafTableRegex.re.matches(in: html, range: NSRange(location: 0, length: ns.length)).compactMap { m in
+            let table = ns.substring(with: m.range)
+            let r = rows(table)
+            guard r.count >= 12 else { return nil }
+            let text = Html.text(table)
+            guard text.ktContains("1.1") && text.ktContains("6.2") else { return nil }
+            let header = r.prefix(2).map { row in row.map(\.text).joined(separator: " ") }.joined(separator: " ")
+            return (table, header)
+        }
+    }
+
+    static func findTodayAndTomorrowTables(_ html: String, today: LocalDate) -> (today: String?, tomorrow: String?) {
+        let tomorrow = today.plusDays(1)
+        var todayTable: String?
+        var tomorrowTable: String?
+        for t in scheduleTables(html) {
+            let matchesToday = matchesTableDate(t.header, today)
+            let matchesTomorrow = matchesTableDate(t.header, tomorrow)
+            if matchesToday && todayTable == nil {
+                todayTable = t.html
+            } else if matchesTomorrow && tomorrowTable == nil {
+                tomorrowTable = t.html
+            }
+        }
+        return (todayTable, tomorrowTable)
+    }
+
+    /// All 12 queues from one table lookup.
+    static func parseAllQueuesSinglePass(_ html: String, today: LocalDate) -> [String: ScheduleFetchResult] {
+        let tables = findTodayAndTomorrowTables(html, today: today)
+        guard let todayTable = tables.today else { return [:] }
+        let todayRows = rows(todayTable)
+        let tomorrowRows = tables.tomorrow.map(rows)
+        var results: [String: ScheduleFetchResult] = [:]
+        for q in ALL_QUEUES {
+            guard let todayCells = parseRowsForQueue(todayRows, queue: q) else { continue }
+            let tomorrowCells = tomorrowRows.flatMap { parseRowsForQueue($0, queue: q) }
+            results[q] = ScheduleFetchResult(
+                todayOff: todayCells, tomorrowOff: tomorrowCells,
+                hasTomorrowSchedule: tomorrowCells != nil && tables.tomorrow != nil
+            )
+        }
+        return results
+    }
+
+    static func parseDocumentFull(_ html: String, queue: String, today: LocalDate) -> ScheduleFetchResult {
+        let tables = findTodayAndTomorrowTables(html, today: today)
+        guard let todayTable = tables.today else {
+            return ScheduleFetchResult(todayOff: nil, tomorrowOff: nil, hasTomorrowSchedule: false, status: .NO_QUEUES_FOUND)
+        }
+        if queue.ktIsBlank {
+            return ScheduleFetchResult(todayOff: nil, tomorrowOff: nil, hasTomorrowSchedule: false, status: .SUCCESS)
+        }
+        guard let todayCells = parseTableForQueue(todayTable, queue: queue) else {
+            return ScheduleFetchResult(todayOff: nil, tomorrowOff: nil, hasTomorrowSchedule: false, status: .NO_QUEUES_FOUND)
+        }
+        let tomorrowCells = tables.tomorrow.flatMap { parseTableForQueue($0, queue: queue) }
+        return ScheduleFetchResult(todayOff: todayCells, tomorrowOff: tomorrowCells,
+                                   hasTomorrowSchedule: tomorrowCells != nil && tables.tomorrow != nil)
+    }
+
+    /// The off-cells of `queue` in one table: 48 (or 24) booleans, nil when the queue row is missing.
+    static func parseTableForQueue(_ tableHtml: String, queue: String) -> [Bool]? {
+        parseRowsForQueue(rows(tableHtml), queue: queue)
+    }
+
+    static func parseRowsForQueue(_ tableRows: [[Cell]], queue: String) -> [Bool]? {
+        // The row with this queue ("1.1", "Черга 1.1") in its first 3 cells
+        guard let row = tableRows.first(where: { cells in
+            cells.prefix(3).contains { cell in
+                let txt = cell.text.ktTrim()
+                return txt == queue || txt == "Черга \(queue)" || txt == "Черга \(queue)." ||
+                    txt.lowercased() == "\(queue) черга"
+            }
+        }) else { return nil }
+
+        let tds = row.filter { !$0.isHeader }
+        if tds.count < 24 { return nil }
+
+        // Drop thin 3pt separator cells, then take the last 48 (or 24) schedule cells
+        let valid = tds.dropFirst().filter { cell in
+            let style = attribute("style", in: cell.attrs).lowercased().replacingOccurrences(of: " ", with: "")
+            return !style.contains("width:3pt") && !style.contains("width:1pt")
+        }
+        let slotCells: [Cell]
+        if valid.count >= 48 {
+            slotCells = Array(valid.suffix(48))
+        } else if tds.count >= 48 {
+            slotCells = Array(tds.suffix(48))
+        } else if valid.count >= 24 {
+            slotCells = Array(valid.suffix(24))
+        } else {
+            slotCells = Array(tds.suffix(24))
+        }
+        return slotCells.map { isCellOff($0) }
+    }
+
+    static func isCellOff(_ cell: Cell) -> Bool {
+        let attr = (attribute("style", in: cell.attrs) + " " + attribute("bgcolor", in: cell.attrs) + " " +
+                    attribute("class", in: cell.attrs)).lowercased()
+        let text = cell.text.ktTrim().lowercased()
+        let redMarkers = [
+            "#ff3333", "#ff3b30", "#ff0000", "background:red", "background: red", "background-color:red",
+            "background-color: red", "rgb(255, 51, 51)", "rgb(255,51,51)", "rgb(255, 0, 0)", "rgb(255,0,0)", "danger"
+        ]
+        return redMarkers.contains { attr.ktContains($0) } ||
+            text.ktContains("вимк") || text.ktContains("відкл") || text == "в" || text == "-"
     }
 }
+// =========================================================================================
+// END OF CRITICAL SECTION — DO NOT MODIFY UNLESS EXPLICITLY REQUESTED
+// =========================================================================================
