@@ -152,6 +152,8 @@ struct SettingsScreen: View {
                     }
                 }
 
+                if WidgetDiag.isTestFlight { WidgetDiagCard() }
+
                 Spacer(minLength: 96)
             }
             .padding(.horizontal, 16)
@@ -540,6 +542,35 @@ private struct SubscriptionBlock<G: Gesture>: View {
         .background {
             RoundedRectangle(cornerRadius: 16).fill(ZtColors.innerRow)
                 .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(isPrimary ? Color(argb: 0x59FF5E3A) : ZtColors.divider, lineWidth: 1))
+        }
+    }
+}
+
+/// TestFlight only: the last widget-button diagnostics (`WidgetDiag`), read again every 2 s, so a tester
+/// can see whether a tap on the widget bell or refresh ran its intent and in which process.
+private struct WidgetDiagCard: View {
+    var body: some View {
+        ZtGlassCard(padding: 14) {
+            TimelineView(.periodic(from: .now, by: 2)) { _ in
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack {
+                        Text(verbatim: "Widget diagnostics (TestFlight)").font(.system(size: 13, weight: .bold)).foregroundStyle(Color.white)
+                        Spacer(minLength: 8)
+                        Button { WidgetDiag.clear() } label: {
+                            Text(verbatim: "Clear").font(.system(size: 13, weight: .semibold)).foregroundStyle(ZtColors.accent)
+                        }
+                    }
+                    let lines = WidgetDiag.lines()
+                    if lines.isEmpty {
+                        Text(verbatim: "(empty)").font(.system(size: 12, design: .monospaced)).foregroundStyle(Color.white.opacity(0.7))
+                    }
+                    ForEach(Array(lines.reversed().enumerated()), id: \.offset) { _, line in
+                        Text(verbatim: line).font(.system(size: 12, design: .monospaced)).foregroundStyle(Color.white.opacity(0.9))
+                            .lineLimit(1).minimumScaleFactor(0.7)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
         }
     }
 }

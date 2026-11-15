@@ -18,8 +18,10 @@ struct ToggleAlertsIntent: AppIntent {
     /// notification centre in the extension can never keep the bell from changing (TestFlight 1.4.0 (31):
     /// the bell did not react). The app re-plans on every launch and refresh anyway.
     func perform() async throws -> some IntentResult {
+        WidgetDiag.log("bell perform start")
         let sync = SubscriptionSync.shared
         sync.setMaster(!sync.master())
+        WidgetDiag.log("bell master=\(sync.master())")
         WidgetCenter.shared.reloadAllTimelines()
         await WidgetWork.bounded(seconds: 5) { await NotificationSync.shared.syncPlanned() }
         return .result()
@@ -37,6 +39,7 @@ struct RefreshWidgetIntent: AppIntent {
     /// The refresh gets 20 s: if it is still running then, the widget is redrawn with the busy button, and the
     /// refresh redraws it again when it ends (the busy mark expires after `WidgetState.BUSY_MAX_MS`).
     func perform() async throws -> some IntentResult {
+        WidgetDiag.log("refresh perform start")
         WidgetState.setRefreshing(true)
         await WidgetWork.bounded(seconds: 20) {
             let settings = SettingsRepository.shared.getSettings()
@@ -46,6 +49,7 @@ struct RefreshWidgetIntent: AppIntent {
             await NotificationSync.shared.deliverEmergency(outcome.batches)
             await NotificationSync.shared.syncPlanned()
             WidgetState.setRefreshing(false)
+            WidgetDiag.log("refresh done")
             WidgetCenter.shared.reloadAllTimelines()
         }
         WidgetCenter.shared.reloadAllTimelines()

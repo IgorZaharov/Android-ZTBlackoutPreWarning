@@ -28,6 +28,7 @@ struct BlackoutProvider: AppIntentTimelineProvider {
     /// The app reloads all timelines after every refresh and settings change.
     func timeline(for configuration: SelectAddressIntent, in context: Context) async -> Timeline<BlackoutEntry> {
         let now = Date()
+        WidgetDiag.log("timeline \(context.family)")
         let source = WidgetModelBuilder.source(boundId: configuration.boundId, at: now)
         let kyivNow = KyivTime.localDateTime(of: now)
         let transitions = OutageEngine.transitions(source.snapshot.outages, from: kyivNow, to: kyivNow.plusHours(48))
