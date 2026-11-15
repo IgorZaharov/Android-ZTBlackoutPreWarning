@@ -3001,6 +3001,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
@@ -3174,7 +3175,9 @@ fun MainScreen(
     shownAddressId: String? = null,
     onSelectAddress: (String) -> Unit = {},
     showNoAlertsCaption: Boolean = false,
-    onOpenSettings: () -> Unit = {}
+    onOpenSettings: () -> Unit = {},
+    /** Hoisted by the navigation: a double tap on this page's dock button scrolls it back to the top. */
+    scrollState: ScrollState = rememberScrollState()
 ) {
     val context = LocalContext.current
 
@@ -3250,7 +3253,7 @@ fun MainScreen(
                             .clearAndSetSemantics {}
                             .alpha(0.15f)
                     } else {
-                        Modifier.verticalScroll(rememberScrollState())
+                        Modifier.verticalScroll(scrollState)
                     }
                 )
                 .padding(horizontal = 16.dp, vertical = 12.dp),
@@ -4190,6 +4193,7 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
@@ -4372,7 +4376,9 @@ fun SettingsScreen(
     onShowAppBanner: (String) -> Unit = {},
     exactAlarmMissing: Boolean = false,
     onOpenExactAlarmSettings: () -> Unit = {},
-    isVisible: Boolean = true
+    isVisible: Boolean = true,
+    /** Hoisted by the navigation: a double tap on this page's dock button scrolls it back to the top. */
+    scrollState: ScrollState = rememberScrollState()
 ) {
     val context = LocalContext.current
     var showQueueHelpDialog by remember { mutableStateOf(false) }
@@ -4419,7 +4425,7 @@ fun SettingsScreen(
         modifier = Modifier
             .fillMaxSize()
             .statusBarsPadding()
-            .verticalScroll(rememberScrollState())
+            .verticalScroll(scrollState)
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
@@ -5357,8 +5363,12 @@ private fun ActionButton(
 }
 
 private fun ZtoeRemOption.displayName(lang: String) = if (lang == "uk") nameUk else nameEn
-private fun ZtoeSettlementOption.displayName(lang: String) = if (lang == "uk") nameUk else nameEn
-private fun ZtoeStreetOption.displayName(lang: String) = if (lang == "uk") nameUk else nameEn
+// Settlements and streets keep their Ukrainian names in both languages: the live ztoe lists have no English
+// names, so translating only the built-in ones mixed the two (owner request 2026-11-15).
+@Suppress("UNUSED_PARAMETER")
+private fun ZtoeSettlementOption.displayName(lang: String) = nameUk
+@Suppress("UNUSED_PARAMETER")
+private fun ZtoeStreetOption.displayName(lang: String) = nameUk
 
 /** Loading flags of one level of the REM, city, street, house cascade; [retry] re-runs its fetch with forceRefresh. */
 private class LevelState {
@@ -7608,6 +7618,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -7639,7 +7650,9 @@ import ua.blackout.prewarning.ui.components.glassSurface
 @Composable
 fun AboutScreen(
     lang: String = "uk",
-    onOpenRoulette: (() -> Unit)? = null
+    onOpenRoulette: (() -> Unit)? = null,
+    /** Hoisted by the navigation: a double tap on this page's dock button scrolls it back to the top. */
+    scrollState: ScrollState = rememberScrollState()
 ) {
     val context = LocalContext.current
     val appContext = remember { context.applicationContext }
@@ -7691,7 +7704,7 @@ fun AboutScreen(
         modifier = Modifier
             .fillMaxSize()
             .statusBarsPadding()
-            .verticalScroll(rememberScrollState())
+            .verticalScroll(scrollState)
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
@@ -8070,6 +8083,8 @@ fun AboutScreen(
     description: 'Main navigation pager with time-of-day dynamic background and top scrim',
     content: `package ua.blackout.prewarning.ui.screens
 
+import androidx.compose.foundation.rememberScrollState
+import android.os.SystemClock
 import android.content.SharedPreferences
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
@@ -8166,6 +8181,10 @@ private fun smoothGaussianRadialBrush(
     )
 }
 
+
+/** Two taps on the same dock button within this time scroll its page to the top (iOS: \`Dock.doubleTapWindow\`). */
+private const val DOCK_DOUBLE_TAP_MS = 400L
+
 @Composable
 fun BlackoutAppNavigation(
     onThemeChanged: (Boolean) -> Unit = {},
@@ -8212,6 +8231,19 @@ fun BlackoutAppNavigation(
 
     // Pager for swipe left/right between windows with beyondViewportPageCount = 2 to eliminate swipe jittering
     val pagerState = rememberPagerState(initialPage = 0, pageCount = { 3 })
+    // the pages' scroll positions, hoisted so a double tap on a dock button can scroll its page to the top
+    val pageScrolls = listOf(rememberScrollState(), rememberScrollState(), rememberScrollState())
+    var lastDockTap by remember { mutableStateOf<Pair<Int, Long>?>(null) }
+    // A tap switches to the page at once; a second tap on the same button within DOCK_DOUBLE_TAP_MS also
+    // scrolls that page to its top (owner, 2026-11-15). Timed by hand, so a single tap never waits.
+    fun onDockTap(page: Int) {
+        val now = SystemClock.uptimeMillis()
+        val last = lastDockTap
+        val isDouble = last != null && last.first == page && now - last.second < DOCK_DOUBLE_TAP_MS
+        lastDockTap = if (isDouble) null else page to now
+        coroutineScope.launch { pagerState.animateScrollToPage(page, animationSpec = PageGlide) }
+        if (isDouble) coroutineScope.launch { pageScrolls[page].animateScrollTo(0) }
+    }
 
     // Custom In-App Banner with Application Icon (replaces raw OS Toast so Android robot icon never appears)
     var appBannerMessage by remember { mutableStateOf<String?>(null) }
@@ -8659,6 +8691,7 @@ fun BlackoutAppNavigation(
                 0 -> {
                     val other = otherShownItem()
                     MainScreen(
+                        scrollState = pageScrolls[0],
                         queue = if (other != null) other.queue.orEmpty() else queue,
                         customQueueStatusText = if (other != null) other.queueStatusText else customQueueStatusText,
                         selectedAddress = if (other != null) {
@@ -8719,6 +8752,7 @@ fun BlackoutAppNavigation(
                 }
                 1 -> {
                     SettingsScreen(
+                        scrollState = pageScrolls[1],
                         currentQueue = queue,
                         subscriptions = subscriptions,
                         alertsMaster = alertsMaster,
@@ -8853,6 +8887,7 @@ fun BlackoutAppNavigation(
                 }
                 2 -> {
                     AboutScreen(
+                        scrollState = pageScrolls[2],
                         lang = resolvedLang,
                         onOpenRoulette = { isRouletteOpen = true }
                     )
@@ -8941,7 +8976,7 @@ fun BlackoutAppNavigation(
                                 .clip(CircleShape)
                                 .background(if (isSchedule) Color.White else Color.Transparent)
                                 .clickable(enabled = !isQueueUnselected) {
-                                    coroutineScope.launch { pagerState.animateScrollToPage(0, animationSpec = PageGlide) }
+                                    onDockTap(0)
                                 },
                             contentAlignment = Alignment.Center
                         ) {
@@ -8961,7 +8996,7 @@ fun BlackoutAppNavigation(
                                 .clip(CircleShape)
                                 .background(if (isSettings) Color.White else Color.Transparent)
                                 .clickable(enabled = !isQueueUnselected) {
-                                    coroutineScope.launch { pagerState.animateScrollToPage(1, animationSpec = PageGlide) }
+                                    onDockTap(1)
                                 },
                             contentAlignment = Alignment.Center
                         ) {
@@ -8981,7 +9016,7 @@ fun BlackoutAppNavigation(
                                 .clip(CircleShape)
                                 .background(if (isAbout) Color.White else Color.Transparent)
                                 .clickable(enabled = !isQueueUnselected) {
-                                    coroutineScope.launch { pagerState.animateScrollToPage(2, animationSpec = PageGlide) }
+                                    onDockTap(2)
                                 },
                             contentAlignment = Alignment.Center
                         ) {

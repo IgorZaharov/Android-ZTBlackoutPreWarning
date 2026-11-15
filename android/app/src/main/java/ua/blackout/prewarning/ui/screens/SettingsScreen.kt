@@ -23,6 +23,7 @@ import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
@@ -205,7 +206,9 @@ fun SettingsScreen(
     onShowAppBanner: (String) -> Unit = {},
     exactAlarmMissing: Boolean = false,
     onOpenExactAlarmSettings: () -> Unit = {},
-    isVisible: Boolean = true
+    isVisible: Boolean = true,
+    /** Hoisted by the navigation: a double tap on this page's dock button scrolls it back to the top. */
+    scrollState: ScrollState = rememberScrollState()
 ) {
     val context = LocalContext.current
     var showQueueHelpDialog by remember { mutableStateOf(false) }
@@ -252,7 +255,7 @@ fun SettingsScreen(
         modifier = Modifier
             .fillMaxSize()
             .statusBarsPadding()
-            .verticalScroll(rememberScrollState())
+            .verticalScroll(scrollState)
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
@@ -1190,8 +1193,12 @@ private fun ActionButton(
 }
 
 private fun ZtoeRemOption.displayName(lang: String) = if (lang == "uk") nameUk else nameEn
-private fun ZtoeSettlementOption.displayName(lang: String) = if (lang == "uk") nameUk else nameEn
-private fun ZtoeStreetOption.displayName(lang: String) = if (lang == "uk") nameUk else nameEn
+// Settlements and streets keep their Ukrainian names in both languages: the live ztoe lists have no English
+// names, so translating only the built-in ones mixed the two (owner request 2026-11-15).
+@Suppress("UNUSED_PARAMETER")
+private fun ZtoeSettlementOption.displayName(lang: String) = nameUk
+@Suppress("UNUSED_PARAMETER")
+private fun ZtoeStreetOption.displayName(lang: String) = nameUk
 
 /** Loading flags of one level of the REM, city, street, house cascade; [retry] re-runs its fetch with forceRefresh. */
 private class LevelState {
