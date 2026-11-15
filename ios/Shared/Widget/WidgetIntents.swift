@@ -68,11 +68,14 @@ public struct ToggleAlertsIntent: AppIntent {
 
     public init() {}
 
+    /// The switch is written and the widgets redrawn first; re-planning the warnings is bounded, so a slow
+    /// notification centre in the extension can never keep the bell from changing (TestFlight 1.4.0 (31):
+    /// the bell did not react). The app re-plans on every launch and refresh anyway.
     public func perform() async throws -> some IntentResult {
         let sync = SubscriptionSync.shared
         sync.setMaster(!sync.master())
-        await NotificationSync.shared.syncPlanned()
         WidgetCenter.shared.reloadAllTimelines()
+        await WidgetWork.bounded(seconds: 5) { await NotificationSync.shared.syncPlanned() }
         return .result()
     }
 }
@@ -84,18 +87,53 @@ public struct RefreshWidgetIntent: AppIntent {
 
     public init() {}
 
+    /// While the intent runs, iOS shows the button and the countdowns as updating (`invalidatableContent`).
+    /// The refresh gets 20 s: if it is still running then, the widget is redrawn with the busy button, and the
+    /// refresh redraws it again when it ends (the busy mark expires after `WidgetState.BUSY_MAX_MS`).
     public func perform() async throws -> some IntentResult {
         WidgetState.setRefreshing(true)
-        WidgetCenter.shared.reloadAllTimelines()
-        let settings = SettingsRepository.shared.getSettings()
-        let outcome = await OutageRepository.shared.refresh(
-            settings, forceNetwork: true, widgetItemIds: await WidgetBindings.shownItemIds()
-        )
-        await NotificationSync.shared.deliverEmergency(outcome.batches)
-        await NotificationSync.shared.syncPlanned()
-        WidgetState.setRefreshing(false)
+        await WidgetWork.bounded(seconds: 20) {
+            let settings = SettingsRepository.shared.getSettings()
+            let outcome = await OutageRepository.shared.refresh(
+                settings, forceNetwork: true, widgetItemIds: await WidgetBindings.shownItemIds()
+            )
+            await NotificationSync.shared.deliverEmergency(outcome.batches)
+            await NotificationSync.shared.syncPlanned()
+            WidgetState.setRefreshing(false)
+            WidgetCenter.shared.reloadAllTimelines()
+        }
         WidgetCenter.shared.reloadAllTimelines()
         return .result()
+    }
+}
+
+/// Runs widget work with a time limit. A task group would wait for a child that ignores cancellation, so
+/// the work runs in its own task and whichever ends first, the work or the timer, resumes the caller; the
+/// work goes on in the background while the extension lives.
+enum WidgetWork {
+    private final class Once: @unchecked Sendable {
+        private let lock = NSLock()
+        private var done = false
+        func first() -> Bool {
+            lock.lock(); defer { lock.unlock() }
+            if done { return false }
+            done = true
+            return true
+        }
+    }
+
+    static func bounded(seconds: Double, _ work: @escaping @Sendable () async -> Void) async {
+        await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
+            let once = Once()
+            Task {
+                await work()
+                if once.first() { cont.resume() }
+            }
+            Task {
+                try? await Task.sleep(nanoseconds: UInt64(seconds * 1_000_000_000))
+                if once.first() { cont.resume() }
+            }
+        }
     }
 }
 

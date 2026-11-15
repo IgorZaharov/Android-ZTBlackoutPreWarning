@@ -50,7 +50,7 @@ Data flow: `ZtoeParser` (validates URL against `valid-urls.json`, fetches with E
 ## Invariants enforced by tests (do not change unless the owner asks)
 
 Asserted in `tests/unit.test.ts` and `android/app/src/test/.../ZtoeParserTest.kt`:
-- App name `"Світло в Житомирі"` (strings.xml, AppStrings.kt, metadata.json, index.html, i18n.ts).
+- App name `"Світло в Житомирі"` (strings.xml, AppStrings.kt, metadata.json, index.html, i18n.ts, iOS `CFBundleName`). Only the iPhone home-screen name (`CFBundleDisplayName`) is the short `"Світло"` (owner, 2026-11-15: the full name is cut there).
 - Defaults: `advanceNoticeMinutes = 15`, `refreshIntervalMinutes = 30`.
 - Queue help dialog 4-step text and `"Зрозуміло"` button, character-for-character.
 - Widget labels `"СВІТЛО Є"` / `"СВІТЛА НЕМАЄ"` (never `"ЗНЕСТРУМЛЕНО"`); widget countdowns without seconds (`HHг. MMхв.`).

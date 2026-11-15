@@ -68,6 +68,8 @@ struct AddressLookupSheet: View {
     // MARK: - Derived
 
     private func name(uk: String, en: String) -> String { lang == "uk" ? uk : en }
+    // Settlements and streets keep their Ukrainian names in both languages (SettingsScreen.kt): the live
+    // ztoe lists have no English names, so translating only the built-in ones mixed the two.
     private var currentRem: ZtoeRemOption? { rems.first { $0.id == remId } }
     private var currentSettlement: ZtoeSettlementOption? {
         settlementId.ktIsBlank ? nil : (settlements.first { $0.id == settlementId } ?? ZtoeAddressLookup.findSettlementById(settlementId))
@@ -82,8 +84,8 @@ struct AddressLookupSheet: View {
     private var selectedAddressStr: String {
         guard let street = currentStreet, !house.ktIsBlank else { return "" }
         let remName = currentRem.map { name(uk: $0.nameUk, en: $0.nameEn) } ?? ""
-        let settlementName = currentSettlement.map { name(uk: $0.nameUk, en: $0.nameEn) } ?? ""
-        return "\(remName), \(settlementName),\n\(name(uk: street.nameUk, en: street.nameEn)), \(AppStrings.addrHousePrefix(lang)) \(house)"
+        let settlementName = currentSettlement.map(\.nameUk) ?? ""
+        return "\(remName), \(settlementName),\n\(street.nameUk), \(AppStrings.addrHousePrefix(lang)) \(house)"
     }
 
     /// The live answer when it is for this house, merged with the indexed row; else the indexed row.
@@ -208,9 +210,9 @@ struct AddressLookupSheet: View {
 
             SearchablePickerField(
                 label: AppStrings.addrCityLabel(lang),
-                value: currentSettlement.map { name(uk: $0.nameUk, en: $0.nameEn) },
+                value: currentSettlement.map(\.nameUk),
                 placeholder: AppStrings.addrCityPlaceholder(lang),
-                items: settlements.map { PickerItem(id: $0.id, label: name(uk: $0.nameUk, en: $0.nameEn)) },
+                items: settlements.map { PickerItem(id: $0.id, label: $0.nameUk) },
                 selectedId: settlementId.ktIsBlank ? nil : settlementId,
                 lang: lang,
                 loading: settlementsState.loading,
@@ -225,9 +227,9 @@ struct AddressLookupSheet: View {
 
             SearchablePickerField(
                 label: AppStrings.addrStreetLabel(lang),
-                value: currentStreet.map { name(uk: $0.nameUk, en: $0.nameEn) },
+                value: currentStreet.map(\.nameUk),
                 placeholder: AppStrings.addrStreetPlaceholder(lang),
-                items: streets.map { PickerItem(id: $0.id, label: name(uk: $0.nameUk, en: $0.nameEn)) },
+                items: streets.map { PickerItem(id: $0.id, label: $0.nameUk) },
                 selectedId: streetId.ktIsBlank ? nil : streetId,
                 lang: lang,
                 enabled: !settlementId.ktIsBlank,

@@ -72,6 +72,9 @@ interface SettingsViewProps {
 }
 
 const displayName = (o: { nameUk: string; nameEn: string }, lang: 'uk' | 'en') => (lang === 'uk' ? o.nameUk : o.nameEn);
+// Settlements and streets keep their Ukrainian names in both languages: the live ztoe lists have no English
+// names, so translating only the built-in ones mixed the two (mirrors SettingsScreen.kt).
+const placeName = (o: { nameUk: string }) => o.nameUk;
 const sameHouse = (a: string, b: string) => a.toLowerCase() === b.toLowerCase() || (HouseKey.of(a) !== '' && HouseKey.of(a) === HouseKey.of(b));
 
 // ---------------------------------------------------------------------------------------------
@@ -1066,15 +1069,12 @@ const AddressLookupDialog: React.FC<AddressLookupDialogProps> = ({ settings, lan
 
   const selectedAddressStr =
     currentStreet && selectedHouse.trim() !== ''
-      ? `${currentRem ? displayName(currentRem, lang) : ''}, ${currentSettlement ? displayName(currentSettlement, lang) : ''},\n${displayName(
-          currentStreet,
-          lang
-        )}, ${t.addrHousePrefix} ${selectedHouse}`
+      ? `${currentRem ? displayName(currentRem, lang) : ''}, ${currentSettlement ? placeName(currentSettlement) : ''},\n${placeName(currentStreet)}, ${t.addrHousePrefix} ${selectedHouse}`
       : '';
 
   const remItems = useMemo<PickerItem[]>(() => allRems.map((r) => ({ id: r.id, label: displayName(r, lang) })), [allRems, lang]);
-  const settlementItems = useMemo<PickerItem[]>(() => settlementsList.map((s) => ({ id: s.id, label: displayName(s, lang) })), [settlementsList, lang]);
-  const streetItems = useMemo<PickerItem[]>(() => streetsList.map((s) => ({ id: s.id, label: displayName(s, lang) })), [streetsList, lang]);
+  const settlementItems = useMemo<PickerItem[]>(() => settlementsList.map((s) => ({ id: s.id, label: placeName(s) })), [settlementsList, lang]);
+  const streetItems = useMemo<PickerItem[]>(() => streetsList.map((s) => ({ id: s.id, label: placeName(s) })), [streetsList, lang]);
   const houseItems = useMemo<PickerItem[]>(() => housesList.map((h) => ({ id: h.house, label: h.house })), [housesList]);
 
   // Result card (shown when a house is selected)
@@ -1182,7 +1182,7 @@ const AddressLookupDialog: React.FC<AddressLookupDialogProps> = ({ settings, lan
           <SearchablePickerField
             testId="ztoe-select-settlement"
             label={t.addrCityLabel}
-            value={currentSettlement ? displayName(currentSettlement, lang) : null}
+            value={currentSettlement ? placeName(currentSettlement) : null}
             placeholder={t.addrCityPlaceholder}
             items={settlementItems}
             selectedId={selectedSettlementId || null}
@@ -1201,7 +1201,7 @@ const AddressLookupDialog: React.FC<AddressLookupDialogProps> = ({ settings, lan
           <SearchablePickerField
             testId="ztoe-select-street"
             label={t.addrStreetLabel}
-            value={currentStreet ? displayName(currentStreet, lang) : null}
+            value={currentStreet ? placeName(currentStreet) : null}
             placeholder={t.addrStreetPlaceholder}
             items={streetItems}
             selectedId={selectedStreetId || null}

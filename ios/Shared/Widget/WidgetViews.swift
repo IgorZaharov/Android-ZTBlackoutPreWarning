@@ -86,6 +86,7 @@ public struct WidgetDrum: View {
                       : AnyShapeStyle(Color.white.opacity(0.08)))
         }
         .widgetAccentable(look == .tinted)
+        .invalidatableContent()
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(Text(verbatim: summary))
     }
@@ -176,6 +177,7 @@ private struct WidgetButtons: View {
                             .font(.system(size: size * 0.45, weight: .bold))
                             .foregroundStyle(Color.white)
                     }
+                    .invalidatableContent()
             }
             .buttonStyle(.plain)
             .accessibilityLabel(Text(verbatim: AppStrings.refreshBtn(lang)))
@@ -187,6 +189,7 @@ private struct WidgetButtons: View {
                             .foregroundStyle(master ? (look == .fullColor ? ZtColors.accent : Color.black) : Color.white)
                     }
                     .widgetAccentable(look == .tinted && master)
+                    .invalidatableContent()
             }
             .buttonStyle(.plain)
             .accessibilityLabel(Text(verbatim: AppStrings.masterHint(lang)))
@@ -204,7 +207,7 @@ private struct HeaderLine: View {
         HStack(spacing: 6) {
             Text(verbatim: m.queueHeader).font(.system(size: queueSize, weight: .bold)).foregroundStyle(Color.white).lineLimit(1)
             if let label = m.addressLabel {
-                Text(verbatim: label).font(.system(size: labelSize)).foregroundStyle(ZtColors.textSecondary).lineLimit(1)
+                Text(verbatim: label).font(.system(size: labelSize)).foregroundStyle(Color.white.opacity(0.72)).lineLimit(1)
             }
         }
     }
@@ -234,7 +237,7 @@ public struct SmallWidgetView: View {
             Spacer(minLength: 0)
             Text(verbatim: WidgetText.countdownLabel(m.isOffNow)).font(.system(size: 10)).foregroundStyle(ZtColors.textSecondary).lineLimit(1)
             Text(verbatim: m.countdown).font(.system(size: 18, weight: .bold, design: .rounded)).foregroundStyle(Color.white)
-                .lineLimit(1).minimumScaleFactor(0.7).widgetAccentable()
+                .lineLimit(1).minimumScaleFactor(0.7).widgetAccentable().invalidatableContent()
             HStack {
                 Spacer(minLength: 0)
                 WidgetButtons(master: master, refreshing: refreshing, size: 32, look: look, lang: m.lang)
@@ -283,7 +286,7 @@ public struct BigWidgetView: View {
                 VStack(alignment: .leading, spacing: 0) {
                     Text(verbatim: WidgetText.countdownLabel(m.isOffNow)).font(.system(size: 10)).foregroundStyle(ZtColors.textSecondary)
                     Text(verbatim: m.countdown).font(.system(size: 18, weight: .bold, design: .rounded)).foregroundStyle(Color.white)
-                        .lineLimit(1).minimumScaleFactor(0.7).widgetAccentable()
+                        .lineLimit(1).minimumScaleFactor(0.7).widgetAccentable().invalidatableContent()
                 }
                 Spacer(minLength: 6)
                 VStack(alignment: .trailing, spacing: 0) {
@@ -305,15 +308,78 @@ public struct BigWidgetView: View {
                 .padding(.horizontal, 8)
                 .padding(.vertical, 3)
                 .background { RoundedRectangle(cornerRadius: 8).fill(Color.black.opacity(0.15)) }
+                // The app's rows are too tall for a large widget on a smaller iPhone (the content overflowed
+                // and cut the header, TestFlight 1.4.0 (31)): compact rows, and the list gives way first.
                 VStack(spacing: 4) {
-                    ForEach(Array(m.rows.prefix(3).enumerated()), id: \.offset) { _, row in
-                        OutageRowView(row)
+                    ForEach(Array(m.rows.prefix(4).enumerated()), id: \.offset) { _, row in
+                        WidgetRowView(text: row)
                     }
                 }
-                .frame(maxHeight: .infinity, alignment: .top)
+                .frame(minHeight: 0, maxHeight: .infinity, alignment: .top)
+                .clipped()
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+    }
+}
+
+/// One outage of the day in the large widget: the row of the main screen (`OutageRowView`) in one line
+/// with smaller type, so four rows fit on every iPhone.
+struct WidgetRowView: View {
+    let text: OutageRowFormat.RowText
+
+    private var tags: String {
+        [text.kindTag, text.originTag, text.statusTag, text.continueTag].compactMap { $0 }.joined(separator: " · ")
+    }
+
+    var body: some View {
+        HStack(spacing: 8) {
+            marker.frame(width: 14, height: 14)
+            Text(verbatim: text.timeText)
+                .font(.system(size: 13, weight: .bold, design: .monospaced))
+                .foregroundStyle(Color.white)
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
+                .layoutPriority(1)
+            if !tags.isEmpty {
+                Text(verbatim: tags)
+                    .font(.system(size: 10))
+                    .foregroundStyle(text.isEmergency && !text.isFinished ? ZtColors.accent : Color.white.opacity(0.72))
+                    .lineLimit(1)
+            }
+            Spacer(minLength: 4)
+            if let duration = text.durationText {
+                Text(verbatim: duration)
+                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                    .foregroundStyle(ZtColors.accent)
+                    .lineLimit(1)
+                    .fixedSize()
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background { RoundedRectangle(cornerRadius: 6).fill(Color(argb: 0x26FF5E3A)) }
+                    .widgetAccentable()
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 5)
+        .background { RoundedRectangle(cornerRadius: 8).fill(Color.black.opacity(0.18)) }
+        .opacity(text.isFinished ? 0.55 : 1)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(Text(verbatim: text.accessibilityText))
+    }
+
+    @ViewBuilder
+    private var marker: some View {
+        if text.isEmergency {
+            ZStack {
+                Circle().fill(ZtColors.accent)
+                Text(verbatim: "!").font(.system(size: 9, weight: .black)).foregroundStyle(Color.white)
+            }
+        } else if text.isRepair {
+            Image(systemName: "wrench.fill").font(.system(size: 11, weight: .semibold)).foregroundStyle(ZtColors.accent)
+        } else {
+            Circle().fill(ZtColors.accent).frame(width: 8, height: 8)
+        }
     }
 }
 
@@ -330,19 +396,26 @@ public struct StripWidgetView: View {
         self.look = look
     }
 
+    /// Android's 4x1 strip is one line over the drum; an iOS medium widget is twice as tall, so the drum
+    /// keeps the large widget's height (stretched to the full height it looked squeezed, TestFlight 1.4.0
+    /// (31)) and the info takes two lines instead of truncating.
     public var body: some View {
-        VStack(spacing: 6) {
+        VStack(alignment: .leading, spacing: 6) {
+            HeaderLine(m: m, queueSize: 15, labelSize: 11)
+                .frame(maxWidth: .infinity, alignment: .leading)
             HStack(spacing: 6) {
-                HeaderLine(m: m, queueSize: 13, labelSize: 10)
-                Text(verbatim: m.statusText).font(.system(size: 11, weight: .bold)).foregroundStyle(m.statusColor).lineLimit(1).widgetAccentable()
+                Text(verbatim: m.statusText).font(.system(size: 12, weight: .bold)).foregroundStyle(m.statusColor)
+                    .lineLimit(1).minimumScaleFactor(0.8).widgetAccentable()
                 Spacer(minLength: 4)
                 if !m.isUnclear {
-                    Text(verbatim: m.countdown).font(.system(size: 13, weight: .bold, design: .rounded)).foregroundStyle(Color.white).lineLimit(1)
+                    Text(verbatim: m.countdown).font(.system(size: 15, weight: .bold, design: .rounded)).foregroundStyle(Color.white)
+                        .lineLimit(1).invalidatableContent()
                 }
             }
-            .padding(.horizontal, 4)
             WidgetDrum(slots: m.slots, hour: m.nowHour, minute: m.nowMinute, lang: m.lang, look: look)
+                .frame(height: 64)
         }
+        .padding(.horizontal, 2)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
@@ -357,7 +430,7 @@ public struct WidgetBackground: View {
     public var body: some View {
         ZStack {
             AmbientBackground(palette: TimeOfDayPalette.current(now: date), frozenSeconds: 0)
-            Color(argb: 0x99141A29)
+            Color(argb: 0xCC141A29)
         }
     }
 }

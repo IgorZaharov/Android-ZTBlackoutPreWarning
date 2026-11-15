@@ -2585,9 +2585,15 @@ function runUnitTestG_IosPort() {
 
   // Invariants shared with Android and web.
   const infoPlist = read('ios/App/Info.plist');
+  // The iPhone home screen fits about 11 characters, so the icon shows the short name chosen by the owner
+  // (2026-11-15); the bundle name, the App Store listing and the widget gallery keep the full name.
   assert.ok(
-    infoPlist.includes('<key>CFBundleDisplayName</key>\n\t<string>Світло в Житомирі</string>'),
-    'iOS CFBundleDisplayName must be "Світло в Житомирі"'
+    infoPlist.includes('<key>CFBundleDisplayName</key>\n\t<string>Світло</string>'),
+    'iOS CFBundleDisplayName (home-screen name) must be "Світло"'
+  );
+  assert.ok(
+    infoPlist.includes('<key>CFBundleName</key>\n\t<string>Світло в Житомирі</string>'),
+    'iOS CFBundleName must be "Світло в Житомирі"'
   );
   assert.ok(infoPlist.includes('$(MARKETING_VERSION)'), 'iOS Info.plist must take the version from MARKETING_VERSION');
   assert.ok(!infoPlist.includes('<string>processing</string>'), 'iOS must not declare the unused processing background mode');
