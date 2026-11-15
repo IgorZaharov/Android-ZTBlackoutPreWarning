@@ -393,6 +393,9 @@ object AppStrings {
     fun notificationsAskBodyIos(lang: String) =
         if (lang == "uk") "Застосунок попередить перед відключенням за графіком і повідомить про аварійні відключення. Без дозволу графік працює, але без сповіщень." else "The app warns you before a scheduled outage and tells you about emergency outages. Without permission the schedule still works, just without notifications."
     fun notificationsAskButtonIos(lang: String) = if (lang == "uk") "Дозволити сповіщення" else "Allow notifications"
-    const val PRIVACY_POLICY_URL_IOS = "https://github.com/IgorZaharov/Android-ZTBlackoutPreWarning/blob/main/PRIVACY_POLICY.md"
+    // About links of the iPhone app point to the iOS repository (owner, 2026-11-15); Android keeps its own.
+    const val IOS_REPO_URL = "https://github.com/IgorZaharov/iOS-ZTPreBlackoutNotification"
+    const val IOS_ISSUES_URL = "https://github.com/IgorZaharov/iOS-ZTPreBlackoutNotification/issues"
+    const val PRIVACY_POLICY_URL_IOS = "https://github.com/IgorZaharov/iOS-ZTPreBlackoutNotification/blob/main/PRIVACY_POLICY_IOS.md"
     // --- end iOS only ---
 }

@@ -2609,6 +2609,16 @@ function runUnitTestG_IosPort() {
   assert.ok(versionName, 'versionName not found in build.gradle.kts');
   assert.ok(projectYml.includes(`MARKETING_VERSION: "${versionName}"`), `ios/project.yml MARKETING_VERSION must be ${versionName}`);
 
+  // iPhone only (plan R10): XcodeGen's iOS target preset sets TARGETED_DEVICE_FAMILY "1,2" per target, which
+  // overrides the project-level value, so the app and the widget targets must each set "1" themselves.
+  for (const target of ['ZTPreBlackout', 'BlackoutWidgetExtension']) {
+    const start = projectYml.indexOf(`\n  ${target}:`);
+    assert.ok(start >= 0, `ios/project.yml target ${target} not found`);
+    const next = projectYml.slice(start + 1).search(/\n {2}\S/);
+    const block = next < 0 ? projectYml.slice(start) : projectYml.slice(start, start + 1 + next);
+    assert.ok(/TARGETED_DEVICE_FAMILY:\s*"1"/.test(block), `ios/project.yml target ${target} must set TARGETED_DEVICE_FAMILY "1" (iPhone only)`);
+  }
+
   // Owner decision D3 (docs/ios/IOS_PORT_PLAN.md): no roulette mini-game in the iOS app.
   const walk = (dir: string): string[] =>
     fs.readdirSync(path.join(ROOT_DIR, dir), { withFileTypes: true }).flatMap((e) =>

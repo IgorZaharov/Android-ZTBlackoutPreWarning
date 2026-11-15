@@ -317,5 +317,7 @@ public enum AppStrings {
     public static func notificationsAskTitleIos(_ lang: String) -> String { lang == "uk" ? "Увімкніть попередження" : "Turn on warnings" }
     public static func notificationsAskBodyIos(_ lang: String) -> String { lang == "uk" ? "Застосунок попередить перед відключенням за графіком і повідомить про аварійні відключення. Без дозволу графік працює, але без сповіщень." : "The app warns you before a scheduled outage and tells you about emergency outages. Without permission the schedule still works, just without notifications." }
     public static func notificationsAskButtonIos(_ lang: String) -> String { lang == "uk" ? "Дозволити сповіщення" : "Allow notifications" }
-    public static let PRIVACY_POLICY_URL_IOS = "https://github.com/IgorZaharov/Android-ZTBlackoutPreWarning/blob/main/PRIVACY_POLICY.md"
+    public static let IOS_REPO_URL = "https://github.com/IgorZaharov/iOS-ZTPreBlackoutNotification"
+    public static let IOS_ISSUES_URL = "https://github.com/IgorZaharov/iOS-ZTPreBlackoutNotification/issues"
+    public static let PRIVACY_POLICY_URL_IOS = "https://github.com/IgorZaharov/iOS-ZTPreBlackoutNotification/blob/main/PRIVACY_POLICY_IOS.md"
 }
