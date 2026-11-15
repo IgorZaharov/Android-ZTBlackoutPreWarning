@@ -15,7 +15,7 @@ Fix these first. Each one is a likely rejection or a step you cannot finish.
 
 | # | Problem | What to do |
 |---|---|---|
-| B1 | **The privacy policy URL shows the Android-only text.** The app and this guide link to `.../blob/main/PRIVACY_POLICY.md`. The iOS sections (5A, both hosts, street ids) exist only on `feat/ios-port`. App Review opens the link and finds no word about iPhone (guideline 5.1.1). | Get `PRIVACY_POLICY.md` onto `main` before you submit. A push to `main` publishes an Android GitHub Release (CLAUDE.md), so do it as part of a planned release (merge the iOS branch for 1.4.x), not as a one-file push. Owner decision. |
+| B1 | **The privacy policy URL shows the Android-only text.** The app and this guide link to `.../blob/main/PRIVACY_POLICY.md`. The iOS sections (5A, both hosts, street ids) exist only on `feat/ios-port`. App Review opens the link and finds no word about iPhone (guideline 5.1.1). **Done 2026-11-15:** the iOS port is merged into `main` (PR #4), and the App Store listing uses its own iPhone-only policy `PRIVACY_POLICY_IOS.md` (owner request). Build 52's About page still links to the combined `PRIVACY_POLICY.md`, which also covers iPhone. |
 | B2 | **The TestFlight diagnostics card is visible to App Review.** `WidgetDiag.isTestFlight` checks for a sandbox receipt. App Review installs builds with a sandbox receipt too, so the reviewer sees "Widget diagnostics (TestFlight)" in Settings. Test or debug content can be rejected under 2.2 / 2.3. **Done 2026-11-15:** the card and the logging are removed, tag `ios-v1.4.0-11`. Check that build on the iPhone (Settings has no diagnostics card, the widget buttons still work) and submit **that** build or a later one, never an older one. |
 | B3 | **Support URL.** Apple requires a page where users can contact you. | Use the GitHub Issues page (below). Optional: add a contact e-mail to the README so users without a GitHub account can write. |
 | B4 | **Open question 4 of the plan: countries.** | Answer in step 3 (recommendation: all countries except mainland China). |
@@ -118,7 +118,7 @@ No Paid Apps agreement, no bank or tax forms are needed for a free app.
 
 | Field | Value |
 |---|---|
-| Privacy Policy URL | `https://github.com/IgorZaharov/Android-ZTBlackoutPreWarning/blob/main/PRIVACY_POLICY.md` (only after blocker B1 is fixed) |
+| Privacy Policy URL | `https://github.com/IgorZaharov/Android-ZTBlackoutPreWarning/blob/main/PRIVACY_POLICY_IOS.md` (iPhone only; the Android policy stays in `PRIVACY_POLICY.md`) |
 | User Privacy Choices URL | empty |
 | Data collection | **Get Started → "No, we do not collect data from this app"** → Save → **Publish**. |
 
