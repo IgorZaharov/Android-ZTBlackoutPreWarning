@@ -1,9 +1,10 @@
 # Privacy Policy / Політика конфіденційності
 
 **Effective Date:** November 9, 2026  
-**Last Updated:** November 9, 2026  
+**Last Updated:** November 15, 2026  
 **Application Name:** Світло в Житомирі (ZTBlackoutPreWarning)  
-**Package Name / Application ID:** `com.ZTBlackoutPreWarning`  
+**Package Name / Application ID (Android):** `com.ZTBlackoutPreWarning`  
+**Bundle Identifier (iOS):** `ua.blackout.prewarning` (widget extension `ua.blackout.prewarning.widget`)  
 **Developer / Publisher:** Igor Zaharov  
 **Open-Source Repository:** [https://github.com/IgorZaharov/Android-ZTBlackoutPreWarning](https://github.com/IgorZaharov/Android-ZTBlackoutPreWarning)  
 **Contact / Issue Tracker:** [https://github.com/IgorZaharov/Android-ZTBlackoutPreWarning/issues](https://github.com/IgorZaharov/Android-ZTBlackoutPreWarning/issues)  
@@ -12,11 +13,11 @@
 
 ## 1. Introduction and Scope
 
-This Privacy Policy governs the mobile application **"Світло в Житомирі"** (package name `com.ZTBlackoutPreWarning`, hereinafter referred to as the "Application", "App", "we", "us", or "our"), created and maintained by Igor Zaharov as a free, open-source community utility.
+This Privacy Policy governs the mobile application **"Світло в Житомирі"** for Android (package name `com.ZTBlackoutPreWarning`) and for iPhone (bundle identifier `ua.blackout.prewarning`, iOS 17.0 or newer), hereinafter referred to as the "Application", "App", "we", "us", or "our", created and maintained by Igor Zaharov as a free, open-source community utility. Both versions handle data in the same way; where they differ, this policy says so (see section 5 for Android and section 5A for iOS).
 
 The Application is designed to provide residents and organizations in the Zhytomyr region of Ukraine with timely, accurate information regarding scheduled electrical power outages (Графіки погодинних відключень електроенергії) published by **JSC "Zhytomyroblenergo" (АТ «Житомиробленерго»)**.
 
-We are strictly committed to user privacy and digital sovereignty. This document outlines our data handling practices in accordance with the **Google Play Developer Program Policies**, the **General Data Protection Regulation (GDPR) (EU) 2016/679**, the **Law of Ukraine "On Protection of Personal Data" (Закон України «Про захист персональних даних» № 2297-VI)**, and applicable privacy standards.
+We are strictly committed to user privacy and digital sovereignty. This document outlines our data handling practices in accordance with the **Google Play Developer Program Policies**, the **Apple App Store Review Guidelines (section 5.1, Privacy)**, the **General Data Protection Regulation (GDPR) (EU) 2016/679**, the **Law of Ukraine "On Protection of Personal Data" (Закон України «Про захист персональних даних» № 2297-VI)**, and applicable privacy standards.
 
 ---
 
@@ -26,7 +27,7 @@ In strict adherence to the principle of data minimization (Article 5(1)(c) of th
 
 - **No Personal Data Collected:** The Application does **not** collect, solicit, aggregate, record, store, sell, lease, or monetize any Personally Identifiable Information (PII).
 - **No User Accounts:** There is no registration, login, profile creation, or authentication required to use the Application.
-- **No Advertising or Behavioral Profiling:** The Application contains no advertising frameworks, ad-tracking SDKs, or commercial behavioral profiling mechanisms. It does not access the Android Advertising ID (AAID).
+- **No Advertising or Behavioral Profiling:** The Application contains no advertising frameworks, ad-tracking SDKs, or commercial behavioral profiling mechanisms. It does not access the Android Advertising ID (AAID) or the Apple Identifier for Advertisers (IDFA), and it does not track users across apps or websites, so no App Tracking Transparency prompt is shown.
 - **No Analytics or Telemetry:** The Application does not integrate third-party analytics services (e.g., Google Analytics for Firebase, Firebase Crashlytics, AppsFlyer, Mixpanel, or Facebook SDK). We do not collect telemetry, diagnostic crash reports containing device IDs, or usage statistics.
 - **No Location Tracking:** The Application does not request or access GPS, coarse location, Wi-Fi SSID information, or cellular tower triangulation data.
 
@@ -34,15 +35,15 @@ In strict adherence to the principle of data minimization (Article 5(1)(c) of th
 
 ## 3. Information Processed Locally on the User's Device
 
-All configuration settings and operational data created during application use are retained **strictly on the user's physical device** within the sandboxed Android application private storage (`SharedPreferences` under `Context.MODE_PRIVATE`). This information is never transmitted to any external server or third party.
+All configuration settings and operational data created during application use are retained **strictly on the user's physical device**: on Android within the sandboxed application private storage (`SharedPreferences` under `Context.MODE_PRIVATE`); on iPhone within the application sandbox and the App Group container `group.ua.blackout.prewarning`, which only the Application and its own home-screen widget can read. This information is never transmitted to any external server or third party, except the public street and settlement identifiers described in section 4.
 
 Locally stored parameters include:
 
-1. **Selected Power Outage Queue:** The user's chosen consumer sub-queue (e.g., queues `1.1` through `6.2`).
+1. **Saved Addresses and Queues:** Up to five addresses or queues the user added (district, settlement, street, house number, the queue found for it, and an optional custom name), with the per-address notification switches.
 2. **Notification & Pre-Warning Settings:** The user's chosen pre-warning lead time (e.g., 15 or 30 minutes in advance), sound toggles, and vibration toggles.
 3. **Audio Preferences:** Sound effects and music volume sliders.
-4. **Offline Cache:** Cached electricity outage schedule tables to enable offline viewing when network access is unavailable.
-5. **Mini-Game State ("Житомирська Рулетка"):** Local game scores, achievements, daily streak counters, and mini-game power points.
+4. **Offline Cache:** Cached electricity outage schedule tables and the emergency outages last seen for each saved address, to enable offline viewing when network access is unavailable.
+5. **Mini-Game State ("Житомирська Рулетка", Android only):** Local game scores, achievements, daily streak counters, and mini-game power points. The iPhone version has no mini-game.
 
 ---
 
@@ -62,6 +63,12 @@ The Application requires internet access exclusively to fetch publicly accessibl
    - **Target Endpoint:** `https://raw.githubusercontent.com/IgorZaharov/Android-ZTBlackoutPreWarning/main/donations.json`
    - **Purpose:** Periodically retrieving optional community donation URLs and official information links using standard conditional HTTP headers (`ETag` / `If-Modified-Since`).
    - **Data Transmitted:** Anonymous static file GET request. No telemetry or user information is transmitted.
+4. **Website Icons of the Donation Links:**
+   - **Target Endpoints:** `https://icons.duckduckgo.com/ip3/` and the `/favicon.ico` file of each donation website listed in the About screen.
+   - **Purpose:** Showing the small website icon next to each donation link.
+   - **Data Transmitted:** Anonymous image GET request naming only the donation website's domain. No user information is transmitted.
+
+As with any internet request, the operators of these servers can see the device's IP address. We do not receive, store, or combine these addresses with anything.
 
 ---
 
@@ -83,6 +90,22 @@ The Application does **not** request access to contacts, cameras, microphones, l
 
 ---
 
+## 5A. iPhone (iOS) Capabilities and Technical Justification
+
+The iPhone version uses only the following system capabilities:
+
+| Capability | Technical Requirement & Justification |
+| :--- | :--- |
+| Notifications (`UserNotifications`) | Local notifications before a scheduled outage and about emergency outages. The Application asks for permission only after the user has chosen a queue or an address, and works fully without it. All notifications are created on the device; there is no push server. |
+| Background App Refresh (`BGAppRefreshTask` `ua.blackout.prewarning.sync`, background mode `fetch`) | Refreshing the schedule and emergency outages from time to time while the Application is closed, so that warnings and widgets stay current. iOS decides how often this runs; the user can turn it off in iOS Settings. |
+| Home-Screen Widgets (`WidgetKit`) and App Group `group.ua.blackout.prewarning` | Sharing the saved addresses and the cached schedule between the Application and its own widgets. |
+
+The Privacy Manifest (`PrivacyInfo.xcprivacy`) of the Application and of its widget declares no tracking, no collected data types, and one required-reason API: `UserDefaults` (reasons `CA92.1` and `1C8F.1`, settings read only by the Application and its App Group). The cache files in the App Group container are excluded from iCloud and device backups.
+
+The iPhone version does **not** request access to contacts, photos, camera, microphone, location, Bluetooth, health data, or the advertising identifier. Donation, Facebook, and website links open in Safari, outside the Application; the Application does not process payments.
+
+---
+
 ## 6. Third-Party Links and External Services
 
 The Application contains hyperlinks to external third-party platforms for the convenience of the user:
@@ -100,17 +123,18 @@ We do not control, oversee, or assume responsibility for the privacy practices, 
 
 The Application is a public utility intended for general audiences. It does not target, knowingly interact with, or collect information from children under the age of 13 (or under 16 within the European Economic Area). 
 
-Because the Application does not collect, retain, or transmit personal data of any kind, it is fully safe for all age groups and compliant with the **Children's Online Privacy Protection Act (COPPA)** and the **Google Play Families Policy**.
+Because the Application does not collect, retain, or transmit personal data of any kind, it is fully safe for all age groups and compliant with the **Children's Online Privacy Protection Act (COPPA)**, the **Google Play Families Policy**, and the **App Store Review Guidelines** for apps rated for all ages.
 
 ---
 
 ## 8. Data Storage, Security, and Retention
 
-- **Storage Location:** All user-specific settings are confined exclusively to the local file system sandbox of the Android operating system on the user's device.
-- **Security:** Data is protected by Android's application sandboxing architecture and file system encryption. We do not operate remote databases, cloud synchronization servers, or user data repositories.
+- **Storage Location:** All user-specific settings are confined exclusively to the local file system sandbox of the operating system (Android or iOS) on the user's device.
+- **Security:** Data is protected by the application sandboxing architecture and file system encryption of Android and iOS. We do not operate remote databases, cloud synchronization servers, or user data repositories.
 - **Data Deletion:** The user retains complete sovereignty over their data. All stored preferences and local caches can be irrevocably deleted at any time by:
-  1. Navigating on the device to **Settings > Apps > Світло в Житомирі > Storage > Clear Data**; or
-  2. Uninstalling the Application from the device.
+  1. On Android, navigating on the device to **Settings > Apps > Світло в Житомирі > Storage > Clear Data**;
+  2. In the Application's own Settings screen, using the reset button, which removes the saved addresses and settings (Android and iPhone); or
+  3. Uninstalling the Application from the device (on iPhone, deleting the app also deletes its widgets and its App Group data).
 
 ---
 
@@ -125,7 +149,7 @@ In accordance with Chapter III of the GDPR (Regulation (EU) 2016/679) and Articl
 
 ## 10. Modifications to this Privacy Policy
 
-We reserve the right to update this Privacy Policy to reflect changes in legal requirements, technical enhancements, or Google Play Store standards. Any modifications will be posted to the official repository with an updated "Last Updated" date. Continued use of the Application after revisions constitutes acknowledgment of the updated terms.
+We reserve the right to update this Privacy Policy to reflect changes in legal requirements, technical enhancements, or Google Play and App Store standards. Any modifications will be posted to the official repository with an updated "Last Updated" date. Continued use of the Application after revisions constitutes acknowledgment of the updated terms.
 
 ---
 
@@ -142,30 +166,32 @@ If you have questions, feedback, or legal inquiries concerning this Privacy Poli
 # Політика конфіденційності (Офіційна українська версія)
 
 **Дата набрання чинності:** 9 листопада 2026 року  
-**Останнє оновлення:** 9 листопада 2026 року  
+**Останнє оновлення:** 15 листопада 2026 року  
 **Назва додатку:** Світло в Житомирі (ZTBlackoutPreWarning)  
-**Ідентифікатор пакета (Package Name):** `com.ZTBlackoutPreWarning`  
+**Ідентифікатор пакета Android (Package Name):** `com.ZTBlackoutPreWarning`  
+**Ідентифікатор iPhone (Bundle Identifier):** `ua.blackout.prewarning` (віджет `ua.blackout.prewarning.widget`)  
 **Розробник:** Ігор Захаров (Igor Zaharov)  
 **Репозиторій проєкту:** [https://github.com/IgorZaharov/Android-ZTBlackoutPreWarning](https://github.com/IgorZaharov/Android-ZTBlackoutPreWarning)  
 
 ### 1. Загальні положення
-Ця Політика конфіденційності регулює використання мобільного додатку **«Світло в Житомирі»** (`com.ZTBlackoutPreWarning`), розробленого як безкоштовний некомерційний інструмент для жителів міста Житомира та Житомирської області для оперативного відстеження графіків погодинних відключень електроенергії (ГПВ) АТ «Житомиробленерго».
+Ця Політика конфіденційності регулює використання мобільного додатку **«Світло в Житомирі»** для Android (`com.ZTBlackoutPreWarning`) та для iPhone (`ua.blackout.prewarning`, iOS 17.0 або новіша), розробленого як безкоштовний некомерційний інструмент для жителів міста Житомира та Житомирської області для оперативного відстеження графіків погодинних відключень електроенергії (ГПВ) АТ «Житомиробленерго».
 
 ### 2. Повна відсутність збору персональних даних
 - Додаток **не збирає**, не реєструє, не передає та не продає персональні дані користувачів.
 - Реєстрація або вхід в обліковий запис відсутні.
-- У додатку відсутні рекламні мережі, рекламні трекери, аналітичні системи (наприклад, Google Analytics, Firebase SDK, Facebook SDK) та збір рекламних ідентифікаторів.
+- У додатку відсутні рекламні мережі, рекламні трекери, аналітичні системи (наприклад, Google Analytics, Firebase SDK, Facebook SDK) та збір рекламних ідентифікаторів (AAID на Android, IDFA на iPhone). Додаток не відстежує користувача в інших застосунках і на сайтах.
 - Додаток не відстежує геопозицію користувача (GPS чи дані мережі).
 
 ### 3. Локальні дані на пристрої
-Усі налаштування користувача (номер черги від 1.1 до 6.2, час завчасного попередження, рівень звуку, локальні бали мінігри) зберігаються **виключно локально** у захищеному сховищі пристрою (`SharedPreferences`) і ніколи не передаються стороннім особам чи серверам.
+Усі налаштування користувача (до п'яти збережених адрес або черг від 1.1 до 6.2 з їхніми назвами та перемикачами, час завчасного попередження, рівень звуку, збережений графік, на Android також локальні бали мінігри) зберігаються **виключно локально** у захищеному сховищі пристрою (`SharedPreferences` на Android; пісочниця застосунку та контейнер App Group `group.ua.blackout.prewarning`, доступний лише застосунку та його віджетам, на iPhone) і ніколи не передаються стороннім особам чи серверам, крім публічних кодів населеного пункту й вулиці, описаних нижче. На iPhone мінігри немає.
 
 ### 4. Мережеві запити
 Додаток звертається через захищене з'єднання виключно до:
 1. Офіційного сайту АТ «Житомиробленерго» (`https://www.ztoe.com.ua/unhooking-search.php`) для завантаження відкритих графіків відключень.
 2. Публічного сервісу аварійних відключень АТ «Житомиробленерго» (`https://api-ztoe-poweron.inneti.net/api/`, сайт `https://ztoe-poweron.inneti.net/`) для отримання аварійних відключень і планових ремонтних робіт на вибраній вулиці. Надсилаються лише публічні коди вибраного населеного пункту та вулиці; номер будинку порівнюється на пристрої й нікуди не надсилається.
 3. Статичного файлу конфігурації у відкритому репозиторії GitHub для оновлення офіційних посилань.
-Жодні ідентифікатори пристрою чи користувача під час цих запитів не надсилаються.
+4. Сервісу іконок сайтів `https://icons.duckduckgo.com/ip3/` та файлів `/favicon.ico` сайтів зі списку пожертв, щоб показати маленьку іконку біля кожного посилання. Запит містить лише домен сайту пожертв.
+Жодні ідентифікатори пристрою чи користувача під час цих запитів не надсилаються. Як і під час будь-якого запиту в інтернеті, власники цих серверів бачать IP-адресу пристрою; ми цих адрес не отримуємо й не зберігаємо.
 
 ### 5. Дозволи Android
 - `INTERNET` та `ACCESS_NETWORK_STATE`: для отримання публічного графіка та перевірки наявності з'єднання.
@@ -174,8 +200,15 @@ If you have questions, feedback, or legal inquiries concerning this Privacy Poli
 - `RECEIVE_BOOT_COMPLETED`: для автоматичного відновлення запланованих таймерів після перезавантаження телефону.
 - `VIBRATE` та `WAKE_LOCK`: для коректного доставлення сигналу сповіщення.
 
+### 5А. Можливості iPhone (iOS)
+- **Сповіщення** (`UserNotifications`): локальні попередження перед плановим відключенням і про аварійні відключення. Дозвіл запитується лише після вибору черги або адреси; без нього додаток повністю працює. Усі сповіщення створюються на пристрої, push-сервера немає.
+- **Фонове оновлення** (`BGAppRefreshTask` `ua.blackout.prewarning.sync`, фоновий режим `fetch`): час від часу оновлює графік і аварійні відключення, коли додаток закрито. Як часто це відбувається, вирішує iOS; користувач може вимкнути це в налаштуваннях iOS.
+- **Віджети** (`WidgetKit`) та App Group `group.ua.blackout.prewarning`: спільні збережені адреси й графік для додатку та його віджетів.
+- Маніфест конфіденційності (`PrivacyInfo.xcprivacy`) додатку та віджета: без відстеження, без зібраних типів даних; єдиний API з обов'язковою причиною — `UserDefaults` (причини `CA92.1` і `1C8F.1`). Файли кешу в контейнері App Group не потрапляють до резервних копій iCloud і пристрою.
+- Додаток не запитує доступ до контактів, фото, камери, мікрофона, геопозиції, Bluetooth, даних здоров'я чи рекламного ідентифікатора. Посилання на пожертви, Facebook і сайти відкриваються в Safari, поза додатком; додаток не обробляє платежі.
+
 ### 6. Видалення даних
-Користувач може в будь-який момент повністю видалити всі локальні налаштування, очистивши дані програми в налаштуваннях Android або видаливши додаток.
+Користувач може в будь-який момент повністю видалити всі локальні налаштування: кнопкою скидання в налаштуваннях самого додатку (Android і iPhone), очистивши дані програми в налаштуваннях Android або видаливши додаток (на iPhone разом із додатком видаляються його віджети та дані App Group).
 
 ### 7. Контакти
 З будь-яких питань щодо функціонування додатку або цієї політики можна звернутися через офіційний репозиторій:  

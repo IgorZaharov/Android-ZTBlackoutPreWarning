@@ -165,6 +165,7 @@ private struct WidgetButtons: View {
     let refreshing: Bool
     let size: CGFloat
     let look: WidgetLook
+    let lang: String
 
     var body: some View {
         HStack(spacing: 6) {
@@ -177,7 +178,7 @@ private struct WidgetButtons: View {
                     }
             }
             .buttonStyle(.plain)
-            .accessibilityLabel(Text(verbatim: "Оновити дані"))
+            .accessibilityLabel(Text(verbatim: AppStrings.refreshBtn(lang)))
             Button(intent: ToggleAlertsIntent()) {
                 Circle().fill(master ? Color.white : Color.white.opacity(0.15)).frame(width: size, height: size)
                     .overlay {
@@ -188,7 +189,8 @@ private struct WidgetButtons: View {
                     .widgetAccentable(look == .tinted && master)
             }
             .buttonStyle(.plain)
-            .accessibilityLabel(Text(verbatim: "Toggle alerts"))
+            .accessibilityLabel(Text(verbatim: AppStrings.masterHint(lang)))
+            .accessibilityAddTraits(master ? .isSelected : [])
         }
     }
 }
@@ -235,7 +237,7 @@ public struct SmallWidgetView: View {
                 .lineLimit(1).minimumScaleFactor(0.7).widgetAccentable()
             HStack {
                 Spacer(minLength: 0)
-                WidgetButtons(master: master, refreshing: refreshing, size: 32, look: look)
+                WidgetButtons(master: master, refreshing: refreshing, size: 32, look: look, lang: m.lang)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -275,7 +277,7 @@ public struct BigWidgetView: View {
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
-                WidgetButtons(master: master, refreshing: refreshing, size: 34, look: look)
+                WidgetButtons(master: master, refreshing: refreshing, size: 34, look: look, lang: m.lang)
             }
             HStack(alignment: .bottom) {
                 VStack(alignment: .leading, spacing: 0) {
