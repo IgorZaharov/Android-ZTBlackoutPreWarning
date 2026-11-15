@@ -6,6 +6,8 @@ import SwiftUI
 /// opens in Safari, never inside the app (R3).
 struct AboutScreen: View {
     let lang: String
+    /// A double tap on the About dock button scrolls back to the top.
+    var scrollTop = AppModel.PageJump(page: -1, seq: 0)
 
     @State private var donations: [DonationItem] = DonationsRepository.DEFAULT_DONATIONS
 
@@ -16,6 +18,7 @@ struct AboutScreen: View {
 
     var body: some View {
         ScrollView {
+          ScrollViewReader { proxy in
             VStack(spacing: 16) {
                 identity
                 description
@@ -49,6 +52,8 @@ struct AboutScreen: View {
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
+            .scrollsToTop(proxy, page: 2, request: scrollTop)
+          }
         }
         .task {
             let fresh = await DonationsRepository.shared.getDonationsWithDailyRefresh(forceRefresh: true)

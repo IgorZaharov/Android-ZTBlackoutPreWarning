@@ -7,6 +7,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
@@ -38,7 +39,9 @@ import ua.blackout.prewarning.ui.components.glassSurface
 @Composable
 fun AboutScreen(
     lang: String = "uk",
-    onOpenRoulette: (() -> Unit)? = null
+    onOpenRoulette: (() -> Unit)? = null,
+    /** Hoisted by the navigation: a double tap on this page's dock button scrolls it back to the top. */
+    scrollState: ScrollState = rememberScrollState()
 ) {
     val context = LocalContext.current
     val appContext = remember { context.applicationContext }
@@ -90,7 +93,7 @@ fun AboutScreen(
         modifier = Modifier
             .fillMaxSize()
             .statusBarsPadding()
-            .verticalScroll(rememberScrollState())
+            .verticalScroll(scrollState)
             .padding(horizontal = 16.dp, vertical = 12.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {

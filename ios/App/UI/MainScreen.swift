@@ -154,6 +154,7 @@ struct MainScreen: View {
                 .padding(.horizontal, 16)
                 .padding(.vertical, 12)
                 .launchScroll(proxy, active: model.page == 0)
+                .scrollsToTop(proxy, page: 0, request: model.scrollTop)
               }
             }
             .scrollDisabled(isQueueUnselected)

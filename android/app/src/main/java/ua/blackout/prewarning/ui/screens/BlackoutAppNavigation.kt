@@ -1,5 +1,7 @@
 package ua.blackout.prewarning.ui.screens
 
+import androidx.compose.foundation.rememberScrollState
+import android.os.SystemClock
 import android.content.SharedPreferences
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
@@ -96,6 +98,10 @@ private fun smoothGaussianRadialBrush(
     )
 }
 
+
+/** Two taps on the same dock button within this time scroll its page to the top (iOS: `Dock.doubleTapWindow`). */
+private const val DOCK_DOUBLE_TAP_MS = 400L
+
 @Composable
 fun BlackoutAppNavigation(
     onThemeChanged: (Boolean) -> Unit = {},
@@ -142,6 +148,19 @@ fun BlackoutAppNavigation(
 
     // Pager for swipe left/right between windows with beyondViewportPageCount = 2 to eliminate swipe jittering
     val pagerState = rememberPagerState(initialPage = 0, pageCount = { 3 })
+    // the pages' scroll positions, hoisted so a double tap on a dock button can scroll its page to the top
+    val pageScrolls = listOf(rememberScrollState(), rememberScrollState(), rememberScrollState())
+    var lastDockTap by remember { mutableStateOf<Pair<Int, Long>?>(null) }
+    // A tap switches to the page at once; a second tap on the same button within DOCK_DOUBLE_TAP_MS also
+    // scrolls that page to its top (owner, 2026-11-15). Timed by hand, so a single tap never waits.
+    fun onDockTap(page: Int) {
+        val now = SystemClock.uptimeMillis()
+        val last = lastDockTap
+        val isDouble = last != null && last.first == page && now - last.second < DOCK_DOUBLE_TAP_MS
+        lastDockTap = if (isDouble) null else page to now
+        coroutineScope.launch { pagerState.animateScrollToPage(page, animationSpec = PageGlide) }
+        if (isDouble) coroutineScope.launch { pageScrolls[page].animateScrollTo(0) }
+    }
 
     // Custom In-App Banner with Application Icon (replaces raw OS Toast so Android robot icon never appears)
     var appBannerMessage by remember { mutableStateOf<String?>(null) }
@@ -589,6 +608,7 @@ fun BlackoutAppNavigation(
                 0 -> {
                     val other = otherShownItem()
                     MainScreen(
+                        scrollState = pageScrolls[0],
                         queue = if (other != null) other.queue.orEmpty() else queue,
                         customQueueStatusText = if (other != null) other.queueStatusText else customQueueStatusText,
                         selectedAddress = if (other != null) {
@@ -649,6 +669,7 @@ fun BlackoutAppNavigation(
                 }
                 1 -> {
                     SettingsScreen(
+                        scrollState = pageScrolls[1],
                         currentQueue = queue,
                         subscriptions = subscriptions,
                         alertsMaster = alertsMaster,
@@ -783,6 +804,7 @@ fun BlackoutAppNavigation(
                 }
                 2 -> {
                     AboutScreen(
+                        scrollState = pageScrolls[2],
                         lang = resolvedLang,
                         onOpenRoulette = { isRouletteOpen = true }
                     )
@@ -871,7 +893,7 @@ fun BlackoutAppNavigation(
                                 .clip(CircleShape)
                                 .background(if (isSchedule) Color.White else Color.Transparent)
                                 .clickable(enabled = !isQueueUnselected) {
-                                    coroutineScope.launch { pagerState.animateScrollToPage(0, animationSpec = PageGlide) }
+                                    onDockTap(0)
                                 },
                             contentAlignment = Alignment.Center
                         ) {
@@ -891,7 +913,7 @@ fun BlackoutAppNavigation(
                                 .clip(CircleShape)
                                 .background(if (isSettings) Color.White else Color.Transparent)
                                 .clickable(enabled = !isQueueUnselected) {
-                                    coroutineScope.launch { pagerState.animateScrollToPage(1, animationSpec = PageGlide) }
+                                    onDockTap(1)
                                 },
                             contentAlignment = Alignment.Center
                         ) {
@@ -911,7 +933,7 @@ fun BlackoutAppNavigation(
                                 .clip(CircleShape)
                                 .background(if (isAbout) Color.White else Color.Transparent)
                                 .clickable(enabled = !isQueueUnselected) {
-                                    coroutineScope.launch { pagerState.animateScrollToPage(2, animationSpec = PageGlide) }
+                                    onDockTap(2)
                                 },
                             contentAlignment = Alignment.Center
                         ) {

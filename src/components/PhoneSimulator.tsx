@@ -141,6 +141,17 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
     previousTab.current = activeTab;
   }, [activeTab]);
   const reduceMotion = useReducedMotion() ?? false;
+  // A dock tap switches to the screen at once; a second tap on the same button within 400 ms also scrolls it
+  // to the top (Android DOCK_DOUBLE_TAP_MS, iOS Dock.doubleTapWindow). Timed by hand, so a single tap never waits.
+  const lastDockTap = React.useRef<{ tab: (typeof tabOrder)[number]; at: number } | null>(null);
+  const onDockTap = (tab: (typeof tabOrder)[number]) => {
+    const now = Date.now();
+    const last = lastDockTap.current;
+    const isDouble = last !== null && last.tab === tab && now - last.at < 400;
+    lastDockTap.current = isDouble ? null : { tab, at: now };
+    setActiveTab(tab);
+    if (isDouble) scrollContainerRef.current?.scrollTo({ top: 0, behavior: reduceMotion ? 'auto' : 'smooth' });
+  };
   const pageRef = React.useRef<HTMLDivElement>(null);
 
   const displayedNotification = imitatedNotification || activeNotification;
@@ -397,7 +408,7 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
               
               {/* 1. Schedule */}
               <button
-                onClick={() => setActiveTab('schedule')}
+                onClick={() => onDockTap('schedule')}
                 disabled={
                   (!settings.queue || settings.queue.trim() === '') &&
                   !settings.customQueueStatusText &&
@@ -416,7 +427,7 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
 
               {/* 2. Widget Preview */}
               <button
-                onClick={() => setActiveTab('widget')}
+                onClick={() => onDockTap('widget')}
                 disabled={
                   (!settings.queue || settings.queue.trim() === '') &&
                   !settings.customQueueStatusText &&
@@ -435,7 +446,7 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
 
               {/* 3. Settings */}
               <button
-                onClick={() => setActiveTab('settings')}
+                onClick={() => onDockTap('settings')}
                 disabled={
                   (!settings.queue || settings.queue.trim() === '') &&
                   !settings.customQueueStatusText &&
@@ -454,7 +465,7 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
 
               {/* 4. About */}
               <button
-                onClick={() => setActiveTab('about')}
+                onClick={() => onDockTap('about')}
                 disabled={
                   (!settings.queue || settings.queue.trim() === '') &&
                   !settings.customQueueStatusText &&

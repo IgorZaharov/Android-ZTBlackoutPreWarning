@@ -14,6 +14,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
@@ -187,7 +188,9 @@ fun MainScreen(
     shownAddressId: String? = null,
     onSelectAddress: (String) -> Unit = {},
     showNoAlertsCaption: Boolean = false,
-    onOpenSettings: () -> Unit = {}
+    onOpenSettings: () -> Unit = {},
+    /** Hoisted by the navigation: a double tap on this page's dock button scrolls it back to the top. */
+    scrollState: ScrollState = rememberScrollState()
 ) {
     val context = LocalContext.current
 
@@ -263,7 +266,7 @@ fun MainScreen(
                             .clearAndSetSemantics {}
                             .alpha(0.15f)
                     } else {
-                        Modifier.verticalScroll(rememberScrollState())
+                        Modifier.verticalScroll(scrollState)
                     }
                 )
                 .padding(horizontal = 16.dp, vertical = 12.dp),

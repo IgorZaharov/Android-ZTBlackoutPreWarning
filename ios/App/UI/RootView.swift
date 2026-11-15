@@ -78,6 +78,8 @@ struct RootView: View {
         .overlay(alignment: .bottom) {
             Dock(page: page, enabled: !unselected) { target in
                 model.go(to: target)
+            } onDoubleTap: { target in
+                model.scrollToTop(target)
             }
             .padding(.bottom, 16)
             .opacity(unselected ? 0.15 : 1)
@@ -131,7 +133,7 @@ struct RootView: View {
         switch index {
         case 0: MainScreen(model: model)
         case 1: SettingsScreen(model: model, isVisible: page == 1)
-        default: AboutScreen(lang: model.lang)
+        default: AboutScreen(lang: model.lang, scrollTop: model.scrollTop)
         }
     }
 }
@@ -160,11 +162,17 @@ private struct AppBanner: View {
     }
 }
 
-/// Floating capsule with the three page buttons; the shown page is a white disc.
+/// Floating capsule with the three page buttons; the shown page is a white disc. A tap switches to the page at
+/// once; a second tap on the same button within `doubleTapWindow` also scrolls that page to its top (owner,
+/// 2026-11-15). Timed by hand, so a single tap never waits for a double-tap gesture to fail.
 private struct Dock: View {
     let page: Int
     let enabled: Bool
     let onSelect: (Int) -> Void
+    let onDoubleTap: (Int) -> Void
+
+    static let doubleTapWindow: TimeInterval = 0.4
+    @State private var lastTap: (index: Int, at: Date)?
 
     private let items: [(icon: String, label: String)] = [("house.fill", "Графік"), ("gearshape.fill", "Налаштування"), ("info.circle.fill", "Про додаток")]
 
@@ -173,7 +181,17 @@ private struct Dock: View {
             HStack(spacing: 12) {
                 ForEach(0..<3, id: \.self) { i in
                     let selected = page == i
-                    Button { onSelect(i) } label: {
+                    Button {
+                        let now = Date()
+                        if let last = lastTap, last.index == i, now.timeIntervalSince(last.at) < Self.doubleTapWindow {
+                            lastTap = nil
+                            onSelect(i)
+                            onDoubleTap(i)
+                        } else {
+                            lastTap = (i, now)
+                            onSelect(i)
+                        }
+                    } label: {
                         Circle().fill(selected ? Color.white : Color.clear).frame(width: 44, height: 44)
                             .overlay {
                                 Image(systemName: items[i].icon).font(.system(size: 18, weight: .semibold))

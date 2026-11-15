@@ -258,6 +258,24 @@ func openExternal(_ url: String) {
     UIApplication.shared.open(u)
 }
 
+// MARK: - Scroll to top
+
+/// The id of each page's content stack: scrolling it to `.top` is the page's own start (offset 0).
+enum PageTop {
+    static let id = "page-top"
+}
+
+extension View {
+    /// A double tap on the page's dock button (`AppModel.scrollToTop`) scrolls the page back to its top.
+    func scrollsToTop(_ proxy: ScrollViewProxy, page: Int, request: AppModel.PageJump) -> some View {
+        id(PageTop.id)
+            .onChange(of: request) { _, r in
+                guard r.page == page else { return }
+                withAnimation(.smooth(duration: 0.35)) { proxy.scrollTo(PageTop.id, anchor: .top) }
+            }
+    }
+}
+
 // MARK: - CI screenshots
 
 /// CI screenshots only (ios/scripts/gallery_screenshots.sh): `-ZTScroll <id>` scrolls the page in front

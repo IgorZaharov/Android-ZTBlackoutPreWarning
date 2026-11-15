@@ -47,6 +47,13 @@ final class AppModel: ObservableObject {
         page = target
         pageJump = PageJump(page: target, seq: pageJump.seq + 1)
     }
+
+    /// A double tap on a dock button: that page scrolls back to its top (owner, 2026-11-15).
+    @Published private(set) var scrollTop = PageJump(page: -1, seq: 0)
+
+    func scrollToTop(_ target: Int) {
+        scrollTop = PageJump(page: target, seq: scrollTop.seq + 1)
+    }
     /// Main's "Select queue" asks Settings to open the address lookup at once.
     @Published var autoOpenQueueHelp = false
     /// iOS notification permission; `.authorized` until read, so the ask card never flashes.

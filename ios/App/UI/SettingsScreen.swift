@@ -159,6 +159,7 @@ struct SettingsScreen: View {
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
             .launchScroll(proxy, active: isVisible)
+            .scrollsToTop(proxy, page: 1, request: model.scrollTop)
           }
         }
         .scrollDismissesKeyboard(.interactively)
