@@ -324,8 +324,6 @@ jobs:
           command -v xcodegen >/dev/null || brew install xcodegen
           xcodegen generate
 
-      # The archive signs for distribution at once: the default development identity needs a development
-      # profile, and Apple creates one only for a team with a registered device (run 43699004808 failed so).
       - name: Archive (cloud-managed signing via the App Store Connect API key)
         working-directory: ios
         run: |
@@ -346,7 +344,6 @@ jobs:
             -authenticationKeyIssuerID "$ASC_ISSUER_ID" \
             DEVELOPMENT_TEAM="$APPLE_TEAM_ID" \
             CODE_SIGN_STYLE=Automatic \
-            CODE_SIGN_IDENTITY="Apple Distribution" \
             CURRENT_PROJECT_VERSION=${{ github.run_number }} \
             | tee build/archive.log | grep -E '(error:|warning: .*sign|\*\* )' || true
           grep -q '\*\* ARCHIVE SUCCEEDED \*\*' build/archive.log
