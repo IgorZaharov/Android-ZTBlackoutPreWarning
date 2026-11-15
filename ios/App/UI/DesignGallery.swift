@@ -6,12 +6,15 @@ import UIKit
 /// each glass recipe and on the darkest and the brightest time-of-day palette.
 ///
 /// Launch arguments (read from the UserDefaults argument domain):
-/// - `-ZTGallery components|drum|rows|widgets|widgets-large|widgets-tinted`
+/// - `-ZTGallery components|drum|rows|widgets|widgets-large|widgets-tinted|widgets-light|widgets-large-light`
 /// - `-ZTGlassMode automatic|fallback|solid` (solid = what Reduce Transparency shows)
 /// - `-ZTGalleryTime HH:mm` Kyiv time of the background palette (default 02:00)
 /// - `-ZTGalleryLang uk|en`
 struct DesignGallery: View {
-    enum Page: String, CaseIterable { case components, drum, rows, widgets, widgetsLarge = "widgets-large", widgetsTinted = "widgets-tinted" }
+    enum Page: String, CaseIterable {
+        case components, drum, rows, widgets, widgetsLarge = "widgets-large", widgetsTinted = "widgets-tinted"
+        case widgetsLight = "widgets-light", widgetsLargeLight = "widgets-large-light"
+    }
 
     let page: Page
     let mode: ZtGlassMode
@@ -53,6 +56,8 @@ struct DesignGallery: View {
                     case .widgets: widgetPage(large: false, look: .fullColor)
                     case .widgetsLarge: widgetPage(large: true, look: .fullColor)
                     case .widgetsTinted: widgetPage(large: false, look: .tinted)
+                    case .widgetsLight: widgetPage(large: false, look: .fullColor, scheme: .light)
+                    case .widgetsLargeLight: widgetPage(large: true, look: .fullColor, scheme: .light)
                     }
                 }
                 .padding(16)
@@ -215,7 +220,8 @@ struct DesignGallery: View {
 
     /// One widget at its home-screen size with the system's 16 pt content margins. The tinted look is shown
     /// grey on a plain glass-like card: on a device iOS paints the accentable parts in the chosen tint.
-    private func widgetFrame<V: View>(_ w: CGFloat, _ h: CGFloat, look: WidgetLook, @ViewBuilder _ content: () -> V) -> some View {
+    private func widgetFrame<V: View>(_ w: CGFloat, _ h: CGFloat, look: WidgetLook, scheme: ColorScheme = .dark,
+                                      @ViewBuilder _ content: () -> V) -> some View {
         content()
             .padding(16)
             .frame(width: w, height: h)
@@ -228,21 +234,28 @@ struct DesignGallery: View {
             }
             .grayscale(look == .tinted ? 1 : 0)
             .clipShape(RoundedRectangle(cornerRadius: 22, style: .continuous))
+            // the widget colours follow the phone's appearance (WidgetInk); the gallery itself stays dark
+            .environment(\.colorScheme, scheme)
     }
 
-    private func widgetPage(large: Bool, look: WidgetLook) -> some View {
+    private func widgetPage(large: Bool, look: WidgetLook, scheme: ColorScheme = .dark) -> some View {
         let m = widgetModel
         return VStack(alignment: .leading, spacing: 14) {
             if large {
                 caption("large · Big widget")
-                widgetFrame(364, 382, look: look) { BigWidgetView(model: m, master: true, refreshing: false, look: look, large: true) }
+                widgetFrame(364, 382, look: look, scheme: scheme) { BigWidgetView(model: m, master: true, refreshing: false, look: look, large: true) }
+                // the smallest large widget (iPhone SE), where the first TestFlight build cut the header
+                caption("large · iPhone SE size 321 x 324")
+                widgetFrame(321, 324, look: look, scheme: scheme) { BigWidgetView(model: m, master: true, refreshing: false, look: look, large: true) }
             } else {
                 caption("small · bell on")
-                widgetFrame(170, 170, look: look) { SmallWidgetView(model: m, master: true, refreshing: false, look: look) }
+                widgetFrame(170, 170, look: look, scheme: scheme) { SmallWidgetView(model: m, master: true, refreshing: false, look: look) }
                 caption("medium · Big widget · bell off")
-                widgetFrame(364, 170, look: look) { BigWidgetView(model: m, master: false, refreshing: false, look: look, large: false) }
+                widgetFrame(364, 170, look: look, scheme: scheme) { BigWidgetView(model: m, master: false, refreshing: false, look: look, large: false) }
                 caption("medium · «Графік»")
-                widgetFrame(364, 170, look: look) { StripWidgetView(model: m, look: look) }
+                widgetFrame(364, 170, look: look, scheme: scheme) { StripWidgetView(model: m, look: look) }
+                caption("medium · «Графік» · iPhone SE size 321 x 148")
+                widgetFrame(321, 148, look: look, scheme: scheme) { StripWidgetView(model: m, look: look) }
             }
         }
     }

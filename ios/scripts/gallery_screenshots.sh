@@ -33,7 +33,7 @@ done
 
 # M6 widgets: the three widget views at home-screen size, full colour and tinted (ios/App/UI/DesignGallery.swift)
 for time in 02:00 14:30; do
-  for page in widgets widgets-large widgets-tinted; do
+  for page in widgets widgets-large widgets-tinted widgets-light widgets-large-light; do
     shot "${page}-${time/:/}" -ZTGallery "$page" -ZTGalleryTime "$time"
   done
 done

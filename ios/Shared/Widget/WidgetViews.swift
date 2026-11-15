@@ -1,5 +1,6 @@
 import AppIntents
 import SwiftUI
+import UIKit
 import WidgetKit
 
 /// How a widget is drawn: in full colour, or as one tint (the home screen's tinted and clear styles,
@@ -156,7 +157,7 @@ private enum WidgetText {
 
 private extension WidgetModel {
     var statusText: String { isUnclear ? AppStrings.powerUnclear(lang) : isOffNow ? AppStrings.widgetPowerOff(lang) : AppStrings.widgetPowerOn(lang) }
-    var statusColor: Color { isUnclear ? Color(argb: 0xFF9CA3AF) : isOffNow ? ZtColors.accent : Color(argb: 0xFF34D399) }
+    var statusColor: Color { isUnclear ? WidgetInk.unclear : isOffNow ? ZtColors.accent : WidgetInk.powerOn }
 }
 
 /// Round refresh and bell buttons: interactive App Intents (iOS 17), the bell is the master switch for all
@@ -171,22 +172,22 @@ private struct WidgetButtons: View {
     var body: some View {
         HStack(spacing: 6) {
             Button(intent: RefreshWidgetIntent()) {
-                Circle().fill(Color.white.opacity(0.15)).frame(width: size, height: size)
+                Circle().fill(WidgetInk.buttonFill).frame(width: size, height: size)
                     .overlay {
                         Image(systemName: refreshing ? "ellipsis" : "arrow.clockwise")
                             .font(.system(size: size * 0.45, weight: .bold))
-                            .foregroundStyle(Color.white)
+                            .foregroundStyle(WidgetInk.text)
                     }
                     .invalidatableContent()
             }
             .buttonStyle(.plain)
             .accessibilityLabel(Text(verbatim: AppStrings.refreshBtn(lang)))
             Button(intent: ToggleAlertsIntent()) {
-                Circle().fill(master ? Color.white : Color.white.opacity(0.15)).frame(width: size, height: size)
+                Circle().fill(master ? (look == .fullColor ? WidgetInk.bellOnFill : Color.white) : WidgetInk.buttonFill).frame(width: size, height: size)
                     .overlay {
                         Image(systemName: master ? "bell.fill" : "bell.slash.fill")
                             .font(.system(size: size * 0.48, weight: .semibold))
-                            .foregroundStyle(master ? (look == .fullColor ? ZtColors.accent : Color.black) : Color.white)
+                            .foregroundStyle(master ? (look == .fullColor ? WidgetInk.bellOnIcon : Color.black) : WidgetInk.text)
                     }
                     .widgetAccentable(look == .tinted && master)
                     .invalidatableContent()
@@ -205,9 +206,9 @@ private struct HeaderLine: View {
 
     var body: some View {
         HStack(spacing: 6) {
-            Text(verbatim: m.queueHeader).font(.system(size: queueSize, weight: .bold)).foregroundStyle(Color.white).lineLimit(1)
+            Text(verbatim: m.queueHeader).font(.system(size: queueSize, weight: .bold)).foregroundStyle(WidgetInk.text).lineLimit(1)
             if let label = m.addressLabel {
-                Text(verbatim: label).font(.system(size: labelSize)).foregroundStyle(Color.white.opacity(0.72)).lineLimit(1)
+                Text(verbatim: label).font(.system(size: labelSize)).foregroundStyle(WidgetInk.secondary).lineLimit(1)
             }
         }
     }
@@ -235,8 +236,8 @@ public struct SmallWidgetView: View {
             Text(verbatim: m.statusText).font(.system(size: 12, weight: .bold)).foregroundStyle(m.statusColor)
                 .lineLimit(1).minimumScaleFactor(0.8).widgetAccentable()
             Spacer(minLength: 0)
-            Text(verbatim: WidgetText.countdownLabel(m.isOffNow)).font(.system(size: 10)).foregroundStyle(ZtColors.textSecondary).lineLimit(1)
-            Text(verbatim: m.countdown).font(.system(size: 18, weight: .bold, design: .rounded)).foregroundStyle(Color.white)
+            Text(verbatim: WidgetText.countdownLabel(m.isOffNow)).font(.system(size: 10)).foregroundStyle(WidgetInk.secondary).lineLimit(1)
+            Text(verbatim: m.countdown).font(.system(size: 18, weight: .bold, design: .rounded)).foregroundStyle(WidgetInk.text)
                 .lineLimit(1).minimumScaleFactor(0.7).widgetAccentable().invalidatableContent()
             HStack {
                 Spacer(minLength: 0)
@@ -284,30 +285,30 @@ public struct BigWidgetView: View {
             }
             HStack(alignment: .bottom) {
                 VStack(alignment: .leading, spacing: 0) {
-                    Text(verbatim: WidgetText.countdownLabel(m.isOffNow)).font(.system(size: 10)).foregroundStyle(ZtColors.textSecondary)
-                    Text(verbatim: m.countdown).font(.system(size: 18, weight: .bold, design: .rounded)).foregroundStyle(Color.white)
+                    Text(verbatim: WidgetText.countdownLabel(m.isOffNow)).font(.system(size: 10)).foregroundStyle(WidgetInk.secondary)
+                    Text(verbatim: m.countdown).font(.system(size: 18, weight: .bold, design: .rounded)).foregroundStyle(WidgetInk.text)
                         .lineLimit(1).minimumScaleFactor(0.7).widgetAccentable().invalidatableContent()
                 }
                 Spacer(minLength: 6)
                 VStack(alignment: .trailing, spacing: 0) {
-                    Text(verbatim: WidgetText.period).font(.system(size: 10)).foregroundStyle(ZtColors.textSecondary)
-                    Text(verbatim: m.period).font(.system(size: 12, weight: .bold)).foregroundStyle(Color.white).lineLimit(1).minimumScaleFactor(0.8)
+                    Text(verbatim: WidgetText.period).font(.system(size: 10)).foregroundStyle(WidgetInk.secondary)
+                    Text(verbatim: m.period).font(.system(size: 12, weight: .bold)).foregroundStyle(WidgetInk.text).lineLimit(1).minimumScaleFactor(0.8)
                 }
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 4)
-            .background { RoundedRectangle(cornerRadius: 12).fill(Color.black.opacity(look == .fullColor ? 0.2 : 0.1)) }
+            .background { RoundedRectangle(cornerRadius: 12).fill(look == .fullColor ? WidgetInk.innerCard : Color.black.opacity(0.1)) }
             WidgetDrum(slots: m.slots, hour: m.nowHour, minute: m.nowMinute, lang: m.lang, look: look)
                 .frame(height: large ? 64 : nil)
             if large {
                 HStack {
-                    Text(verbatim: m.nextOutage).font(.system(size: 11, weight: .bold)).foregroundStyle(Color.white).lineLimit(1)
+                    Text(verbatim: m.nextOutage).font(.system(size: 11, weight: .bold)).foregroundStyle(WidgetInk.text).lineLimit(1)
                     Spacer(minLength: 6)
                     Text(verbatim: WidgetText.next).font(.system(size: 10)).foregroundStyle(ZtColors.accent).lineLimit(1).widgetAccentable()
                 }
                 .padding(.horizontal, 8)
                 .padding(.vertical, 3)
-                .background { RoundedRectangle(cornerRadius: 8).fill(Color.black.opacity(0.15)) }
+                .background { RoundedRectangle(cornerRadius: 8).fill(WidgetInk.innerCard) }
                 // The app's rows are too tall for a large widget on a smaller iPhone (the content overflowed
                 // and cut the header, TestFlight 1.4.0 (31)): compact rows, and the list gives way first.
                 VStack(spacing: 4) {
@@ -337,14 +338,14 @@ struct WidgetRowView: View {
             marker.frame(width: 14, height: 14)
             Text(verbatim: text.timeText)
                 .font(.system(size: 13, weight: .bold, design: .monospaced))
-                .foregroundStyle(Color.white)
+                .foregroundStyle(WidgetInk.text)
                 .lineLimit(1)
                 .minimumScaleFactor(0.75)
                 .layoutPriority(1)
             if !tags.isEmpty {
                 Text(verbatim: tags)
                     .font(.system(size: 10))
-                    .foregroundStyle(text.isEmergency && !text.isFinished ? ZtColors.accent : Color.white.opacity(0.72))
+                    .foregroundStyle(text.isEmergency && !text.isFinished ? ZtColors.accent : WidgetInk.secondary)
                     .lineLimit(1)
             }
             Spacer(minLength: 4)
@@ -362,7 +363,7 @@ struct WidgetRowView: View {
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 5)
-        .background { RoundedRectangle(cornerRadius: 8).fill(Color.black.opacity(0.18)) }
+        .background { RoundedRectangle(cornerRadius: 8).fill(WidgetInk.innerCard) }
         .opacity(text.isFinished ? 0.55 : 1)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(Text(verbatim: text.accessibilityText))
@@ -408,7 +409,7 @@ public struct StripWidgetView: View {
                     .lineLimit(1).minimumScaleFactor(0.8).widgetAccentable()
                 Spacer(minLength: 4)
                 if !m.isUnclear {
-                    Text(verbatim: m.countdown).font(.system(size: 15, weight: .bold, design: .rounded)).foregroundStyle(Color.white)
+                    Text(verbatim: m.countdown).font(.system(size: 15, weight: .bold, design: .rounded)).foregroundStyle(WidgetInk.text)
                         .lineLimit(1).invalidatableContent()
                 }
             }
@@ -420,8 +421,9 @@ public struct StripWidgetView: View {
     }
 }
 
-/// Background of every widget: the time-of-day palette under a dark card layer (Android card #CC141A29);
-/// in the tinted and clear styles the system replaces it with its own glass.
+/// Background of every widget: the time-of-day palette under a layer that follows the iPhone's light or dark
+/// appearance (owner, 2026-11-15: like the system widgets, and lighter than Android's #CC141A29 card); in the
+/// tinted and clear styles the system replaces it with its own glass.
 public struct WidgetBackground: View {
     let date: Date
 
@@ -430,9 +432,38 @@ public struct WidgetBackground: View {
     public var body: some View {
         ZStack {
             AmbientBackground(palette: TimeOfDayPalette.current(now: date), frozenSeconds: 0)
-            Color(argb: 0xCC141A29)
+            WidgetInk.layer
         }
     }
+}
+
+/// Widget colours that follow the iPhone's light or dark appearance. A dynamic `UIColor` resolves against the
+/// widget's own colour scheme, so no view has to read the environment. The drum keeps its own colours.
+enum WidgetInk {
+    private static func dynamic(light: UInt32, dark: UInt32) -> Color {
+        Color(UIColor { traits in
+            let v = traits.userInterfaceStyle == .dark ? dark : light
+            return UIColor(red: CGFloat((v >> 16) & 0xFF) / 255, green: CGFloat((v >> 8) & 0xFF) / 255,
+                           blue: CGFloat(v & 0xFF) / 255, alpha: CGFloat((v >> 24) & 0xFF) / 255)
+        })
+    }
+
+    /// Main text: near-black on the light layer, white on the dark one.
+    static let text = dynamic(light: 0xFF111827, dark: 0xFFFFFFFF)
+    /// Labels and the address: about 7:1 on light, 8:1 on dark.
+    static let secondary = dynamic(light: 0xFF374151, dark: 0xB8FFFFFF)
+    /// The layer over the time-of-day palette: 55 % in both modes, so the wallpaper colours show through.
+    static let layer = dynamic(light: 0x8CF4F6FA, dark: 0x8C141A29)
+    /// Cards inside the widget (countdown, next outage, rows).
+    static let innerCard = dynamic(light: 0x14000000, dark: 0x2E000000)
+    /// Round button background when the bell is off and for the refresh button.
+    static let buttonFill = dynamic(light: 0x1A000000, dark: 0x26FFFFFF)
+    /// The bell when alerts are on: white disc with the accent bell on dark, accent disc with a white bell on light.
+    static let bellOnFill = dynamic(light: 0xFFFF5E3A, dark: 0xFFFFFFFF)
+    static let bellOnIcon = dynamic(light: 0xFFFFFFFF, dark: 0xFFFF5E3A)
+    /// "СВІТЛО Є": the app's green on dark, a darker green on light for contrast.
+    static let powerOn = dynamic(light: 0xFF047857, dark: 0xFF34D399)
+    static let unclear = dynamic(light: 0xFF4B5563, dark: 0xFF9CA3AF)
 }
 
 enum UiTokens {
