@@ -166,27 +166,63 @@ private extension WidgetModel {
 /// The two intents are compiled into the widget extension only (ios/Widget/WidgetButtonIntents.swift, flag
 /// `WIDGET_EXTENSION`): with the same intent in the app as well, iOS opened the app on a tap and never ran
 /// `perform()` (TestFlight 1.4.0, owner 2026-11-15). The app's design gallery draws the same buttons inert.
+/// TestFlight 1.4.0 (41) diagnostics showed a tap on the buttons never ran the intent: iOS took it as a tap on
+/// the widget (`widgetURL`). Build (42) tries one variant per widget size to find what blocks the buttons.
+public enum WidgetButtonVariant: Sendable {
+    /// the label, `.buttonStyle(.plain)`, accessibility modifiers
+    case standard
+    /// the same without `.buttonStyle(.plain)`
+    case noStyle
+    /// a bare `Button(intent:)` around an icon, no other modifiers
+    case bare
+}
+
 private struct WidgetButtons: View {
     let master: Bool
     let refreshing: Bool
     let size: CGFloat
     let look: WidgetLook
     let lang: String
+    var variant: WidgetButtonVariant = .standard
 
     var body: some View {
-        HStack(spacing: 6) {
-            refreshButton
-                .accessibilityLabel(Text(verbatim: AppStrings.refreshBtn(lang)))
-            bellButton
-                .accessibilityLabel(Text(verbatim: AppStrings.masterHint(lang)))
-                .accessibilityAddTraits(master ? .isSelected : [])
+        if variant == .bare {
+            bare
+        } else {
+            HStack(spacing: 6) {
+                refreshButton
+                    .accessibilityLabel(Text(verbatim: AppStrings.refreshBtn(lang)))
+                bellButton
+                    .accessibilityLabel(Text(verbatim: AppStrings.masterHint(lang)))
+                    .accessibilityAddTraits(master ? .isSelected : [])
+            }
         }
+    }
+
+    @ViewBuilder
+    private var bare: some View {
+        #if WIDGET_EXTENSION
+        HStack(spacing: 6) {
+            Button(intent: RefreshWidgetIntent()) {
+                Image(systemName: "arrow.clockwise").font(.system(size: size * 0.5, weight: .bold)).frame(width: size, height: size)
+            }
+            Button(intent: ToggleAlertsIntent()) {
+                Image(systemName: master ? "bell.fill" : "bell.slash.fill").font(.system(size: size * 0.5, weight: .bold)).frame(width: size, height: size)
+            }
+        }
+        #else
+        HStack(spacing: 6) { refreshLabel; bellLabel }
+        #endif
     }
 
     @ViewBuilder
     private var refreshButton: some View {
         #if WIDGET_EXTENSION
-        Button(intent: RefreshWidgetIntent()) { refreshLabel }.buttonStyle(.plain)
+        if variant == .noStyle {
+            Button(intent: RefreshWidgetIntent()) { refreshLabel }
+        } else {
+            Button(intent: RefreshWidgetIntent()) { refreshLabel }.buttonStyle(.plain)
+        }
         #else
         refreshLabel
         #endif
@@ -195,7 +231,11 @@ private struct WidgetButtons: View {
     @ViewBuilder
     private var bellButton: some View {
         #if WIDGET_EXTENSION
-        Button(intent: ToggleAlertsIntent()) { bellLabel }.buttonStyle(.plain)
+        if variant == .noStyle {
+            Button(intent: ToggleAlertsIntent()) { bellLabel }
+        } else {
+            Button(intent: ToggleAlertsIntent()) { bellLabel }.buttonStyle(.plain)
+        }
         #else
         bellLabel
         #endif
@@ -250,12 +290,14 @@ public struct SmallWidgetView: View {
     let master: Bool
     let refreshing: Bool
     let look: WidgetLook
+    let buttons: WidgetButtonVariant
 
-    public init(model: WidgetModel, master: Bool, refreshing: Bool, look: WidgetLook) {
+    public init(model: WidgetModel, master: Bool, refreshing: Bool, look: WidgetLook, buttons: WidgetButtonVariant = .standard) {
         m = model
         self.master = master
         self.refreshing = refreshing
         self.look = look
+        self.buttons = buttons
     }
 
     public var body: some View {
@@ -269,7 +311,7 @@ public struct SmallWidgetView: View {
                 .lineLimit(1).minimumScaleFactor(0.7).widgetAccentable().invalidatableContent()
             HStack {
                 Spacer(minLength: 0)
-                WidgetButtons(master: master, refreshing: refreshing, size: 32, look: look, lang: m.lang)
+                WidgetButtons(master: master, refreshing: refreshing, size: 32, look: look, lang: m.lang, variant: buttons)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
@@ -286,13 +328,15 @@ public struct BigWidgetView: View {
     let refreshing: Bool
     let look: WidgetLook
     let large: Bool
+    let buttons: WidgetButtonVariant
 
-    public init(model: WidgetModel, master: Bool, refreshing: Bool, look: WidgetLook, large: Bool) {
+    public init(model: WidgetModel, master: Bool, refreshing: Bool, look: WidgetLook, large: Bool, buttons: WidgetButtonVariant = .standard) {
         m = model
         self.master = master
         self.refreshing = refreshing
         self.look = look
         self.large = large
+        self.buttons = buttons
     }
 
     public var body: some View {
@@ -309,7 +353,7 @@ public struct BigWidgetView: View {
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
-                WidgetButtons(master: master, refreshing: refreshing, size: 34, look: look, lang: m.lang)
+                WidgetButtons(master: master, refreshing: refreshing, size: 34, look: look, lang: m.lang, variant: buttons)
             }
             HStack(alignment: .bottom) {
                 VStack(alignment: .leading, spacing: 0) {

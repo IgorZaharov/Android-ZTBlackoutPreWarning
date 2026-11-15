@@ -58,8 +58,8 @@ struct SmallEntryView: View {
     @Environment(\.widgetRenderingMode) private var mode
 
     var body: some View {
-        SmallWidgetView(model: entry.model, master: entry.master, refreshing: entry.refreshing, look: WidgetLook(mode))
-            .widgetURL(openURL(entry.model.itemId))
+        // TestFlight (42) diagnostics: bare buttons and no widget-wide URL (a tap outside opens the app)
+        SmallWidgetView(model: entry.model, master: entry.master, refreshing: entry.refreshing, look: WidgetLook(mode), buttons: .bare)
             .containerBackground(for: .widget) { WidgetBackground(date: entry.date) }
     }
 }
@@ -70,10 +70,17 @@ struct BigEntryView: View {
     @Environment(\.widgetFamily) private var family
 
     var body: some View {
-        BigWidgetView(model: entry.model, master: entry.master, refreshing: entry.refreshing, look: WidgetLook(mode),
-                      large: family == .systemLarge)
-            .widgetURL(openURL(entry.model.itemId))
-            .containerBackground(for: .widget) { WidgetBackground(date: entry.date) }
+        // TestFlight (42) diagnostics: medium = buttons without .plain style, widget URL kept;
+        // large = buttons unchanged, no widget-wide URL
+        if family == .systemLarge {
+            BigWidgetView(model: entry.model, master: entry.master, refreshing: entry.refreshing, look: WidgetLook(mode), large: true)
+                .containerBackground(for: .widget) { WidgetBackground(date: entry.date) }
+        } else {
+            BigWidgetView(model: entry.model, master: entry.master, refreshing: entry.refreshing, look: WidgetLook(mode),
+                          large: false, buttons: .noStyle)
+                .widgetURL(openURL(entry.model.itemId))
+                .containerBackground(for: .widget) { WidgetBackground(date: entry.date) }
+        }
     }
 }
 
