@@ -32,7 +32,7 @@ BACKGROUND
 Warnings for the published schedule are scheduled as local calendar notifications, so they arrive with the app closed. Background App Refresh (BGAppRefreshTask) only fetches schedule updates; iOS decides how often. The only background mode is "fetch". There is no push server.
 
 PRIVACY
-No account, no analytics, no advertising, no tracking. Saved addresses stay on the device. To look up emergency outages the app sends the public numeric ids of the chosen settlement and street to the PowerOn service; the house number never leaves the device. Privacy policy: https://github.com/IgorZaharov/Android-ZTBlackoutPreWarning/blob/main/PRIVACY_POLICY.md
+No account, no analytics, no advertising, no tracking. Saved addresses stay on the device. To look up emergency outages the app sends the public numeric ids of the chosen settlement and street to the PowerOn service; the house number never leaves the device. Privacy policy (iPhone): https://github.com/IgorZaharov/Android-ZTBlackoutPreWarning/blob/main/PRIVACY_POLICY_IOS.md
 
 DONATION LINKS (About page)
 ⟳ The About page lists links to Ukrainian charities (animal volunteers, the "Come Back Alive" foundation). They are plain links that open in Safari. The app does not collect money and has no in-app purchases; it is free and stays free.
