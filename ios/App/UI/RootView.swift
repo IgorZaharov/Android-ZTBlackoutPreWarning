@@ -105,7 +105,6 @@ struct RootView: View {
             // a widget or a background refresh may have written while the app was away; the permission
             // may have changed in iOS Settings; the warnings are re-planned
             case .active:
-                WidgetDiag.log("active")
                 model.foreground()
                 // ask iOS for the next background refresh (BackgroundRefresh.swift); the scene is set up,
                 // so its `.backgroundTask` handler is registered
@@ -122,7 +121,6 @@ struct RootView: View {
         }
         // a widget tap: svitlozt://open?item=<subscription id> shows that address (spec/SUBSCRIPTIONS.md 10)
         .onOpenURL { url in
-            WidgetDiag.log("opened by \(url.absoluteString.prefix(40))")
             let item = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first { $0.name == "item" }?.value
             model.openFromNotification(item)
         }
