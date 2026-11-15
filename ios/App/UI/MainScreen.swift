@@ -457,7 +457,10 @@ private struct AddressSwitcher: View {
                             .frame(minHeight: ZtMinTouch)
                             .ztGlassSurface(
                                 cornerRadius: ZtRadius.chip,
-                                tint: selected ? Color(argb: 0x33FFFFFF) : Color(argb: 0x80141A29),
+                                // Android's 20 % white (0x33FFFFFF) turns Liquid Glass almost white on the day
+                                // palette and hides the white label; an opaque slate keeps about 7:1 and still
+                                // reads lighter than the idle chips (App Store screenshots, CI run 43693680302)
+                                tint: selected ? Color(argb: 0xCC4B5563) : Color(argb: 0x80141A29),
                                 border: selected ? Color(argb: 0x66FFFFFF) : Color(argb: 0x1FFFFFFF),
                                 interactive: true
                             )
