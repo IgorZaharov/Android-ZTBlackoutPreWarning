@@ -200,8 +200,10 @@ private struct WidgetButtons: View {
         #endif
     }
 
+    /// The icon stays 16 pt; `size` is only its frame. The default button style adds its own padded background
+    /// around it (about 7 pt above and below), so a frame of 20 gives a 34 pt button.
     private func icon(_ name: String) -> some View {
-        Image(systemName: name).font(.system(size: size * 0.5, weight: .bold)).frame(width: size, height: size)
+        Image(systemName: name).font(.system(size: 16, weight: .bold)).frame(width: size, height: size)
     }
 }
 
@@ -215,7 +217,7 @@ private struct HeaderLine: View {
     var body: some View {
         HStack(spacing: 6) {
             Text(verbatim: short ? m.queueShort : m.queueHeader).font(.system(size: queueSize, weight: .bold)).foregroundStyle(WidgetInk.text)
-                .lineLimit(1).layoutPriority(short ? 1 : 0)
+                .lineLimit(1).layoutPriority(1)
                 .accessibilityLabel(Text(verbatim: m.queueHeader))
             if let label = m.addressLabel {
                 Text(verbatim: label).font(.system(size: labelSize)).foregroundStyle(WidgetInk.secondary).lineLimit(1)
@@ -291,7 +293,9 @@ public struct BigWidgetView: View {
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
-                WidgetButtons(master: master, size: 34, lang: m.lang)
+                // frame 20: with the default style's padding the buttons are 34 pt tall, as the round buttons were;
+                // a 34 pt frame made them about 48 pt and squeezed the medium widget's drum to a line (TestFlight (44), (46))
+                WidgetButtons(master: master, size: 20, lang: m.lang)
             }
             HStack(alignment: .bottom) {
                 VStack(alignment: .leading, spacing: 0) {
