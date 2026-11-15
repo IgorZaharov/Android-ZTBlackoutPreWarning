@@ -26,15 +26,15 @@ struct AboutScreen: View {
                     LinkRow(title: AppStrings.devProfile(lang), detail: "github.com/IgorZaharov", url: "https://github.com/IgorZaharov", lang: lang) {
                         tile(Color.white) { Image(systemName: "chevron.left.forwardslash.chevron.right").foregroundStyle(Color.black) }
                     }
-                    LinkRow(title: AppStrings.desktopApp(lang), detail: "github.com/IgorZaharov/Android-ZTBlackoutPreWarning/blob/main/README.md",
-                            url: AppStrings.ABOUT_GITHUB_README_URL, lang: lang) {
+                    LinkRow(title: AppStrings.desktopApp(lang), detail: "github.com/IgorZaharov/iOS-ZTPreBlackoutNotification",
+                            url: AppStrings.IOS_REPO_URL, lang: lang) {
                         tile(Color(argb: 0x26FFFFFF)) { Image(systemName: "desktopcomputer").foregroundStyle(Color.white) }
                     }
                     LinkRow(title: AppStrings.repoIssues(lang), detail: "github.com/IgorZaharov/.../issues",
-                            url: "https://github.com/IgorZaharov/Android-ZTBlackoutPreWarning/issues", lang: lang) {
+                            url: AppStrings.IOS_ISSUES_URL, lang: lang) {
                         tile(ZtColors.accent) { Image(systemName: "ladybug.fill").foregroundStyle(Color.white) }
                     }
-                    LinkRow(title: AppStrings.privacyPolicyIos(lang), detail: "github.com/IgorZaharov/.../PRIVACY_POLICY.md",
+                    LinkRow(title: AppStrings.privacyPolicyIos(lang), detail: "github.com/IgorZaharov/.../PRIVACY_POLICY_IOS.md",
                             url: AppStrings.PRIVACY_POLICY_URL_IOS, lang: lang) {
                         tile(Color(argb: 0x26FFFFFF)) { Image(systemName: "hand.raised.fill").foregroundStyle(Color.white) }
                     }
