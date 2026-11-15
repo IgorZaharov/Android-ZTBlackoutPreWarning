@@ -132,6 +132,32 @@ jobs:
           plutil -p "$APP/Info.plist" | grep -E 'CFBundle(ShortVersionString|Version|DisplayName)'
           ls "$APP/PlugIns"
 
+      - name: Widget button intents are registered in the extension
+        # A widget Button(intent:) whose intent is missing from the extension's App Intents metadata
+        # opens the app on a tap instead of running (TestFlight 1.4.0 (31) and (38)).
+        working-directory: ios
+        run: |
+          APP=build/DD/Build/Products/Debug-iphonesimulator/ZTPreBlackout.app
+          EXT="$APP/PlugIns/BlackoutWidgetExtension.appex"
+          for b in "$APP" "$EXT"; do
+            echo "== $b"
+            ls -la "$b/Metadata.appintents" 2>&1 || echo "(no Metadata.appintents)"
+            if [ -f "$b/Metadata.appintents/extract.actionsdata" ]; then
+              python3 - "$b/Metadata.appintents/extract.actionsdata" <<'PY'
+          import json, sys
+          d = json.load(open(sys.argv[1]))
+          print("actions:", sorted(d.get("actions", {}).keys()))
+          print("entities:", sorted(d.get("entities", {}).keys()))
+          for k, v in d.get("actions", {}).items():
+              print(k, {x: v.get(x) for x in ("openAppWhenRun", "isDiscoverable", "outputType", "systemProtocols", "presentationStyle") if x in v})
+          PY
+            fi
+          done
+          echo "== App Intents lines of the build log"
+          grep -iE 'appintents|ExtractAppIntentsMetadata|intent.*(warning|error)' build/xcodebuild-test.log | grep -viE '^\s*cd |export ' | head -60 || true
+          grep -q ToggleAlertsIntent "$EXT/Metadata.appintents/extract.actionsdata"
+          grep -q RefreshWidgetIntent "$EXT/Metadata.appintents/extract.actionsdata"
+
       - name: Design gallery screenshots (M3)
         working-directory: ios
         run: bash scripts/gallery_screenshots.sh "${{ steps.sim.outputs.udid }}" build/screenshots/gallery-ios26
