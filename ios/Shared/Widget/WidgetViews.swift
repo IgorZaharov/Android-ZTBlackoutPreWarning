@@ -310,11 +310,12 @@ public struct BigWidgetView: View {
                 .padding(.vertical, 3)
                 .background { RoundedRectangle(cornerRadius: 8).fill(WidgetInk.innerCard) }
                 // The app's rows are too tall for a large widget on a smaller iPhone (the content overflowed
-                // and cut the header, TestFlight 1.4.0 (31)): compact rows, and the list gives way first.
-                VStack(spacing: 4) {
-                    ForEach(Array(m.rows.prefix(4).enumerated()), id: \.offset) { _, row in
-                        WidgetRowView(text: row)
-                    }
+                // and cut the header, TestFlight 1.4.0 (31)): compact rows, as many whole rows as fit (4 to 1).
+                ViewThatFits(in: .vertical) {
+                    rowList(4)
+                    rowList(3)
+                    rowList(2)
+                    rowList(1)
                 }
                 .frame(minHeight: 0, maxHeight: .infinity, alignment: .top)
                 .clipped()
@@ -380,6 +381,16 @@ struct WidgetRowView: View {
             Image(systemName: "wrench.fill").font(.system(size: 11, weight: .semibold)).foregroundStyle(ZtColors.accent)
         } else {
             Circle().fill(ZtColors.accent).frame(width: 8, height: 8)
+        }
+    }
+}
+
+private extension BigWidgetView {
+    func rowList(_ count: Int) -> some View {
+        VStack(spacing: 4) {
+            ForEach(Array(m.rows.prefix(count).enumerated()), id: \.offset) { _, row in
+                WidgetRowView(text: row)
+            }
         }
     }
 }
