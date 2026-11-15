@@ -54,6 +54,7 @@ final class WidgetTests: XCTestCase {
         // at 12:40 the power is on, the next outage is 13:00, today
         let on = WidgetModelBuilder.build(queue: "5.2", statusText: nil, snapshot: snapshot(now: at(13, 12, 40)), lang: "uk", label: "Київська 1")
         XCTAssertEqual(on.queueHeader, "Черга 5.2")
+        XCTAssertEqual(on.queueShort, "5.2")
         XCTAssertFalse(on.isOffNow)
         XCTAssertEqual(on.countdown, "00г. 20хв.")
         XCTAssertEqual(on.nextOutage, "13:00 – 17:00")
@@ -72,11 +73,15 @@ final class WidgetTests: XCTestCase {
         // a house without a queue and an empty first launch
         let noQueue = WidgetModelBuilder.build(queue: "", statusText: "Будинок не відключається", snapshot: snapshot(now: at(13, 12), queue: ""), lang: "uk")
         XCTAssertEqual(noQueue.queueHeader, "Черга відсутня")
+        XCTAssertEqual(noQueue.queueShort, "—")
+        let noQueueWithQueue = WidgetModelBuilder.build(queue: "5.2", statusText: "Будинок не відключається", snapshot: snapshot(now: at(13, 12)), lang: "uk")
+        XCTAssertEqual(noQueueWithQueue.queueShort, "—")
         var empty = snapshot(now: at(13, 12), queue: "")
         empty.hasAddress = false
         let unset = WidgetModelBuilder.build(queue: "", statusText: nil, snapshot: empty, lang: "en")
         XCTAssertTrue(unset.isUnclear)
         XCTAssertEqual(unset.queueHeader, "Queue —")
+        XCTAssertEqual(unset.queueShort, "—")
         XCTAssertEqual(unset.countdown, "--hr. --m.")
         XCTAssertTrue(unset.slots.isEmpty)
     }

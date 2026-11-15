@@ -6,6 +6,9 @@ public struct WidgetModel: Equatable, Sendable {
     public var lang: String
     /// "Черга 5.2", "Черга відсутня" or "Черга —" (Ukrainian on Android too).
     public var queueHeader: String
+    /// The small widget's header: the queue alone ("5.2"), "—" without one; "Черга 5.2" clipped the address
+    /// on a small widget (owner, 2026-11-15).
+    public var queueShort: String
     public var isUnclear: Bool
     public var isOffNow: Bool
     /// "02г. 15хв." / "02hr. 15m.": never seconds (CLAUDE.md invariant).
@@ -57,10 +60,11 @@ public enum WidgetModelBuilder {
         } else {
             queueHeader = "Черга \(queue)"
         }
+        let queueShort = isNoQueueHouse || queue.ktIsBlank ? "—" : queue
         let notConfigured = queue.ktIsBlank && !isNoQueueHouse && !snapshot.hasAddress
         if notConfigured || snapshot.isUnclear {
             return WidgetModel(
-                lang: lang, queueHeader: queueHeader, isUnclear: true, isOffNow: false,
+                lang: lang, queueHeader: queueHeader, queueShort: queueShort, isUnclear: true, isOffNow: false,
                 countdown: formatCountdown("--:--:--", lang: lang), period: "--:-- - --:--", nextOutage: "--:-- - --:--",
                 slots: [], nowHour: now.hour, nowMinute: now.minute, staleCaption: nil,
                 addressLabel: label, itemId: itemId, rows: []
@@ -81,7 +85,7 @@ public enum WidgetModelBuilder {
         }
         let stale = snapshot.isStale ? snapshot.site?.lastSuccessMs.map { AppStrings.staleChip(lang, SiteStatusModel.formatHhmm($0)) } : nil
         return WidgetModel(
-            lang: lang, queueHeader: queueHeader, isUnclear: false, isOffNow: st.isOffNow,
+            lang: lang, queueHeader: queueHeader, queueShort: queueShort, isUnclear: false, isOffNow: st.isOffNow,
             countdown: formatCountdown(st.countdownText, lang: lang), period: period, nextOutage: nextText,
             slots: snapshot.slotsFor(snapshot.today), nowHour: now.hour, nowMinute: now.minute, staleCaption: stale,
             addressLabel: label, itemId: itemId,

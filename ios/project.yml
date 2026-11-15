@@ -81,6 +81,9 @@ targets:
         INFOPLIST_FILE: Widget/Info.plist
         CODE_SIGN_ENTITLEMENTS: Widget/Widget.entitlements
         SKIP_INSTALL: YES
+        # The widget button intents exist in the extension only (ios/Widget/WidgetButtonIntents.swift):
+        # in both targets iOS opened the app on a tap instead of running them.
+        SWIFT_ACTIVE_COMPILATION_CONDITIONS: "$(inherited) WIDGET_EXTENSION"
 
   ZTPreBlackoutTests:
     type: bundle.unit-test

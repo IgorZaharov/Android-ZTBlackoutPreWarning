@@ -162,6 +162,10 @@ private extension WidgetModel {
 
 /// Round refresh and bell buttons: interactive App Intents (iOS 17), the bell is the master switch for all
 /// addresses (owner decision 4) and the refresh refreshes everything.
+///
+/// The two intents are compiled into the widget extension only (ios/Widget/WidgetButtonIntents.swift, flag
+/// `WIDGET_EXTENSION`): with the same intent in the app as well, iOS opened the app on a tap and never ran
+/// `perform()` (TestFlight 1.4.0, owner 2026-11-15). The app's design gallery draws the same buttons inert.
 private struct WidgetButtons: View {
     let master: Bool
     let refreshing: Bool
@@ -171,31 +175,51 @@ private struct WidgetButtons: View {
 
     var body: some View {
         HStack(spacing: 6) {
-            Button(intent: RefreshWidgetIntent()) {
-                Circle().fill(WidgetInk.buttonFill).frame(width: size, height: size)
-                    .overlay {
-                        Image(systemName: refreshing ? "ellipsis" : "arrow.clockwise")
-                            .font(.system(size: size * 0.45, weight: .bold))
-                            .foregroundStyle(WidgetInk.text)
-                    }
-                    .invalidatableContent()
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel(Text(verbatim: AppStrings.refreshBtn(lang)))
-            Button(intent: ToggleAlertsIntent()) {
-                Circle().fill(master ? (look == .fullColor ? WidgetInk.bellOnFill : Color.white) : WidgetInk.buttonFill).frame(width: size, height: size)
-                    .overlay {
-                        Image(systemName: master ? "bell.fill" : "bell.slash.fill")
-                            .font(.system(size: size * 0.48, weight: .semibold))
-                            .foregroundStyle(master ? (look == .fullColor ? WidgetInk.bellOnIcon : Color.black) : WidgetInk.text)
-                    }
-                    .widgetAccentable(look == .tinted && master)
-                    .invalidatableContent()
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel(Text(verbatim: AppStrings.masterHint(lang)))
-            .accessibilityAddTraits(master ? .isSelected : [])
+            refreshButton
+                .accessibilityLabel(Text(verbatim: AppStrings.refreshBtn(lang)))
+            bellButton
+                .accessibilityLabel(Text(verbatim: AppStrings.masterHint(lang)))
+                .accessibilityAddTraits(master ? .isSelected : [])
         }
+    }
+
+    @ViewBuilder
+    private var refreshButton: some View {
+        #if WIDGET_EXTENSION
+        Button(intent: RefreshWidgetIntent()) { refreshLabel }.buttonStyle(.plain)
+        #else
+        refreshLabel
+        #endif
+    }
+
+    @ViewBuilder
+    private var bellButton: some View {
+        #if WIDGET_EXTENSION
+        Button(intent: ToggleAlertsIntent()) { bellLabel }.buttonStyle(.plain)
+        #else
+        bellLabel
+        #endif
+    }
+
+    private var refreshLabel: some View {
+        Circle().fill(WidgetInk.buttonFill).frame(width: size, height: size)
+            .overlay {
+                Image(systemName: refreshing ? "ellipsis" : "arrow.clockwise")
+                    .font(.system(size: size * 0.45, weight: .bold))
+                    .foregroundStyle(WidgetInk.text)
+            }
+            .invalidatableContent()
+    }
+
+    private var bellLabel: some View {
+        Circle().fill(master ? (look == .fullColor ? WidgetInk.bellOnFill : Color.white) : WidgetInk.buttonFill).frame(width: size, height: size)
+            .overlay {
+                Image(systemName: master ? "bell.fill" : "bell.slash.fill")
+                    .font(.system(size: size * 0.48, weight: .semibold))
+                    .foregroundStyle(master ? (look == .fullColor ? WidgetInk.bellOnIcon : Color.black) : WidgetInk.text)
+            }
+            .widgetAccentable(look == .tinted && master)
+            .invalidatableContent()
     }
 }
 
@@ -203,10 +227,14 @@ private struct HeaderLine: View {
     let m: WidgetModel
     let queueSize: CGFloat
     let labelSize: CGFloat
+    /// The queue alone ("5.2") instead of "Черга 5.2": the small widget.
+    var short = false
 
     var body: some View {
         HStack(spacing: 6) {
-            Text(verbatim: m.queueHeader).font(.system(size: queueSize, weight: .bold)).foregroundStyle(WidgetInk.text).lineLimit(1)
+            Text(verbatim: short ? m.queueShort : m.queueHeader).font(.system(size: queueSize, weight: .bold)).foregroundStyle(WidgetInk.text)
+                .lineLimit(1).layoutPriority(short ? 1 : 0)
+                .accessibilityLabel(Text(verbatim: m.queueHeader))
             if let label = m.addressLabel {
                 Text(verbatim: label).font(.system(size: labelSize)).foregroundStyle(WidgetInk.secondary).lineLimit(1)
             }
@@ -232,7 +260,7 @@ public struct SmallWidgetView: View {
 
     public var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            HeaderLine(m: m, queueSize: 15, labelSize: 10)
+            HeaderLine(m: m, queueSize: 15, labelSize: 10, short: true)
             Text(verbatim: m.statusText).font(.system(size: 12, weight: .bold)).foregroundStyle(m.statusColor)
                 .lineLimit(1).minimumScaleFactor(0.8).widgetAccentable()
             Spacer(minLength: 0)
