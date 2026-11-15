@@ -153,6 +153,9 @@ jobs:
           PY
             fi
           done
+          echo "== Extension compilation conditions (WIDGET_EXTENSION makes the buttons interactive)"
+          xcodebuild -project SvitloZhytomyr.xcodeproj -target BlackoutWidgetExtension -configuration Debug -showBuildSettings 2>/dev/null | grep -E 'SWIFT_ACTIVE_COMPILATION_CONDITIONS|OTHER_SWIFT_FLAGS'
+          xcodebuild -project SvitloZhytomyr.xcodeproj -target BlackoutWidgetExtension -configuration Release -showBuildSettings 2>/dev/null | grep -E 'SWIFT_ACTIVE_COMPILATION_CONDITIONS'
           echo "== App Intents lines of the build log"
           grep -iE 'appintents|ExtractAppIntentsMetadata|intent.*(warning|error)' build/xcodebuild-test.log | grep -viE '^\s*cd |export ' | head -60 || true
           grep -q ToggleAlertsIntent "$EXT/Metadata.appintents/extract.actionsdata"
