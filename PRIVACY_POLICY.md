@@ -112,7 +112,7 @@ The Application contains hyperlinks to external third-party platforms for the co
 
 - **JSC "Zhytomyroblenergo" (АТ «Житомиробленерго»):** [https://www.ztoe.com.ua](https://www.ztoe.com.ua) and its emergency outage service [https://ztoe-poweron.inneti.net](https://ztoe-poweron.inneti.net)
 - **Official Zhytomyroblenergo Facebook Page:** For official emergency announcements.
-- **Voluntary Community Donations (Monobank / Charity Jar):** Direct links that open in the user's external web browser or banking application. The Application does not process payments, store banking credentials, or receive transaction records.
+- **Voluntary Community Donations (Monobank charity jar, "Come Back Alive" foundation `savelife.in.ua`):** Direct links that open in the user's external web browser or banking application. The Application does not process payments, store banking credentials, or receive transaction records.
 - **Project GitHub Repository:** [https://github.com/IgorZaharov/Android-ZTBlackoutPreWarning](https://github.com/IgorZaharov/Android-ZTBlackoutPreWarning)
 
 We do not control, oversee, or assume responsibility for the privacy practices, content, or policies of external websites. When navigating to third-party services, users are advised to review the respective third-party privacy notices.
