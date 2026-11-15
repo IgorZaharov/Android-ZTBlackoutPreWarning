@@ -46,6 +46,10 @@ targets:
       base:
         PRODUCT_NAME: ZTPreBlackout
         PRODUCT_BUNDLE_IDENTIFIER: ua.blackout.prewarning
+        # iPhone only (R10). Must be set per target: XcodeGen's iOS target preset sets "1,2", which overrides
+        # the project-level value, so builds up to 1.4.0 (52) were universal and App Store Connect asked for
+        # 13-inch iPad screenshots.
+        TARGETED_DEVICE_FAMILY: "1"
         INFOPLIST_FILE: App/Info.plist
         CODE_SIGN_ENTITLEMENTS: App/App.entitlements
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
@@ -78,6 +82,7 @@ targets:
       base:
         PRODUCT_NAME: BlackoutWidgetExtension
         PRODUCT_BUNDLE_IDENTIFIER: ua.blackout.prewarning.widget
+        TARGETED_DEVICE_FAMILY: "1"
         INFOPLIST_FILE: Widget/Info.plist
         CODE_SIGN_ENTITLEMENTS: Widget/Widget.entitlements
         SKIP_INSTALL: YES
