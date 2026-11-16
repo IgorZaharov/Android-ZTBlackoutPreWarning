@@ -133,5 +133,19 @@
                 android:resource="@xml/blackout_widget_strip_info" />
         </receiver>
 
+        <!-- Glance Home Screen Minimal (2x2) AppWidget Receiver: queue, status, countdown, refresh; primary address only -->
+        <receiver
+            android:name=".widget.BlackoutMinimalWidgetReceiver"
+            android:label="@string/widget_minimal_name"
+            android:enabled="true"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/blackout_widget_minimal_info" />
+        </receiver>
+
     </application>
 </manifest>

@@ -364,6 +364,20 @@ kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "ko
                 android:resource="@xml/blackout_widget_strip_info" />
         </receiver>
 
+        <!-- Glance Home Screen Minimal (2x2) AppWidget Receiver: queue, status, countdown, refresh; primary address only -->
+        <receiver
+            android:name=".widget.BlackoutMinimalWidgetReceiver"
+            android:label="@string/widget_minimal_name"
+            android:enabled="true"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/blackout_widget_minimal_info" />
+        </receiver>
+
     </application>
 </manifest>`
   },
@@ -1921,7 +1935,8 @@ open class BlackoutGlanceWidget(private val forceBigLayout: Boolean = false) : G
                 val manager = GlanceAppWidgetManager(appCtx)
                 manager.getGlanceIds(BlackoutGlanceWidget::class.java).isNotEmpty() ||
                     manager.getGlanceIds(BlackoutBigGlanceWidget::class.java).isNotEmpty() ||
-                    manager.getGlanceIds(BlackoutStripGlanceWidget::class.java).isNotEmpty()
+                    manager.getGlanceIds(BlackoutStripGlanceWidget::class.java).isNotEmpty() ||
+                    manager.getGlanceIds(BlackoutMinimalGlanceWidget::class.java).isNotEmpty()
             } catch (_: Exception) {
                 false
             }
@@ -1937,7 +1952,8 @@ open class BlackoutGlanceWidget(private val forceBigLayout: Boolean = false) : G
             val smallIds = manager.getGlanceIds(BlackoutGlanceWidget::class.java)
             val bigIds = manager.getGlanceIds(BlackoutBigGlanceWidget::class.java)
             val stripIds = manager.getGlanceIds(BlackoutStripGlanceWidget::class.java)
-            if (smallIds.isEmpty() && bigIds.isEmpty() && stripIds.isEmpty()) return
+            val minimalIds = manager.getGlanceIds(BlackoutMinimalGlanceWidget::class.java)
+            if (smallIds.isEmpty() && bigIds.isEmpty() && stripIds.isEmpty() && minimalIds.isEmpty()) return
 
             val settings = SettingsRepository(appCtx).getSettings()
             val alertsMaster = SubscriptionSync(appCtx).master()
@@ -1977,6 +1993,15 @@ open class BlackoutGlanceWidget(private val forceBigLayout: Boolean = false) : G
                 try {
                     touch(gId)
                     BlackoutStripGlanceWidget().update(appCtx, gId)
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (_: Exception) {
+                }
+            }
+            for (gId in minimalIds) {
+                try {
+                    touch(gId)
+                    BlackoutMinimalGlanceWidget().update(appCtx, gId)
                 } catch (e: CancellationException) {
                     throw e
                 } catch (_: Exception) {
@@ -2890,6 +2915,10 @@ class BlackoutBigWidgetReceiver : BlackoutWidgetReceiver() {
 
 class BlackoutStripWidgetReceiver : BlackoutWidgetReceiver() {
     override val glanceAppWidget: GlanceAppWidget = BlackoutStripGlanceWidget()
+}
+
+class BlackoutMinimalWidgetReceiver : BlackoutWidgetReceiver() {
+    override val glanceAppWidget: GlanceAppWidget = BlackoutMinimalGlanceWidget()
 }
 `
   },
@@ -17597,6 +17626,316 @@ class SubscriptionSync(context: Context) {
         settingsRepo.applyPrimaryMirror(Subscriptions.primaryMirror(repo.store(), repo.alertsMaster()))
     }
 }
+`
+  },
+  {
+    path: 'app/src/main/java/ua/blackout/prewarning/widget/BlackoutMinimalGlanceWidget.kt',
+    language: 'kotlin',
+    description: 'Minimal 2x2 Glance widget: primary queue, status, countdown and refresh on a 50% layer',
+    content: `package ua.blackout.prewarning.widget
+
+import android.content.Context
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.datastore.preferences.core.Preferences
+import androidx.glance.ColorFilter
+import androidx.glance.GlanceId
+import androidx.glance.GlanceModifier
+import androidx.glance.GlanceTheme
+import androidx.glance.Image
+import androidx.glance.ImageProvider
+import androidx.glance.LocalSize
+import androidx.glance.action.clickable
+import androidx.glance.appwidget.CircularProgressIndicator
+import androidx.glance.appwidget.GlanceAppWidget
+import androidx.glance.appwidget.SizeMode
+import androidx.glance.appwidget.action.actionRunCallback
+import androidx.glance.appwidget.cornerRadius
+import androidx.glance.appwidget.provideContent
+import androidx.glance.background
+import androidx.glance.currentState
+import androidx.glance.layout.Alignment
+import androidx.glance.layout.Box
+import androidx.glance.layout.Column
+import androidx.glance.layout.Row
+import androidx.glance.layout.Spacer
+import androidx.glance.layout.fillMaxSize
+import androidx.glance.layout.fillMaxWidth
+import androidx.glance.layout.height
+import androidx.glance.layout.padding
+import androidx.glance.layout.size
+import androidx.glance.layout.width
+import androidx.glance.state.GlanceStateDefinition
+import androidx.glance.state.PreferencesGlanceStateDefinition
+import androidx.glance.text.FontWeight
+import androidx.glance.text.Text
+import androidx.glance.text.TextAlign
+import androidx.glance.text.TextStyle
+import androidx.glance.unit.ColorProvider
+import ua.blackout.prewarning.R
+import ua.blackout.prewarning.ui.AppStrings
+
+/**
+ * Fourth widget (2x2, «Мінімальний»): the queue of the primary address, the status, the countdown to the
+ * next outage or to power on, and the refresh button, on a 50 % transparent layer. It always follows the
+ * primary address (no configuration screen) and draws from the same snapshot as the other widgets, so the
+ * status and the countdown are identical. Text sizes follow the widget size so a resized widget stays filled.
+ */
+class BlackoutMinimalGlanceWidget : GlanceAppWidget() {
+
+    override val stateDefinition: GlanceStateDefinition<*> = PreferencesGlanceStateDefinition
+
+    override val sizeMode = SizeMode.Exact
+
+    override suspend fun provideGlance(context: Context, id: GlanceId) {
+        val appContext = context.applicationContext
+
+        provideContent {
+            val prefs = currentState<Preferences>()
+            // Reading the tick subscribes this composition to the Glance state that syncAllWidgets bumps
+            @Suppress("UNUSED_VARIABLE")
+            val refreshTick = prefs[BlackoutGlanceWidget.KEY_REFRESH_TICK] ?: 0L
+            val refreshingSince = prefs[BlackoutGlanceWidget.KEY_REFRESHING_SINCE] ?: 0L
+            val isRefreshing = refreshingSince > 0L &&
+                System.currentTimeMillis() - refreshingSince < BlackoutGlanceWidget.REFRESH_BUSY_MAX_MS
+            // null app widget id = follow the primary address
+            val source = widgetSource(appContext, null)
+            val model = BlackoutGlanceWidget.buildWidgetModel(source.settings, source.snapshot)
+            val openApp = openAppAction(source.itemId)
+            val m = minimalWidgetTexts(model.lang, model.isUnclear, model.isOffNow, model.countdown)
+
+            val statusColor = when {
+                model.isUnclear -> Color(0xFF9CA3AF)
+                model.isOffNow -> Color(0xFFFF5E3A)
+                else -> Color(0xFF34D399)
+            }
+
+            val size = LocalSize.current
+            val scale = (minOf(size.width.value, size.height.value) / BASE_DP).coerceIn(0.8f, 1.8f)
+            val pad = 12f * scale
+            val button = 34f * scale
+            val innerWidth = size.width.value - 2 * pad
+            val queueSp = fit(14f * scale, model.queueHeader, innerWidth - button - 6f, 0.6f)
+            val statusSp = fit(20f * scale, m.status, innerWidth, 0.68f)
+            val labelSp = m.label?.let { fit(12f * scale, it, innerWidth, 0.52f) } ?: 0f
+            val countdownSp = m.countdown?.let { fit(22f * scale, it, innerWidth, 0.58f) } ?: 0f
+
+            GlanceTheme {
+                Column(
+                    modifier = GlanceModifier
+                        .fillMaxSize()
+                        .cornerRadius(20.dp)
+                        .background(ColorProvider(Color(0x80141A29)))
+                        .padding(pad.dp)
+                        .clickable(openApp)
+                ) {
+                    Row(
+                        modifier = GlanceModifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.Vertical.CenterVertically
+                    ) {
+                        Text(
+                            text = model.queueHeader,
+                            style = TextStyle(
+                                fontWeight = FontWeight.Bold,
+                                fontSize = queueSp.sp,
+                                color = ColorProvider(Color.White)
+                            ),
+                            maxLines = 1,
+                            modifier = GlanceModifier.defaultWeight()
+                        )
+                        RefreshButton(button.dp, isRefreshing, m.refreshDescription)
+                    }
+
+                    Column(
+                        modifier = GlanceModifier.fillMaxWidth().defaultWeight(),
+                        horizontalAlignment = Alignment.Horizontal.CenterHorizontally,
+                        verticalAlignment = Alignment.Vertical.CenterVertically
+                    ) {
+                        Text(
+                            text = m.status,
+                            style = TextStyle(
+                                fontWeight = FontWeight.Bold,
+                                fontSize = statusSp.sp,
+                                color = ColorProvider(statusColor),
+                                textAlign = TextAlign.Center
+                            ),
+                            maxLines = 1
+                        )
+                        if (m.label != null) {
+                            Spacer(modifier = GlanceModifier.height((4f * scale).dp))
+                            Text(
+                                text = m.label,
+                                style = TextStyle(
+                                    fontSize = labelSp.sp,
+                                    color = ColorProvider(Color(0xFFA9B4C2)),
+                                    textAlign = TextAlign.Center
+                                ),
+                                maxLines = 1
+                            )
+                        }
+                        if (m.countdown != null) {
+                            Text(
+                                text = m.countdown,
+                                style = TextStyle(
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = countdownSp.sp,
+                                    color = ColorProvider(Color.White),
+                                    textAlign = TextAlign.Center
+                                ),
+                                maxLines = 1
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    @androidx.compose.runtime.Composable
+    private fun RefreshButton(size: Dp, isRefreshing: Boolean, description: String) {
+        Box(
+            modifier = GlanceModifier
+                .size(size)
+                .cornerRadius(size / 2)
+                .background(ColorProvider(Color(0x26FFFFFF)))
+                .clickable(actionRunCallback<RefreshWidgetActionCallback>()),
+            contentAlignment = Alignment.Center
+        ) {
+            val icon = size * 0.5f
+            if (isRefreshing) {
+                // Glance cannot rotate an image; the platform progress ring animates on its own
+                CircularProgressIndicator(
+                    color = ColorProvider(Color.White),
+                    modifier = GlanceModifier.size(icon)
+                )
+            } else {
+                Image(
+                    provider = ImageProvider(R.drawable.ic_refresh),
+                    contentDescription = description,
+                    colorFilter = ColorFilter.tint(ColorProvider(Color.White)),
+                    modifier = GlanceModifier.size(icon)
+                )
+            }
+        }
+    }
+
+    private companion object {
+        /** Widget side (dp) the base text sizes are designed for: a usual 2x2 launcher cell. */
+        const val BASE_DP = 150f
+
+        /** [base] sp, or smaller so [text] fits [widthDp] at about [emPerChar] em per character. */
+        fun fit(base: Float, text: String, widthDp: Float, emPerChar: Float): Float {
+            if (text.isEmpty() || widthDp <= 0f) return base
+            return minOf(base, widthDp / (text.length * emPerChar))
+        }
+    }
+}
+
+/** The texts of the minimal widget; null [label] or [countdown] = that line is not drawn. */
+internal data class MinimalWidgetTexts(
+    val status: String,
+    val label: String?,
+    val countdown: String?,
+    val refreshDescription: String
+)
+
+/**
+ * Unclear: the status alone. No outage ahead while the power is on: «Відключень немає» instead of a
+ * countdown of dashes. Otherwise the label and the countdown of the other widgets (\`HHг. MMхв.\`).
+ */
+internal fun minimalWidgetTexts(lang: String, isUnclear: Boolean, isOffNow: Boolean, countdown: String): MinimalWidgetTexts {
+    val isUk = lang == "uk"
+    val refresh = if (isUk) "Оновити дані" else "Refresh"
+    if (isUnclear) return MinimalWidgetTexts(AppStrings.powerUnclear(lang), null, null, refresh)
+    val status = if (isOffNow) "СВІТЛА НЕМАЄ" else "СВІТЛО Є"
+    if (!isOffNow && countdown.contains("--")) {
+        return MinimalWidgetTexts(status, AppStrings.widgetNoOutages(lang), null, refresh)
+    }
+    val label = when {
+        isOffNow -> if (isUk) "До увімкнення:" else "Power on in:"
+        else -> if (isUk) "До відключення:" else "Time to blackout:"
+    }
+    return MinimalWidgetTexts(status, label, countdown, refresh)
+}
+`
+  },
+  {
+    path: 'app/src/main/res/xml/blackout_widget_minimal_info.xml',
+    language: 'xml',
+    description: 'Minimal 2x2 widget provider info',
+    content: `<?xml version="1.0" encoding="utf-8"?>
+<appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
+    android:description="@string/widget_minimal_name"
+    android:initialKeyguardLayout="@layout/glance_default_loading_layout"
+    android:initialLayout="@layout/glance_default_loading_layout"
+    android:minWidth="110dp"
+    android:minHeight="110dp"
+    android:minResizeWidth="110dp"
+    android:minResizeHeight="110dp"
+    android:previewImage="@drawable/widget_preview_minimal"
+    android:resizeMode="horizontal|vertical"
+    android:targetCellWidth="2"
+    android:targetCellHeight="2"
+    android:updatePeriodMillis="900000"
+    android:widgetCategory="home_screen" />
+`
+  },
+  {
+    path: 'app/src/main/res/drawable/widget_preview_minimal.xml',
+    language: 'xml',
+    description: 'Minimal 2x2 widget picker preview',
+    content: `<?xml version="1.0" encoding="utf-8"?>
+<!-- Preview of the 2x2 minimal widget: queue, refresh button, status, label and countdown on a 50 % layer -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="160dp"
+    android:height="160dp"
+    android:viewportWidth="160"
+    android:viewportHeight="160">
+
+    <!-- Rounded widget background (#141A29 at 50 %) -->
+    <path
+        android:fillColor="#80141A29"
+        android:pathData="M24,4 L136,4 A20,20 0 0,1 156,24 L156,136 A20,20 0 0,1 136,156 L24,156 A20,20 0 0,1 4,136 L4,24 A20,20 0 0,1 24,4 Z" />
+
+    <!-- Subtle border -->
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#33FFFFFF"
+        android:strokeWidth="1.5"
+        android:pathData="M24,4 L136,4 A20,20 0 0,1 156,24 L156,136 A20,20 0 0,1 136,156 L24,156 A20,20 0 0,1 4,136 L4,24 A20,20 0 0,1 24,4 Z" />
+
+    <!-- Queue title ("Черга 5.2") -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M21,22 L77,22 A5,5 0 0,1 82,27 L82,31 A5,5 0 0,1 77,36 L21,36 A5,5 0 0,1 16,31 L16,27 A5,5 0 0,1 21,22 Z" />
+
+    <!-- Round refresh button (#26FFFFFF) -->
+    <path
+        android:fillColor="#26FFFFFF"
+        android:pathData="M127,29 m-15,0 a15,15 0 1,0 30,0 a15,15 0 1,0 -30,0" />
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="2.2"
+        android:pathData="M127,22 A7,7 0 1,1 120.5,31.5 M127,19 L127,25 L121,25" />
+
+    <!-- Green status ("СВІТЛО Є") -->
+    <path
+        android:fillColor="#34D399"
+        android:pathData="M38,64 L122,64 A7,7 0 0,1 129,71 L129,75 A7,7 0 0,1 122,82 L38,82 A7,7 0 0,1 31,75 L31,71 A7,7 0 0,1 38,64 Z" />
+
+    <!-- Countdown label ("До відключення:") -->
+    <path
+        android:fillColor="#99A9B4C2"
+        android:pathData="M37,94 L123,94 A4,4 0 0,1 127,98 L127,100 A4,4 0 0,1 123,104 L37,104 A4,4 0 0,1 33,100 L33,98 A4,4 0 0,1 37,94 Z" />
+
+    <!-- Countdown value ("00г. 46хв.") -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M28,114 L132,114 A8,8 0 0,1 140,122 L140,128 A8,8 0 0,1 132,136 L28,136 A8,8 0 0,1 20,128 L20,122 A8,8 0 0,1 28,114 Z" />
+</vector>
 `
   }
 ];

@@ -2515,6 +2515,22 @@ async function runUnitTestE_AddressLookupAndUnsetQueue() {
       fs.existsSync(path.join(ROOT_DIR, 'android/app/src/main/res/drawable/widget_preview_strip.xml')),
     'Android must provide Small (2x1), Big (4x2) and Strip (4x1) widgets with vector thumbnail previews'
   );
+  // Fourth widget: 2x2 minimal (queue of the primary address, status, countdown, refresh; 50 % transparent)
+  const minimalXml = read('android/app/src/main/res/xml/blackout_widget_minimal_info.xml');
+  const minimalKt = read(KT + 'widget/BlackoutMinimalGlanceWidget.kt');
+  assert.ok(
+    manifest.includes('.widget.BlackoutMinimalWidgetReceiver') &&
+      widgetReceiverKt.includes('class BlackoutMinimalWidgetReceiver') &&
+      minimalKt.includes('class BlackoutMinimalGlanceWidget') &&
+      minimalKt.includes('Color(0x80141A29)') &&
+      minimalKt.includes('widgetSource(appContext, null)') &&
+      !minimalXml.includes('android:configure') &&
+      minimalXml.includes('android:previewImage="@drawable/widget_preview_minimal"') &&
+      fs.existsSync(path.join(ROOT_DIR, 'android/app/src/main/res/drawable/widget_preview_minimal.xml')) &&
+      read(KT + 'widget/WidgetBindings.kt').includes('BlackoutMinimalWidgetReceiver::class.java') &&
+      glanceWidgetKt.includes('BlackoutMinimalGlanceWidget().update('),
+    'Android must provide the Minimal (2x2) widget: primary address only, 50 % transparent, redrawn with the others'
+  );
   assert.ok(
     manifest.includes('android.permission.SCHEDULE_EXACT_ALARM') && !manifest.includes('android.permission.USE_EXACT_ALARM'),
     'AndroidManifest.xml must use SCHEDULE_EXACT_ALARM and not USE_EXACT_ALARM'
@@ -2547,6 +2563,8 @@ async function runUnitTestE_AddressLookupAndUnsetQueue() {
       settingsViewTsx.includes('testId={`ios-switch-emergency-${item.id}`}') &&
       settingsViewTsx.includes('data-testid="ztoe-address-lookup-subtitle"') &&
       widgetSimTsx.includes('data-testid="widget-strip"') &&
+      widgetSimTsx.includes('data-testid="widget-minimal"') &&
+      (translations.uk as Record<string, string>).widgetMinimalName === 'Світло в Житомирі (Мінімальний)' &&
       (translations.uk as Record<string, string>).widgetStripName === 'Світло в Житомирі (Графік)',
     'MainView.tsx, SettingsView.tsx and WidgetSimulator.tsx must mirror the first launch, notice card, searchable pickers, the "Мої адреси" card with per-address emergency switches and strip widget'
   );

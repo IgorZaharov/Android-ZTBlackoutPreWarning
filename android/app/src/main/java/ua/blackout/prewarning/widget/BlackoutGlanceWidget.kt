@@ -205,7 +205,8 @@ open class BlackoutGlanceWidget(private val forceBigLayout: Boolean = false) : G
                 val manager = GlanceAppWidgetManager(appCtx)
                 manager.getGlanceIds(BlackoutGlanceWidget::class.java).isNotEmpty() ||
                     manager.getGlanceIds(BlackoutBigGlanceWidget::class.java).isNotEmpty() ||
-                    manager.getGlanceIds(BlackoutStripGlanceWidget::class.java).isNotEmpty()
+                    manager.getGlanceIds(BlackoutStripGlanceWidget::class.java).isNotEmpty() ||
+                    manager.getGlanceIds(BlackoutMinimalGlanceWidget::class.java).isNotEmpty()
             } catch (_: Exception) {
                 false
             }
@@ -221,7 +222,8 @@ open class BlackoutGlanceWidget(private val forceBigLayout: Boolean = false) : G
             val smallIds = manager.getGlanceIds(BlackoutGlanceWidget::class.java)
             val bigIds = manager.getGlanceIds(BlackoutBigGlanceWidget::class.java)
             val stripIds = manager.getGlanceIds(BlackoutStripGlanceWidget::class.java)
-            if (smallIds.isEmpty() && bigIds.isEmpty() && stripIds.isEmpty()) return
+            val minimalIds = manager.getGlanceIds(BlackoutMinimalGlanceWidget::class.java)
+            if (smallIds.isEmpty() && bigIds.isEmpty() && stripIds.isEmpty() && minimalIds.isEmpty()) return
 
             val settings = SettingsRepository(appCtx).getSettings()
             val alertsMaster = SubscriptionSync(appCtx).master()
@@ -261,6 +263,15 @@ open class BlackoutGlanceWidget(private val forceBigLayout: Boolean = false) : G
                 try {
                     touch(gId)
                     BlackoutStripGlanceWidget().update(appCtx, gId)
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (_: Exception) {
+                }
+            }
+            for (gId in minimalIds) {
+                try {
+                    touch(gId)
+                    BlackoutMinimalGlanceWidget().update(appCtx, gId)
                 } catch (e: CancellationException) {
                     throw e
                 } catch (_: Exception) {

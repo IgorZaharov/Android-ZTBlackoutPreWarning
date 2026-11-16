@@ -24,7 +24,9 @@ object WidgetBindings {
     private val RECEIVERS = listOf(
         BlackoutWidgetReceiver::class.java,
         BlackoutBigWidgetReceiver::class.java,
-        BlackoutStripWidgetReceiver::class.java
+        BlackoutStripWidgetReceiver::class.java,
+        // always unbound: the minimal widget follows the primary address
+        BlackoutMinimalWidgetReceiver::class.java
     )
 
     /** The bound subscription id of one widget; null = follow the primary. */
@@ -42,7 +44,7 @@ object WidgetBindings {
         e.apply()
     }
 
-    /** App widget ids of every placed widget of the three kinds. */
+    /** App widget ids of every placed widget of the four kinds. */
     fun placedWidgetIds(context: Context): List<Int> {
         val appCtx = context.applicationContext
         val manager = AppWidgetManager.getInstance(appCtx)

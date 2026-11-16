@@ -97,3 +97,7 @@ class BlackoutBigWidgetReceiver : BlackoutWidgetReceiver() {
 class BlackoutStripWidgetReceiver : BlackoutWidgetReceiver() {
     override val glanceAppWidget: GlanceAppWidget = BlackoutStripGlanceWidget()
 }
+
+class BlackoutMinimalWidgetReceiver : BlackoutWidgetReceiver() {
+    override val glanceAppWidget: GlanceAppWidget = BlackoutMinimalGlanceWidget()
+}
