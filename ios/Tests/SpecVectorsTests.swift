@@ -222,6 +222,38 @@ final class SpecVectorsTests: XCTestCase {
         report("address_keys.json", "all groups", ran: ran, atLeast: 8 + 5 + 6 + 5 + 9)
     }
 
+    // MARK: - house_variants.json
+
+    func testHouseVariantVectors() throws {
+        let v = try Vectors.load("house_variants.json")
+        var ran = 0
+        for p in v.array("consumerType") ?? [] {
+            let pair = p as! [String]
+            XCTAssertEqual(pair[1], ConsumerType.of(pair[0]), "consumerType '\(pair[0])'")
+            ran += 1
+        }
+        for c in v.objs("merge") {
+            let name = c.str("name")!
+            var variants: [HouseVariant] = []
+            for r in c.objs("rows") {
+                variants = HouseVariants.add(variants, queue: r.str("queue")!, statusText: r.str("status"), consumerRaw: r.str("consumer"))
+            }
+            let expect = c.objs("expect").map {
+                HouseVariant(queue: $0.str("queue")!, statusText: $0.str("status"), consumers: $0.strings("consumers") ?? [])
+            }
+            XCTAssertEqual(expect, HouseVariants.ordered(variants), "\(name): ordered variants")
+            ran += 1
+            for p in c.objs("picks") {
+                let preferred = p.str("preferred")
+                let picked = HouseVariants.pick(variants, preferredQueue: preferred, preferredConsumers: p.strings("consumers") ?? [])
+                XCTAssertEqual(p.str("queue"), picked?.queue, "\(name): pick '\(preferred ?? "nil")' queue")
+                XCTAssertEqual(p.str("status"), picked?.statusText, "\(name): pick '\(preferred ?? "nil")' status")
+                ran += 1
+            }
+        }
+        report("house_variants.json", "all groups", ran: ran, atLeast: 10 + 8)
+    }
+
     // MARK: - poweron_api.json
 
     private func row(_ o: J) -> PowerOnRow {

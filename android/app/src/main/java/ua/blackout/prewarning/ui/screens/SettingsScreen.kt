@@ -44,6 +44,8 @@ import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.HelpOutline
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.material.icons.filled.RadioButtonChecked
+import androidx.compose.material.icons.filled.RadioButtonUnchecked
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.filled.Star
@@ -109,6 +111,10 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import ua.blackout.prewarning.core.ConsumerType
+import ua.blackout.prewarning.data.repository.HouseVariantChoices
+import ua.blackout.prewarning.core.HouseVariant
+import ua.blackout.prewarning.core.HouseVariants
 import ua.blackout.prewarning.core.Subscription
 import ua.blackout.prewarning.core.SubscriptionStore
 import ua.blackout.prewarning.core.Subscriptions
@@ -125,6 +131,19 @@ import ua.blackout.prewarning.ui.AppStrings
 import ua.blackout.prewarning.ui.components.spinWhile
 import ua.blackout.prewarning.ui.components.GlassCard
 import ua.blackout.prewarning.ui.components.PickerItem
+import ua.blackout.prewarning.ui.components.CoachOverlay
+import ua.blackout.prewarning.ui.components.CoachTargets
+import ua.blackout.prewarning.ui.components.CoachTip
+import ua.blackout.prewarning.ui.components.LocalCoachTargets
+import ua.blackout.prewarning.ui.components.OnboardingTour
+import ua.blackout.prewarning.ui.components.TourInput
+import ua.blackout.prewarning.ui.components.TourPage
+import ua.blackout.prewarning.ui.components.TourStep
+import ua.blackout.prewarning.ui.components.coachTarget
+import androidx.compose.foundation.relocation.BringIntoViewRequester
+import androidx.compose.foundation.relocation.bringIntoViewRequester
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.SideEffect
 import ua.blackout.prewarning.ui.components.PickerSearch
 import ua.blackout.prewarning.ui.components.SearchablePickerField
 import ua.blackout.prewarning.ui.components.glassFieldColors
@@ -173,6 +192,11 @@ fun SettingsScreen(
     lang: String = "uk",
     autoOpenQueueHelp: Boolean = false,
     onAutoOpenQueueHelpHandled: () -> Unit = {},
+    /** First-run tour (spec/ONBOARDING.md): the lookup dialog shows its PICK / APPLY steps. */
+    tourActive: Boolean = false,
+    onTourSkip: () -> Unit = {},
+    /** The rename dialog was closed (saved or cancelled): the tour goes on from RENAME to ALERTS. */
+    onRenameDialogClosed: () -> Unit = {},
     onAddAddress: (
         queue: String,
         statusText: String?,
@@ -215,6 +239,15 @@ fun SettingsScreen(
     var showResetConfirmDialog by remember { mutableStateOf(false) }
     var removeCandidate by remember { mutableStateOf<Subscription?>(null) }
     var renameCandidate by remember { mutableStateOf<Subscription?>(null) }
+    var renameWasOpen by remember { mutableStateOf(false) }
+    LaunchedEffect(renameCandidate) {
+        if (renameCandidate != null) {
+            renameWasOpen = true
+        } else if (renameWasOpen) {
+            renameWasOpen = false
+            onRenameDialogClosed()
+        }
+    }
 
     LaunchedEffect(autoOpenQueueHelp) {
         if (autoOpenQueueHelp) {
@@ -618,7 +651,9 @@ fun SettingsScreen(
                 onAddAddress(queue, statusText, addressLabel, query)
                 showQueueHelpDialog = false
             },
-            onShowAppBanner = onShowAppBanner
+            onShowAppBanner = onShowAppBanner,
+            tourActive = tourActive,
+            onTourSkip = onTourSkip
         )
     }
 
@@ -863,6 +898,7 @@ private fun MyAddressesCard(
                     onRemove = { onRemove(item) },
                     onRename = { onRename(item) },
                     onMakePrimary = { onMakePrimary(item.id) },
+                    tourTargets = index == 0,
                     onSetPlanned = { onSetPlanned(item.id, it) },
                     onSetEmergency = { onSetEmergency(item.id, it) },
                     dragHandle = handle,
@@ -926,6 +962,8 @@ private fun SubscriptionBlock(
     onSetEmergency: (Boolean) -> Unit,
     /** Gesture and accessibility actions of the reorder handle; null hides it (one address). */
     dragHandle: Modifier? = null,
+    /** The first block marks its rename button and alert switches for the first-run tour. */
+    tourTargets: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     val shape = RoundedCornerShape(16.dp)
@@ -974,7 +1012,12 @@ private fun SubscriptionBlock(
                     )
                 }
             }
-            IconTile(icon = Icons.Default.Edit, description = "${AppStrings.renameAddress(lang)}: $label", onClick = onRename)
+            IconTile(
+                icon = Icons.Default.Edit,
+                description = "${AppStrings.renameAddress(lang)}: $label",
+                onClick = onRename,
+                modifier = if (tourTargets) Modifier.coachTarget("rename") else Modifier
+            )
             IconTile(icon = Icons.Default.Delete, description = "${AppStrings.removeAddress(lang)}: $label", onClick = onRemove, danger = true)
         }
         Text(text = label, style = ZtType.subhead, color = Color.White)
@@ -990,7 +1033,8 @@ private fun SubscriptionBlock(
             checked = alertsMaster && item.plannedAlerts,
             onCheckedChange = onSetPlanned,
             lang = lang,
-            enabled = alertsMaster && item.queue != null
+            enabled = alertsMaster && item.queue != null,
+            modifier = if (tourTargets) Modifier.coachTarget("alert-planned") else Modifier
         )
         SwitchRow(
             icon = Icons.Default.Warning,
@@ -1000,7 +1044,8 @@ private fun SubscriptionBlock(
             checked = alertsMaster && item.emergencyAlerts && item.address != null,
             onCheckedChange = onSetEmergency,
             lang = lang,
-            enabled = alertsMaster && item.address != null
+            enabled = alertsMaster && item.address != null,
+            modifier = if (tourTargets) Modifier.coachTarget("alert-emergency") else Modifier
         )
         if (!isPrimary) {
             ActionButton(
@@ -1016,9 +1061,9 @@ private fun SubscriptionBlock(
 
 /** 48 dp touch target around a 36 dp icon tile. */
 @Composable
-private fun IconTile(icon: ImageVector, description: String, onClick: () -> Unit, danger: Boolean = false) {
+private fun IconTile(icon: ImageVector, description: String, onClick: () -> Unit, danger: Boolean = false, modifier: Modifier = Modifier) {
     Box(
-        modifier = Modifier
+        modifier = modifier
             .size(ZtMinTouch)
             .clickable(role = Role.Button, onClick = onClick)
             .semantics { contentDescription = description },
@@ -1079,11 +1124,12 @@ private fun SwitchRow(
     checked: Boolean,
     onCheckedChange: (Boolean) -> Unit,
     lang: String,
-    enabled: Boolean = true
+    enabled: Boolean = true,
+    modifier: Modifier = Modifier
 ) {
     val stateText = if (checked) AppStrings.switchOn(lang) else AppStrings.switchOff(lang)
     Row(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .heightIn(min = ZtMinTouch)
             .toggleable(value = checked, enabled = enabled, role = Role.Switch, onValueChange = onCheckedChange)
@@ -1211,15 +1257,93 @@ private class LevelState {
 // Full-screen queue help and address lookup dialog ("?" button)
 // =============================================================================================
 
+/** «Побутові споживачі, Непобутові (юридичні) споживачі» for the consumer types of a variant. */
+private fun consumerLabel(variant: HouseVariant, lang: String): String =
+    if (variant.consumers.isEmpty()) {
+        AppStrings.consumerUnknown(lang)
+    } else {
+        variant.consumers.joinToString(", ") {
+            when (it) {
+                ConsumerType.HOUSEHOLD -> AppStrings.consumerHousehold(lang)
+                ConsumerType.BUSINESS -> AppStrings.consumerBusiness(lang)
+                else -> it
+            }
+        }
+    }
+
+/** One button per queue of a house the site lists more than once (households / non-household). */
 @Composable
+private fun HouseVariantChooser(
+    choices: List<HouseVariant>,
+    active: HouseVariant,
+    lang: String,
+    onChoose: (HouseVariant) -> Unit
+) {
+    Column(
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+        modifier = Modifier.fillMaxWidth().selectableGroup()
+    ) {
+        Text(
+            text = AppStrings.addrVariantsHint(lang),
+            style = ZtType.caption,
+            color = ZtColors.ChipAmberText
+        )
+        for (v in choices) {
+            val isActive = v.queue == active.queue
+            val title = if (v.queue.isNotEmpty()) "${AppStrings.queue(lang)} ${v.queue}" else AppStrings.variantNoQueue(lang)
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = ZtMinTouch)
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(if (isActive) ZtColors.Accent.copy(alpha = 0.22f) else Color(0x0FFFFFFF))
+                    .border(2.dp, if (isActive) ZtColors.Accent else Color(0x33FFFFFF), RoundedCornerShape(14.dp))
+                    .selectable(selected = isActive, role = Role.RadioButton) { onChoose(v) }
+                    .padding(horizontal = 14.dp, vertical = 10.dp)
+            ) {
+                Icon(
+                    if (isActive) Icons.Default.RadioButtonChecked else Icons.Default.RadioButtonUnchecked,
+                    contentDescription = null,
+                    tint = if (isActive) ZtColors.Accent else ZtColors.TextSecondary,
+                    modifier = Modifier.size(20.dp)
+                )
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = title,
+                        style = ZtType.label,
+                        fontWeight = FontWeight.ExtraBold,
+                        color = Color.White
+                    )
+                    Text(
+                        text = consumerLabel(v, lang),
+                        style = ZtType.caption,
+                        color = ZtColors.TextSecondary
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 private fun AddressLookupDialog(
     siteUrl: String,
     lang: String,
     saved: SelectedAddressQuery?,
     onDismiss: () -> Unit,
     onApply: (queue: String, statusText: String?, addressLabel: String, query: SelectedAddressQuery) -> Unit,
-    onShowAppBanner: (String) -> Unit
+    onShowAppBanner: (String) -> Unit,
+    tourActive: Boolean = false,
+    onTourSkip: () -> Unit = {}
 ) {
+    val lookupContext = LocalContext.current
+    // First-run tour inside this dialog window (spec/ONBOARDING.md): PICK, then APPLY once a result card shows
+    val tourTargets = remember { CoachTargets() }
+    var tourResultShown by remember { mutableStateOf(false) }
+    val applyBringer = remember { BringIntoViewRequester() }
     // The cascade starts from the saved address, or from Zhytomyr city on a first launch. After that a REM
     // never picks a city for the user: choosing another REM clears city, street and house.
     var selectedRemId by remember { mutableStateOf(saved?.remId?.ifBlank { "zhytomyr" } ?: "zhytomyr") }
@@ -1247,6 +1371,8 @@ private fun AddressLookupDialog(
     var isCheckingAddressOnSite by remember { mutableStateOf(false) }
     var addressCheckFailed by remember { mutableStateOf(false) }
     var addressLookupResult by remember { mutableStateOf<AddressLookupResult?>(null) }
+    // Queue of the variant the user tapped ("" = the one without a queue); null = default (spec/ADDRESS_KEY.md section 6)
+    var chosenVariantQueue by remember { mutableStateOf<String?>(null) }
 
     fun clearBelowRem() {
         selectedSettlementId = ""
@@ -1361,6 +1487,7 @@ private fun AddressLookupDialog(
     // Queries the site when street and house are chosen. Nothing closes or applies until the user presses the button.
     LaunchedEffect(selectedRemId, selectedSettlementId, selectedStreetId, selectedHouse, siteUrl) {
         addressLookupResult = null
+        chosenVariantQueue = null
         addressCheckFailed = false
         if (selectedStreetId.isBlank() || selectedHouse.isBlank()) {
             isCheckingAddressOnSite = false
@@ -1388,11 +1515,20 @@ private fun AddressLookupDialog(
             } else {
                 housesList.map { h ->
                     if (h.house.equals(res.house, ignoreCase = true)) {
-                        h.copy(
-                            queue = res.queue.ifEmpty { h.queue },
-                            statusText = res.statusText ?: h.statusText,
-                            addressLabel = res.addressLabel.ifEmpty { h.addressLabel }
-                        )
+                        if (res.variants.isNotEmpty()) {
+                            h.copy(
+                                queue = res.queue,
+                                statusText = res.statusText,
+                                addressLabel = res.addressLabel.ifEmpty { h.addressLabel },
+                                variants = res.variants
+                            )
+                        } else {
+                            h.copy(
+                                queue = res.queue.ifEmpty { h.queue },
+                                statusText = res.statusText ?: h.statusText,
+                                addressLabel = res.addressLabel.ifEmpty { h.addressLabel }
+                            )
+                        }
                     } else h
                 }
             }
@@ -1413,10 +1549,19 @@ private fun AddressLookupDialog(
     val streetItems = remember(streetsList, lang) { streetsList.map { PickerItem(it.id, it.displayName(lang)) } }
     val houseItems = remember(housesList) { housesList.map { PickerItem(it.house, it.house) } }
 
+    LaunchedEffect(tourActive, tourResultShown) {
+        // bring the «Обрати чергу» button into view once the result card has settled
+        if (tourActive && tourResultShown) {
+            kotlinx.coroutines.delay(400)
+            applyBringer.bringIntoView()
+        }
+    }
+
     Dialog(
         onDismissRequest = onDismiss,
         properties = DialogProperties(usePlatformDefaultWidth = false)
     ) {
+      CompositionLocalProvider(LocalCoachTargets provides tourTargets) {
         Box(
             modifier = Modifier
                 .fillMaxSize()
@@ -1526,6 +1671,7 @@ private fun AddressLookupDialog(
                         )
 
                         SearchablePickerField(
+                            modifier = Modifier.coachTarget("settlement"),
                             label = AppStrings.addrCityLabel(lang),
                             value = currentSettlement?.displayName(lang),
                             placeholder = AppStrings.addrCityPlaceholder(lang),
@@ -1544,6 +1690,7 @@ private fun AddressLookupDialog(
                         )
 
                         SearchablePickerField(
+                            modifier = Modifier.coachTarget("street"),
                             label = AppStrings.addrStreetLabel(lang),
                             value = currentStreet?.displayName(lang),
                             placeholder = AppStrings.addrStreetPlaceholder(lang),
@@ -1566,6 +1713,7 @@ private fun AddressLookupDialog(
                         )
 
                         SearchablePickerField(
+                            modifier = Modifier.coachTarget("house"),
                             label = AppStrings.addrHouseLabel(lang),
                             value = selectedHouse,
                             placeholder = AppStrings.addrHousePlaceholder(lang),
@@ -1588,7 +1736,8 @@ private fun AddressLookupDialog(
                         val validLookupResult = addressLookupResult?.takeIf {
                             it.house.equals(selectedHouse, ignoreCase = true)
                         }
-                        val matchedRecord: ZtoeHouseLookupResult? = when {
+                        val foundRecord: ZtoeHouseLookupResult? = when {
+                            validLookupResult != null && validLookupResult.variants.isNotEmpty() -> validLookupResult
                             validLookupResult != null && currentHouseRecord != null -> validLookupResult.copy(
                                 queue = validLookupResult.queue.ifEmpty { currentHouseRecord.queue },
                                 statusText = validLookupResult.statusText ?: currentHouseRecord.statusText
@@ -1602,6 +1751,21 @@ private fun AddressLookupDialog(
                             )
                             else -> null
                         }
+                        // A house with several queues: the tapped variant, else the saved one, else households first
+                        val variantChoices = foundRecord?.choices.orEmpty()
+                        val storedChoice = remember(selectedStreetId, selectedHouse) {
+                            HouseVariantChoices.get(lookupContext, selectedStreetId, selectedHouse)
+                        }
+                        val activeVariant = if (variantChoices.size > 1) {
+                            if (chosenVariantQueue != null) {
+                                HouseVariants.pick(variantChoices, chosenVariantQueue)
+                            } else {
+                                HouseVariants.pick(variantChoices, storedChoice?.queue, storedChoice?.consumers.orEmpty())
+                            }
+                        } else null
+                        val matchedRecord = if (foundRecord != null && activeVariant != null) foundRecord.withVariant(activeVariant) else foundRecord
+                        val resultShown = selectedHouse.isNotBlank() && matchedRecord != null
+                        SideEffect { tourResultShown = resultShown }
                         if (selectedHouse.isNotBlank() && matchedRecord != null) {
                             // while the site answers, an address without a known queue cannot be confirmed yet
                             val canApply = !(isCheckingAddressOnSite && matchedRecord.queue.isBlank())
@@ -1609,6 +1773,7 @@ private fun AddressLookupDialog(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .padding(top = 6.dp)
+                                    .coachTarget("result")
                                     .clip(RoundedCornerShape(16.dp))
                                     .background(Color(0xD9141A29))
                                     .border(2.dp, Color.White.copy(alpha = 0.25f), RoundedCornerShape(16.dp))
@@ -1660,6 +1825,15 @@ private fun AddressLookupDialog(
                                         }
                                     }
 
+                                    if (activeVariant != null) {
+                                        HouseVariantChooser(
+                                            choices = variantChoices,
+                                            active = activeVariant,
+                                            lang = lang,
+                                            onChoose = { chosenVariantQueue = it.queue }
+                                        )
+                                    }
+
                                     if (matchedRecord.queue.isNotBlank()) {
                                         Row(
                                             modifier = Modifier.fillMaxWidth(),
@@ -1704,6 +1878,8 @@ private fun AddressLookupDialog(
                                     Box(
                                         modifier = Modifier
                                             .fillMaxWidth()
+                                            .coachTarget("apply")
+                                            .bringIntoViewRequester(applyBringer)
                                             .heightIn(min = ZtMinTouch)
                                             .clip(RoundedCornerShape(16.dp))
                                             .background(if (canApply) ZtColors.Accent else Color(0x66FF5E3A))
@@ -1715,6 +1891,8 @@ private fun AddressLookupDialog(
                                                     house = selectedHouse
                                                 )
                                                 val addressToSave = selectedAddressStr.ifBlank { matchedRecord.addressLabel }
+                                                // re-checks keep this variant (spec/ADDRESS_KEY.md section 6, rule 5)
+                                                HouseVariantChoices.put(lookupContext, selectedStreetId, selectedHouse, activeVariant)
                                                 if (matchedRecord.queue.isNotBlank()) {
                                                     onApply(matchedRecord.queue, null, addressToSave, query)
                                                     onShowAppBanner("${AppStrings.queue(lang)} ${matchedRecord.queue}")
@@ -1839,6 +2017,50 @@ private fun AddressLookupDialog(
                     )
                 }
             }
+
+            if (tourActive) {
+                val step = OnboardingTour.step(
+                    TourInput(
+                        active = true,
+                        lookupOpen = true,
+                        resultShown = tourResultShown,
+                        page = TourPage.SETTINGS,
+                        hasAddress = false,
+                        reachedRename = false,
+                        renameDone = false
+                    )
+                )
+                if (step == TourStep.PICK) {
+                    // the tip sits outside the lit block; the next field to fill is ringed
+                    val block = listOf("settlement", "street", "house")
+                    val ringKey = when {
+                        currentStreet != null -> "house"
+                        selectedSettlementId.isNotBlank() -> "street"
+                        else -> "settlement"
+                    }
+                    CoachOverlay(
+                        targets = tourTargets,
+                        holes = listOf(block),
+                        tips = listOf(CoachTip(anchor = block, text = AppStrings.tourPick(lang), ring = ringKey, skip = true)),
+                        lang = lang,
+                        onSkip = onTourSkip
+                    )
+                } else if (step == TourStep.APPLY) {
+                    // outside the result card unless the card fills most of the screen; the button is ringed
+                    val screenPx = androidx.compose.ui.platform.LocalConfiguration.current.screenHeightDp *
+                        androidx.compose.ui.platform.LocalDensity.current.density
+                    val card = tourTargets.rects["result"]
+                    val anchor = if (card != null && card.height < screenPx * 0.55f) "result" else "apply"
+                    CoachOverlay(
+                        targets = tourTargets,
+                        holes = listOf(listOf("result")),
+                        tips = listOf(CoachTip(anchor = listOf(anchor), text = AppStrings.tourApply(lang), ring = "apply", skip = true)),
+                        lang = lang,
+                        onSkip = onTourSkip
+                    )
+                }
+            }
         }
+      }
     }
 }

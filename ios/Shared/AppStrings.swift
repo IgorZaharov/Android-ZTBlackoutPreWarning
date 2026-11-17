@@ -138,6 +138,16 @@ public enum AppStrings {
     public static func blackoutHoursForDayHeader(_ lang: String) -> String { lang == "uk" ? "Години відключень на сьогодні:" : "Blackout hours for today:" }
     public static func blackoutHoursForTomorrowHeader(_ lang: String) -> String { lang == "uk" ? "Години відключень на завтра:" : "Blackout hours for tomorrow:" }
     public static func selectQueueAction(_ lang: String) -> String { lang == "uk" ? "Виберіть чергу" : "Select queue" }
+    public static func firstStartTip(_ lang: String) -> String { lang == "uk" ? "Спробуйте вибрати будь-яку адресу або чергу" : "Try selecting any address or queue" }
+    public static func tourPick(_ lang: String) -> String { lang == "uk" ? "Тепер виберіть населений пункт, вулицю та будинок" : "Now choose your settlement, street and house" }
+    public static func tourApply(_ lang: String) -> String { lang == "uk" ? "Натисніть, щоб обрати чергу" : "Tap to choose the queue" }
+    public static func tourRename(_ lang: String) -> String { lang == "uk" ? "Перейменуйте адресу для зручності: «Дім», «Робота»" : "Rename the address for convenience: “Home”, “Work”" }
+    public static func tourAlerts(_ lang: String) -> String { lang == "uk" ? "Оберіть, про які відключення сповіщати для цієї адреси: планові чи аварійні" : "Choose which outages to be notified about for this address: planned or emergency" }
+    public static func tourNext(_ lang: String) -> String { lang == "uk" ? "Далі" : "Next" }
+    public static func tourBack(_ lang: String) -> String { lang == "uk" ? "Поверніться на головний екран" : "Go back to the main screen" }
+    public static func tourDonate(_ lang: String) -> String { lang == "uk" ? "Або допоможіть волонтерам, якщо хочете задонатити" : "Or help volunteers if you want to donate" }
+    public static func tourSkip(_ lang: String) -> String { lang == "uk" ? "Пропустити підказки" : "Skip tips" }
+    public static func tourGotIt(_ lang: String) -> String { lang == "uk" ? "Зрозуміло" : "Got it" }
     public static func emergencyOutageTitle(_ lang: String) -> String { lang == "uk" ? "Аварійне відключення!" : "Emergency outage!" }
     public static func emergencyStartLabel(_ lang: String) -> String { lang == "uk" ? "Початок:" : "Start:" }
     public static func emergencyRestoreLabel(_ lang: String) -> String { lang == "uk" ? "Орієнтовне відновлення:" : "Estimated restoration:" }
@@ -260,6 +270,11 @@ public enum AppStrings {
     public static func addrCheckFailed(_ lang: String) -> String { lang == "uk" ? "Не вдалося перевірити адресу на сайті. Показано збережені дані." : "Could not check the address on the site. Showing saved data." }
     public static func addrConfirm(_ lang: String) -> String { lang == "uk" ? "Підтвердити вибір" : "Confirm selection" }
     public static func addrSaved(_ lang: String) -> String { lang == "uk" ? "Адресу збережено" : "Address saved" }
+    public static func addrVariantsHint(_ lang: String) -> String { lang == "uk" ? "На сайті ztoe цей будинок має кілька черг. Оберіть свою:" : "The ztoe site lists this building with several queues. Choose yours:" }
+    public static func consumerHousehold(_ lang: String) -> String { lang == "uk" ? "Побутові споживачі" : "Households" }
+    public static func consumerBusiness(_ lang: String) -> String { lang == "uk" ? "Непобутові (юридичні) споживачі" : "Non-household (businesses)" }
+    public static func consumerUnknown(_ lang: String) -> String { lang == "uk" ? "Тип споживача не вказано" : "Consumer type not given" }
+    public static func variantNoQueue(_ lang: String) -> String { lang == "uk" ? "Не вимикається" : "Not disconnected" }
     public static func noQueueNotDisconnected(_ lang: String) -> String { lang == "uk" ? "Черга відсутня (не вимикається)" : "No queue (not disconnected)" }
     public static func testAlertSent(_ lang: String) -> String { lang == "uk" ? "Тестове сповіщення надіслано" : "Test alert dispatched" }
     public static func settingsReset(_ lang: String) -> String { lang == "uk" ? "Налаштування скинуто" : "Settings reset" }

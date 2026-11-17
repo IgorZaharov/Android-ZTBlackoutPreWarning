@@ -24,6 +24,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Alarm
+import androidx.compose.material.icons.filled.ArrowDownward
 import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Notifications
@@ -129,6 +130,48 @@ private fun rememberAnimationsEnabled(): Boolean {
         } catch (_: Exception) {
             true
         }
+    }
+}
+
+/**
+ * Tip above the first-launch "Виберіть чергу" button: a line of text and an arrow nudging down at the button
+ * (owner, 2026-11-17). The arrow stands still when system animations are off; read in graphicsLayer, so only it redraws.
+ */
+@Composable
+private fun FirstStartTip(lang: String, modifier: Modifier = Modifier) {
+    val animate = rememberAnimationsEnabled()
+    val nudge: State<Float>? = if (animate) {
+        rememberInfiniteTransition(label = "tip").animateFloat(
+            initialValue = 0f,
+            targetValue = 1f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(700, easing = FastOutSlowInEasing),
+                repeatMode = RepeatMode.Reverse
+            ),
+            label = "tipNudge"
+        )
+    } else {
+        null
+    }
+    Column(
+        modifier = modifier.widthIn(max = 300.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        Text(
+            text = AppStrings.firstStartTip(lang),
+            style = ZtType.body.copy(fontWeight = FontWeight.Bold),
+            color = Color.White,
+            textAlign = TextAlign.Center
+        )
+        Icon(
+            imageVector = Icons.Default.ArrowDownward,
+            contentDescription = null,
+            tint = ZtColors.Accent,
+            modifier = Modifier
+                .size(32.dp)
+                .graphicsLayer { translationY = (nudge?.value ?: 0f) * 8.dp.toPx() }
+        )
     }
 }
 
@@ -645,6 +688,7 @@ fun MainScreen(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.spacedBy(24.dp)
                 ) {
+                    FirstStartTip(lang = lang, modifier = Modifier.offset(y = 12.dp))
                     Box(
                         modifier = Modifier
                             .defaultMinSize(minWidth = 260.dp, minHeight = ZtMinTouch)

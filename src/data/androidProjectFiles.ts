@@ -34,7 +34,7 @@ android {
         targetSdk = 36
         versionCode = (System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull() ?: 300) + 300
         val semverEnv = System.getenv("APP_VERSION_NAME")?.removePrefix("v")?.trim()?.takeIf { it.matches(Regex("^[0-9]+\\\\.[0-9]+\\\\.[0-9]+.*")) }
-        versionName = semverEnv ?: "1.4.0"
+        versionName = semverEnv ?: "1.4.1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
@@ -1613,6 +1613,7 @@ import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import kotlinx.coroutines.CancellationException
 import ua.blackout.prewarning.data.parser.ZtoeAddressLookup
+import ua.blackout.prewarning.data.repository.HouseVariantChoices
 import ua.blackout.prewarning.data.repository.OutageRepository
 import ua.blackout.prewarning.data.repository.SettingsRepository
 import ua.blackout.prewarning.data.repository.SubscriptionSync
@@ -1637,7 +1638,11 @@ class ScheduleSyncWorker(
             if (addressQuery != null && settings.queue.isBlank()) {
                 try {
                     ZtoeAddressLookup.initDiskCache(appContext)
-                    val lookup = ZtoeAddressLookup.checkAddressOnZtoeWebsite(addressQuery, settings.cityUrl)
+                    val lookup = ZtoeAddressLookup.checkAddressOnZtoeWebsite(
+                        addressQuery,
+                        settings.cityUrl,
+                        HouseVariantChoices.get(appContext, addressQuery.streetId, addressQuery.house)
+                    )
                     if (lookup != null && (lookup.queue != settings.queue || lookup.statusText != settings.customQueueStatusText)) {
                         // through the subscription store, which writes the primary back into these keys
                         SubscriptionSync(appContext).assignPrimaryQueue(lookup.queue, lookup.statusText, null)
@@ -3011,6 +3016,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Alarm
+import androidx.compose.material.icons.filled.ArrowDownward
 import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Notifications
@@ -3116,6 +3122,48 @@ private fun rememberAnimationsEnabled(): Boolean {
         } catch (_: Exception) {
             true
         }
+    }
+}
+
+/**
+ * Tip above the first-launch "Виберіть чергу" button: a line of text and an arrow nudging down at the button
+ * (owner, 2026-11-17). The arrow stands still when system animations are off; read in graphicsLayer, so only it redraws.
+ */
+@Composable
+private fun FirstStartTip(lang: String, modifier: Modifier = Modifier) {
+    val animate = rememberAnimationsEnabled()
+    val nudge: State<Float>? = if (animate) {
+        rememberInfiniteTransition(label = "tip").animateFloat(
+            initialValue = 0f,
+            targetValue = 1f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(700, easing = FastOutSlowInEasing),
+                repeatMode = RepeatMode.Reverse
+            ),
+            label = "tipNudge"
+        )
+    } else {
+        null
+    }
+    Column(
+        modifier = modifier.widthIn(max = 300.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(6.dp)
+    ) {
+        Text(
+            text = AppStrings.firstStartTip(lang),
+            style = ZtType.body.copy(fontWeight = FontWeight.Bold),
+            color = Color.White,
+            textAlign = TextAlign.Center
+        )
+        Icon(
+            imageVector = Icons.Default.ArrowDownward,
+            contentDescription = null,
+            tint = ZtColors.Accent,
+            modifier = Modifier
+                .size(32.dp)
+                .graphicsLayer { translationY = (nudge?.value ?: 0f) * 8.dp.toPx() }
+        )
     }
 }
 
@@ -3632,6 +3680,7 @@ fun MainScreen(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.spacedBy(24.dp)
                 ) {
+                    FirstStartTip(lang = lang, modifier = Modifier.offset(y = 12.dp))
                     Box(
                         modifier = Modifier
                             .defaultMinSize(minWidth = 260.dp, minHeight = ZtMinTouch)
@@ -4214,6 +4263,8 @@ import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.HelpOutline
 import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.material.icons.filled.RadioButtonChecked
+import androidx.compose.material.icons.filled.RadioButtonUnchecked
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.filled.Star
@@ -4279,6 +4330,10 @@ import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import ua.blackout.prewarning.core.ConsumerType
+import ua.blackout.prewarning.data.repository.HouseVariantChoices
+import ua.blackout.prewarning.core.HouseVariant
+import ua.blackout.prewarning.core.HouseVariants
 import ua.blackout.prewarning.core.Subscription
 import ua.blackout.prewarning.core.SubscriptionStore
 import ua.blackout.prewarning.core.Subscriptions
@@ -4295,6 +4350,19 @@ import ua.blackout.prewarning.ui.AppStrings
 import ua.blackout.prewarning.ui.components.spinWhile
 import ua.blackout.prewarning.ui.components.GlassCard
 import ua.blackout.prewarning.ui.components.PickerItem
+import ua.blackout.prewarning.ui.components.CoachOverlay
+import ua.blackout.prewarning.ui.components.CoachTargets
+import ua.blackout.prewarning.ui.components.CoachTip
+import ua.blackout.prewarning.ui.components.LocalCoachTargets
+import ua.blackout.prewarning.ui.components.OnboardingTour
+import ua.blackout.prewarning.ui.components.TourInput
+import ua.blackout.prewarning.ui.components.TourPage
+import ua.blackout.prewarning.ui.components.TourStep
+import ua.blackout.prewarning.ui.components.coachTarget
+import androidx.compose.foundation.relocation.BringIntoViewRequester
+import androidx.compose.foundation.relocation.bringIntoViewRequester
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.SideEffect
 import ua.blackout.prewarning.ui.components.PickerSearch
 import ua.blackout.prewarning.ui.components.SearchablePickerField
 import ua.blackout.prewarning.ui.components.glassFieldColors
@@ -4343,6 +4411,11 @@ fun SettingsScreen(
     lang: String = "uk",
     autoOpenQueueHelp: Boolean = false,
     onAutoOpenQueueHelpHandled: () -> Unit = {},
+    /** First-run tour (spec/ONBOARDING.md): the lookup dialog shows its PICK / APPLY steps. */
+    tourActive: Boolean = false,
+    onTourSkip: () -> Unit = {},
+    /** The rename dialog was closed (saved or cancelled): the tour goes on from RENAME to ALERTS. */
+    onRenameDialogClosed: () -> Unit = {},
     onAddAddress: (
         queue: String,
         statusText: String?,
@@ -4385,6 +4458,15 @@ fun SettingsScreen(
     var showResetConfirmDialog by remember { mutableStateOf(false) }
     var removeCandidate by remember { mutableStateOf<Subscription?>(null) }
     var renameCandidate by remember { mutableStateOf<Subscription?>(null) }
+    var renameWasOpen by remember { mutableStateOf(false) }
+    LaunchedEffect(renameCandidate) {
+        if (renameCandidate != null) {
+            renameWasOpen = true
+        } else if (renameWasOpen) {
+            renameWasOpen = false
+            onRenameDialogClosed()
+        }
+    }
 
     LaunchedEffect(autoOpenQueueHelp) {
         if (autoOpenQueueHelp) {
@@ -4788,7 +4870,9 @@ fun SettingsScreen(
                 onAddAddress(queue, statusText, addressLabel, query)
                 showQueueHelpDialog = false
             },
-            onShowAppBanner = onShowAppBanner
+            onShowAppBanner = onShowAppBanner,
+            tourActive = tourActive,
+            onTourSkip = onTourSkip
         )
     }
 
@@ -5033,6 +5117,7 @@ private fun MyAddressesCard(
                     onRemove = { onRemove(item) },
                     onRename = { onRename(item) },
                     onMakePrimary = { onMakePrimary(item.id) },
+                    tourTargets = index == 0,
                     onSetPlanned = { onSetPlanned(item.id, it) },
                     onSetEmergency = { onSetEmergency(item.id, it) },
                     dragHandle = handle,
@@ -5096,6 +5181,8 @@ private fun SubscriptionBlock(
     onSetEmergency: (Boolean) -> Unit,
     /** Gesture and accessibility actions of the reorder handle; null hides it (one address). */
     dragHandle: Modifier? = null,
+    /** The first block marks its rename button and alert switches for the first-run tour. */
+    tourTargets: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     val shape = RoundedCornerShape(16.dp)
@@ -5144,7 +5231,12 @@ private fun SubscriptionBlock(
                     )
                 }
             }
-            IconTile(icon = Icons.Default.Edit, description = "\${AppStrings.renameAddress(lang)}: $label", onClick = onRename)
+            IconTile(
+                icon = Icons.Default.Edit,
+                description = "\${AppStrings.renameAddress(lang)}: $label",
+                onClick = onRename,
+                modifier = if (tourTargets) Modifier.coachTarget("rename") else Modifier
+            )
             IconTile(icon = Icons.Default.Delete, description = "\${AppStrings.removeAddress(lang)}: $label", onClick = onRemove, danger = true)
         }
         Text(text = label, style = ZtType.subhead, color = Color.White)
@@ -5160,7 +5252,8 @@ private fun SubscriptionBlock(
             checked = alertsMaster && item.plannedAlerts,
             onCheckedChange = onSetPlanned,
             lang = lang,
-            enabled = alertsMaster && item.queue != null
+            enabled = alertsMaster && item.queue != null,
+            modifier = if (tourTargets) Modifier.coachTarget("alert-planned") else Modifier
         )
         SwitchRow(
             icon = Icons.Default.Warning,
@@ -5170,7 +5263,8 @@ private fun SubscriptionBlock(
             checked = alertsMaster && item.emergencyAlerts && item.address != null,
             onCheckedChange = onSetEmergency,
             lang = lang,
-            enabled = alertsMaster && item.address != null
+            enabled = alertsMaster && item.address != null,
+            modifier = if (tourTargets) Modifier.coachTarget("alert-emergency") else Modifier
         )
         if (!isPrimary) {
             ActionButton(
@@ -5186,9 +5280,9 @@ private fun SubscriptionBlock(
 
 /** 48 dp touch target around a 36 dp icon tile. */
 @Composable
-private fun IconTile(icon: ImageVector, description: String, onClick: () -> Unit, danger: Boolean = false) {
+private fun IconTile(icon: ImageVector, description: String, onClick: () -> Unit, danger: Boolean = false, modifier: Modifier = Modifier) {
     Box(
-        modifier = Modifier
+        modifier = modifier
             .size(ZtMinTouch)
             .clickable(role = Role.Button, onClick = onClick)
             .semantics { contentDescription = description },
@@ -5249,11 +5343,12 @@ private fun SwitchRow(
     checked: Boolean,
     onCheckedChange: (Boolean) -> Unit,
     lang: String,
-    enabled: Boolean = true
+    enabled: Boolean = true,
+    modifier: Modifier = Modifier
 ) {
     val stateText = if (checked) AppStrings.switchOn(lang) else AppStrings.switchOff(lang)
     Row(
-        modifier = Modifier
+        modifier = modifier
             .fillMaxWidth()
             .heightIn(min = ZtMinTouch)
             .toggleable(value = checked, enabled = enabled, role = Role.Switch, onValueChange = onCheckedChange)
@@ -5381,15 +5476,93 @@ private class LevelState {
 // Full-screen queue help and address lookup dialog ("?" button)
 // =============================================================================================
 
+/** «Побутові споживачі, Непобутові (юридичні) споживачі» for the consumer types of a variant. */
+private fun consumerLabel(variant: HouseVariant, lang: String): String =
+    if (variant.consumers.isEmpty()) {
+        AppStrings.consumerUnknown(lang)
+    } else {
+        variant.consumers.joinToString(", ") {
+            when (it) {
+                ConsumerType.HOUSEHOLD -> AppStrings.consumerHousehold(lang)
+                ConsumerType.BUSINESS -> AppStrings.consumerBusiness(lang)
+                else -> it
+            }
+        }
+    }
+
+/** One button per queue of a house the site lists more than once (households / non-household). */
 @Composable
+private fun HouseVariantChooser(
+    choices: List<HouseVariant>,
+    active: HouseVariant,
+    lang: String,
+    onChoose: (HouseVariant) -> Unit
+) {
+    Column(
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+        modifier = Modifier.fillMaxWidth().selectableGroup()
+    ) {
+        Text(
+            text = AppStrings.addrVariantsHint(lang),
+            style = ZtType.caption,
+            color = ZtColors.ChipAmberText
+        )
+        for (v in choices) {
+            val isActive = v.queue == active.queue
+            val title = if (v.queue.isNotEmpty()) "\${AppStrings.queue(lang)} \${v.queue}" else AppStrings.variantNoQueue(lang)
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = ZtMinTouch)
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(if (isActive) ZtColors.Accent.copy(alpha = 0.22f) else Color(0x0FFFFFFF))
+                    .border(2.dp, if (isActive) ZtColors.Accent else Color(0x33FFFFFF), RoundedCornerShape(14.dp))
+                    .selectable(selected = isActive, role = Role.RadioButton) { onChoose(v) }
+                    .padding(horizontal = 14.dp, vertical = 10.dp)
+            ) {
+                Icon(
+                    if (isActive) Icons.Default.RadioButtonChecked else Icons.Default.RadioButtonUnchecked,
+                    contentDescription = null,
+                    tint = if (isActive) ZtColors.Accent else ZtColors.TextSecondary,
+                    modifier = Modifier.size(20.dp)
+                )
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = title,
+                        style = ZtType.label,
+                        fontWeight = FontWeight.ExtraBold,
+                        color = Color.White
+                    )
+                    Text(
+                        text = consumerLabel(v, lang),
+                        style = ZtType.caption,
+                        color = ZtColors.TextSecondary
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 private fun AddressLookupDialog(
     siteUrl: String,
     lang: String,
     saved: SelectedAddressQuery?,
     onDismiss: () -> Unit,
     onApply: (queue: String, statusText: String?, addressLabel: String, query: SelectedAddressQuery) -> Unit,
-    onShowAppBanner: (String) -> Unit
+    onShowAppBanner: (String) -> Unit,
+    tourActive: Boolean = false,
+    onTourSkip: () -> Unit = {}
 ) {
+    val lookupContext = LocalContext.current
+    // First-run tour inside this dialog window (spec/ONBOARDING.md): PICK, then APPLY once a result card shows
+    val tourTargets = remember { CoachTargets() }
+    var tourResultShown by remember { mutableStateOf(false) }
+    val applyBringer = remember { BringIntoViewRequester() }
     // The cascade starts from the saved address, or from Zhytomyr city on a first launch. After that a REM
     // never picks a city for the user: choosing another REM clears city, street and house.
     var selectedRemId by remember { mutableStateOf(saved?.remId?.ifBlank { "zhytomyr" } ?: "zhytomyr") }
@@ -5417,6 +5590,8 @@ private fun AddressLookupDialog(
     var isCheckingAddressOnSite by remember { mutableStateOf(false) }
     var addressCheckFailed by remember { mutableStateOf(false) }
     var addressLookupResult by remember { mutableStateOf<AddressLookupResult?>(null) }
+    // Queue of the variant the user tapped ("" = the one without a queue); null = default (spec/ADDRESS_KEY.md section 6)
+    var chosenVariantQueue by remember { mutableStateOf<String?>(null) }
 
     fun clearBelowRem() {
         selectedSettlementId = ""
@@ -5531,6 +5706,7 @@ private fun AddressLookupDialog(
     // Queries the site when street and house are chosen. Nothing closes or applies until the user presses the button.
     LaunchedEffect(selectedRemId, selectedSettlementId, selectedStreetId, selectedHouse, siteUrl) {
         addressLookupResult = null
+        chosenVariantQueue = null
         addressCheckFailed = false
         if (selectedStreetId.isBlank() || selectedHouse.isBlank()) {
             isCheckingAddressOnSite = false
@@ -5558,11 +5734,20 @@ private fun AddressLookupDialog(
             } else {
                 housesList.map { h ->
                     if (h.house.equals(res.house, ignoreCase = true)) {
-                        h.copy(
-                            queue = res.queue.ifEmpty { h.queue },
-                            statusText = res.statusText ?: h.statusText,
-                            addressLabel = res.addressLabel.ifEmpty { h.addressLabel }
-                        )
+                        if (res.variants.isNotEmpty()) {
+                            h.copy(
+                                queue = res.queue,
+                                statusText = res.statusText,
+                                addressLabel = res.addressLabel.ifEmpty { h.addressLabel },
+                                variants = res.variants
+                            )
+                        } else {
+                            h.copy(
+                                queue = res.queue.ifEmpty { h.queue },
+                                statusText = res.statusText ?: h.statusText,
+                                addressLabel = res.addressLabel.ifEmpty { h.addressLabel }
+                            )
+                        }
                     } else h
                 }
             }
@@ -5583,10 +5768,19 @@ private fun AddressLookupDialog(
     val streetItems = remember(streetsList, lang) { streetsList.map { PickerItem(it.id, it.displayName(lang)) } }
     val houseItems = remember(housesList) { housesList.map { PickerItem(it.house, it.house) } }
 
+    LaunchedEffect(tourActive, tourResultShown) {
+        // bring the «Обрати чергу» button into view once the result card has settled
+        if (tourActive && tourResultShown) {
+            kotlinx.coroutines.delay(400)
+            applyBringer.bringIntoView()
+        }
+    }
+
     Dialog(
         onDismissRequest = onDismiss,
         properties = DialogProperties(usePlatformDefaultWidth = false)
     ) {
+      CompositionLocalProvider(LocalCoachTargets provides tourTargets) {
         Box(
             modifier = Modifier
                 .fillMaxSize()
@@ -5696,6 +5890,7 @@ private fun AddressLookupDialog(
                         )
 
                         SearchablePickerField(
+                            modifier = Modifier.coachTarget("settlement"),
                             label = AppStrings.addrCityLabel(lang),
                             value = currentSettlement?.displayName(lang),
                             placeholder = AppStrings.addrCityPlaceholder(lang),
@@ -5714,6 +5909,7 @@ private fun AddressLookupDialog(
                         )
 
                         SearchablePickerField(
+                            modifier = Modifier.coachTarget("street"),
                             label = AppStrings.addrStreetLabel(lang),
                             value = currentStreet?.displayName(lang),
                             placeholder = AppStrings.addrStreetPlaceholder(lang),
@@ -5736,6 +5932,7 @@ private fun AddressLookupDialog(
                         )
 
                         SearchablePickerField(
+                            modifier = Modifier.coachTarget("house"),
                             label = AppStrings.addrHouseLabel(lang),
                             value = selectedHouse,
                             placeholder = AppStrings.addrHousePlaceholder(lang),
@@ -5758,7 +5955,8 @@ private fun AddressLookupDialog(
                         val validLookupResult = addressLookupResult?.takeIf {
                             it.house.equals(selectedHouse, ignoreCase = true)
                         }
-                        val matchedRecord: ZtoeHouseLookupResult? = when {
+                        val foundRecord: ZtoeHouseLookupResult? = when {
+                            validLookupResult != null && validLookupResult.variants.isNotEmpty() -> validLookupResult
                             validLookupResult != null && currentHouseRecord != null -> validLookupResult.copy(
                                 queue = validLookupResult.queue.ifEmpty { currentHouseRecord.queue },
                                 statusText = validLookupResult.statusText ?: currentHouseRecord.statusText
@@ -5772,6 +5970,21 @@ private fun AddressLookupDialog(
                             )
                             else -> null
                         }
+                        // A house with several queues: the tapped variant, else the saved one, else households first
+                        val variantChoices = foundRecord?.choices.orEmpty()
+                        val storedChoice = remember(selectedStreetId, selectedHouse) {
+                            HouseVariantChoices.get(lookupContext, selectedStreetId, selectedHouse)
+                        }
+                        val activeVariant = if (variantChoices.size > 1) {
+                            if (chosenVariantQueue != null) {
+                                HouseVariants.pick(variantChoices, chosenVariantQueue)
+                            } else {
+                                HouseVariants.pick(variantChoices, storedChoice?.queue, storedChoice?.consumers.orEmpty())
+                            }
+                        } else null
+                        val matchedRecord = if (foundRecord != null && activeVariant != null) foundRecord.withVariant(activeVariant) else foundRecord
+                        val resultShown = selectedHouse.isNotBlank() && matchedRecord != null
+                        SideEffect { tourResultShown = resultShown }
                         if (selectedHouse.isNotBlank() && matchedRecord != null) {
                             // while the site answers, an address without a known queue cannot be confirmed yet
                             val canApply = !(isCheckingAddressOnSite && matchedRecord.queue.isBlank())
@@ -5779,6 +5992,7 @@ private fun AddressLookupDialog(
                                 modifier = Modifier
                                     .fillMaxWidth()
                                     .padding(top = 6.dp)
+                                    .coachTarget("result")
                                     .clip(RoundedCornerShape(16.dp))
                                     .background(Color(0xD9141A29))
                                     .border(2.dp, Color.White.copy(alpha = 0.25f), RoundedCornerShape(16.dp))
@@ -5830,6 +6044,15 @@ private fun AddressLookupDialog(
                                         }
                                     }
 
+                                    if (activeVariant != null) {
+                                        HouseVariantChooser(
+                                            choices = variantChoices,
+                                            active = activeVariant,
+                                            lang = lang,
+                                            onChoose = { chosenVariantQueue = it.queue }
+                                        )
+                                    }
+
                                     if (matchedRecord.queue.isNotBlank()) {
                                         Row(
                                             modifier = Modifier.fillMaxWidth(),
@@ -5874,6 +6097,8 @@ private fun AddressLookupDialog(
                                     Box(
                                         modifier = Modifier
                                             .fillMaxWidth()
+                                            .coachTarget("apply")
+                                            .bringIntoViewRequester(applyBringer)
                                             .heightIn(min = ZtMinTouch)
                                             .clip(RoundedCornerShape(16.dp))
                                             .background(if (canApply) ZtColors.Accent else Color(0x66FF5E3A))
@@ -5885,6 +6110,8 @@ private fun AddressLookupDialog(
                                                     house = selectedHouse
                                                 )
                                                 val addressToSave = selectedAddressStr.ifBlank { matchedRecord.addressLabel }
+                                                // re-checks keep this variant (spec/ADDRESS_KEY.md section 6, rule 5)
+                                                HouseVariantChoices.put(lookupContext, selectedStreetId, selectedHouse, activeVariant)
                                                 if (matchedRecord.queue.isNotBlank()) {
                                                     onApply(matchedRecord.queue, null, addressToSave, query)
                                                     onShowAppBanner("\${AppStrings.queue(lang)} \${matchedRecord.queue}")
@@ -6009,7 +6236,51 @@ private fun AddressLookupDialog(
                     )
                 }
             }
+
+            if (tourActive) {
+                val step = OnboardingTour.step(
+                    TourInput(
+                        active = true,
+                        lookupOpen = true,
+                        resultShown = tourResultShown,
+                        page = TourPage.SETTINGS,
+                        hasAddress = false,
+                        reachedRename = false,
+                        renameDone = false
+                    )
+                )
+                if (step == TourStep.PICK) {
+                    // the tip sits outside the lit block; the next field to fill is ringed
+                    val block = listOf("settlement", "street", "house")
+                    val ringKey = when {
+                        currentStreet != null -> "house"
+                        selectedSettlementId.isNotBlank() -> "street"
+                        else -> "settlement"
+                    }
+                    CoachOverlay(
+                        targets = tourTargets,
+                        holes = listOf(block),
+                        tips = listOf(CoachTip(anchor = block, text = AppStrings.tourPick(lang), ring = ringKey, skip = true)),
+                        lang = lang,
+                        onSkip = onTourSkip
+                    )
+                } else if (step == TourStep.APPLY) {
+                    // outside the result card unless the card fills most of the screen; the button is ringed
+                    val screenPx = androidx.compose.ui.platform.LocalConfiguration.current.screenHeightDp *
+                        androidx.compose.ui.platform.LocalDensity.current.density
+                    val card = tourTargets.rects["result"]
+                    val anchor = if (card != null && card.height < screenPx * 0.55f) "result" else "apply"
+                    CoachOverlay(
+                        targets = tourTargets,
+                        holes = listOf(listOf("result")),
+                        tips = listOf(CoachTip(anchor = listOf(anchor), text = AppStrings.tourApply(lang), ring = "apply", skip = true)),
+                        lang = lang,
+                        onSkip = onTourSkip
+                    )
+                }
+            }
         }
+      }
     }
 }
 `
@@ -6023,6 +6294,8 @@ private fun AddressLookupDialog(
 import org.json.JSONArray
 import org.json.JSONObject
 import ua.blackout.prewarning.core.HouseKey
+import ua.blackout.prewarning.core.HouseVariant
+import ua.blackout.prewarning.core.HouseVariants
 import ua.blackout.prewarning.core.StreetKey
 import ua.blackout.prewarning.core.TextNorm
 import ua.blackout.prewarning.data.model.EmergencyOutageInfo
@@ -6084,21 +6357,63 @@ data class ZtoeStreetOption(
         get() = ZtoeAddressLookup.getHousesForStreet(id)
 }
 
-/** [emergencyOutage] is kept for source compatibility only; emergencies come from PowerOnClient and are always null here. */
+/**
+ * [emergencyOutage] is kept for source compatibility only; emergencies come from PowerOnClient and are always null here.
+ * [queue] / [statusText] are the default variant; [variants] holds every queue the site lists for the house
+ * (households / non-household, spec/ADDRESS_KEY.md section 6) in discovery order.
+ */
 data class ZtoeHouseLookupResult(
     val house: String,
     val queue: String,
     val statusText: String? = null,
     val emergencyOutage: EmergencyOutageInfo? = null,
-    val addressLabel: String = ""
-)
+    val addressLabel: String = "",
+    val variants: List<HouseVariant> = emptyList()
+) {
+    /** The variants in display order (households first); one entry for a record without stored variants. */
+    val choices: List<HouseVariant>
+        get() = HouseVariants.ordered(variants.ifEmpty { HouseVariants.add(emptyList(), queue, statusText, null) })
+
+    /** True when the site lists the house with more than one queue (or a queue and a status). */
+    val hasChoice: Boolean get() = choices.size > 1
+
+    /** This record with [variant] applied as its queue and status. */
+    fun withVariant(variant: HouseVariant): ZtoeHouseLookupResult =
+        copy(queue = variant.queue, statusText = if (variant.queue.isEmpty()) variant.statusText else null)
+
+    companion object {
+        /** One table row of the house; [consumer] is the raw 7th column («побутові споживачі» ...). */
+        fun row(house: String, queue: String, statusText: String?, consumer: String?): ZtoeHouseLookupResult =
+            ZtoeHouseLookupResult(
+                house = house,
+                queue = queue,
+                statusText = statusText,
+                variants = HouseVariants.add(emptyList(), queue, statusText, consumer)
+            )
+
+        /** Unites two records of one house: the variants of both, the default variant applied, the first display form. */
+        fun merge(a: ZtoeHouseLookupResult, b: ZtoeHouseLookupResult?): ZtoeHouseLookupResult {
+            val va = a.variants.ifEmpty { HouseVariants.add(emptyList(), a.queue, a.statusText, null) }
+            val vb = b?.let { it.variants.ifEmpty { HouseVariants.add(emptyList(), it.queue, it.statusText, null) } } ?: emptyList()
+            val all = HouseVariants.union(va, vb)
+            val first = HouseVariants.pick(all, null)
+            return a.copy(
+                queue = first?.queue ?: a.queue,
+                statusText = if (first == null) a.statusText else if (first.queue.isEmpty()) first.statusText else null,
+                addressLabel = a.addressLabel.ifEmpty { b?.addressLabel.orEmpty() },
+                variants = all
+            )
+        }
+    }
+}
 
 object ZtoeAddressLookup {
     const val DEFAULT_SITE_URL = "https://www.ztoe.com.ua/unhooking-search.php"
 
     /** Bumped to 2 when merged street ids were introduced; caches of other versions are discarded. */
     /** 3: drops street house lists that were cut to ztoe's first page of 10 records (per-street request without all=1). */
-    internal const val CACHE_VERSION = 3
+    /** 4: houses keep every queue variant (households / non-household), spec/ADDRESS_KEY.md section 6. */
+    internal const val CACHE_VERSION = 4
     private const val PREFS_NAME = "zt_address_index_cache_v1"
     private const val KEY_INDEX_JSON = "address_index_json_v1"
     private const val MAX_PERSISTED_HOUSE_STREETS = 50
@@ -6320,14 +6635,12 @@ object ZtoeAddressLookup {
             .map { it.house }
     }
 
-    /** First display form wins, except that a row with a queue replaces a row without one. */
+    /** First display form wins; the variants of all rows of the house are united (spec/ADDRESS_KEY.md section 6). */
     private fun putHouse(map: MutableMap<String, ZtoeHouseLookupResult>, h: ZtoeHouseLookupResult) {
         val key = HouseKey.of(h.house)
         if (key.isEmpty()) return
         val existing = map[key]
-        if (existing == null || (existing.queue.isEmpty() && h.queue.isNotEmpty())) {
-            map[key] = h
-        }
+        map[key] = if (existing == null) ZtoeHouseLookupResult.merge(h, null) else ZtoeHouseLookupResult.merge(existing, h)
     }
 
     internal fun unionHouses(a: List<ZtoeHouseLookupResult>, b: List<ZtoeHouseLookupResult>): List<ZtoeHouseLookupResult> {
@@ -6387,6 +6700,15 @@ object ZtoeAddressLookup {
         return field.split(HOUSE_SPLIT_REGEX)
             .map { it.trim() }
             .filter { it.isNotEmpty() && !it.equals("будинки", ignoreCase = true) }
+    }
+
+    /** The «Споживач» cell of a house row (7th column), or null for a table without it (spec/ADDRESS_KEY.md section 6). */
+    private fun consumerCell(cells: List<String>): String? {
+        for (i in cells.indices.reversed()) {
+            if (i < 4) break
+            if (cells[i].contains("споживач", ignoreCase = true)) return cells[i]
+        }
+        return null
     }
 
     /** The part of the page before the schedule section, without copying the string. */
@@ -6478,6 +6800,17 @@ object ZtoeAddressLookup {
                     put("house", h.house)
                     put("queue", h.queue)
                     if (!h.statusText.isNullOrBlank()) put("statusText", h.statusText)
+                    if (h.variants.isNotEmpty()) {
+                        val vs = JSONArray()
+                        for (v in h.variants) {
+                            vs.put(JSONObject().apply {
+                                put("queue", v.queue)
+                                if (!v.statusText.isNullOrBlank()) put("statusText", v.statusText)
+                                put("consumers", JSONArray(v.consumers))
+                            })
+                        }
+                        put("variants", vs)
+                    }
                 })
             }
         }
@@ -6577,8 +6910,15 @@ object ZtoeAddressLookup {
                     }
                     val house = o.str("house") ?: continue
                     val canonical = findStreetById(streetId)?.id ?: streetId
+                    val variants = ArrayList<HouseVariant>()
+                    o.optJSONArray("variants")?.let { vs ->
+                        for (j in 0 until vs.length()) {
+                            val v = vs.optJSONObject(j) ?: continue
+                            variants.add(HouseVariant(v.str("queue") ?: "", v.str("statusText"), v.strList("consumers")))
+                        }
+                    }
                     grouped.getOrPut(canonical) { mutableListOf() }.add(
-                        ZtoeHouseLookupResult(house = house, queue = o.str("queue") ?: "", statusText = o.str("statusText"))
+                        ZtoeHouseLookupResult(house = house, queue = o.str("queue") ?: "", statusText = o.str("statusText"), variants = variants)
                     )
                 }
                 for ((canonical, list) in grouped) {
@@ -6936,9 +7276,10 @@ object ZtoeAddressLookup {
                 continue
             }
 
+            val consumer = consumerCell(cells)
             val streetMap = houseMaps.getOrPut(streetId) { LinkedHashMap() }
             for (h in splitHouses(houseField)) {
-                putHouse(streetMap, ZtoeHouseLookupResult(house = h, queue = resolvedQueue, statusText = resolvedStatusText))
+                putHouse(streetMap, ZtoeHouseLookupResult.row(h, resolvedQueue, resolvedStatusText, consumer))
             }
         }
 
@@ -6986,15 +7327,16 @@ object ZtoeAddressLookup {
 
                 if (houses.isNotEmpty()) {
                     val candidateQueue = "\${NON_DIGIT_REGEX.replace(col4, "")}.\${NON_DIGIT_REGEX.replace(col5, "")}"
+                    val consumer = consumerCell(cells)
 
                     if (ZtoeParser.ALL_QUEUES.contains(candidateQueue)) {
                         for (h in houses) {
-                            results.add(ZtoeHouseLookupResult(house = h, queue = candidateQueue))
+                            results.add(ZtoeHouseLookupResult.row(h, candidateQueue, null, consumer))
                         }
                         continue
                     } else if (col4.length > 3) {
                         for (h in houses) {
-                            results.add(ZtoeHouseLookupResult(house = h, queue = "", statusText = col4))
+                            results.add(ZtoeHouseLookupResult.row(h, "", col4, consumer))
                         }
                         continue
                     }
@@ -7044,16 +7386,13 @@ object ZtoeAddressLookup {
     fun parseZtoeAddressLookupTableHtml(html: String, targetHouse: String): Pair<String?, String?>? {
         val target = HouseKey.of(targetHouse)
         if (target.isEmpty()) return null
-        val matching = parseZtoeAddressLookupTableHtml(html).filter { HouseKey.of(it.house) == target }
-        if (matching.isEmpty()) return null
-        val withQueue = matching.firstOrNull { it.queue.isNotEmpty() }
-        if (withQueue != null) {
-            return withQueue.queue to null
+        val map = LinkedHashMap<String, ZtoeHouseLookupResult>()
+        for (row in parseZtoeAddressLookupTableHtml(html)) {
+            if (HouseKey.of(row.house) == target) putHouse(map, row)
         }
-        val withStatus = matching.firstOrNull { !it.statusText.isNullOrBlank() }
-        if (withStatus != null) {
-            return null to withStatus.statusText
-        }
+        val house = map[target] ?: return null
+        if (house.queue.isNotEmpty()) return house.queue to null
+        if (!house.statusText.isNullOrBlank()) return null to house.statusText
         return null
     }
 
@@ -7357,7 +7696,8 @@ object ZtoeAddressLookup {
         settlementId: String,
         streetId: String,
         house: String,
-        siteUrl: String = DEFAULT_SITE_URL
+        siteUrl: String = DEFAULT_SITE_URL,
+        preferred: HouseVariant? = null
     ): ZtoeHouseLookupResult? {
         return checkAddressOnZtoeWebsite(
             query = SelectedAddressQuery(
@@ -7366,7 +7706,8 @@ object ZtoeAddressLookup {
                 streetId = streetId,
                 house = house
             ),
-            siteUrl = siteUrl
+            siteUrl = siteUrl,
+            preferred = preferred
         )
     }
 
@@ -7375,10 +7716,16 @@ object ZtoeAddressLookup {
      * site. The live row is authoritative (A-H1: upstream queue changes propagate); the cached row is
      * used only when the site is unreachable or does not list the house. Emergencies are not looked up
      * here: [OutageRepository] asks PowerOnClient. The result's \`emergencyOutage\` is always null.
+     *
+     * A house the site lists with several queues (households / non-household) keeps all of them in
+     * \`variants\`; the applied one is [preferred], the variant the user chose in the lookup (see
+     * \`HouseVariantChoices\`), while the house still has it for that consumer type, otherwise the default
+     * variant (spec/ADDRESS_KEY.md section 6, rule 5).
      */
     fun checkAddressOnZtoeWebsite(
         query: SelectedAddressQuery,
-        siteUrl: String = DEFAULT_SITE_URL
+        siteUrl: String = DEFAULT_SITE_URL,
+        preferred: HouseVariant? = null
     ): ZtoeHouseLookupResult? {
         val targetKey = HouseKey.of(query.house)
         if (targetKey.isEmpty()) return null
@@ -7406,7 +7753,8 @@ object ZtoeAddressLookup {
             }
         }
 
-        val base = resolved ?: return null
+        val found = resolved ?: return null
+        val base = HouseVariants.pick(found.choices, preferred?.queue, preferred?.consumers.orEmpty())?.let { found.withVariant(it) } ?: found
         val head = listOf(rem?.nameUk, settlement?.nameUk).filter { !it.isNullOrBlank() }.joinToString(", ")
         val streetPart = street?.nameUk?.takeIf { it.isNotBlank() }?.let { "$it, " } ?: ""
         val label = (if (head.isNotEmpty()) "$head,\\n" else "") + streetPart + "буд. " + query.house.trim()
@@ -7678,7 +8026,7 @@ fun AboutScreen(
         val resolved = when {
             !rawVersion.isNullOrBlank() && rawVersion.matches(semverRegex) -> rawVersion
             buildCfgVersion.matches(semverRegex) -> buildCfgVersion
-            else -> "1.4.0"
+            else -> "1.4.1"
         }
         "v$resolved"
     }
@@ -8131,6 +8479,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import ua.blackout.prewarning.core.SiteState
 import ua.blackout.prewarning.data.parser.ZtoeAddressLookup
+import ua.blackout.prewarning.data.repository.HouseVariantChoices
 import ua.blackout.prewarning.data.repository.OutageRepository
 import ua.blackout.prewarning.data.repository.OutageStateStore
 import ua.blackout.prewarning.data.repository.RefreshOutcome
@@ -8146,6 +8495,17 @@ import ua.blackout.prewarning.notification.ExactAlarmGate
 import ua.blackout.prewarning.notification.NotificationHelper
 import ua.blackout.prewarning.ui.AppStrings
 import ua.blackout.prewarning.ui.components.glassSurface
+import ua.blackout.prewarning.ui.components.CoachOverlay
+import ua.blackout.prewarning.ui.components.CoachTargets
+import ua.blackout.prewarning.ui.components.CoachTip
+import ua.blackout.prewarning.ui.components.LocalCoachTargets
+import ua.blackout.prewarning.ui.components.OnboardingStore
+import ua.blackout.prewarning.ui.components.OnboardingTour
+import ua.blackout.prewarning.ui.components.TourInput
+import ua.blackout.prewarning.ui.components.TourPage
+import ua.blackout.prewarning.ui.components.TourStep
+import ua.blackout.prewarning.ui.components.coachTarget
+import androidx.compose.runtime.CompositionLocalProvider
 import ua.blackout.prewarning.ui.components.PageGlide
 import ua.blackout.prewarning.ui.components.ambientBreath
 import ua.blackout.prewarning.ui.components.ambientDrift
@@ -8224,6 +8584,18 @@ fun BlackoutAppNavigation(
     var currentLanguage by remember { mutableStateOf(initialSettings.language) }
     var isRouletteOpen by remember { mutableStateOf(false) }
     var autoOpenQueueHelp by remember { mutableStateOf(false) }
+    // First-run tour (spec/ONBOARDING.md): started by the first-launch button, never shown again once finished
+    val onboarding = remember { OnboardingStore(appContext) }
+    val coachTargets = remember { CoachTargets() }
+    var tourActive by remember { mutableStateOf(false) }
+    var tourReachedRename by remember { mutableStateOf(false) }
+    var tourRenameDone by remember { mutableStateOf(false) }
+    fun endTour() {
+        onboarding.setDone(true)
+        tourActive = false
+        tourReachedRename = false
+        tourRenameDone = false
+    }
     var currentTime by remember { mutableStateOf(LocalTime.now(KYIV_ZONE)) }
 
     // An address counts as a selection even when it has no queue and no emergency right now
@@ -8325,13 +8697,16 @@ fun BlackoutAppNavigation(
                 ZtoeAddressLookup.initDiskCache(appContext)
                 val addrQuery = settingsRepo.getSettings().selectedAddressQuery
                 if (resolveAddress && addrQuery != null && addrQuery.streetId.isNotBlank() && addrQuery.house.isNotBlank()) {
+                    val saved = settingsRepo.getSettings()
                     val lookup = try {
+                        // the variant the user chose is kept when the site lists the house with several queues (households / non-household)
                         ZtoeAddressLookup.checkAddressOnZtoeWebsite(
                             remId = addrQuery.remId,
                             settlementId = addrQuery.settlementId,
                             streetId = addrQuery.streetId,
                             house = addrQuery.house,
-                            siteUrl = settingsRepo.getSettings().cityUrl
+                            siteUrl = saved.cityUrl,
+                            preferred = HouseVariantChoices.get(appContext, addrQuery.streetId, addrQuery.house)
                         )
                     } catch (_: Exception) {
                         null
@@ -8577,6 +8952,7 @@ fun BlackoutAppNavigation(
     val ambient = rememberAmbientSeconds()
     val reduceMotion = remember { reducedMotion(appContext) }
 
+    CompositionLocalProvider(LocalCoachTargets provides coachTargets) {
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -8734,6 +9110,11 @@ fun BlackoutAppNavigation(
                         },
                         onOpenQueueSelection = {
                             autoOpenQueueHelp = true
+                            if (!onboarding.isDone()) {
+                                tourActive = true
+                                tourReachedRename = false
+                                tourRenameDone = false
+                            }
                             coroutineScope.launch {
                                 pagerState.animateScrollToPage(1, animationSpec = PageGlide)
                             }
@@ -8768,6 +9149,9 @@ fun BlackoutAppNavigation(
                         lang = resolvedLang,
                         autoOpenQueueHelp = autoOpenQueueHelp,
                         onAutoOpenQueueHelpHandled = { autoOpenQueueHelp = false },
+                        tourActive = tourActive,
+                        onTourSkip = { endTour() },
+                        onRenameDialogClosed = { if (tourActive && tourReachedRename) tourRenameDone = true },
                         onAddAddress = { resolvedQueue, statusText, addressLabel, query ->
                             val ok = onStoreResult(subscriptionSync.addFromLookup(resolvedQueue, statusText, addressLabel, query))
                             // the user stays in Settings (owner request): the address is added in place
@@ -8972,6 +9356,7 @@ fun BlackoutAppNavigation(
                         val isSchedule = pagerState.currentPage == 0
                         Box(
                             modifier = Modifier
+                                .coachTarget("dock-home")
                                 .size(44.dp)
                                 .clip(CircleShape)
                                 .background(if (isSchedule) Color.White else Color.Transparent)
@@ -9012,6 +9397,7 @@ fun BlackoutAppNavigation(
                         val isAbout = pagerState.currentPage == 2
                         Box(
                             modifier = Modifier
+                                .coachTarget("dock-about")
                                 .size(44.dp)
                                 .clip(CircleShape)
                                 .background(if (isAbout) Color.White else Color.Transparent)
@@ -9031,6 +9417,65 @@ fun BlackoutAppNavigation(
                 }
             }
         }
+
+        // First-run tour on the main window: RENAME, ALERTS (Settings) and ABOUT (main screen); the lookup
+        // dialog draws PICK and APPLY in its own window
+        if (tourActive) {
+            val tourPage = when (pagerState.currentPage) {
+                0 -> TourPage.SCHEDULE
+                1 -> TourPage.SETTINGS
+                2 -> TourPage.ABOUT
+                else -> TourPage.OTHER
+            }
+            val step = OnboardingTour.step(
+                TourInput(
+                    active = true,
+                    lookupOpen = false,
+                    resultShown = false,
+                    page = tourPage,
+                    hasAddress = subscriptions.items.isNotEmpty(),
+                    reachedRename = tourReachedRename,
+                    renameDone = tourRenameDone
+                )
+            )
+            LaunchedEffect(step) { if (step == TourStep.RENAME) tourReachedRename = true }
+            LaunchedEffect(tourPage, tourReachedRename) {
+                if (OnboardingTour.finishedBy(tourPage, tourReachedRename)) endTour()
+            }
+            when (step) {
+                TourStep.RENAME -> CoachOverlay(
+                    targets = coachTargets,
+                    holes = listOf(listOf("rename")),
+                    tips = listOf(CoachTip(anchor = listOf("rename"), text = AppStrings.tourRename(resolvedLang), next = true, skip = true)),
+                    lang = resolvedLang,
+                    onSkip = { endTour() },
+                    onNext = { tourRenameDone = true }
+                )
+                TourStep.ALERTS -> {
+                    val switches = listOf("alert-planned", "alert-emergency")
+                    CoachOverlay(
+                        targets = coachTargets,
+                        holes = listOf(switches, listOf("dock-home")),
+                        tips = listOf(
+                            CoachTip(anchor = switches, text = AppStrings.tourAlerts(resolvedLang), skip = true),
+                            CoachTip(anchor = listOf("dock-home"), text = AppStrings.tourBack(resolvedLang))
+                        ),
+                        lang = resolvedLang,
+                        onSkip = { endTour() }
+                    )
+                }
+                TourStep.ABOUT -> CoachOverlay(
+                    targets = coachTargets,
+                    holes = listOf(listOf("dock-about")),
+                    tips = listOf(CoachTip(anchor = listOf("dock-about"), text = AppStrings.tourDonate(resolvedLang), done = true)),
+                    lang = resolvedLang,
+                    onSkip = { endTour() },
+                    onDone = { endTour() }
+                )
+                else -> Unit
+            }
+        }
+    }
     }
 }
 `
@@ -17596,6 +18041,501 @@ class SubscriptionSync(context: Context) {
     fun mirror() {
         settingsRepo.applyPrimaryMirror(Subscriptions.primaryMirror(repo.store(), repo.alertsMaster()))
     }
+}
+`
+  },
+  {
+    path: 'app/src/main/java/ua/blackout/prewarning/core/HouseVariants.kt',
+    language: 'kotlin',
+    description: 'A house listed in several ztoe rows: queue variants by consumer type (spec/ADDRESS_KEY.md section 6)',
+    content: `package ua.blackout.prewarning.core
+
+/**
+ * A house listed in several ztoe rows (households / non-household, sometimes two queues of one type).
+ * Specified in \`spec/ADDRESS_KEY.md\` section 6, golden cases in \`spec/vectors/house_variants.json\`,
+ * mirrored in \`src/core/houseVariants.ts\` and \`ios/Shared/Core/HouseVariants.swift\`.
+ */
+object ConsumerType {
+    const val HOUSEHOLD = "household"
+    const val BUSINESS = "business"
+
+    /** \`household\`, \`business\` or \`""\` when the text names no consumer type. A type code maps to itself. */
+    fun of(raw: String?): String {
+        if (raw.isNullOrBlank()) return ""
+        val s = TextNorm.decodeEntities(raw).trim().lowercase()
+        return when {
+            s == HOUSEHOLD || s == BUSINESS -> s
+            s.contains("непобут") || s.contains("юридич") -> BUSINESS
+            s.contains("побут") -> HOUSEHOLD
+            else -> ""
+        }
+    }
+}
+
+/** One queue (or one status without a queue) of a house, with the consumer types the site lists it for. */
+data class HouseVariant(
+    val queue: String,
+    val statusText: String? = null,
+    val consumers: List<String> = emptyList()
+)
+
+object HouseVariants {
+    /** Folds one table row into [variants]: same non-empty queue = same variant; all status rows = one variant. */
+    fun add(variants: List<HouseVariant>, queue: String, statusText: String?, consumerRaw: String?): List<HouseVariant> {
+        val type = ConsumerType.of(consumerRaw)
+        val q = queue.trim()
+        val idx = variants.indexOfFirst { if (q.isNotEmpty()) it.queue == q else it.queue.isEmpty() }
+        if (idx < 0) {
+            val status = if (q.isEmpty()) statusText?.takeIf { it.isNotBlank() } else null
+            return variants + HouseVariant(q, status, if (type.isEmpty()) emptyList() else listOf(type))
+        }
+        val existing = variants[idx]
+        val merged = existing.copy(
+            statusText = existing.statusText ?: if (q.isEmpty()) statusText?.takeIf { it.isNotBlank() } else null,
+            consumers = if (type.isEmpty() || type in existing.consumers) existing.consumers else existing.consumers + type
+        )
+        return variants.toMutableList().also { it[idx] = merged }
+    }
+
+    /** Unites two variant lists (the rows of [b] come after those of [a]). */
+    fun union(a: List<HouseVariant>, b: List<HouseVariant>): List<HouseVariant> {
+        var out = a
+        for (v in b) {
+            if (v.consumers.isEmpty()) {
+                out = add(out, v.queue, v.statusText, null)
+            } else {
+                for (c in v.consumers) out = add(out, v.queue, v.statusText, c)
+            }
+        }
+        return out
+    }
+
+    /** Households first, then a queue before no queue, otherwise discovery order. */
+    fun ordered(variants: List<HouseVariant>): List<HouseVariant> =
+        variants.sortedWith(
+            compareBy<HouseVariant> { if (ConsumerType.HOUSEHOLD in it.consumers) 0 else 1 }
+                .thenBy { if (it.queue.isNotEmpty()) 0 else 1 }
+        )
+
+    /**
+     * The variant to apply (spec/ADDRESS_KEY.md section 6, rule 5). [preferredQueue] null: the first. Otherwise the
+     * variant with that queue (\`""\` = the one without a queue) while it still lists one of [preferredConsumers] (or
+     * none were given); else the first variant that lists one of them; else the first.
+     */
+    fun pick(variants: List<HouseVariant>, preferredQueue: String?, preferredConsumers: List<String> = emptyList()): HouseVariant? {
+        val list = ordered(variants)
+        if (preferredQueue != null) {
+            val p = preferredQueue.trim()
+            val sharesType = { v: HouseVariant -> preferredConsumers.isEmpty() || v.consumers.any { it in preferredConsumers } }
+            list.firstOrNull { it.queue == p && sharesType(it) }?.let { return it }
+            if (preferredConsumers.isNotEmpty()) list.firstOrNull { v -> v.consumers.any { it in preferredConsumers } }?.let { return it }
+        }
+        return list.firstOrNull()
+    }
+}
+`
+  },
+  {
+    path: 'app/src/main/java/ua/blackout/prewarning/ui/components/CoachMarks.kt',
+    language: 'kotlin',
+    description: 'First-run tour spotlight overlay: dims the window except the lit controls, arrow and tip',
+    content: `package ua.blackout.prewarning.ui.components
+
+import androidx.compose.animation.core.FastOutSlowInEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ArrowDownward
+import androidx.compose.material.icons.filled.ArrowUpward
+import androidx.compose.material3.Icon
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.State
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.composed
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.geometry.RoundRect
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.PathFillType
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.boundsInRoot
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.layout.positionInRoot
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.dp
+import kotlin.math.roundToInt
+import ua.blackout.prewarning.ui.AppStrings
+import ua.blackout.prewarning.ui.theme.ZtColors
+import ua.blackout.prewarning.ui.theme.ZtMinTouch
+import ua.blackout.prewarning.ui.theme.ZtType
+
+/**
+ * Spotlight overlay of the first-run tour (spec/ONBOARDING.md), mirrored by src/components/CoachTour.tsx.
+ *
+ * Controls mark themselves with [coachTarget]; [CoachOverlay] dims its window except the lit targets, points
+ * an arrow with a tip at a target (outside it) and rings the control to use next. The dim layer has no
+ * pointer input, so every touch reaches the controls underneath; only the tips' buttons take touches.
+ * A dialog is its own window, so the address lookup dialog has its own [CoachTargets] and overlay.
+ */
+class CoachTargets {
+    /** Target bounds in the coordinates of their window's root. */
+    val rects = mutableStateMapOf<String, Rect>()
+
+    /** The smallest rectangle around all the [keys] that are on screen; null when none is. */
+    fun union(keys: List<String>): Rect? {
+        val found = keys.mapNotNull { rects[it] }
+        if (found.isEmpty()) return null
+        return Rect(found.minOf { it.left }, found.minOf { it.top }, found.maxOf { it.right }, found.maxOf { it.bottom })
+    }
+}
+
+val LocalCoachTargets = staticCompositionLocalOf<CoachTargets?> { null }
+
+/** Registers this element as tour target [key] (no effect outside a [LocalCoachTargets] provider). */
+fun Modifier.coachTarget(key: String): Modifier = composed {
+    val targets = LocalCoachTargets.current ?: return@composed this
+    DisposableEffect(targets, key) { onDispose { targets.rects.remove(key) } }
+    onGloballyPositioned { coordinates ->
+        val p = coordinates.positionInRoot()
+        targets.rects[key] = Rect(p, androidx.compose.ui.geometry.Size(coordinates.size.width.toFloat(), coordinates.size.height.toFloat()))
+    }
+}
+
+/** One tip: an arrow and a text next to [anchor] (the union of its keys), outside it. */
+data class CoachTip(
+    val anchor: List<String>,
+    val text: String,
+    /** The control to use next, ringed in the accent colour. */
+    val ring: String? = null,
+    /** «Далі» goes on to the next step. */
+    val next: Boolean = false,
+    /** «Зрозуміло» ends the tour. */
+    val done: Boolean = false,
+    /** «Пропустити підказки» (one tip per step). */
+    val skip: Boolean = false
+)
+
+private val HolePad = 6.dp
+private val HoleRadius = 14.dp
+private val ArrowSize = 32.dp
+private val TipWidth = 260.dp
+private val DimColor = Color(0xC705080F)
+
+/**
+ * Dims the window except the [holes] (each the union of its keys) and draws the [tips]. Draws nothing until
+ * a tip's anchor is on screen.
+ */
+@Composable
+fun CoachOverlay(
+    targets: CoachTargets,
+    holes: List<List<String>>,
+    tips: List<CoachTip>,
+    lang: String,
+    onSkip: () -> Unit,
+    onNext: () -> Unit = {},
+    onDone: () -> Unit = {},
+    modifier: Modifier = Modifier
+) {
+    // the overlay may sit inside a padded box: target rects are moved into its own coordinates
+    var origin by remember { mutableStateOf(Offset.Zero) }
+    val local = { r: Rect -> r.translate(-origin.x, -origin.y) }
+    val shown = tips.mapNotNull { tip -> targets.union(tip.anchor)?.let { tip to local(it) } }
+    BoxWithConstraints(
+        modifier = modifier
+            .fillMaxSize()
+            .onGloballyPositioned { origin = it.boundsInRoot().topLeft }
+    ) {
+        if (shown.isEmpty()) return@BoxWithConstraints
+        val density = LocalDensity.current
+        val pad = with(density) { HolePad.toPx() }
+        val radius = with(density) { HoleRadius.toPx() }
+        val holeRects = holes.mapNotNull { keys -> targets.union(keys)?.let(local) }
+        Canvas(modifier = Modifier.fillMaxSize()) {
+            val path = Path().apply {
+                fillType = PathFillType.EvenOdd
+                addRect(Rect(0f, 0f, size.width, size.height))
+                holeRects.forEach { addRoundRect(RoundRect(it.inflate(pad), CornerRadius(radius, radius))) }
+            }
+            drawPath(path, DimColor)
+        }
+        val width = with(density) { constraints.maxWidth.toDp() }
+        val height = with(density) { constraints.maxHeight.toDp() }
+        shown.forEach { (tip, anchor) ->
+            TipMark(
+                tip = tip,
+                anchor = anchor,
+                ring = tip.ring?.let { targets.rects[it] }?.let(local),
+                screenWidth = width,
+                screenHeight = height,
+                lang = lang,
+                onSkip = onSkip,
+                onNext = onNext,
+                onDone = onDone
+            )
+        }
+    }
+}
+
+@Composable
+private fun TipMark(
+    tip: CoachTip,
+    anchor: Rect,
+    ring: Rect?,
+    screenWidth: androidx.compose.ui.unit.Dp,
+    screenHeight: androidx.compose.ui.unit.Dp,
+    lang: String,
+    onSkip: () -> Unit,
+    onNext: () -> Unit,
+    onDone: () -> Unit
+) {
+    val density = LocalDensity.current
+    val context = LocalContext.current
+    val animate = remember { !reducedMotion(context) }
+    val a = with(density) { Rect(anchor.left.toDp().value, anchor.top.toDp().value, anchor.right.toDp().value, anchor.bottom.toDp().value) }
+    val cx = (a.left + a.right) / 2f
+    val above = (a.top + a.bottom) / 2f > screenHeight.value * 0.45f
+    val arrowTop = if (above) a.top - HolePad.value - 4f - ArrowSize.value else a.bottom + HolePad.value + 4f
+    val bubbleWidth = minOf(TipWidth.value, screenWidth.value - 24f)
+    val bubbleLeft = (cx - bubbleWidth / 2f).coerceIn(12f, maxOf(12f, screenWidth.value - 12f - bubbleWidth))
+    var bubbleHeight by remember { mutableIntStateOf(0) }
+    val nudge: State<Float>? = if (animate) {
+        rememberInfiniteTransition(label = "coach").animateFloat(
+            initialValue = 0f,
+            targetValue = 1f,
+            animationSpec = infiniteRepeatable(tween(700, easing = FastOutSlowInEasing), RepeatMode.Reverse),
+            label = "coachNudge"
+        )
+    } else {
+        null
+    }
+
+    if (ring != null) {
+        val r = with(density) { Rect(ring.left.toDp().value, ring.top.toDp().value, ring.right.toDp().value, ring.bottom.toDp().value) }
+        Box(
+            modifier = Modifier
+                .offset((r.left - 3f).dp, (r.top - 3f).dp)
+                .size((r.width + 6f).dp, (r.height + 6f).dp)
+                .border(2.dp, ZtColors.Accent, RoundedCornerShape(16.dp))
+        )
+    }
+    Icon(
+        imageVector = if (above) Icons.Default.ArrowDownward else Icons.Default.ArrowUpward,
+        contentDescription = null,
+        tint = ZtColors.Accent,
+        modifier = Modifier
+            .offset((cx - ArrowSize.value / 2f).dp, arrowTop.dp)
+            .size(ArrowSize)
+            .graphicsLayer { translationY = (nudge?.value ?: 0f) * 8.dp.toPx() * if (above) 1f else -1f }
+    )
+    Column(
+        modifier = Modifier
+            .offset {
+                val top = if (above) arrowTop.dp.toPx() - 2.dp.toPx() - bubbleHeight else (arrowTop + ArrowSize.value + 2f).dp.toPx()
+                IntOffset(bubbleLeft.dp.roundToPx(), top.roundToInt())
+            }
+            .width(bubbleWidth.dp)
+            .onSizeChanged { bubbleHeight = it.height }
+            .background(ZtColors.CardSolid, RoundedCornerShape(16.dp))
+            .border(1.dp, Color(0x33FFFFFF), RoundedCornerShape(16.dp))
+            .padding(horizontal = 16.dp, vertical = 12.dp)
+            .semantics { liveRegion = LiveRegionMode.Polite },
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        Text(text = tip.text, style = ZtType.body.copy(fontWeight = FontWeight.Bold), color = Color.White, textAlign = TextAlign.Center)
+        if (tip.next || tip.done) {
+            Box(
+                modifier = Modifier
+                    .heightIn(min = 44.dp)
+                    .background(ZtColors.Accent, RoundedCornerShape(12.dp))
+                    .clickable(role = Role.Button) { if (tip.done) onDone() else onNext() }
+                    .padding(horizontal = 20.dp, vertical = 10.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = if (tip.done) AppStrings.tourGotIt(lang) else AppStrings.tourNext(lang),
+                    style = ZtType.label.copy(fontWeight = FontWeight.ExtraBold),
+                    color = Color.White
+                )
+            }
+        }
+        if (tip.skip) {
+            Box(
+                modifier = Modifier
+                    .heightIn(min = ZtMinTouch)
+                    .clickable(role = Role.Button, onClick = onSkip)
+                    .padding(horizontal = 12.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = AppStrings.tourSkip(lang),
+                    style = ZtType.caption.copy(textDecoration = TextDecoration.Underline, fontWeight = FontWeight.SemiBold),
+                    color = ZtColors.TextSecondary
+                )
+            }
+        }
+    }
+}
+`
+  },
+  {
+    path: 'app/src/main/java/ua/blackout/prewarning/ui/components/OnboardingTour.kt',
+    language: 'kotlin',
+    description: 'First-run tour steps (PICK, APPLY, RENAME, ALERTS, ABOUT) and the "done" flag',
+    content: `package ua.blackout.prewarning.ui.components
+
+import android.content.Context
+
+/**
+ * First-run tour (spec/ONBOARDING.md); mirrored by src/services/onboarding.ts, cases in OnboardingTourTest.
+ *
+ * The tour starts when a new user taps the first-launch «Виберіть чергу» button and walks them through:
+ *  PICK   - the address picker: settlement, street and house are lit, the rest is dimmed;
+ *  APPLY  - the result card: the «Обрати чергу» button is ringed;
+ *  RENAME - Settings with the new address: an arrow at its rename button («Далі» or the rename dialog goes on);
+ *  ALERTS - its planned and emergency alert switches, and an arrow at the dock's home button;
+ *  ABOUT  - the main screen: an arrow at the dock's About button, «Або допоможіть волонтерам...».
+ * It ends on «Зрозуміло», on «Пропустити підказки» or when About is opened, and is never shown again.
+ */
+enum class TourStep { NONE, PICK, APPLY, RENAME, ALERTS, ABOUT }
+
+enum class TourPage { SCHEDULE, SETTINGS, ABOUT, OTHER }
+
+data class TourInput(
+    /** The tour was started (first-launch button) and not finished or skipped. */
+    val active: Boolean,
+    /** The address lookup dialog is open. */
+    val lookupOpen: Boolean,
+    /** The lookup shows a result card (a house, or a settlement / street without lower levels). */
+    val resultShown: Boolean,
+    val page: TourPage,
+    /** At least one address or queue is saved. */
+    val hasAddress: Boolean,
+    /** The RENAME step was shown, so the main screen goes on to ABOUT. */
+    val reachedRename: Boolean,
+    /** «Далі» was tapped on RENAME, or the rename dialog was closed: Settings goes on to ALERTS. */
+    val renameDone: Boolean,
+    /** Another dialog is on top: the tour waits (on Android a dialog is its own window above the overlay). */
+    val covered: Boolean = false
+)
+
+object OnboardingTour {
+    fun step(i: TourInput): TourStep = when {
+        !i.active || i.covered -> TourStep.NONE
+        i.lookupOpen -> if (i.resultShown) TourStep.APPLY else TourStep.PICK
+        !i.hasAddress -> TourStep.NONE
+        i.page == TourPage.SETTINGS -> if (i.renameDone) TourStep.ALERTS else TourStep.RENAME
+        i.page == TourPage.SCHEDULE && i.reachedRename -> TourStep.ABOUT
+        else -> TourStep.NONE
+    }
+
+    /** Opening About after the RENAME step finishes the tour (the donations are there). */
+    fun finishedBy(page: TourPage, reachedRename: Boolean): Boolean = page == TourPage.ABOUT && reachedRename
+}
+
+/** "The tour was finished or skipped": never shown again (a reinstall shows it again). */
+class OnboardingStore(context: Context) {
+    private val prefs = context.applicationContext.getSharedPreferences("onboarding", Context.MODE_PRIVATE)
+
+    fun isDone(): Boolean = prefs.getBoolean(KEY_DONE, false)
+
+    fun setDone(done: Boolean) {
+        prefs.edit().putBoolean(KEY_DONE, done).apply()
+    }
+
+    private companion object {
+        const val KEY_DONE = "done"
+    }
+}
+`
+  },
+  {
+    path: 'app/src/main/java/ua/blackout/prewarning/data/repository/HouseVariantChoices.kt',
+    language: 'kotlin',
+    description: 'The queue variant the user applied for a house listed more than once, kept by re-checks',
+    content: `package ua.blackout.prewarning.data.repository
+
+import android.content.Context
+import ua.blackout.prewarning.core.HouseKey
+import ua.blackout.prewarning.core.HouseVariant
+
+/**
+ * The queue variant the user applied from the address lookup for a house the site lists more than once
+ * (spec/ADDRESS_KEY.md section 6, rule 5). Re-checks of the address prefer it; without a stored choice the
+ * default (households first) applies, so addresses saved before 1.4.1 move to the households' queue.
+ * Keyed by street id and [HouseKey]; mirrored by src/services/houseVariantChoices.ts and
+ * ios/Shared/Data/HouseVariantChoices.swift.
+ */
+object HouseVariantChoices {
+    private const val PREFS = "house_variant_choice"
+
+    internal fun key(streetId: String, house: String) = "$streetId|\${HouseKey.of(house)}"
+
+    /** Stored as \`queue\` TAB \`consumer,consumer\`. */
+    internal fun encode(v: HouseVariant) = "\${v.queue}\\t\${v.consumers.joinToString(",")}"
+
+    internal fun decode(raw: String?): HouseVariant? {
+        if (raw == null) return null
+        val tab = raw.indexOf('\\t')
+        if (tab < 0) return null
+        val consumers = raw.substring(tab + 1).split(',').filter { it.isNotBlank() }
+        return HouseVariant(queue = raw.substring(0, tab), consumers = consumers)
+    }
+
+    fun get(context: Context, streetId: String, house: String): HouseVariant? {
+        if (streetId.isBlank() || HouseKey.of(house).isEmpty()) return null
+        return decode(prefs(context).getString(key(streetId, house), null))
+    }
+
+    /** [variant] null forgets the choice (the house has a single queue). */
+    fun put(context: Context, streetId: String, house: String, variant: HouseVariant?) {
+        if (streetId.isBlank() || HouseKey.of(house).isEmpty()) return
+        val edit = prefs(context).edit()
+        if (variant == null) edit.remove(key(streetId, house)) else edit.putString(key(streetId, house), encode(variant))
+        edit.apply()
+    }
+
+    private fun prefs(context: Context) = context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 }
 `
   }

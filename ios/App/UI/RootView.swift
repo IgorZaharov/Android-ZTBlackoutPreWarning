@@ -9,6 +9,8 @@ struct RootView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var pagePosition: CGFloat = 0
     @State private var paletteMinute = KyivZone.minuteOfDay()
+    /// Tour targets of the main window (spec/ONBOARDING.md); the address lookup collects its own.
+    @State private var coachRects: [String: CGRect] = [:]
 
     private var page: Int { model.page ?? 0 }
 
@@ -84,6 +86,13 @@ struct RootView: View {
             .padding(.bottom, 16)
             .opacity(unselected ? 0.15 : 1)
         }
+        .onPreferenceChange(CoachRectsKey.self) { coachRects = $0 }
+        // First-run tour on the main window: RENAME, ALERTS (Settings) and ABOUT (main screen)
+        .overlay { tourOverlay }
+        .onChange(of: tourStep) { _, step in if step == .rename { model.tourReachedRename = true } }
+        .onChange(of: page) { _, _ in
+            if model.tourActive && OnboardingTour.finishedBy(tourPage, reachedRename: model.tourReachedRename) { model.endTour() }
+        }
         .preferredColorScheme(.dark)
         .task { await model.prefetchAddressIndex() }
         // refresh both sources when the queue, site or address changes (and once at launch)
@@ -123,6 +132,55 @@ struct RootView: View {
         .onOpenURL { url in
             let item = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems?.first { $0.name == "item" }?.value
             model.openFromNotification(item)
+        }
+    }
+
+    private var tourPage: TourPage { page == 0 ? .schedule : page == 1 ? .settings : .about }
+
+    private var tourStep: TourStep {
+        OnboardingTour.step(TourInput(
+            active: model.tourActive, lookupOpen: false, resultShown: false, page: tourPage,
+            hasAddress: !model.subscriptions.items.isEmpty,
+            reachedRename: model.tourReachedRename, renameDone: model.tourRenameDone
+        ))
+    }
+
+    @ViewBuilder
+    private var tourOverlay: some View {
+        let lang = model.lang
+        switch tourStep {
+        case .rename:
+            CoachOverlay(
+                rects: coachRects,
+                holes: [["rename"]],
+                tips: [CoachTip(anchor: ["rename"], text: AppStrings.tourRename(lang), next: true, skip: true)],
+                lang: lang,
+                onSkip: { model.endTour() },
+                onNext: { model.tourRenameDone = true }
+            )
+        case .alerts:
+            let switches = ["alert-planned", "alert-emergency"]
+            CoachOverlay(
+                rects: coachRects,
+                holes: [switches, ["dock-home"]],
+                tips: [
+                    CoachTip(anchor: switches, text: AppStrings.tourAlerts(lang), skip: true),
+                    CoachTip(anchor: ["dock-home"], text: AppStrings.tourBack(lang))
+                ],
+                lang: lang,
+                onSkip: { model.endTour() }
+            )
+        case .about:
+            CoachOverlay(
+                rects: coachRects,
+                holes: [["dock-about"]],
+                tips: [CoachTip(anchor: ["dock-about"], text: AppStrings.tourDonate(lang), done: true)],
+                lang: lang,
+                onSkip: { model.endTour() },
+                onDone: { model.endTour() }
+            )
+        default:
+            EmptyView()
         }
     }
 
@@ -198,6 +256,7 @@ private struct Dock: View {
                             .contentShape(Circle())
                     }
                     .buttonStyle(ZtPressStyle())
+                    .coachTarget(i == 0 ? "dock-home" : i == 2 ? "dock-about" : "dock-settings")
                     .accessibilityLabel(Text(verbatim: items[i].label))
                     .accessibilityAddTraits(selected ? [.isSelected] : [])
                 }

@@ -247,6 +247,37 @@ class SpecVectorsTest {
     }
 
     // ---------------------------------------------------------------------------------------------
+    // house_variants.json
+    // ---------------------------------------------------------------------------------------------
+
+    @Test
+    fun houseVariantVectors() {
+        val v = load("house_variants.json")
+        for (pair in v.getJSONArray("consumerType")) {
+            val (raw, expect) = (pair as JSONArray).strings()
+            assertEquals("consumerType '$raw'", expect, ConsumerType.of(raw))
+        }
+        for (c in v.getJSONArray("merge").objects()) {
+            val name = c.getString("name")
+            var variants = emptyList<HouseVariant>()
+            for (r in c.getJSONArray("rows").objects()) {
+                variants = HouseVariants.add(variants, r.getString("queue"), r.optStr("status"), r.getString("consumer"))
+            }
+            val expect = c.getJSONArray("expect").objects().map {
+                HouseVariant(it.getString("queue"), it.optStr("status"), it.getJSONArray("consumers").strings())
+            }
+            assertEquals("$name: ordered variants", expect, HouseVariants.ordered(variants))
+            for (p in c.getJSONArray("picks").objects()) {
+                val preferred = p.optStr("preferred")
+                val consumers = p.optJSONArray("consumers")?.strings() ?: emptyList()
+                val picked = HouseVariants.pick(variants, preferred, consumers)
+                assertEquals("$name: pick '$preferred' queue", p.getString("queue"), picked?.queue)
+                assertEquals("$name: pick '$preferred' status", p.optStr("status"), picked?.statusText)
+            }
+        }
+    }
+
+    // ---------------------------------------------------------------------------------------------
     // poweron_api.json
     // ---------------------------------------------------------------------------------------------
 

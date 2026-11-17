@@ -30,6 +30,18 @@ object AppStrings {
     fun blackoutHoursForDayHeader(lang: String) = if (lang == "uk") "Години відключень на сьогодні:" else "Blackout hours for today:"
     fun blackoutHoursForTomorrowHeader(lang: String) = if (lang == "uk") "Години відключень на завтра:" else "Blackout hours for tomorrow:"
     fun selectQueueAction(lang: String) = if (lang == "uk") "Виберіть чергу" else "Select queue"
+    /** Tip above the first-launch button, with an animated arrow pointing at it (owner, 2026-11-17). */
+    fun firstStartTip(lang: String) = if (lang == "uk") "Спробуйте вибрати будь-яку адресу або чергу" else "Try selecting any address or queue"
+    // First-run tour (spec/ONBOARDING.md, owner 2026-11-17)
+    fun tourPick(lang: String) = if (lang == "uk") "Тепер виберіть населений пункт, вулицю та будинок" else "Now choose your settlement, street and house"
+    fun tourApply(lang: String) = if (lang == "uk") "Натисніть, щоб обрати чергу" else "Tap to choose the queue"
+    fun tourRename(lang: String) = if (lang == "uk") "Перейменуйте адресу для зручності: «Дім», «Робота»" else "Rename the address for convenience: “Home”, “Work”"
+    fun tourAlerts(lang: String) = if (lang == "uk") "Оберіть, про які відключення сповіщати для цієї адреси: планові чи аварійні" else "Choose which outages to be notified about for this address: planned or emergency"
+    fun tourNext(lang: String) = if (lang == "uk") "Далі" else "Next"
+    fun tourBack(lang: String) = if (lang == "uk") "Поверніться на головний екран" else "Go back to the main screen"
+    fun tourDonate(lang: String) = if (lang == "uk") "Або допоможіть волонтерам, якщо хочете задонатити" else "Or help volunteers if you want to donate"
+    fun tourSkip(lang: String) = if (lang == "uk") "Пропустити підказки" else "Skip tips"
+    fun tourGotIt(lang: String) = if (lang == "uk") "Зрозуміло" else "Got it"
     fun emergencyOutageTitle(lang: String) = if (lang == "uk") "Аварійне відключення!" else "Emergency outage!"
     fun emergencyStartLabel(lang: String) = if (lang == "uk") "Початок:" else "Start:"
     fun emergencyRestoreLabel(lang: String) = if (lang == "uk") "Орієнтовне відновлення:" else "Estimated restoration:"
@@ -307,6 +319,12 @@ object AppStrings {
     fun addrCheckFailed(lang: String) = if (lang == "uk") "Не вдалося перевірити адресу на сайті. Показано збережені дані." else "Could not check the address on the site. Showing saved data."
     fun addrConfirm(lang: String) = if (lang == "uk") "Підтвердити вибір" else "Confirm selection"
     fun addrSaved(lang: String) = if (lang == "uk") "Адресу збережено" else "Address saved"
+    // A house the site lists with several queues (households / non-household), spec/ADDRESS_KEY.md section 6
+    fun addrVariantsHint(lang: String) = if (lang == "uk") "На сайті ztoe цей будинок має кілька черг. Оберіть свою:" else "The ztoe site lists this building with several queues. Choose yours:"
+    fun consumerHousehold(lang: String) = if (lang == "uk") "Побутові споживачі" else "Households"
+    fun consumerBusiness(lang: String) = if (lang == "uk") "Непобутові (юридичні) споживачі" else "Non-household (businesses)"
+    fun consumerUnknown(lang: String) = if (lang == "uk") "Тип споживача не вказано" else "Consumer type not given"
+    fun variantNoQueue(lang: String) = if (lang == "uk") "Не вимикається" else "Not disconnected"
 
     // Settings cards
     fun noQueueNotDisconnected(lang: String) = if (lang == "uk") "Черга відсутня (не вимикається)" else "No queue (not disconnected)"

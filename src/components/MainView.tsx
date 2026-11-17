@@ -15,7 +15,8 @@ import {
   Star,
   WifiOff,
   Wrench,
-  Zap
+  Zap,
+  ArrowDown,
 } from 'lucide-react';
 import { Language, BlackoutSlot, UserSettings } from '../types';
 import { siteNoticeA11y, siteNoticeTitle, translations } from '../services/i18n';
@@ -307,6 +308,11 @@ export const MainView: React.FC<MainViewProps> = ({
           data-testid="first-start-select-queue-overlay"
           className="pointer-events-auto fixed inset-0 z-50 flex flex-col items-center justify-center gap-6 px-6"
         >
+          {/* Tip with an arrow nudging down at the button (owner, 2026-11-17) */}
+          <div data-testid="first-start-tip" className="-mb-3 flex max-w-[300px] flex-col items-center gap-1.5 text-center">
+            <span className="text-base font-bold leading-6 text-white">{t.firstStartTip}</span>
+            <ArrowDown className="zt-nudge h-8 w-8 text-[#FF5E3A]" strokeWidth={3} aria-hidden="true" />
+          </div>
           <button
             type="button"
             data-testid="unselected-queue-header-btn"

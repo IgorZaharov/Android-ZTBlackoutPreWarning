@@ -20,6 +20,7 @@ import {
 } from 'lucide-react';
 import { UserSettings, NotificationRecord, Language } from './types';
 import { checkAddressOnZtoeWebsite, prefetchAddressIndexInBackground } from './services/ztoeAddressLookup';
+import { getHouseVariantChoice } from './services/houseVariantChoices';
 import { getSubscriptionSync } from './services/subscriptionSync';
 import { displayLabel, viewItem, widgetItem, widgetLabel, type Subscription } from './core/subscriptions';
 import {
@@ -126,7 +127,11 @@ export default function App() {
 
       // A house that "is not disconnected" can get a queue later: re-check the address when no queue is stored
       if (currentSettings.selectedAddressQuery && (!currentSettings.queue || currentSettings.queue.trim() === '')) {
-        const latest = await checkAddressOnZtoeWebsite(currentSettings.selectedAddressQuery, currentSettings.url);
+        const latest = await checkAddressOnZtoeWebsite(
+          currentSettings.selectedAddressQuery,
+          currentSettings.url,
+          getHouseVariantChoice(currentSettings.selectedAddressQuery.streetId, currentSettings.selectedAddressQuery.house)
+        );
         if (latest && ((latest.queue || '') !== currentSettings.queue || latest.statusText !== currentSettings.customQueueStatusText)) {
           // into the primary subscription, which is mirrored back into the single-address fields
           const synced = getSubscriptionSync().assignPrimaryQueue(

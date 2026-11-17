@@ -92,17 +92,61 @@ public struct ZtoeStreetOption: Equatable, Hashable, Sendable {
 }
 
 /// The retired 1.3.x `emergencyOutage` field is not ported: emergencies come from PowerOn.
+/// `queue` / `statusText` are the default variant; `variants` holds every queue the site lists for the
+/// house (households / non-household, spec/ADDRESS_KEY.md section 6) in discovery order.
 public struct ZtoeHouseLookupResult: Equatable, Hashable, Sendable {
     public var house: String
     public var queue: String
     public var statusText: String?
     public var addressLabel: String
+    public var variants: [HouseVariant]
 
-    public init(house: String, queue: String, statusText: String? = nil, addressLabel: String = "") {
+    public init(house: String, queue: String, statusText: String? = nil, addressLabel: String = "", variants: [HouseVariant] = []) {
         self.house = house
         self.queue = queue
         self.statusText = statusText
         self.addressLabel = addressLabel
+        self.variants = variants
+    }
+
+    /// The variants in display order (households first); one entry for a record without stored variants.
+    public var choices: [HouseVariant] {
+        HouseVariants.ordered(variants.isEmpty ? HouseVariants.add([], queue: queue, statusText: statusText, consumerRaw: nil) : variants)
+    }
+
+    /// True when the site lists the house with more than one queue (or a queue and a status).
+    public var hasChoice: Bool { choices.count > 1 }
+
+    /// This record with `variant` applied as its queue and status.
+    public func withVariant(_ variant: HouseVariant) -> ZtoeHouseLookupResult {
+        var out = self
+        out.queue = variant.queue
+        out.statusText = variant.queue.isEmpty ? variant.statusText : nil
+        return out
+    }
+
+    /// One table row of the house; `consumer` is the raw 7th column («побутові споживачі» ...).
+    public static func row(_ house: String, queue: String, statusText: String?, consumer: String?) -> ZtoeHouseLookupResult {
+        ZtoeHouseLookupResult(
+            house: house, queue: queue, statusText: statusText,
+            variants: HouseVariants.add([], queue: queue, statusText: statusText, consumerRaw: consumer)
+        )
+    }
+
+    /// Unites two records of one house: the variants of both, the default variant applied, the first display form.
+    public static func merge(_ a: ZtoeHouseLookupResult, _ b: ZtoeHouseLookupResult?) -> ZtoeHouseLookupResult {
+        let va = a.variants.isEmpty ? HouseVariants.add([], queue: a.queue, statusText: a.statusText, consumerRaw: nil) : a.variants
+        var vb: [HouseVariant] = []
+        if let b { vb = b.variants.isEmpty ? HouseVariants.add([], queue: b.queue, statusText: b.statusText, consumerRaw: nil) : b.variants }
+        let all = HouseVariants.union(va, vb)
+        var out = a
+        if let first = HouseVariants.pick(all, preferredQueue: nil) {
+            out.queue = first.queue
+            out.statusText = first.queue.isEmpty ? first.statusText : nil
+        }
+        if out.addressLabel.isEmpty, let b { out.addressLabel = b.addressLabel }
+        out.variants = all
+        return out
     }
 }
 
@@ -111,7 +155,8 @@ public enum ZtoeAddressLookup {
 
     /// Bumped to 2 when merged street ids were introduced; caches of other versions are discarded.
     /// 3: drops street house lists that were cut to ztoe's first page of 10 records (per-street request without all=1).
-    static let CACHE_VERSION = 3
+    /// 4: houses keep every queue variant (households / non-household), spec/ADDRESS_KEY.md section 6.
+    static let CACHE_VERSION = 4
     /// One JSON file in the App Group container (Android: SharedPreferences `zt_address_index_cache_v1`).
     static let CACHE_FILE_NAME = "zt_address_index_cache_v1.json"
     private static let MAX_PERSISTED_HOUSE_STREETS = 50
@@ -380,6 +425,16 @@ public enum ZtoeAddressLookup {
     // House helpers
     // ---------------------------------------------------------------------------------------------
 
+    /// The «Споживач» cell of a house row (7th column), or nil for a table without it.
+    private static func consumerCell(_ cells: [String]) -> String? {
+        var i = cells.count - 1
+        while i >= 4 {
+            if cells[i].lowercased().contains("споживач") { return cells[i] }
+            i -= 1
+        }
+        return nil
+    }
+
     /// Kotlin `LinkedHashMap<HouseKey, house>` filled through `putHouse`.
     private struct HouseMap {
         private var order: [String] = []
@@ -388,15 +443,15 @@ public enum ZtoeAddressLookup {
         var isEmpty: Bool { order.isEmpty }
         var values: [ZtoeHouseLookupResult] { order.compactMap { byKey[$0] } }
 
-        /// First display form wins, except that a row with a queue replaces a row without one.
+        /// First display form wins; the variants of all rows of the house are united (spec/ADDRESS_KEY.md section 6).
         mutating func put(_ h: ZtoeHouseLookupResult) {
             let key = HouseKey.of(h.house)
             if key.isEmpty { return }
             if let existing = byKey[key] {
-                if existing.queue.isEmpty && !h.queue.isEmpty { byKey[key] = h }
+                byKey[key] = ZtoeHouseLookupResult.merge(existing, h)
             } else {
                 order.append(key)
-                byKey[key] = h
+                byKey[key] = ZtoeHouseLookupResult.merge(h, nil)
             }
         }
     }
@@ -654,6 +709,13 @@ public enum ZtoeAddressLookup {
                 for h in list {
                     var o: [String: Any] = ["streetId": streetId, "house": h.house, "queue": h.queue]
                     if let status = h.statusText, !status.ktIsBlank { o["statusText"] = status }
+                    if !h.variants.isEmpty {
+                        o["variants"] = h.variants.map { v -> [String: Any] in
+                            var vo: [String: Any] = ["queue": v.queue, "consumers": v.consumers]
+                            if let st = v.statusText, !st.ktIsBlank { vo["statusText"] = st }
+                            return vo
+                        }
+                    }
                     houses.append(o)
                 }
             }
@@ -777,8 +839,15 @@ public enum ZtoeAddressLookup {
                     guard let house = jStr(o, "house") else { continue }
                     let canonical = findStreetById(streetId)?.id ?? streetId
                     if grouped[canonical] == nil { order.append(canonical) }
+                    var variants: [HouseVariant] = []
+                    if let vs = o["variants"] as? [Any] {
+                        for item in vs {
+                            guard let vo = item as? [String: Any] else { continue }
+                            variants.append(HouseVariant(queue: jStr(vo, "queue") ?? "", statusText: jStr(vo, "statusText"), consumers: jStrList(vo, "consumers")))
+                        }
+                    }
                     grouped[canonical, default: []].append(ZtoeHouseLookupResult(
-                        house: house, queue: jStr(o, "queue") ?? "", statusText: jStr(o, "statusText")
+                        house: house, queue: jStr(o, "queue") ?? "", statusText: jStr(o, "statusText"), variants: variants
                     ))
                 }
                 for canonical in order {
@@ -1151,9 +1220,10 @@ public enum ZtoeAddressLookup {
                 continue
             }
 
+            let consumer = consumerCell(cells)
             for h in splitHouses(houseField) {
                 houseMaps[streetId, default: HouseMap()].put(
-                    ZtoeHouseLookupResult(house: h, queue: resolvedQueue, statusText: resolvedStatusText)
+                    ZtoeHouseLookupResult.row(h, queue: resolvedQueue, statusText: resolvedStatusText, consumer: consumer)
                 )
             }
         }
@@ -1205,15 +1275,16 @@ public enum ZtoeAddressLookup {
 
                 if !houses.isEmpty {
                     let candidateQueue = "\(digitsOnly(col4)).\(digitsOnly(col5))"
+                    let consumer = consumerCell(cells)
 
                     if ALL_QUEUES.contains(candidateQueue) {
                         for h in houses {
-                            results.append(ZtoeHouseLookupResult(house: h, queue: candidateQueue))
+                            results.append(ZtoeHouseLookupResult.row(h, queue: candidateQueue, statusText: nil, consumer: consumer))
                         }
                         continue
                     } else if col4.ktLength > 3 {
                         for h in houses {
-                            results.append(ZtoeHouseLookupResult(house: h, queue: "", statusText: col4))
+                            results.append(ZtoeHouseLookupResult.row(h, queue: "", statusText: col4, consumer: consumer))
                         }
                         continue
                     }
@@ -1263,14 +1334,11 @@ public enum ZtoeAddressLookup {
     public static func parseZtoeAddressLookupTableHtml(_ html: String, targetHouse: String) -> (queue: String?, statusText: String?)? {
         let target = HouseKey.of(targetHouse)
         if target.isEmpty { return nil }
-        let matching = parseZtoeAddressLookupTableHtml(html).filter { HouseKey.of($0.house) == target }
-        if matching.isEmpty { return nil }
-        if let withQueue = matching.first(where: { !$0.queue.isEmpty }) {
-            return (queue: withQueue.queue, statusText: nil)
-        }
-        if let withStatus = matching.first(where: { !isBlank($0.statusText) }) {
-            return (queue: nil, statusText: withStatus.statusText)
-        }
+        var map = HouseMap()
+        for row in parseZtoeAddressLookupTableHtml(html) where HouseKey.of(row.house) == target { map.put(row) }
+        guard let house = map.values.first else { return nil }
+        if !house.queue.isEmpty { return (queue: house.queue, statusText: nil) }
+        if !isBlank(house.statusText) { return (queue: nil, statusText: house.statusText) }
         return nil
     }
 
@@ -1525,12 +1593,17 @@ public enum ZtoeAddressLookup {
     /// site. The live row is authoritative (A-H1: upstream queue changes propagate); the cached row is
     /// used only when the site is unreachable or does not list the house. Emergencies are not looked up
     /// here: OutageRepository asks PowerOnClient.
+    ///
+    /// A house the site lists with several queues (households / non-household) keeps all of them in
+    /// `variants`; the applied one is `preferred`, the variant the user chose in the lookup (`HouseVariantChoices`),
+    /// while the house still has it for that consumer type, otherwise the default variant (spec/ADDRESS_KEY.md 6.5).
     public static func checkAddressOnZtoeWebsite(
         remId: String,
         settlementId: String,
         streetId: String,
         house: String,
-        siteUrl: String = DEFAULT_SITE_URL
+        siteUrl: String = DEFAULT_SITE_URL,
+        preferred: HouseVariant? = nil
     ) async -> ZtoeHouseLookupResult? {
         let targetKey = HouseKey.of(house)
         if targetKey.isEmpty { return nil }
@@ -1558,7 +1631,8 @@ public enum ZtoeAddressLookup {
             }
         }
 
-        guard var base = resolved else { return nil }
+        guard let found = resolved else { return nil }
+        var base = HouseVariants.pick(found.choices, preferredQueue: preferred?.queue, preferredConsumers: preferred?.consumers ?? []).map { found.withVariant($0) } ?? found
         let head = [rem?.nameUk, settlement?.nameUk].compactMap { $0 }.filter { !$0.ktIsBlank }.joined(separator: ", ")
         var streetPart = ""
         if let name = street?.nameUk, !name.ktIsBlank { streetPart = "\(name), " }

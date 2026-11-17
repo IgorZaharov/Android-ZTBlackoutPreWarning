@@ -32,7 +32,8 @@ enum BackgroundRefresh {
         // written, through the store, so a setting the user changes meanwhile is never reverted.
         if let q = settings.selectedAddressQuery, settings.queue.ktIsBlank,
            let lookup = await ZtoeAddressLookup.checkAddressOnZtoeWebsite(
-               remId: q.remId, settlementId: q.settlementId, streetId: q.streetId, house: q.house, siteUrl: settings.cityUrl
+               remId: q.remId, settlementId: q.settlementId, streetId: q.streetId, house: q.house, siteUrl: settings.cityUrl,
+               preferred: HouseVariantChoices.get(streetId: q.streetId, house: q.house)
            ),
            lookup.queue != settings.queue || lookup.statusText != settings.customQueueStatusText {
             SubscriptionSync.shared.assignPrimaryQueue(queue: lookup.queue, statusText: lookup.statusText, addressText: nil)

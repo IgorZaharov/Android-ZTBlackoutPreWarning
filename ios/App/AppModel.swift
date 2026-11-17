@@ -56,6 +56,32 @@ final class AppModel: ObservableObject {
     }
     /// Main's "Select queue" asks Settings to open the address lookup at once.
     @Published var autoOpenQueueHelp = false
+
+    // First-run tour (spec/ONBOARDING.md): started by the first-launch button, never shown again once finished
+    @Published private(set) var tourActive = false
+    @Published var tourReachedRename = false
+    @Published var tourRenameDone = false
+
+    /// The first-launch button was tapped: a new user gets the tour.
+    func startTourIfNew() {
+        guard !OnboardingTour.isDone else { return }
+        tourActive = true
+        tourReachedRename = false
+        tourRenameDone = false
+    }
+
+    /// «Зрозуміло», «Пропустити підказки» or About opened after RENAME: never shown again.
+    func endTour() {
+        OnboardingTour.setDone(true)
+        tourActive = false
+        tourReachedRename = false
+        tourRenameDone = false
+    }
+
+    /// The rename dialog was closed (saved or cancelled) during RENAME: the tour goes on to ALERTS.
+    func tourRenameDialogClosed() {
+        if tourActive && tourReachedRename { tourRenameDone = true }
+    }
     /// iOS notification permission; `.authorized` until read, so the ask card never flashes.
     @Published private(set) var notificationAuth: UNAuthorizationStatus = .authorized
 
@@ -155,7 +181,9 @@ final class AppModel: ObservableObject {
         let current = settingsRepo.getSettings()
         if resolveAddress, let q = current.selectedAddressQuery, !q.streetId.ktIsBlank, !q.house.ktIsBlank {
             if let lookup = await ZtoeAddressLookup.checkAddressOnZtoeWebsite(
-                remId: q.remId, settlementId: q.settlementId, streetId: q.streetId, house: q.house, siteUrl: current.cityUrl
+                remId: q.remId, settlementId: q.settlementId, streetId: q.streetId, house: q.house, siteUrl: current.cityUrl,
+                // the variant the user chose is kept when the site lists the house with several queues (households / non-household)
+                preferred: HouseVariantChoices.get(streetId: q.streetId, house: q.house)
             ) {
                 let latest = settingsRepo.getSettings()
                 let status = lookup.statusText ?? ""
