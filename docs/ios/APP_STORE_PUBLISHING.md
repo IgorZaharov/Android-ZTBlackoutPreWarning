@@ -131,14 +131,18 @@ that request, and the house number never leaves the device. This matches `Privac
 
 ---
 
-## 5. Version page (iOS App → 1.4.0 Prepare for Submission)
+## 5. Version page (iOS App → 1.4.1 Prepare for Submission)
 
-If the left column shows "1.0", open it and change **Version** to `1.4.0` (it must equal
-`MARKETING_VERSION` in `ios/project.yml`).
+The version must equal `MARKETING_VERSION` in `ios/project.yml` (**1.4.1** since 2026-11-17).
+- If 1.4.0 was never submitted, the left column shows "1.4.0" (or "1.0") as **Prepare for Submission**:
+  open it and change **Version** to `1.4.1`. This is still the first release, so What's New is not shown.
+- If 1.4.0 is already in review, approved or live: **iOS App → + (next to the version list) → 1.4.1**,
+  then fill **What's New in This Version** (section 5.11); the rest is copied from 1.4.0.
 
 ### 5.1 Screenshots
 
-Source: GitHub Actions → latest green **iOS build, tests and TestFlight** run on `feat/ios-port` →
+Source: GitHub Actions → the green **iOS build, tests and TestFlight** run of tag `ios-v1.4.1-1`
+(run 44066617840; `gh run download 44066617840 -n ios-appstore-6.9`) →
 artifacts `ios-appstore-6.9` (1320 × 2868) and `ios-appstore-6.5` (1284 × 2778), each with `uk/` and `en/`.
 
 | Language | 6.9" Display | 6.5" Display |
@@ -236,7 +240,7 @@ power,outage,blackout,schedule,electricity,ukraine,zhytomyr,queue,alert,widget,c
 
 | Field | Value |
 |---|---|
-| Version | `1.4.0` |
+| Version | `1.4.1` |
 | Copyright | `2026 Igor Zaharov` |
 | Routing App Coverage File | none (not a navigation app) |
 
@@ -260,10 +264,26 @@ Off.
 | Notes | paste the English block from `docs/ios/APP_REVIEW_NOTES.md` without changes (about 3600 of 4000 characters). Check the three ⟳ facts first. |
 | Attachment | **Recommended:** a 30 to 60 s screen recording made in Ukraine on a day with outages: choose a queue, Main page with a countdown and red slots, add a widget, tap the widget refresh button. It answers a 2.1 "app looks empty" question before it is asked. |
 
-### 5.10 Version Release
+### 5.10 Version Release (first release; see 5.11 for updates)
 
 Pick **Manually release this version**. After approval you press **Release This Version** when you are
 ready (for example together with the Android 1.4.x release). Phased release is offered only for updates.
+
+### 5.11 What's New in This Version (updates only, from 1.4.1 on)
+
+Ukrainian:
+```
+• Правильна черга для будинків, які на сайті обленерго мають кілька записів (побутові та непобутові споживачі). Якщо черг кілька, застосунок покаже кнопки, щоб вибрати свою.
+• Підказки при першому запуску: застосунок покаже, де вибрати адресу, як перейменувати її та налаштувати сповіщення.
+• Жовта стрілка поточного часу на шкалі доби; на віджетах позначки годин кожні 3 години.
+```
+
+English:
+```
+• Correct queue for buildings the power company lists more than once (household and non-household consumers). When there are several queues, the app shows buttons to pick yours.
+• First-run tips show where to choose an address, how to rename it and how to set up warnings.
+• Yellow current-time needle on the day timeline; widgets mark the hours every 3 hours.
+```
 
 ---
 
