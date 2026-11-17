@@ -27,8 +27,9 @@ export const DRUM_COLORS = {
   stripeDark: 'rgba(26,18,8,0.55)', // #1A1208 at 55 %
   stripeLight: 'rgba(255,176,32,0.85)', // #FFB020 at 85 %
   tick: '#1C1B18',
-  needle: '#0B0B0A',
-  needleHalo: 'rgba(255,255,255,0.85)',
+  // owner, 2026-11-17: the black needle was hard to see; bright yellow with a black outline on every drum
+  needle: '#FFE600',
+  needleOutline: '#000000',
 } as const;
 
 const vGradient = (c: readonly string[]): string => `linear-gradient(to bottom, ${c[0]}, ${c[1]}, ${c[2]})`;
@@ -82,6 +83,7 @@ export function usePrefersReducedMotion(): boolean {
 const HOUR_GAP = 1.5;
 const CELL_HEIGHT = 32;
 const TRACK_INSET = 8; // 6 slot padding + 2 slot border, like the Compose needle
+const NEEDLE_BELOW_SLOT = 7; // the needle runs past the slot wrapper to the bottom of the hour tick marks
 const STRIPE = 3; // 3 px stripe + 3 px gap, measured across the stripe
 
 const ALL_MARKERS = [0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 24];
@@ -193,16 +195,17 @@ export const DrumChart: React.FC<DrumChartProps> = ({
 
         {showNeedle && (
           <>
+            {/* 2 px black outline; down past the wrapper to the bottom of the hour tick marks (2 px gap + 5 px marks) */}
             <div
               aria-hidden="true"
               data-testid="drum-needle"
-              className="absolute top-0 bottom-0 rounded-full pointer-events-none"
-              style={{ left: needleLeft - 2.25, width: 4.5, background: DRUM_COLORS.needleHalo }}
+              className="absolute top-0 rounded-full pointer-events-none"
+              style={{ left: needleLeft - 3.5, width: 7, bottom: -NEEDLE_BELOW_SLOT, background: DRUM_COLORS.needleOutline }}
             />
             <div
               aria-hidden="true"
-              className="absolute top-0 bottom-0 rounded-full pointer-events-none"
-              style={{ left: needleLeft - 1.5, width: 3, background: DRUM_COLORS.needle }}
+              className="absolute rounded-full pointer-events-none"
+              style={{ left: needleLeft - 1.5, width: 3, top: 2, bottom: 2 - NEEDLE_BELOW_SLOT, background: DRUM_COLORS.needle }}
             />
           </>
         )}
@@ -275,9 +278,10 @@ export const DrumBitmap: React.FC<DrumBitmapProps> = ({
   const fraction = Math.min(1, Math.max(0, (Math.min(23, Math.max(0, currentHour)) * 60 + Math.min(59, Math.max(0, currentMinute))) / 1440));
   const needleX = trackLeft + trackWidth * fraction;
   const needleTop = contourTop - 8;
-  const needleBottom = contourBottom + 8;
+  const needleBottom = height - 36; // just above the hour labels (baseline height - 16)
   const fontSize = 21 + (height - 132) * 0.1;
-  const labels: [number, string][] = [[0, '00'], [0.25, '06'], [0.5, '12'], [0.75, '18'], [1, '24']];
+  // every 3 hours: 00, 03, 06 ... 24 (owner, 2026-11-17), like BlackoutGlanceWidget.kt
+  const labels: [number, string][] = [0, 3, 6, 9, 12, 15, 18, 21, 24].map((h) => [h / 24, String(h).padStart(2, '0')]);
 
   const stops = (id: string, c: readonly string[]) => (
     <linearGradient id={`${uid}${id}`} x1="0" y1={id === 'amber' ? trackTop + (trackBottom - trackTop) / 2 : trackTop} x2="0" y2={trackBottom} gradientUnits="userSpaceOnUse">
@@ -368,10 +372,10 @@ export const DrumBitmap: React.FC<DrumBitmapProps> = ({
       ) : (
         cellEls
       )}
-      {/* 5. Black current-time needle with a light halo */}
-      <rect x={needleX - 4.5} y={needleTop} width={9} height={needleBottom - needleTop} rx={4.5} fill={DRUM_COLORS.needleHalo} />
+      {/* 5. Bright yellow current-time needle with a black outline (5 px of the 720 px bitmap = 2 dp), down to the labels */}
+      <rect x={needleX - 8} y={needleTop - 5} width={16} height={needleBottom - needleTop + 10} rx={8} fill={DRUM_COLORS.needleOutline} />
       <rect x={needleX - 3} y={needleTop} width={6} height={needleBottom - needleTop} rx={3} fill={DRUM_COLORS.needle} />
-      {/* 6. Stamped hour markers 00, 06, 12, 18, 24 */}
+      {/* 6. Stamped hour markers every 3 hours: 00, 03, 06 ... 24 */}
       {labels.map(([pos, text]) => (
         <text
           key={text}

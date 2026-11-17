@@ -13,7 +13,7 @@ struct AboutScreen: View {
 
     private var version: String {
         let raw = (Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "").ktTrim()
-        return "v" + (raw.range(of: #"^[0-9]+\.[0-9]+"#, options: .regularExpression) != nil ? raw : "1.4.0")
+        return "v" + (raw.range(of: #"^[0-9]+\.[0-9]+"#, options: .regularExpression) != nil ? raw : "1.4.1")
     }
 
     var body: some View {

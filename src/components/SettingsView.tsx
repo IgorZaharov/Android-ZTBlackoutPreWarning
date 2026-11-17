@@ -14,12 +14,15 @@ import {
   getRems,
   getSettlementsForRem,
   getStreetsForSettlement,
+  houseChoices,
+  withHouseVariant,
   type ZtoeHouseLookupResult,
   type ZtoeRemOption,
   type ZtoeSettlementOption,
   type ZtoeStreetOption
 } from '../services/ztoeAddressLookup';
 import { getSubscriptionSync, type SyncResult } from '../services/subscriptionSync';
+import { ConsumerType, HouseVariants, type HouseVariant } from '../core/houseVariants';
 import {
   ERR_DUPLICATE,
   ERR_LIMIT,
@@ -45,6 +48,7 @@ import {
   removeConfirmBody,
   translations,
 } from '../services/i18n';
+import { getHouseVariantChoice, setHouseVariantChoice } from '../services/houseVariantChoices';
 import { HouseKey } from '../core/addressKeys';
 import { GlassCard, TEXT_SECONDARY, TEXT_TERTIARY } from './GlassCard';
 import { SearchablePickerField, type PickerItem } from './SearchablePickerField';
@@ -95,13 +99,16 @@ const SwitchRow: React.FC<{
   testId: string;
   rowTestId?: string;
   titleClassName?: string;
-}> = ({ icon, title, hint, checked, enabled = true, onToggle, testId, rowTestId, titleClassName = '' }) => (
+  /** Marks the switch for the first-run tour (CoachTour). */
+  tour?: string;
+}> = ({ icon, title, hint, checked, enabled = true, onToggle, testId, rowTestId, titleClassName = '', tour }) => (
   <button
     type="button"
     role="switch"
     aria-checked={checked}
     aria-disabled={!enabled}
     data-testid={testId}
+    data-tour={tour}
     disabled={!enabled}
     onClick={onToggle}
     className={`flex min-h-12 w-full items-center gap-3 text-left ${enabled ? 'cursor-pointer' : 'cursor-not-allowed'}`}
@@ -427,6 +434,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 <button
                   type="button"
                   aria-label={`${t.renameAddress}: ${label}`}
+                  data-tour={index === 0 ? 'rename' : undefined}
                   onClick={() => {
                     setRenameText(item.label);
                     setRenameCandidate(item);
@@ -459,6 +467,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 enabled={alertsMaster && item.queue !== null}
                 onToggle={() => applySync(sync.change(settings, (st) => setPlanned(st, item.id, !item.plannedAlerts)))}
                 testId={`ios-switch-planned-${item.id}`}
+                tour={index === 0 ? 'alert-planned' : undefined}
               />
               <SwitchRow
                 icon={<AlertTriangle className="h-5 w-5 text-[#FF5E3A]" />}
@@ -468,6 +477,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 enabled={alertsMaster && item.address !== null}
                 onToggle={() => applySync(sync.change(settings, (st) => setEmergency(st, item.id, !item.emergencyAlerts)))}
                 testId={`ios-switch-emergency-${item.id}`}
+                tour={index === 0 ? 'alert-emergency' : undefined}
                 titleClassName="break-words leading-snug"
               />
               {!isPrimary && (
@@ -862,6 +872,57 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 // Queue help modal with the numbered instruction for users on how to find their queue
 // =========================================================================================
 
+/** «Побутові споживачі, Непобутові (юридичні) споживачі» for the consumer types of a variant (consumerLabel in SettingsScreen.kt). */
+function consumerLabel(variant: HouseVariant, lang: 'uk' | 'en'): string {
+  const t = translations[lang];
+  if (variant.consumers.length === 0) return t.consumerUnknown;
+  return variant.consumers
+    .map((c) => (c === ConsumerType.HOUSEHOLD ? t.consumerHousehold : c === ConsumerType.BUSINESS ? t.consumerBusiness : c))
+    .join(', ');
+}
+
+/** One button per queue of a house the site lists more than once (HouseVariantChooser in SettingsScreen.kt). */
+const HouseVariantChooser: React.FC<{
+  choices: HouseVariant[];
+  active: HouseVariant;
+  lang: 'uk' | 'en';
+  onChoose: (v: HouseVariant) => void;
+}> = ({ choices, active, lang, onChoose }) => {
+  const t = translations[lang];
+  return (
+    <div role="radiogroup" data-testid="ztoe-lookup-variants" className="flex flex-col gap-2">
+      <div className="text-[13px] font-medium leading-[19px] text-[#FBBF24]">{t.addrVariantsHint}</div>
+      {choices.map((v) => {
+        const isActive = v.queue === active.queue;
+        return (
+          <button
+            key={v.queue || 'status'}
+            type="button"
+            role="radio"
+            aria-checked={isActive}
+            data-testid={`ztoe-lookup-variant-${v.queue || 'none'}`}
+            onClick={() => onChoose(v)}
+            className={`flex min-h-12 w-full items-center gap-3 rounded-[14px] border-2 px-3.5 py-2.5 text-left transition-colors ${
+              isActive ? 'border-[#FF5E3A] bg-[#FF5E3A]/20' : 'border-white/20 bg-white/[0.06] hover:bg-white/10'
+            }`}
+          >
+            <span
+              aria-hidden="true"
+              className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full border-2 ${isActive ? 'border-[#FF5E3A]' : 'border-white/50'}`}
+            >
+              {isActive && <span className="h-2.5 w-2.5 rounded-full bg-[#FF5E3A]" />}
+            </span>
+            <span className="flex flex-1 flex-col">
+              <span className="text-sm font-extrabold leading-5 text-white">{v.queue ? `${t.queue} ${v.queue}` : t.variantNoQueue}</span>
+              <span className={`text-[13px] font-medium leading-[19px] ${TEXT_SECONDARY}`}>{consumerLabel(v, lang)}</span>
+            </span>
+          </button>
+        );
+      })}
+    </div>
+  );
+};
+
 interface AddressLookupDialogProps {
   settings: UserSettings;
   lang: 'uk' | 'en';
@@ -893,6 +954,8 @@ const AddressLookupDialog: React.FC<AddressLookupDialogProps> = ({ settings, lan
   const [isChecking, setIsChecking] = useState(false);
   const [checkFailed, setCheckFailed] = useState(false);
   const [lookup, setLookup] = useState<ZtoeHouseLookupResult | null>(null);
+  // Queue of the variant the user tapped ('' = the one without a queue); null = default (spec/ADDRESS_KEY.md section 6)
+  const [chosenVariantQueue, setChosenVariantQueue] = useState<string | null>(null);
 
   const patch = (set: React.Dispatch<React.SetStateAction<LevelState>>, p: Partial<LevelState>) => set((s) => ({ ...s, ...p }));
 
@@ -1030,6 +1093,7 @@ const AddressLookupDialog: React.FC<AddressLookupDialogProps> = ({ settings, lan
   useEffect(() => {
     setLookup(null);
     setCheckFailed(false);
+    setChosenVariantQueue(null);
     if (!selectedStreetId || !selectedHouse) {
       setIsChecking(false);
       return;
@@ -1056,7 +1120,9 @@ const AddressLookupDialog: React.FC<AddressLookupDialogProps> = ({ settings, lan
           if (!exists) return [...prev, res!];
           return prev.map((h) =>
             sameHouse(h.house, res!.house)
-              ? { ...h, queue: res!.queue || h.queue, statusText: res!.statusText ?? h.statusText, addressLabel: res!.addressLabel || h.addressLabel }
+              ? res!.variants && res!.variants.length > 0
+                ? { ...h, queue: res!.queue, statusText: res!.statusText, addressLabel: res!.addressLabel || h.addressLabel, variants: res!.variants }
+                : { ...h, queue: res!.queue || h.queue, statusText: res!.statusText ?? h.statusText, addressLabel: res!.addressLabel || h.addressLabel }
               : h
           );
         });
@@ -1079,9 +1145,21 @@ const AddressLookupDialog: React.FC<AddressLookupDialogProps> = ({ settings, lan
 
   // Result card (shown when a house is selected)
   const validLookup = lookup && sameHouse(lookup.house, selectedHouse) ? lookup : null;
-  const matched: ZtoeHouseLookupResult | null = validLookup && currentHouseRecord
+  const found: ZtoeHouseLookupResult | null = validLookup && validLookup.variants && validLookup.variants.length > 0
+    ? validLookup
+    : validLookup && currentHouseRecord
     ? { ...validLookup, queue: validLookup.queue || currentHouseRecord.queue, statusText: validLookup.statusText ?? currentHouseRecord.statusText }
     : validLookup ?? currentHouseRecord ?? (selectedHouse.trim() !== '' ? { house: selectedHouse, queue: '', addressLabel: selectedAddressStr } : null);
+  // A house with several queues: the tapped variant, else the saved one, else households first
+  const variantChoices = found ? houseChoices(found) : [];
+  const storedChoice = useMemo(() => getHouseVariantChoice(selectedStreetId, selectedHouse), [selectedStreetId, selectedHouse]);
+  const activeVariant =
+    variantChoices.length > 1
+      ? chosenVariantQueue !== null
+        ? HouseVariants.pick(variantChoices, chosenVariantQueue)
+        : HouseVariants.pick(variantChoices, storedChoice?.queue ?? null, storedChoice?.consumers ?? [])
+      : null;
+  const matched: ZtoeHouseLookupResult | null = found && activeVariant ? withHouseVariant(found, activeVariant) : found;
   // while the site answers, an address without a known queue cannot be confirmed yet
   const canApply = matched ? !(isChecking && !matched.queue) : false;
 
@@ -1089,6 +1167,8 @@ const AddressLookupDialog: React.FC<AddressLookupDialogProps> = ({ settings, lan
     if (!matched) return;
     const query = { remId: selectedRemId, settlementId: selectedSettlementId, streetId: selectedStreetId, house: selectedHouse };
     const addressToSave = selectedAddressStr || matched.addressLabel;
+    // re-checks keep this variant (spec/ADDRESS_KEY.md section 6, rule 5)
+    setHouseVariantChoice(selectedStreetId, selectedHouse, activeVariant);
     const hasQueue = Boolean(matched.queue);
     onApply(
       {
@@ -1263,6 +1343,15 @@ const AddressLookupDialog: React.FC<AddressLookupDialogProps> = ({ settings, lan
                   <span className="flex-1 text-[13px] font-medium leading-[19px] text-[#FBBF24]">{t.addrCheckFailed}</span>
                 </div>
               ) : null}
+
+              {activeVariant && (
+                <HouseVariantChooser
+                  choices={variantChoices}
+                  active={activeVariant}
+                  lang={lang}
+                  onChoose={(v) => setChosenVariantQueue(v.queue)}
+                />
+              )}
 
               {matched.queue && (
                 <div className="flex items-center justify-between gap-3">

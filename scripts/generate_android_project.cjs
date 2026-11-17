@@ -32,6 +32,26 @@ while ((match = entryRegex.exec(existingTs)) !== null) {
 
 const additionalFiles = [
   {
+    path: 'app/src/main/java/ua/blackout/prewarning/core/HouseVariants.kt',
+    language: 'kotlin',
+    description: 'A house listed in several ztoe rows: queue variants by consumer type (spec/ADDRESS_KEY.md section 6)',
+  },
+  {
+    path: 'app/src/main/java/ua/blackout/prewarning/data/repository/HouseVariantChoices.kt',
+    language: 'kotlin',
+    description: 'The queue variant the user applied for a house listed more than once, kept by re-checks',
+  },
+  {
+    path: 'app/src/main/java/ua/blackout/prewarning/ui/components/CoachMarks.kt',
+    language: 'kotlin',
+    description: 'First-run tour spotlight overlay: dims the window except the lit controls, arrow and tip',
+  },
+  {
+    path: 'app/src/main/java/ua/blackout/prewarning/ui/components/OnboardingTour.kt',
+    language: 'kotlin',
+    description: 'First-run tour steps (PICK, APPLY, RENAME, ALERTS, ABOUT) and the "done" flag',
+  },
+  {
     path: 'app/src/main/java/ua/blackout/prewarning/core/Subscriptions.kt',
     language: 'kotlin',
     description: 'Multi-address subscriptions: model, repair, store operations and migration (spec/SUBSCRIPTIONS.md)',

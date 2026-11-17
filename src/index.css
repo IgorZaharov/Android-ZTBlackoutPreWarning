@@ -19,6 +19,21 @@
  * within +-15 % on its own uneven period (23-37 s), so the background never visibly repeats. Transform only
  * (composited); browsers pause it in hidden tabs; none under reduced motion.
  */
+/* Arrow of the first-launch tip, nudging down towards the "Виберіть чергу" button; still under reduced motion */
+@keyframes zt-nudge {
+  from { transform: translate3d(0, 0, 0); }
+  to { transform: translate3d(0, 8px, 0); }
+}
+.zt-nudge { animation: zt-nudge 0.7s ease-in-out infinite alternate; }
+@keyframes zt-nudge-up {
+  from { transform: translate3d(0, 0, 0); }
+  to { transform: translate3d(0, -8px, 0); }
+}
+.zt-nudge-up { animation: zt-nudge-up 0.7s ease-in-out infinite alternate; }
+@media (prefers-reduced-motion: reduce) {
+  .zt-nudge, .zt-nudge-up { animation: none; }
+}
+
 @keyframes zt-drift-1 {
   0% { transform: translate3d(0, 0, 0) scale(1); }
   33% { transform: translate3d(-16%, 10%, 0) scale(1.14); }

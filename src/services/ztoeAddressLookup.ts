@@ -15,6 +15,7 @@
 
 import { EmergencyOutageInfo, SelectedAddressQuery } from '../types';
 import { HouseKey, StreetKey } from '../core/addressKeys';
+import { HouseVariants, type HouseVariant } from '../core/houseVariants';
 import { getKyivDateParts } from './ztoeParser';
 
 /**
@@ -93,7 +94,36 @@ export interface ZtoeHouseLookupResult {
    * (OutageRepository / EmergencyLedger). Kept so older views still compile.
    */
   emergencyOutage?: EmergencyOutageInfo | null;
+  /**
+   * Every queue the site lists for the house (households / non-household, spec/ADDRESS_KEY.md section 6),
+   * in discovery order; `queue` / `statusText` are the default variant.
+   */
+  variants?: HouseVariant[];
 }
+
+/** The variants of a record in display order (households first); one entry for a record without stored variants. */
+export function houseChoices(h: ZtoeHouseLookupResult): HouseVariant[] {
+  return HouseVariants.ordered(h.variants && h.variants.length > 0 ? h.variants : HouseVariants.add([], h.queue, h.statusText, null));
+}
+
+/** `h` with `variant` applied as its queue and status. */
+export function withHouseVariant(h: ZtoeHouseLookupResult, variant: HouseVariant): ZtoeHouseLookupResult {
+  const next: ZtoeHouseLookupResult = { ...h, queue: variant.queue };
+  if (!variant.queue && variant.statusText) next.statusText = variant.statusText;
+  else delete next.statusText;
+  return next;
+}
+
+/** The «Споживач» cell of a house row (7th column), or null for a table without it. */
+function consumerCell(cells: readonly string[]): string | null {
+  for (let i = cells.length - 1; i >= 4; i--) {
+    if ((cells[i] ?? '').toLowerCase().includes('споживач')) return cells[i];
+  }
+  return null;
+}
+
+const variantsOf = (h: ZtoeHouseLookupResult): HouseVariant[] =>
+  h.variants && h.variants.length > 0 ? h.variants : HouseVariants.add([], h.queue, h.statusText, null);
 
 export type ZtoeHouseQueueRecord = ZtoeHouseLookupResult;
 
@@ -183,8 +213,11 @@ export function mergeHouseLists(lists: readonly (readonly ZtoeHouseLookupResult[
       const key = HouseKey.of(h.house);
       if (!key) continue;
       const existing = byKey.get(key);
-      if (!existing) byKey.set(key, h);
-      else if (!existing.queue && h.queue) byKey.set(key, { ...h, house: existing.house });
+      // the variants of all rows of the house are united; the default (households first) is applied
+      const variants = existing ? HouseVariants.union(variantsOf(existing), variantsOf(h)) : variantsOf(h);
+      const base: ZtoeHouseLookupResult = existing ? { ...existing } : { ...h };
+      const first = HouseVariants.pick(variants, null);
+      byKey.set(key, { ...(first ? withHouseVariant(base, first) : base), variants });
     }
   }
   return sortHouseLookupResults(byKey.values());
@@ -448,6 +481,7 @@ export function parseZtoeAddressLookupTableHtml(
       ? houseVal.split(',').map((h) => h.trim()).filter(Boolean)
       : [houseVal.trim()];
 
+    const consumer = consumerCell(cells);
     for (const hToken of houseTokens) {
       results.push({
         house: hToken,
@@ -455,6 +489,7 @@ export function parseZtoeAddressLookupTableHtml(
         rawQueueCell: queueRaw,
         rawSubqueueCell: subqueueRaw,
         statusText,
+        variants: HouseVariants.add([], normalizedQueue, statusText, consumer),
       });
     }
   }
@@ -501,10 +536,15 @@ async function fetchStreetRows(
  * not list the house. Emergencies are not looked up here: OutageRepository asks PowerOnClient, and
  * the result's `emergencyOutage` is never set. The street is requested once per ztoe `vulica_id`
  * of the merged street and the rows are unioned; the whole street list is stored for the next use.
+ *
+ * A house the site lists with several queues (households / non-household) keeps all of them in `variants`;
+ * the applied one is `preferred`, the variant the user chose in the lookup (houseVariantChoices.ts), while the
+ * house still has it for that consumer type, otherwise the default variant (spec/ADDRESS_KEY.md section 6, rule 5).
  */
 export async function checkAddressOnZtoeWebsite(
   query: SelectedAddressQuery,
-  siteUrl?: string
+  siteUrl?: string,
+  preferred: HouseVariant | null = null
 ): Promise<ZtoeHouseLookupResult | null> {
   if (!query || !query.streetId || !query.house) return null;
 
@@ -533,14 +573,15 @@ export async function checkAddressOnZtoeWebsite(
       dynamicHousesByStreetId[streetObj.id] = merged;
       houseCacheUpdatedAtByStreetId[streetObj.id] = Date.now();
       recordRecentHouseStreet(streetObj.id);
-      // A house with a "does not switch off" status row beats a plain row without queue
-      const rows = merged.filter(sameHouse);
-      const live = rows.find((r) => !r.queue && r.statusText) ?? rows.find((r) => Boolean(r.queue)) ?? rows[0];
+      // one record per house; its variants hold every row of the house
+      const live = merged.find(sameHouse);
       if (live) resolved = live;
     }
   }
 
   if (!resolved) return null;
+  const chosen = HouseVariants.pick(houseChoices(resolved), preferred?.queue ?? null, preferred?.consumers ?? []);
+  if (chosen) resolved = withHouseVariant(resolved, chosen);
   const head = [remObj?.nameUk, settlementObj?.nameUk].filter((x): x is string => Boolean(x && x.trim())).join(', ');
   const streetPart = streetObj?.nameUk?.trim() ? `${streetObj.nameUk}, ` : '';
   return {
@@ -553,7 +594,8 @@ export async function checkAddressOnZtoeWebsite(
 export const ADDRESS_INDEX_STORAGE_KEY = 'zt_address_index_cache_v1';
 // v5: duplicate streets are merged and the fake default houses / injected emergencies of v4 are gone
 // 6: drops street house lists cut to ztoe's first page of 10 records (per-street request without all=1)
-const CACHE_SCHEMA_VERSION = 6;
+// 7: houses keep every queue variant (households / non-household), spec/ADDRESS_KEY.md section 6
+const CACHE_SCHEMA_VERSION = 7;
 const MAX_PERSISTED_HOUSE_STREETS = 50;
 const FRESH_HOUSE_CACHE_TTL_MS = 120_000;
 
@@ -693,6 +735,7 @@ export function persistAddressIndexToStorage(): void {
             queue: h.queue,
           };
           if (h.statusText) compact.statusText = h.statusText;
+          if (h.variants && h.variants.length > 0) compact.variants = h.variants;
           return compact;
         });
       }
@@ -1122,20 +1165,21 @@ export function parseZtoeSettlementHousesTableHtml(
         ? houseVal.split(',').map((h) => h.trim()).filter(Boolean)
         : [houseVal.trim()];
 
+      const consumer = consumerCell(cells);
       for (const hToken of houseTokens) {
-        if (!list.some((item) => item.house === hToken)) {
-          list.push({
-            house: hToken,
-            queue: normalizedQueue,
-            rawQueueCell: queueRaw,
-            rawSubqueueCell: subqueueRaw,
-            ...(statusText ? { statusText } : {}),
-          });
-        }
+        list.push({
+          house: hToken,
+          queue: normalizedQueue,
+          rawQueueCell: queueRaw,
+          rawSubqueueCell: subqueueRaw,
+          ...(statusText ? { statusText } : {}),
+          variants: HouseVariants.add([], normalizedQueue, statusText, consumer),
+        });
       }
       streetMap.set(key, list);
     }
 
+    for (const [key, list] of streetMap) streetMap.set(key, mergeHouseLists([list]));
     return streetMap;
   }
 
@@ -1270,6 +1314,7 @@ export function parseZtoeSettlementHousesTableHtml(
       : [houseVal.trim()];
 
     const list = rowsByStreetId.get(matchedStreet.id) ?? [];
+    const consumer = consumerCell(cells);
     for (const hToken of houseTokens) {
       if (!HouseKey.of(hToken)) continue;
       list.push({
@@ -1278,6 +1323,7 @@ export function parseZtoeSettlementHousesTableHtml(
         rawQueueCell: queueRaw,
         rawSubqueueCell: subqueueRaw,
         ...(statusText ? { statusText } : {}),
+        variants: HouseVariants.add([], normalizedQueue, statusText, consumer),
       });
     }
     rowsByStreetId.set(matchedStreet.id, list);

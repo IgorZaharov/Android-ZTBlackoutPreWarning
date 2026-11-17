@@ -89,12 +89,10 @@ public enum ZtDrumColors {
     public static let emergencyStripeDark = Color(argb: 0x8C1A1208)
     public static let emergencyStripeLight = Color(argb: 0xD9FFB020)
     public static let tick = Color(argb: 0xFF1C1B18)
-    public static let needle = Color(argb: 0xFF0B0B0A)
-    public static let needleHalo = Color(argb: 0xD9FFFFFF)
-    /// Widget drums only (owner, 2026-11-15: the black needle was hard to see on the home screen): a bright
-    /// yellow core with a dark outline, which stands out on the white, red and orange cells alike.
-    public static let widgetNeedle = Color(argb: 0xFFFFE600)
-    public static let widgetNeedleHalo = Color(argb: 0xCC000000)
+    /// Every drum, app and widgets (owner, 2026-11-15 for the widgets, 2026-11-17 everywhere: the black needle was
+    /// hard to see): a bright yellow core with a 2 pt black outline, which stands out on every cell colour.
+    public static let needle = Color(argb: 0xFFFFE600)
+    public static let needleOutline = Color(argb: 0xFF000000)
 }
 
 public enum ZtRadius {

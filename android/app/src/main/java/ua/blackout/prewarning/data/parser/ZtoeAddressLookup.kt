@@ -3,6 +3,8 @@ package ua.blackout.prewarning.data.parser
 import org.json.JSONArray
 import org.json.JSONObject
 import ua.blackout.prewarning.core.HouseKey
+import ua.blackout.prewarning.core.HouseVariant
+import ua.blackout.prewarning.core.HouseVariants
 import ua.blackout.prewarning.core.StreetKey
 import ua.blackout.prewarning.core.TextNorm
 import ua.blackout.prewarning.data.model.EmergencyOutageInfo
@@ -64,21 +66,63 @@ data class ZtoeStreetOption(
         get() = ZtoeAddressLookup.getHousesForStreet(id)
 }
 
-/** [emergencyOutage] is kept for source compatibility only; emergencies come from PowerOnClient and are always null here. */
+/**
+ * [emergencyOutage] is kept for source compatibility only; emergencies come from PowerOnClient and are always null here.
+ * [queue] / [statusText] are the default variant; [variants] holds every queue the site lists for the house
+ * (households / non-household, spec/ADDRESS_KEY.md section 6) in discovery order.
+ */
 data class ZtoeHouseLookupResult(
     val house: String,
     val queue: String,
     val statusText: String? = null,
     val emergencyOutage: EmergencyOutageInfo? = null,
-    val addressLabel: String = ""
-)
+    val addressLabel: String = "",
+    val variants: List<HouseVariant> = emptyList()
+) {
+    /** The variants in display order (households first); one entry for a record without stored variants. */
+    val choices: List<HouseVariant>
+        get() = HouseVariants.ordered(variants.ifEmpty { HouseVariants.add(emptyList(), queue, statusText, null) })
+
+    /** True when the site lists the house with more than one queue (or a queue and a status). */
+    val hasChoice: Boolean get() = choices.size > 1
+
+    /** This record with [variant] applied as its queue and status. */
+    fun withVariant(variant: HouseVariant): ZtoeHouseLookupResult =
+        copy(queue = variant.queue, statusText = if (variant.queue.isEmpty()) variant.statusText else null)
+
+    companion object {
+        /** One table row of the house; [consumer] is the raw 7th column («побутові споживачі» ...). */
+        fun row(house: String, queue: String, statusText: String?, consumer: String?): ZtoeHouseLookupResult =
+            ZtoeHouseLookupResult(
+                house = house,
+                queue = queue,
+                statusText = statusText,
+                variants = HouseVariants.add(emptyList(), queue, statusText, consumer)
+            )
+
+        /** Unites two records of one house: the variants of both, the default variant applied, the first display form. */
+        fun merge(a: ZtoeHouseLookupResult, b: ZtoeHouseLookupResult?): ZtoeHouseLookupResult {
+            val va = a.variants.ifEmpty { HouseVariants.add(emptyList(), a.queue, a.statusText, null) }
+            val vb = b?.let { it.variants.ifEmpty { HouseVariants.add(emptyList(), it.queue, it.statusText, null) } } ?: emptyList()
+            val all = HouseVariants.union(va, vb)
+            val first = HouseVariants.pick(all, null)
+            return a.copy(
+                queue = first?.queue ?: a.queue,
+                statusText = if (first == null) a.statusText else if (first.queue.isEmpty()) first.statusText else null,
+                addressLabel = a.addressLabel.ifEmpty { b?.addressLabel.orEmpty() },
+                variants = all
+            )
+        }
+    }
+}
 
 object ZtoeAddressLookup {
     const val DEFAULT_SITE_URL = "https://www.ztoe.com.ua/unhooking-search.php"
 
     /** Bumped to 2 when merged street ids were introduced; caches of other versions are discarded. */
     /** 3: drops street house lists that were cut to ztoe's first page of 10 records (per-street request without all=1). */
-    internal const val CACHE_VERSION = 3
+    /** 4: houses keep every queue variant (households / non-household), spec/ADDRESS_KEY.md section 6. */
+    internal const val CACHE_VERSION = 4
     private const val PREFS_NAME = "zt_address_index_cache_v1"
     private const val KEY_INDEX_JSON = "address_index_json_v1"
     private const val MAX_PERSISTED_HOUSE_STREETS = 50
@@ -300,14 +344,12 @@ object ZtoeAddressLookup {
             .map { it.house }
     }
 
-    /** First display form wins, except that a row with a queue replaces a row without one. */
+    /** First display form wins; the variants of all rows of the house are united (spec/ADDRESS_KEY.md section 6). */
     private fun putHouse(map: MutableMap<String, ZtoeHouseLookupResult>, h: ZtoeHouseLookupResult) {
         val key = HouseKey.of(h.house)
         if (key.isEmpty()) return
         val existing = map[key]
-        if (existing == null || (existing.queue.isEmpty() && h.queue.isNotEmpty())) {
-            map[key] = h
-        }
+        map[key] = if (existing == null) ZtoeHouseLookupResult.merge(h, null) else ZtoeHouseLookupResult.merge(existing, h)
     }
 
     internal fun unionHouses(a: List<ZtoeHouseLookupResult>, b: List<ZtoeHouseLookupResult>): List<ZtoeHouseLookupResult> {
@@ -367,6 +409,15 @@ object ZtoeAddressLookup {
         return field.split(HOUSE_SPLIT_REGEX)
             .map { it.trim() }
             .filter { it.isNotEmpty() && !it.equals("будинки", ignoreCase = true) }
+    }
+
+    /** The «Споживач» cell of a house row (7th column), or null for a table without it (spec/ADDRESS_KEY.md section 6). */
+    private fun consumerCell(cells: List<String>): String? {
+        for (i in cells.indices.reversed()) {
+            if (i < 4) break
+            if (cells[i].contains("споживач", ignoreCase = true)) return cells[i]
+        }
+        return null
     }
 
     /** The part of the page before the schedule section, without copying the string. */
@@ -458,6 +509,17 @@ object ZtoeAddressLookup {
                     put("house", h.house)
                     put("queue", h.queue)
                     if (!h.statusText.isNullOrBlank()) put("statusText", h.statusText)
+                    if (h.variants.isNotEmpty()) {
+                        val vs = JSONArray()
+                        for (v in h.variants) {
+                            vs.put(JSONObject().apply {
+                                put("queue", v.queue)
+                                if (!v.statusText.isNullOrBlank()) put("statusText", v.statusText)
+                                put("consumers", JSONArray(v.consumers))
+                            })
+                        }
+                        put("variants", vs)
+                    }
                 })
             }
         }
@@ -557,8 +619,15 @@ object ZtoeAddressLookup {
                     }
                     val house = o.str("house") ?: continue
                     val canonical = findStreetById(streetId)?.id ?: streetId
+                    val variants = ArrayList<HouseVariant>()
+                    o.optJSONArray("variants")?.let { vs ->
+                        for (j in 0 until vs.length()) {
+                            val v = vs.optJSONObject(j) ?: continue
+                            variants.add(HouseVariant(v.str("queue") ?: "", v.str("statusText"), v.strList("consumers")))
+                        }
+                    }
                     grouped.getOrPut(canonical) { mutableListOf() }.add(
-                        ZtoeHouseLookupResult(house = house, queue = o.str("queue") ?: "", statusText = o.str("statusText"))
+                        ZtoeHouseLookupResult(house = house, queue = o.str("queue") ?: "", statusText = o.str("statusText"), variants = variants)
                     )
                 }
                 for ((canonical, list) in grouped) {
@@ -916,9 +985,10 @@ object ZtoeAddressLookup {
                 continue
             }
 
+            val consumer = consumerCell(cells)
             val streetMap = houseMaps.getOrPut(streetId) { LinkedHashMap() }
             for (h in splitHouses(houseField)) {
-                putHouse(streetMap, ZtoeHouseLookupResult(house = h, queue = resolvedQueue, statusText = resolvedStatusText))
+                putHouse(streetMap, ZtoeHouseLookupResult.row(h, resolvedQueue, resolvedStatusText, consumer))
             }
         }
 
@@ -966,15 +1036,16 @@ object ZtoeAddressLookup {
 
                 if (houses.isNotEmpty()) {
                     val candidateQueue = "${NON_DIGIT_REGEX.replace(col4, "")}.${NON_DIGIT_REGEX.replace(col5, "")}"
+                    val consumer = consumerCell(cells)
 
                     if (ZtoeParser.ALL_QUEUES.contains(candidateQueue)) {
                         for (h in houses) {
-                            results.add(ZtoeHouseLookupResult(house = h, queue = candidateQueue))
+                            results.add(ZtoeHouseLookupResult.row(h, candidateQueue, null, consumer))
                         }
                         continue
                     } else if (col4.length > 3) {
                         for (h in houses) {
-                            results.add(ZtoeHouseLookupResult(house = h, queue = "", statusText = col4))
+                            results.add(ZtoeHouseLookupResult.row(h, "", col4, consumer))
                         }
                         continue
                     }
@@ -1024,16 +1095,13 @@ object ZtoeAddressLookup {
     fun parseZtoeAddressLookupTableHtml(html: String, targetHouse: String): Pair<String?, String?>? {
         val target = HouseKey.of(targetHouse)
         if (target.isEmpty()) return null
-        val matching = parseZtoeAddressLookupTableHtml(html).filter { HouseKey.of(it.house) == target }
-        if (matching.isEmpty()) return null
-        val withQueue = matching.firstOrNull { it.queue.isNotEmpty() }
-        if (withQueue != null) {
-            return withQueue.queue to null
+        val map = LinkedHashMap<String, ZtoeHouseLookupResult>()
+        for (row in parseZtoeAddressLookupTableHtml(html)) {
+            if (HouseKey.of(row.house) == target) putHouse(map, row)
         }
-        val withStatus = matching.firstOrNull { !it.statusText.isNullOrBlank() }
-        if (withStatus != null) {
-            return null to withStatus.statusText
-        }
+        val house = map[target] ?: return null
+        if (house.queue.isNotEmpty()) return house.queue to null
+        if (!house.statusText.isNullOrBlank()) return null to house.statusText
         return null
     }
 
@@ -1337,7 +1405,8 @@ object ZtoeAddressLookup {
         settlementId: String,
         streetId: String,
         house: String,
-        siteUrl: String = DEFAULT_SITE_URL
+        siteUrl: String = DEFAULT_SITE_URL,
+        preferred: HouseVariant? = null
     ): ZtoeHouseLookupResult? {
         return checkAddressOnZtoeWebsite(
             query = SelectedAddressQuery(
@@ -1346,7 +1415,8 @@ object ZtoeAddressLookup {
                 streetId = streetId,
                 house = house
             ),
-            siteUrl = siteUrl
+            siteUrl = siteUrl,
+            preferred = preferred
         )
     }
 
@@ -1355,10 +1425,16 @@ object ZtoeAddressLookup {
      * site. The live row is authoritative (A-H1: upstream queue changes propagate); the cached row is
      * used only when the site is unreachable or does not list the house. Emergencies are not looked up
      * here: [OutageRepository] asks PowerOnClient. The result's `emergencyOutage` is always null.
+     *
+     * A house the site lists with several queues (households / non-household) keeps all of them in
+     * `variants`; the applied one is [preferred], the variant the user chose in the lookup (see
+     * `HouseVariantChoices`), while the house still has it for that consumer type, otherwise the default
+     * variant (spec/ADDRESS_KEY.md section 6, rule 5).
      */
     fun checkAddressOnZtoeWebsite(
         query: SelectedAddressQuery,
-        siteUrl: String = DEFAULT_SITE_URL
+        siteUrl: String = DEFAULT_SITE_URL,
+        preferred: HouseVariant? = null
     ): ZtoeHouseLookupResult? {
         val targetKey = HouseKey.of(query.house)
         if (targetKey.isEmpty()) return null
@@ -1386,7 +1462,8 @@ object ZtoeAddressLookup {
             }
         }
 
-        val base = resolved ?: return null
+        val found = resolved ?: return null
+        val base = HouseVariants.pick(found.choices, preferred?.queue, preferred?.consumers.orEmpty())?.let { found.withVariant(it) } ?: found
         val head = listOf(rem?.nameUk, settlement?.nameUk).filter { !it.isNullOrBlank() }.joinToString(", ")
         val streetPart = street?.nameUk?.takeIf { it.isNotBlank() }?.let { "$it, " } ?: ""
         val label = (if (head.isNotEmpty()) "$head,\n" else "") + streetPart + "буд. " + query.house.trim()

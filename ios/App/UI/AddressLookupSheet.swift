@@ -16,6 +16,9 @@ struct AddressLookupSheet: View {
     let siteUrl: String
     let lang: String
     let saved: SelectedAddressQuery?
+    /// First-run tour (spec/ONBOARDING.md): this cover draws its own PICK and APPLY steps.
+    let tourActive: Bool
+    let onTourSkip: () -> Void
     let onDismiss: () -> Void
     let onApply: (_ queue: String, _ statusText: String?, _ addressLabel: String, _ query: SelectedAddressQuery) -> Void
     let onBanner: (String) -> Void
@@ -37,11 +40,16 @@ struct AddressLookupSheet: View {
     @State private var checking = false
     @State private var checkFailed = false
     @State private var lookup: ZtoeHouseLookupResult?
+    /// Queue of the variant the user tapped ("" = the one without a queue); nil = default (spec/ADDRESS_KEY.md section 6).
+    @State private var chosenVariantQueue: String?
+    @State private var coachRects: [String: CGRect] = [:]
+    @State private var sheetHeight: CGFloat = 800
 
     private static let ZTOE_SEARCH_URL = "https://www.ztoe.com.ua/unhooking-search.php"
 
     init(
         siteUrl: String, lang: String, saved: SelectedAddressQuery?,
+        tourActive: Bool = false, onTourSkip: @escaping () -> Void = {},
         onDismiss: @escaping () -> Void,
         onApply: @escaping (String, String?, String, SelectedAddressQuery) -> Void,
         onBanner: @escaping (String) -> Void
@@ -49,6 +57,8 @@ struct AddressLookupSheet: View {
         self.siteUrl = siteUrl
         self.lang = lang
         self.saved = saved
+        self.tourActive = tourActive
+        self.onTourSkip = onTourSkip
         self.onDismiss = onDismiss
         self.onApply = onApply
         self.onBanner = onBanner
@@ -89,8 +99,9 @@ struct AddressLookupSheet: View {
     }
 
     /// The live answer when it is for this house, merged with the indexed row; else the indexed row.
-    private var matchedRecord: ZtoeHouseLookupResult? {
+    private var foundRecord: ZtoeHouseLookupResult? {
         let valid = lookup.flatMap { $0.house.caseInsensitiveCompare(house) == .orderedSame ? $0 : nil }
+        if let v = valid, !v.variants.isEmpty { return v }
         if var v = valid, let rec = currentHouseRecord {
             if v.queue.isEmpty { v.queue = rec.queue }
             if v.statusText == nil { v.statusText = rec.statusText }
@@ -100,6 +111,69 @@ struct AddressLookupSheet: View {
         if let rec = currentHouseRecord { return rec }
         if !house.ktIsBlank { return ZtoeHouseLookupResult(house: house, queue: "", addressLabel: selectedAddressStr) }
         return nil
+    }
+
+    /// The queues of a house the site lists more than once (households first); empty when there is no choice.
+    private var variantChoices: [HouseVariant] {
+        guard let found = foundRecord, found.hasChoice else { return [] }
+        return found.choices
+    }
+
+    /// The tapped variant, else the one the user applied before (`HouseVariantChoices`), else households first.
+    private var activeVariant: HouseVariant? {
+        let choices = variantChoices
+        if choices.count < 2 { return nil }
+        if let chosenVariantQueue { return HouseVariants.pick(choices, preferredQueue: chosenVariantQueue) }
+        let stored = HouseVariantChoices.get(streetId: streetId, house: house)
+        return HouseVariants.pick(choices, preferredQueue: stored?.queue, preferredConsumers: stored?.consumers ?? [])
+    }
+
+    private var matchedRecord: ZtoeHouseLookupResult? {
+        guard let found = foundRecord else { return nil }
+        return activeVariant.map { found.withVariant($0) } ?? found
+    }
+
+    private func consumerLabel(_ v: HouseVariant) -> String {
+        if v.consumers.isEmpty { return AppStrings.consumerUnknown(lang) }
+        return v.consumers.map { c in
+            c == ConsumerType.HOUSEHOLD ? AppStrings.consumerHousehold(lang)
+                : c == ConsumerType.BUSINESS ? AppStrings.consumerBusiness(lang) : c
+        }.joined(separator: ", ")
+    }
+
+    /// One button per queue of a house the site lists more than once (HouseVariantChooser in SettingsScreen.kt).
+    private func variantChooser(_ choices: [HouseVariant], active: HouseVariant) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(verbatim: AppStrings.addrVariantsHint(lang)).ztText(ZtType.caption).foregroundStyle(ZtChipTone.amber.text)
+            ForEach(choices, id: \.queue) { v in
+                let isActive = v.queue == active.queue
+                Button {
+                    chosenVariantQueue = v.queue
+                } label: {
+                    HStack(spacing: 12) {
+                        Image(systemName: isActive ? "largecircle.fill.circle" : "circle")
+                            .foregroundStyle(isActive ? ZtColors.accent : ZtColors.textSecondary)
+                            .accessibilityHidden(true)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(verbatim: v.queue.isEmpty ? AppStrings.variantNoQueue(lang) : "\(AppStrings.queue(lang)) \(v.queue)")
+                                .ztText(ZtType.label.weight(.heavy)).foregroundStyle(Color.white)
+                            Text(verbatim: consumerLabel(v)).ztText(ZtType.caption).foregroundStyle(ZtColors.textSecondary)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
+                    .frame(minHeight: ZtMinTouch)
+                    .background {
+                        RoundedRectangle(cornerRadius: 14).fill(isActive ? ZtColors.accent.opacity(0.22) : Color(argb: 0x0FFFFFFF))
+                            .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(isActive ? ZtColors.accent : Color(argb: 0x33FFFFFF), lineWidth: 2))
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(ZtPressStyle())
+                .accessibilityAddTraits(isActive ? [.isSelected] : [])
+            }
+        }
     }
 
     private func clearBelowRem() {
@@ -120,7 +194,33 @@ struct AddressLookupSheet: View {
 
     // MARK: - Body
 
+    private var resultShown: Bool { !house.ktIsBlank && matchedRecord != nil }
+
+    /// PICK (settlement, street and house lit, the next field ringed) or APPLY (the result card, its button ringed).
+    @ViewBuilder
+    private var tourOverlay: some View {
+        let step = OnboardingTour.step(TourInput(
+            active: tourActive, lookupOpen: true, resultShown: resultShown, page: .settings,
+            hasAddress: false, reachedRename: false, renameDone: false
+        ))
+        if step == .pick {
+            let block = ["settlement", "street", "house"]
+            let ring = currentStreet != nil ? "house" : (!settlementId.ktIsBlank ? "street" : "settlement")
+            CoachOverlay(rects: coachRects, holes: [block],
+                         tips: [CoachTip(anchor: block, text: AppStrings.tourPick(lang), ring: ring, skip: true)],
+                         lang: lang, onSkip: onTourSkip)
+        } else if step == .apply {
+            // outside the result card unless the card fills most of the screen; the button is ringed
+            let card = coachRects["result"]
+            let anchor = (card.map { $0.height < sheetHeight * 0.55 } ?? false) ? "result" : "apply"
+            CoachOverlay(rects: coachRects, holes: [["result"]],
+                         tips: [CoachTip(anchor: [anchor], text: AppStrings.tourApply(lang), ring: "apply", skip: true)],
+                         lang: lang, onSkip: onTourSkip)
+        }
+    }
+
     var body: some View {
+      ScrollViewReader { proxy in
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
                 header
@@ -146,6 +246,16 @@ struct AddressLookupSheet: View {
             .padding(.vertical, 16)
         }
         .scrollDismissesKeyboard(.interactively)
+        .onPreferenceChange(CoachRectsKey.self) { coachRects = $0 }
+        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { sheetHeight = $0 }
+        .overlay { tourOverlay }
+        // bring the «Обрати чергу» button into view once the result card has settled
+        .task(id: tourActive && resultShown) {
+            guard tourActive && resultShown else { return }
+            try? await Task.sleep(for: .milliseconds(400))
+            withAnimation { proxy.scrollTo("tour-apply", anchor: .center) }
+        }
+      }
         .background(ZtColors.cardSolid.ignoresSafeArea())
         .preferredColorScheme(.dark)
         // REM list. A retry forces a fresh fetch; otherwise the in-memory cache is used.
@@ -224,6 +334,7 @@ struct AddressLookupSheet: View {
                     clearBelowSettlement()
                 }
             }
+            .coachTarget("settlement")
 
             SearchablePickerField(
                 label: AppStrings.addrStreetLabel(lang),
@@ -247,6 +358,7 @@ struct AddressLookupSheet: View {
                     lookup = nil
                 }
             }
+            .coachTarget("street")
 
             SearchablePickerField(
                 label: AppStrings.addrHouseLabel(lang),
@@ -265,6 +377,7 @@ struct AddressLookupSheet: View {
                 house = item.id
                 lookup = nil
             }
+            .coachTarget("house")
 
             if !house.ktIsBlank, let record = matchedRecord {
                 resultCard(record)
@@ -295,6 +408,9 @@ struct AddressLookupSheet: View {
                     Text(verbatim: AppStrings.addrCheckFailed(lang)).ztText(ZtType.caption).foregroundStyle(ZtChipTone.amber.text)
                 }
             }
+            if let active = activeVariant {
+                variantChooser(variantChoices, active: active)
+            }
             if !record.queue.ktIsBlank {
                 HStack(spacing: 12) {
                     Text(verbatim: AppStrings.addrFoundQueue(lang)).ztText(ZtType.label).foregroundStyle(UiColors.textTertiaryHi)
@@ -315,6 +431,8 @@ struct AddressLookupSheet: View {
             }
             Button {
                 let query = SelectedAddressQuery(remId: remId, settlementId: settlementId, streetId: streetId, house: house)
+                // re-checks keep this variant (spec/ADDRESS_KEY.md section 6, rule 5)
+                HouseVariantChoices.put(streetId: streetId, house: house, variant: activeVariant)
                 let address = selectedAddressStr.ktIsBlank ? record.addressLabel : selectedAddressStr
                 if !record.queue.ktIsBlank {
                     onApply(record.queue, nil, address, query)
@@ -334,12 +452,15 @@ struct AddressLookupSheet: View {
             }
             .buttonStyle(ZtPressStyle())
             .disabled(!canApply)
+            .coachTarget("apply")
+            .id("tour-apply")
         }
         .padding(16)
         .background {
             RoundedRectangle(cornerRadius: 16).fill(Color(argb: 0xD9141A29))
                 .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(Color.white.opacity(0.25), lineWidth: 2))
         }
+        .coachTarget("result")
         .padding(.top, 6)
     }
 
@@ -450,6 +571,7 @@ struct AddressLookupSheet: View {
     private func checkAddress() async {
         lookup = nil
         checkFailed = false
+        chosenVariantQueue = nil
         if streetId.ktIsBlank || house.ktIsBlank {
             checking = false
             return
@@ -465,8 +587,14 @@ struct AddressLookupSheet: View {
         guard let res else { return }
         if let i = houses.firstIndex(where: { $0.house.caseInsensitiveCompare(res.house) == .orderedSame }) {
             var h = houses[i]
-            if !res.queue.isEmpty { h.queue = res.queue }
-            if let s = res.statusText { h.statusText = s }
+            if !res.variants.isEmpty {
+                h.queue = res.queue
+                h.statusText = res.statusText
+                h.variants = res.variants
+            } else {
+                if !res.queue.isEmpty { h.queue = res.queue }
+                if let s = res.statusText { h.statusText = s }
+            }
             if !res.addressLabel.isEmpty { h.addressLabel = res.addressLabel }
             houses[i] = h
         } else {

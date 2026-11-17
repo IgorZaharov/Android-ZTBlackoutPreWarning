@@ -48,15 +48,15 @@ Implementation note (not in the plan): anchor the stripe phase to the drum, not 
 
 ## 3. Ticks and needle
 
-Ticks: 13 markers for the hours `00, 02, 04, ... 22, 24` laid out with space-between and 2 horizontal padding. Each marker is a 1.5 x 5 bar `#1C1B18` above a label of two digits (`String.format("%02d")`), monospace, bold, `#1C1B18`, 1 top padding. Code size is 10 sp; the 1.4.0 type scale (`design-tokens.json`) raises the floor to 12 sp (role `overline`) and the plan thins the labels to every 4 hours when the font scale is above 1.3.
+Ticks: 13 markers for the hours `00, 02, 04, ... 22, 24` laid out with space-between and 2 horizontal padding. Each marker is a 1.5 x 5 bar `#1C1B18` above a label of two digits (`String.format("%02d")`), monospace, bold, `#1C1B18`, 1 top padding. Code size is 10 sp; the 1.4.0 type scale (`design-tokens.json`) raises the floor to 12 sp (role `overline`) and the plan thins the labels to every 4 hours when the font scale is above 1.3. The widget drums (the Android bitmap, the iOS widgets and the web widget simulator) label every 3 hours: `00, 03, 06, ... 21, 24` (owner, 2026-11-17; was every 6 hours).
 
 Needle (**Today only**, never on Tomorrow):
 
 | Property | Value |
 |---|---|
 | Position | `fraction = (hour*60 + minute) / 1440` (hour clamped 0..23, minute 0..59; seconds ignored); `x = 6 + (width - 12) * fraction` (6 = slot padding on each side) |
-| Body | 3 wide, rounded, `#0B0B0A`, full wrapper height (protrudes 4 above and below the slot) |
-| Halo | 4.5 wide, rounded, `#D9FFFFFF`, drawn first, behind the body |
+| Body | 3 wide, rounded, bright yellow `#FFE600`; from the top of the wrapper (4 above the slot) down to the bottom of the hour tick marks under the slot, less the outline |
+| Outline | 2 all round, black `#000000`: a rounded 7 wide bar, drawn first, behind the body (owner, 2026-11-17: the black needle with a light halo was hard to see; the outline 2 and the needle reaching the hour marks asked the same day). The same on the widget drums, where the needle runs down to the top of the hour labels (the 720 px widget bitmap uses a 5 px outline, about 2 dp); a tinted iOS widget keeps a plain white needle |
 | Refresh | when the minute changes |
 
 ## 4. From `DayView` to the screen

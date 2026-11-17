@@ -141,7 +141,8 @@ public struct TimelineBar: View {
         VStack(spacing: 0) {
             well
                 .padding(.vertical, 4)
-                .overlay { if showNeedle { needle } }
+                // the needle runs past the slot to the bottom of the hour tick marks (2 pt gap + 5 pt marks)
+                .overlay(alignment: .top) { if showNeedle { needle.padding(.bottom, -7) } }
             Color.clear.frame(height: 2)
             ticks
         }
@@ -188,19 +189,20 @@ public struct TimelineBar: View {
         .overlay { RoundedRectangle(cornerRadius: 8).strokeBorder(ZtDrumColors.wellBorder, lineWidth: 2) }
     }
 
-    /// Black needle with a light halo, sticking out 4 pt above and below the slot.
+    /// Bright yellow needle with a 2 pt black outline, from 4 pt above the slot down to the hour tick marks.
     private var needle: some View {
         Canvas { gc, size in
             let inset = DrumGeometry.wellPadding
             let x = inset + DrumGeometry.needleX(trackWidth: size.width - inset * 2, hour: currentHour, minute: currentMinute)
-            let halo: CGFloat = 4.5
+            let outline: CGFloat = 2
             let bar: CGFloat = 3
+            let outer = bar + outline * 2
             gc.fill(
-                Path(roundedRect: CGRect(x: x - halo / 2, y: 0, width: halo, height: size.height), cornerRadius: halo / 2),
-                with: .color(ZtDrumColors.needleHalo)
+                Path(roundedRect: CGRect(x: x - outer / 2, y: 0, width: outer, height: size.height), cornerRadius: outer / 2),
+                with: .color(ZtDrumColors.needleOutline)
             )
             gc.fill(
-                Path(roundedRect: CGRect(x: x - bar / 2, y: 0, width: bar, height: size.height), cornerRadius: bar / 2),
+                Path(roundedRect: CGRect(x: x - bar / 2, y: outline, width: bar, height: size.height - outline * 2), cornerRadius: bar / 2),
                 with: .color(ZtDrumColors.needle)
             )
         }

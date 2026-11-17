@@ -17,6 +17,8 @@ import { MainView } from './MainView';
 import { SettingsView } from './SettingsView';
 import { AboutView } from './AboutView';
 import { WidgetSimulator } from './WidgetSimulator';
+import { CoachTour } from './CoachTour';
+import { isOnboardingDone, setOnboardingDone, tourFinishedBy, type TourPage } from '../services/onboarding';
 import { AnimatePresence, motion, useReducedMotion, type PanInfo } from 'motion/react';
 import { ZhytomyrRouletteModal } from './ZhytomyrRouletteModal';
 import { cacheQueueSlotsForRoulette } from '../services/rouletteGame';
@@ -87,12 +89,26 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
   const [isRouletteOpen, setIsRouletteOpen] = React.useState(false);
   const [imitatedNotification, setImitatedNotification] = React.useState<NotificationRecord | null>(null);
   const [autoOpenQueueHelp, setAutoOpenQueueHelp] = React.useState(false);
+  // First-run tour (spec/ONBOARDING.md): started by the first-launch button, never shown again once finished
+  const [tour, setTour] = React.useState({ active: false, reachedRename: false, renameDone: false });
+  const endTour = React.useCallback(() => {
+    setOnboardingDone(true);
+    setTour({ active: false, reachedRename: false, renameDone: false });
+  }, []);
+  const reachRename = React.useCallback(() => setTour((s) => (s.reachedRename ? s : { ...s, reachedRename: true })), []);
+  const finishRename = React.useCallback(() => setTour((s) => (s.renameDone ? s : { ...s, renameDone: true })), []);
+  const tourPage: TourPage = activeTab === 'schedule' || activeTab === 'settings' || activeTab === 'about' ? activeTab : 'other';
+  React.useEffect(() => {
+    if (tour.active && tourFinishedBy(tourPage, tour.reachedRename)) endTour();
+  }, [tour, tourPage, endTour]);
 
   React.useEffect(() => {
     const handleFirstLaunchReset = () => {
       setIsRouletteOpen(false);
       setImitatedNotification(null);
       setAutoOpenQueueHelp(false);
+      setOnboardingDone(false);
+      setTour({ active: false, reachedRename: false, renameDone: false });
     };
     window.addEventListener('zt-app-first-launch-reset', handleFirstLaunchReset);
     return () => window.removeEventListener('zt-app-first-launch-reset', handleFirstLaunchReset);
@@ -324,6 +340,7 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
               onOpenQueueSelection={() => {
                 setAutoOpenQueueHelp(true);
                 setActiveTab('settings');
+                if (!isOnboardingDone()) setTour({ active: true, reachedRename: false, renameDone: false });
               }}
               onChangeLanguage={(newLang) =>
                 onUpdateSettings({
@@ -408,6 +425,7 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
               
               {/* 1. Schedule */}
               <button
+                data-tour="dock-home"
                 onClick={() => onDockTap('schedule')}
                 disabled={
                   (!settings.queue || settings.queue.trim() === '') &&
@@ -465,6 +483,7 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
 
               {/* 4. About */}
               <button
+                data-tour="dock-about"
                 onClick={() => onDockTap('about')}
                 disabled={
                   (!settings.queue || settings.queue.trim() === '') &&
@@ -487,6 +506,20 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
 
         {/* Modal root: dialogs of the screens (address picker, queue help) render here, above the navigation dock */}
         <div data-phone-modal-root className="pointer-events-none absolute inset-0 z-[55] [&>*]:pointer-events-auto" />
+
+        {/* First-run tour: dims the screen except the controls to use next (above dialogs and the dock) */}
+        <CoachTour
+          active={tour.active}
+          page={tourPage}
+          hasAddress={(subscriptionStore?.items.length ?? 0) > 0}
+          reachedRename={tour.reachedRename}
+          renameDone={tour.renameDone}
+          lang={lang}
+          onReachRename={reachRename}
+          onRenameDone={finishRename}
+          onSkip={endTour}
+          onDone={endTour}
+        />
 
         {/* Android Gesture Bar */}
         <div className="shrink-0 flex justify-center pb-2 bg-transparent z-10">

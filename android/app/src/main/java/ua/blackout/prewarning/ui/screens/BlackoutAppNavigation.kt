@@ -48,6 +48,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import ua.blackout.prewarning.core.SiteState
 import ua.blackout.prewarning.data.parser.ZtoeAddressLookup
+import ua.blackout.prewarning.data.repository.HouseVariantChoices
 import ua.blackout.prewarning.data.repository.OutageRepository
 import ua.blackout.prewarning.data.repository.OutageStateStore
 import ua.blackout.prewarning.data.repository.RefreshOutcome
@@ -63,6 +64,17 @@ import ua.blackout.prewarning.notification.ExactAlarmGate
 import ua.blackout.prewarning.notification.NotificationHelper
 import ua.blackout.prewarning.ui.AppStrings
 import ua.blackout.prewarning.ui.components.glassSurface
+import ua.blackout.prewarning.ui.components.CoachOverlay
+import ua.blackout.prewarning.ui.components.CoachTargets
+import ua.blackout.prewarning.ui.components.CoachTip
+import ua.blackout.prewarning.ui.components.LocalCoachTargets
+import ua.blackout.prewarning.ui.components.OnboardingStore
+import ua.blackout.prewarning.ui.components.OnboardingTour
+import ua.blackout.prewarning.ui.components.TourInput
+import ua.blackout.prewarning.ui.components.TourPage
+import ua.blackout.prewarning.ui.components.TourStep
+import ua.blackout.prewarning.ui.components.coachTarget
+import androidx.compose.runtime.CompositionLocalProvider
 import ua.blackout.prewarning.ui.components.PageGlide
 import ua.blackout.prewarning.ui.components.ambientBreath
 import ua.blackout.prewarning.ui.components.ambientDrift
@@ -141,6 +153,18 @@ fun BlackoutAppNavigation(
     var currentLanguage by remember { mutableStateOf(initialSettings.language) }
     var isRouletteOpen by remember { mutableStateOf(false) }
     var autoOpenQueueHelp by remember { mutableStateOf(false) }
+    // First-run tour (spec/ONBOARDING.md): started by the first-launch button, never shown again once finished
+    val onboarding = remember { OnboardingStore(appContext) }
+    val coachTargets = remember { CoachTargets() }
+    var tourActive by remember { mutableStateOf(false) }
+    var tourReachedRename by remember { mutableStateOf(false) }
+    var tourRenameDone by remember { mutableStateOf(false) }
+    fun endTour() {
+        onboarding.setDone(true)
+        tourActive = false
+        tourReachedRename = false
+        tourRenameDone = false
+    }
     var currentTime by remember { mutableStateOf(LocalTime.now(KYIV_ZONE)) }
 
     // An address counts as a selection even when it has no queue and no emergency right now
@@ -242,13 +266,16 @@ fun BlackoutAppNavigation(
                 ZtoeAddressLookup.initDiskCache(appContext)
                 val addrQuery = settingsRepo.getSettings().selectedAddressQuery
                 if (resolveAddress && addrQuery != null && addrQuery.streetId.isNotBlank() && addrQuery.house.isNotBlank()) {
+                    val saved = settingsRepo.getSettings()
                     val lookup = try {
+                        // the variant the user chose is kept when the site lists the house with several queues (households / non-household)
                         ZtoeAddressLookup.checkAddressOnZtoeWebsite(
                             remId = addrQuery.remId,
                             settlementId = addrQuery.settlementId,
                             streetId = addrQuery.streetId,
                             house = addrQuery.house,
-                            siteUrl = settingsRepo.getSettings().cityUrl
+                            siteUrl = saved.cityUrl,
+                            preferred = HouseVariantChoices.get(appContext, addrQuery.streetId, addrQuery.house)
                         )
                     } catch (_: Exception) {
                         null
@@ -494,6 +521,7 @@ fun BlackoutAppNavigation(
     val ambient = rememberAmbientSeconds()
     val reduceMotion = remember { reducedMotion(appContext) }
 
+    CompositionLocalProvider(LocalCoachTargets provides coachTargets) {
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -651,6 +679,11 @@ fun BlackoutAppNavigation(
                         },
                         onOpenQueueSelection = {
                             autoOpenQueueHelp = true
+                            if (!onboarding.isDone()) {
+                                tourActive = true
+                                tourReachedRename = false
+                                tourRenameDone = false
+                            }
                             coroutineScope.launch {
                                 pagerState.animateScrollToPage(1, animationSpec = PageGlide)
                             }
@@ -685,6 +718,9 @@ fun BlackoutAppNavigation(
                         lang = resolvedLang,
                         autoOpenQueueHelp = autoOpenQueueHelp,
                         onAutoOpenQueueHelpHandled = { autoOpenQueueHelp = false },
+                        tourActive = tourActive,
+                        onTourSkip = { endTour() },
+                        onRenameDialogClosed = { if (tourActive && tourReachedRename) tourRenameDone = true },
                         onAddAddress = { resolvedQueue, statusText, addressLabel, query ->
                             val ok = onStoreResult(subscriptionSync.addFromLookup(resolvedQueue, statusText, addressLabel, query))
                             // the user stays in Settings (owner request): the address is added in place
@@ -889,6 +925,7 @@ fun BlackoutAppNavigation(
                         val isSchedule = pagerState.currentPage == 0
                         Box(
                             modifier = Modifier
+                                .coachTarget("dock-home")
                                 .size(44.dp)
                                 .clip(CircleShape)
                                 .background(if (isSchedule) Color.White else Color.Transparent)
@@ -929,6 +966,7 @@ fun BlackoutAppNavigation(
                         val isAbout = pagerState.currentPage == 2
                         Box(
                             modifier = Modifier
+                                .coachTarget("dock-about")
                                 .size(44.dp)
                                 .clip(CircleShape)
                                 .background(if (isAbout) Color.White else Color.Transparent)
@@ -948,5 +986,64 @@ fun BlackoutAppNavigation(
                 }
             }
         }
+
+        // First-run tour on the main window: RENAME, ALERTS (Settings) and ABOUT (main screen); the lookup
+        // dialog draws PICK and APPLY in its own window
+        if (tourActive) {
+            val tourPage = when (pagerState.currentPage) {
+                0 -> TourPage.SCHEDULE
+                1 -> TourPage.SETTINGS
+                2 -> TourPage.ABOUT
+                else -> TourPage.OTHER
+            }
+            val step = OnboardingTour.step(
+                TourInput(
+                    active = true,
+                    lookupOpen = false,
+                    resultShown = false,
+                    page = tourPage,
+                    hasAddress = subscriptions.items.isNotEmpty(),
+                    reachedRename = tourReachedRename,
+                    renameDone = tourRenameDone
+                )
+            )
+            LaunchedEffect(step) { if (step == TourStep.RENAME) tourReachedRename = true }
+            LaunchedEffect(tourPage, tourReachedRename) {
+                if (OnboardingTour.finishedBy(tourPage, tourReachedRename)) endTour()
+            }
+            when (step) {
+                TourStep.RENAME -> CoachOverlay(
+                    targets = coachTargets,
+                    holes = listOf(listOf("rename")),
+                    tips = listOf(CoachTip(anchor = listOf("rename"), text = AppStrings.tourRename(resolvedLang), next = true, skip = true)),
+                    lang = resolvedLang,
+                    onSkip = { endTour() },
+                    onNext = { tourRenameDone = true }
+                )
+                TourStep.ALERTS -> {
+                    val switches = listOf("alert-planned", "alert-emergency")
+                    CoachOverlay(
+                        targets = coachTargets,
+                        holes = listOf(switches, listOf("dock-home")),
+                        tips = listOf(
+                            CoachTip(anchor = switches, text = AppStrings.tourAlerts(resolvedLang), skip = true),
+                            CoachTip(anchor = listOf("dock-home"), text = AppStrings.tourBack(resolvedLang))
+                        ),
+                        lang = resolvedLang,
+                        onSkip = { endTour() }
+                    )
+                }
+                TourStep.ABOUT -> CoachOverlay(
+                    targets = coachTargets,
+                    holes = listOf(listOf("dock-about")),
+                    tips = listOf(CoachTip(anchor = listOf("dock-about"), text = AppStrings.tourDonate(resolvedLang), done = true)),
+                    lang = resolvedLang,
+                    onSkip = { endTour() },
+                    onDone = { endTour() }
+                )
+                else -> Unit
+            }
+        }
+    }
     }
 }

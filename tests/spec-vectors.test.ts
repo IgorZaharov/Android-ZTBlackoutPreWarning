@@ -18,6 +18,7 @@ import {
 import { makeOutage, type AlertSpec, type EmergencyRecord, type Outage, type Span } from '../src/core/outageModels';
 import { buildPlanned, dayView, emergencyDelivery, inWindow, planAlerts, resolveEmergency, spans, status } from '../src/core/outageEngine';
 import { HouseKey, StreetKey, TextNorm } from '../src/core/addressKeys';
+import { ConsumerType, HouseVariants, type HouseVariant } from '../src/core/houseVariants';
 import { EmergencyFetch, eventKey, reconcile, type LedgerEntry } from '../src/core/emergencyLedger';
 import { PowerOnMapper, type PowerOnRow } from '../src/core/poweronMapper';
 import { FETCH_FAILURES, SITE_STATES, SiteStateResolver, type FetchFailure, type SiteState } from '../src/core/siteState';
@@ -233,6 +234,29 @@ function emergencyLedgerVectors(): number {
 // -------------------------------------------------------------------------------------------------
 // address_keys.json
 // -------------------------------------------------------------------------------------------------
+
+function houseVariantVectors(): number {
+  const v: Json = load('house_variants.json');
+  let checks = 0;
+  for (const [raw, expect] of v.consumerType as string[][]) {
+    assert.equal(ConsumerType.of(raw), expect, `consumerType '${raw}'`);
+    checks++;
+  }
+  for (const c of v.merge as Json[]) {
+    let variants: HouseVariant[] = [];
+    for (const r of c.rows as Json[]) variants = HouseVariants.add(variants, r.queue, r.status, r.consumer);
+    const expect: HouseVariant[] = (c.expect as Json[]).map((e) => ({ queue: e.queue, statusText: e.status, consumers: e.consumers }));
+    assert.deepEqual(HouseVariants.ordered(variants), expect, `${c.name}: ordered variants`);
+    checks++;
+    for (const p of c.picks as Json[]) {
+      const picked = HouseVariants.pick(variants, p.preferred, p.consumers ?? []);
+      assert.equal(picked?.queue, p.queue, `${c.name}: pick '${p.preferred}' queue`);
+      assert.equal(picked?.statusText ?? null, p.status, `${c.name}: pick '${p.preferred}' status`);
+      checks++;
+    }
+  }
+  return checks;
+}
 
 function addressKeyVectors(): number {
   const v: Json = load('address_keys.json');
@@ -620,6 +644,7 @@ const suites: [string, () => number][] = [
   ['outage_engine.json', outageEngineVectors],
   ['emergency_ledger.json', emergencyLedgerVectors],
   ['address_keys.json', addressKeyVectors],
+  ['house_variants.json', houseVariantVectors],
   ['poweron_api.json', powerOnVectors],
   ['site_state.json', siteStateVectors],
   ['site_notice.json', siteNoticeVectors],

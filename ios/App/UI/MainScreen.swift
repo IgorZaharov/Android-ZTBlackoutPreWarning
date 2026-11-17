@@ -585,7 +585,9 @@ private struct FirstLaunchOverlay: View {
     var body: some View {
         let lang = model.lang
         VStack(spacing: 24) {
+            FirstStartTip(lang: lang).padding(.bottom, -12)
             Button {
+                model.startTourIfNew()
                 model.autoOpenQueueHelp = true
                 model.go(to: 1)
             } label: {
@@ -620,6 +622,33 @@ private struct FirstLaunchOverlay: View {
         }
         .padding(.horizontal, 24)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
+/// Tip above the first-launch button: a line of text and an arrow nudging down at it (owner, 2026-11-17);
+/// the arrow stands still under Reduce Motion.
+private struct FirstStartTip: View {
+    let lang: String
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var down = false
+
+    var body: some View {
+        VStack(spacing: 6) {
+            Text(verbatim: AppStrings.firstStartTip(lang))
+                .ztText(ZtType.body.weight(.bold))
+                .foregroundStyle(Color.white)
+                .multilineTextAlignment(.center)
+            Image(systemName: "arrow.down")
+                .font(.system(size: 28, weight: .heavy))
+                .foregroundStyle(ZtColors.accent)
+                .offset(y: down ? 8 : 0)
+                .accessibilityHidden(true)
+        }
+        .frame(maxWidth: 300)
+        .onAppear {
+            guard !reduceMotion else { return }
+            withAnimation(.easeInOut(duration: 0.7).repeatForever(autoreverses: true)) { down = true }
+        }
     }
 }
 

@@ -18,7 +18,7 @@ public enum WidgetLook: Sendable {
 
 /// The 24-hour drum of the widgets: the same cells (`DrumGeometry.cells`) and, in full colour, the same
 /// drawing (`DrumRenderer.drawCells`) as the main screen's `TimelineBar`, so both show the same 48 states;
-/// only the frame is compact (ticks every 6 h) to fit a medium widget.
+/// only the frame is compact (ticks every 3 h, owner 2026-11-17) to fit a medium widget.
 public struct WidgetDrum: View {
     let cells: [DrumCell]?
     let summary: String
@@ -52,7 +52,8 @@ public struct WidgetDrum: View {
                     }
                     .clipShape(RoundedRectangle(cornerRadius: 2))
                     .padding(3)
-                    needle.padding(.vertical, 1)
+                    // down past the slot to the hour labels
+                    needle.padding(.top, 1).padding(.bottom, -6)
                 } else {
                     Text(verbatim: AppStrings.outagesUnclear(lang))
                         .font(.system(size: 12, weight: .heavy))
@@ -123,8 +124,8 @@ public struct WidgetDrum: View {
             let inset: CGFloat = 3
             let x = inset + DrumGeometry.needleX(trackWidth: size.width - inset * 2, hour: hour, minute: minute)
             if look == .fullColor {
-                gc.fill(Path(roundedRect: CGRect(x: x - 2.75, y: 0, width: 5.5, height: size.height), cornerRadius: 2.75), with: .color(ZtDrumColors.widgetNeedleHalo))
-                gc.fill(Path(roundedRect: CGRect(x: x - 1.5, y: 0, width: 3, height: size.height), cornerRadius: 1.5), with: .color(ZtDrumColors.widgetNeedle))
+                gc.fill(Path(roundedRect: CGRect(x: x - 3.5, y: 0, width: 7, height: size.height), cornerRadius: 3.5), with: .color(ZtDrumColors.needleOutline))
+                gc.fill(Path(roundedRect: CGRect(x: x - 1.5, y: 2, width: 3, height: size.height - 4), cornerRadius: 1.5), with: .color(ZtDrumColors.needle))
             } else {
                 gc.fill(Path(roundedRect: CGRect(x: x - 1.5, y: 0, width: 3, height: size.height), cornerRadius: 1.5), with: .color(Color.white))
             }
@@ -134,7 +135,7 @@ public struct WidgetDrum: View {
 
     private var ticks: some View {
         HStack(spacing: 0) {
-            ForEach(DrumGeometry.tickHours(every: 6), id: \.self) { h in
+            ForEach(DrumGeometry.tickHours(every: 3), id: \.self) { h in
                 if h != 0 { Spacer(minLength: 0) }
                 Text(verbatim: h < 10 ? "0\(h)" : "\(h)")
                     .font(.system(size: 9, weight: .bold, design: .monospaced))

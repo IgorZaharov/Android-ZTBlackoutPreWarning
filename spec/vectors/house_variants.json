@@ -1,0 +1,489 @@
+{
+  "_doc": "Golden vectors for a house listed in several ztoe rows (spec/ADDRESS_KEY.md section 6). 'consumerType': raw 7th-column text -> type ('household', 'business' or '' for unknown); a type code maps to itself, because stored variants are united again. 'merge': the rows of ONE house in table order (queue '' = a status row) -> the ordered variants; each 'picks' entry gives the preferred queue (null = none), optionally the preferred consumer types of the user's choice, and the variant HouseVariants.pick must return. Rows of просп. Миру 23, вул. Андріївська 2а and вул. Болгарська 23 are real (ztoe.com.ua, Житомир, 2026-11-17).",
+  "consumerType": [
+    [
+      "побутові споживачі",
+      "household"
+    ],
+    [
+      "непобутові (юридичні) споживачі",
+      "business"
+    ],
+    [
+      "Непобутові (юридичні) споживачі ",
+      "business"
+    ],
+    [
+      "ПОБУТОВІ СПОЖИВАЧІ",
+      "household"
+    ],
+    [
+      "юридичні споживачі",
+      "business"
+    ],
+    [
+      "",
+      ""
+    ],
+    [
+      "Примітка",
+      ""
+    ],
+    [
+      "В цей час не вимикається, за винятком випадків аварійних відключень",
+      ""
+    ],
+    [
+      "household",
+      "household"
+    ],
+    [
+      "business",
+      "business"
+    ]
+  ],
+  "merge": [
+    {
+      "name": "просп. Миру 23: non-household 1.2 is listed first, households 5.2 must win",
+      "rows": [
+        {
+          "queue": "1.2",
+          "status": null,
+          "consumer": "непобутові (юридичні) споживачі"
+        },
+        {
+          "queue": "5.2",
+          "status": null,
+          "consumer": "побутові споживачі"
+        },
+        {
+          "queue": "5.2",
+          "status": null,
+          "consumer": "непобутові (юридичні) споживачі"
+        }
+      ],
+      "expect": [
+        {
+          "queue": "5.2",
+          "status": null,
+          "consumers": [
+            "household",
+            "business"
+          ]
+        },
+        {
+          "queue": "1.2",
+          "status": null,
+          "consumers": [
+            "business"
+          ]
+        }
+      ],
+      "picks": [
+        {
+          "preferred": null,
+          "queue": "5.2",
+          "status": null
+        },
+        {
+          "preferred": "1.2",
+          "queue": "1.2",
+          "status": null
+        },
+        {
+          "preferred": "5.2",
+          "queue": "5.2",
+          "status": null
+        },
+        {
+          "preferred": "3.1",
+          "queue": "5.2",
+          "status": null
+        },
+        {
+          "preferred": "",
+          "queue": "5.2",
+          "status": null
+        },
+        {
+          "preferred": "5.2",
+          "consumers": [
+            "business"
+          ],
+          "queue": "5.2",
+          "status": null
+        },
+        {
+          "preferred": "1.2",
+          "consumers": [
+            "business"
+          ],
+          "queue": "1.2",
+          "status": null
+        }
+      ]
+    },
+    {
+      "name": "вул. Андріївська 2а: business has a queue, households do not switch off",
+      "rows": [
+        {
+          "queue": "3.1",
+          "status": null,
+          "consumer": "непобутові (юридичні) споживачі"
+        },
+        {
+          "queue": "",
+          "status": "В цей час не вимикається, за винятком випадків аварійних відключень",
+          "consumer": "побутові споживачі"
+        }
+      ],
+      "expect": [
+        {
+          "queue": "",
+          "status": "В цей час не вимикається, за винятком випадків аварійних відключень",
+          "consumers": [
+            "household"
+          ]
+        },
+        {
+          "queue": "3.1",
+          "status": null,
+          "consumers": [
+            "business"
+          ]
+        }
+      ],
+      "picks": [
+        {
+          "preferred": null,
+          "queue": "",
+          "status": "В цей час не вимикається, за винятком випадків аварійних відключень"
+        },
+        {
+          "preferred": "",
+          "queue": "",
+          "status": "В цей час не вимикається, за винятком випадків аварійних відключень"
+        },
+        {
+          "preferred": "3.1",
+          "queue": "3.1",
+          "status": null
+        }
+      ]
+    },
+    {
+      "name": "вул. Болгарська 23: two household queues keep table order",
+      "rows": [
+        {
+          "queue": "1.2",
+          "status": null,
+          "consumer": "побутові споживачі"
+        },
+        {
+          "queue": "6.1",
+          "status": null,
+          "consumer": "побутові споживачі"
+        }
+      ],
+      "expect": [
+        {
+          "queue": "1.2",
+          "status": null,
+          "consumers": [
+            "household"
+          ]
+        },
+        {
+          "queue": "6.1",
+          "status": null,
+          "consumers": [
+            "household"
+          ]
+        }
+      ],
+      "picks": [
+        {
+          "preferred": null,
+          "queue": "1.2",
+          "status": null
+        },
+        {
+          "preferred": "6.1",
+          "queue": "6.1",
+          "status": null
+        },
+        {
+          "preferred": "",
+          "queue": "1.2",
+          "status": null
+        }
+      ]
+    },
+    {
+      "name": "one consumer type with a queue and a status: the queue comes first",
+      "rows": [
+        {
+          "queue": "",
+          "status": "В цей час не вимикається",
+          "consumer": "побутові споживачі"
+        },
+        {
+          "queue": "6.2",
+          "status": null,
+          "consumer": "побутові споживачі"
+        }
+      ],
+      "expect": [
+        {
+          "queue": "6.2",
+          "status": null,
+          "consumers": [
+            "household"
+          ]
+        },
+        {
+          "queue": "",
+          "status": "В цей час не вимикається",
+          "consumers": [
+            "household"
+          ]
+        }
+      ],
+      "picks": [
+        {
+          "preferred": null,
+          "queue": "6.2",
+          "status": null
+        },
+        {
+          "preferred": "",
+          "queue": "",
+          "status": "В цей час не вимикається"
+        }
+      ]
+    },
+    {
+      "name": "status rows are one variant with the first status text",
+      "rows": [
+        {
+          "queue": "",
+          "status": "Перший статус",
+          "consumer": "непобутові (юридичні) споживачі"
+        },
+        {
+          "queue": "",
+          "status": "Другий статус",
+          "consumer": "побутові споживачі"
+        }
+      ],
+      "expect": [
+        {
+          "queue": "",
+          "status": "Перший статус",
+          "consumers": [
+            "business",
+            "household"
+          ]
+        }
+      ],
+      "picks": [
+        {
+          "preferred": null,
+          "queue": "",
+          "status": "Перший статус"
+        },
+        {
+          "preferred": "4.1",
+          "queue": "",
+          "status": "Перший статус"
+        }
+      ]
+    },
+    {
+      "name": "old table without the consumer column: one variant, no consumers",
+      "rows": [
+        {
+          "queue": "5.2",
+          "status": null,
+          "consumer": ""
+        },
+        {
+          "queue": "5.2",
+          "status": null,
+          "consumer": ""
+        }
+      ],
+      "expect": [
+        {
+          "queue": "5.2",
+          "status": null,
+          "consumers": []
+        }
+      ],
+      "picks": [
+        {
+          "preferred": null,
+          "queue": "5.2",
+          "status": null
+        }
+      ]
+    },
+    {
+      "name": "single row",
+      "rows": [
+        {
+          "queue": "4.1",
+          "status": null,
+          "consumer": "побутові споживачі"
+        }
+      ],
+      "expect": [
+        {
+          "queue": "4.1",
+          "status": null,
+          "consumers": [
+            "household"
+          ]
+        }
+      ],
+      "picks": [
+        {
+          "preferred": null,
+          "queue": "4.1",
+          "status": null
+        },
+        {
+          "preferred": "1.1",
+          "queue": "4.1",
+          "status": null
+        }
+      ]
+    },
+    {
+      "name": "union of stored variants keeps the consumer types (cache, several vulica ids)",
+      "rows": [
+        {
+          "queue": "1.2",
+          "status": null,
+          "consumer": "business"
+        },
+        {
+          "queue": "5.2",
+          "status": null,
+          "consumer": "household"
+        }
+      ],
+      "expect": [
+        {
+          "queue": "5.2",
+          "status": null,
+          "consumers": [
+            "household"
+          ]
+        },
+        {
+          "queue": "1.2",
+          "status": null,
+          "consumers": [
+            "business"
+          ]
+        }
+      ],
+      "picks": [
+        {
+          "preferred": null,
+          "queue": "5.2",
+          "status": null
+        }
+      ]
+    },
+    {
+      "name": "the households' queue moved while a business row kept the old one: the chosen consumer type wins",
+      "rows": [
+        {
+          "queue": "4.1",
+          "status": null,
+          "consumer": "побутові споживачі"
+        },
+        {
+          "queue": "5.2",
+          "status": null,
+          "consumer": "непобутові (юридичні) споживачі"
+        },
+        {
+          "queue": "1.2",
+          "status": null,
+          "consumer": "непобутові (юридичні) споживачі"
+        }
+      ],
+      "expect": [
+        {
+          "queue": "4.1",
+          "status": null,
+          "consumers": [
+            "household"
+          ]
+        },
+        {
+          "queue": "5.2",
+          "status": null,
+          "consumers": [
+            "business"
+          ]
+        },
+        {
+          "queue": "1.2",
+          "status": null,
+          "consumers": [
+            "business"
+          ]
+        }
+      ],
+      "picks": [
+        {
+          "preferred": "5.2",
+          "consumers": [
+            "household"
+          ],
+          "queue": "4.1",
+          "status": null
+        },
+        {
+          "preferred": "5.2",
+          "consumers": [
+            "household",
+            "business"
+          ],
+          "queue": "5.2",
+          "status": null
+        },
+        {
+          "preferred": "1.2",
+          "consumers": [
+            "business"
+          ],
+          "queue": "1.2",
+          "status": null
+        },
+        {
+          "preferred": "3.1",
+          "consumers": [
+            "business"
+          ],
+          "queue": "5.2",
+          "status": null
+        },
+        {
+          "preferred": "5.2",
+          "queue": "5.2",
+          "status": null
+        },
+        {
+          "preferred": null,
+          "queue": "4.1",
+          "status": null
+        }
+      ]
+    }
+  ]
+}

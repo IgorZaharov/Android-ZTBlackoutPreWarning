@@ -10,6 +10,7 @@ import androidx.work.WorkManager
 import androidx.work.WorkerParameters
 import kotlinx.coroutines.CancellationException
 import ua.blackout.prewarning.data.parser.ZtoeAddressLookup
+import ua.blackout.prewarning.data.repository.HouseVariantChoices
 import ua.blackout.prewarning.data.repository.OutageRepository
 import ua.blackout.prewarning.data.repository.SettingsRepository
 import ua.blackout.prewarning.data.repository.SubscriptionSync
@@ -34,7 +35,11 @@ class ScheduleSyncWorker(
             if (addressQuery != null && settings.queue.isBlank()) {
                 try {
                     ZtoeAddressLookup.initDiskCache(appContext)
-                    val lookup = ZtoeAddressLookup.checkAddressOnZtoeWebsite(addressQuery, settings.cityUrl)
+                    val lookup = ZtoeAddressLookup.checkAddressOnZtoeWebsite(
+                        addressQuery,
+                        settings.cityUrl,
+                        HouseVariantChoices.get(appContext, addressQuery.streetId, addressQuery.house)
+                    )
                     if (lookup != null && (lookup.queue != settings.queue || lookup.statusText != settings.customQueueStatusText)) {
                         // through the subscription store, which writes the primary back into these keys
                         SubscriptionSync(appContext).assignPrimaryQueue(lookup.queue, lookup.statusText, null)
