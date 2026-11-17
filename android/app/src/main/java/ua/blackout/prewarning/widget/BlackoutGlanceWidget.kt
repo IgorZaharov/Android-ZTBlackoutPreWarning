@@ -436,40 +436,34 @@ open class BlackoutGlanceWidget(private val forceBigLayout: Boolean = false) : G
                 paint.shader = null
             }
 
-            // 5. Black current-time needle (#0B0B0A) protruding above and below the dark-grey contour
+            // 5. Bright yellow current-time needle (#FFE600) with a black outline, from above the dark-grey contour
+            // down to the hour labels (owner, 2026-11-17: the black needle was hard to see; the 720 px bitmap is
+            // about 2.5 px per dp on the home screen, so the 5 px outline is 2 dp)
             val fraction = ((currentH.coerceIn(0, 23) * 60 + currentM.coerceIn(0, 59)) / 1440f).coerceIn(0f, 1f)
             val needleX = trackLeft + trackWidth * fraction
             val needleTop = contourTop - 8f
-            val needleBottom = contourBottom + 8f
+            val needleBottom = height - 36f // just above the hour labels (baseline height - 16)
 
-            // Subtle white halo around the black needle
+            val needleOutline = 5f
             paint.style = Paint.Style.FILL
-            paint.color = 0xD9FFFFFF.toInt()
+            paint.color = 0xFF000000.toInt()
             canvas.drawRoundRect(
-                RectF(needleX - 4.5f, needleTop, needleX + 4.5f, needleBottom),
-                4.5f, 4.5f, paint
+                RectF(needleX - 3f - needleOutline, needleTop - needleOutline, needleX + 3f + needleOutline, needleBottom + needleOutline),
+                3f + needleOutline, 3f + needleOutline, paint
             )
-
-            // Solid black needle
-            paint.color = 0xFF0B0B0A.toInt()
+            paint.color = 0xFFFFE600.toInt()
             canvas.drawRoundRect(
                 RectF(needleX - 3f, needleTop, needleX + 3f, needleBottom),
                 3f, 3f, paint
             )
 
-            // 6. Stamped black (#1C1B18) hour markers: 00, 06, 12, 18, 24
+            // 6. Stamped black (#1C1B18) hour markers every 3 hours: 00, 03, 06 ... 24 (owner, 2026-11-17)
             val textPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
                 color = 0xFF1C1B18.toInt()
                 typeface = Typeface.create(Typeface.MONOSPACE, Typeface.BOLD)
                 textSize = 21f + (height - 132) * 0.1f
             }
-            val labels = listOf(
-                0f to "00",
-                0.25f to "06",
-                0.50f to "12",
-                0.75f to "18",
-                1.0f to "24"
-            )
+            val labels = (0..24 step 3).map { h -> h / 24f to h.toString().padStart(2, '0') }
             val textY = height - 16f
             labels.forEach { (pos, label) ->
                 val tw = textPaint.measureText(label)

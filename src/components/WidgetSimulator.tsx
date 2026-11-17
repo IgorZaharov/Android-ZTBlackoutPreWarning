@@ -292,7 +292,7 @@ export const WidgetSimulator: React.FC<WidgetSimulatorProps> = ({
     </div>
   );
 
-  // Third widget (4x1): the drum chart with the black needle, no buttons or switches; a tap opens the app.
+  // Third widget (4x1): the drum chart with the yellow needle, no buttons or switches; a tap opens the app.
   // Same width as the big widget (both are 4 cells). When the launcher cell is tall enough (Android: 84 dp,
   // a usual portrait row is about 100 dp) one line with the queue, status and countdown sits above the drum;
   // the simulator shows that usual case.
