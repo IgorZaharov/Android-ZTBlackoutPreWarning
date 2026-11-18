@@ -17,7 +17,7 @@ export interface RowText {
   timeText: string;
   /** Full length of the outage ("2 год"); null when the end is unknown (overdue emergency). */
   durationText: string | null;
-  /** "Аварійне" / "Планові роботи"; null for a plain planned outage (the dot is its marker). */
+  /** "Аварійне" / "Можливі планові роботи"; null for a plain planned outage (the dot is its marker). */
   kindTag: string | null;
   /** "з 13.11 23:00" on the day an outage continues into. */
   originTag: string | null;

@@ -15,7 +15,7 @@ Constants: see `spec/config.json` (`grid`, `outage`).
 | Wall-clock arithmetic | `plusMinutes`, `plusDays`, comparisons, `start of day` are plain calendar arithmetic on the wall clock. |
 | Elapsed time | Durations and countdowns map both ends to real instants in `Europe/Kyiv` (legacy id `Europe/Kiev` on old devices) and subtract. Result is truncated toward zero to whole minutes (durations) or whole seconds (countdowns). See section 7. |
 | `now` | A `LocalDateTime` that may carry seconds. `today` is the calendar date of `now` in Kyiv. |
-| Kinds | `PLANNED` (ztoe hourly schedule), `REPAIR` (PowerOn planned works), `EMERGENCY` (PowerOn). `PLANNED` and `REPAIR` are "planned-like". Kind order for sorting: `PLANNED` < `REPAIR` < `EMERGENCY`. |
+| Kinds | `PLANNED` (ztoe hourly schedule), `REPAIR` (PowerOn planned works), `EMERGENCY` (PowerOn). Only `PLANNED` is scheduled; `REPAIR` works are only *possible* (owner, 2026-11-18: shown as "Можливі планові роботи") and are treated like emergencies: they count as off for status and spans, are drawn like an emergency, and never get a pre-warning. Kind order for sorting: `PLANNED` < `REPAIR` < `EMERGENCY`. |
 
 ## 2. Model
 
@@ -25,7 +25,7 @@ Constants: see `spec/config.json` (`grid`, `outage`).
 | `IntervalStatus` | `FINISHED`, `ACTIVE`, `UPCOMING`, `OVERDUE` | Derived by `statusAt(now)`, see below. |
 | `EmergencyRecord` | `id`, `start`, `estimatedEnd?`, `closedAt?`, `label?` | One emergency as seen on PowerOn or restored from the ledger. `closedAt` is set only by the ledger. |
 | `Span` | `start`, `end`, `mayContinue`, `kinds: set<kind>` | Maximal union of touching or overlapping outages. |
-| `SlotState` | `planned`, `emergency`; derived `off = planned or emergency` | One drum cell. `planned` is true for `PLANNED` and `REPAIR` outages. |
+| `SlotState` | `planned`, `emergency`; derived `off = planned or emergency` | One drum cell. `planned` is true for `PLANNED` outages; `emergency` is true for `EMERGENCY` and `REPAIR` outages. |
 | `DayRow` | `outage`, `from`, `to`, `status`, `continuesFromPrevDay`, `continuesToNextDay`, `durationMinutes`, `inDayMinutes` | One outage clipped to one day. |
 | `DayView` | `date`, `slots: SlotState[48]`, `rows: DayRow[]`, `totalOffMinutes` | |
 | `StatusInfo` | `isOffNow`, `countdownSeconds?`, `countdownText`, `nextSlotTime`, `currentSpan?`, `nextSpan?` | |
@@ -150,13 +150,13 @@ The vectors write cells as `HH:MM-HH:MM` ranges (maximal runs of true cells; the
 4. Else `next` = the first span with `start > now`. If present: `isOffNow = false`; `secs = elapsed seconds now -> next.start`; `countdownText = formatCountdown(secs)`; `nextSlotTime = formatSpan(next)`; `nextSpan = next`.
 5. Else: `isOffNow = false`, `countdownSeconds = null`, `countdownText = "--:--:--"`, `nextSlotTime = "Відключень немає"` (the exact Ukrainian string; the UI maps it to the localised "no outages" text but compares against this value), no spans.
 
-Stale emergencies never count. Repair works and emergencies count as off like planned outages.
+Stale emergencies never count. Repair works and emergencies count as off like planned outages (status and spans use every kind).
 
 ### 6.2 `planAlerts(outages, now, advanceMinutes) -> AlertSpec[]`
 
-1. `planned = spans(outages that are not stale, kinds = {PLANNED, REPAIR})`. Emergencies take no part: a planned block directly followed by an emergency keeps its own end in the alert.
+1. `planned = spans(outages that are not stale, kinds = {PLANNED})`. Emergencies and repair works take no part: a planned block directly followed by an emergency or a repair work keeps its own end in the alert, and a repair work alone gets no alert.
 2. For each span in order: skip it if `start <= now`. `fireAt = start - advanceMinutes` (wall-clock minutes); skip it if `fireAt <= now` (no retroactive alerts; `fireAt == now` is also skipped).
-2a. **One continuous outage, one warning:** skip the span when an emergency that is not stale started **before** it and is still on at its start (`emergency.start < span.start` and either `emergency.overdue` or `emergency.end >= span.start`): power is already off, the scheduled block only continues the outage. An emergency starting at the same moment does not take the warning away (the warning is the start of the outage then).
+2a. **One continuous outage, one warning:** skip the span when an emergency or repair work that is not stale started **before** it and is still on at its start (`o.start < span.start` and either `o.overdue` or `o.end >= span.start`): power is already off, the scheduled block only continues the outage. An emergency starting at the same moment does not take the warning away (the warning is the start of the outage then).
 3. Emit `AlertSpec(key = "planned_" + start, fireAt, spanStart = start, spanEnd = end, mayContinue, durationMinutes = elapsed minutes start -> end)`.
 
 One alert per merged span, keyed by the span's absolute start. A `00:00` continuation is part of the earlier span and never gets its own alert. A span that spans midnight is one alert with the full duration. Alerts exist for any span in the window, so blocks of tomorrow are planned today.
@@ -193,7 +193,7 @@ One alert per merged span, keyed by the span's absolute start. A `00:00` continu
 
 **C. Overdue and stale.** Emergency `17:30`, estimate `19:00`. At `19:20`: row `OVERDUE`, `to = 19:20`, `durationMinutes = 110`, emergency cells `17:30-19:30`, `status` -> off, `--:--:--`, `17:30 – --:--`. At `20:00` (60 min past): still `OVERDUE`. At `20:01` (61 min past): `FINISHED`, row `to = 19:00`, not off, `Відключень немає`. Closed by the ledger at `18:10` (now `18:30`): row `17:30->18:10` `FINISHED`, `totalOffMinutes = 40`.
 
-**D. Repair works.** `repair_2026-11-14T08:00` `08:00-17:00` tomorrow, now `2026-11-13T18:00`: countdown `14:00:00`, `nextSlotTime = 08:00 – 17:00`, one alert `planned_2026-11-14T08:00` at `07:45` with `durationMinutes = 540`; tomorrow's `plannedCells = 08:00-17:00`, row kind `REPAIR`.
+**D. Repair works.** `repair_2026-11-14T08:00` `08:00-17:00` tomorrow, now `2026-11-13T18:00`: countdown `14:00:00`, `nextSlotTime = 08:00 – 17:00`, **no** alert; tomorrow's `emergencyCells = 08:00-17:00` (no planned cells), row kind `REPAIR`.
 
 ## 9. Not pinned by a vector (reference behaviour, change only together with a new vector)
 
@@ -204,4 +204,4 @@ One alert per merged span, keyed by the span's absolute start. A `00:00` continu
 
 ## Vectors
 
-`spec/vectors/outage_engine.json` (22 cases incl. midnight with and without yesterday's tail, year boundary, both DST nights, overdue grace boundary 60/61, ledger-closed emergency, repair works, far-future emergency, empty input). Runner semantics: `spec/README.md`.
+`spec/vectors/outage_engine.json` (23 cases incl. midnight with and without yesterday's tail, year boundary, both DST nights, overdue grace boundary 60/61, ledger-closed emergency, repair works (no alert, emergency cells, between two planned blocks), far-future emergency, empty input). Runner semantics: `spec/README.md`.

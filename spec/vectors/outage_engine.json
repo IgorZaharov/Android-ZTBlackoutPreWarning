@@ -185,15 +185,31 @@
       }
     },
     {
-      "name": "repair works tomorrow count as planned: listed on tomorrow, one alert",
+      "name": "repair works tomorrow are possible works: listed and counted as off, drawn as emergency cells, no alert",
       "today": "2026-11-13", "now": "2026-11-13T18:00", "advanceMinutes": 15,
       "planned": { "today": [] },
       "repair": [ { "id": "repair_2026-11-14T08:00", "start": "2026-11-14T08:00", "end": "2026-11-14T17:00" } ],
       "expect": {
         "status": { "isOffNow": false, "countdownText": "14:00:00", "nextSlotTime": "08:00 – 17:00" },
-        "alerts": [ { "key": "planned_2026-11-14T08:00", "fireAt": "2026-11-14T07:45", "spanEnd": "2026-11-14T17:00", "durationMinutes": 540 } ],
-        "days": { "2026-11-14": { "totalOffMinutes": 540, "plannedCells": ["08:00-17:00"], "emergencyCells": [],
+        "alerts": [],
+        "days": { "2026-11-14": { "totalOffMinutes": 540, "plannedCells": [], "emergencyCells": ["08:00-17:00"],
           "rows": [ { "kind": "REPAIR", "from": "2026-11-14T08:00", "to": "2026-11-14T17:00", "status": "UPCOMING", "durationMinutes": 540, "inDayMinutes": 540 } ] } }
+      }
+    },
+    {
+      "name": "repair works between two planned blocks: one span for the status, the first block keeps its own end in the alert, the block that starts inside the works gets none",
+      "today": "2026-11-13", "now": "2026-11-13T05:00", "advanceMinutes": 15,
+      "planned": { "today": ["06:00-08:00", "16:30-19:30"] },
+      "repair": [ { "id": "repair_2026-11-13T08:00", "start": "2026-11-13T08:00", "end": "2026-11-13T17:00" } ],
+      "expect": {
+        "status": { "isOffNow": false, "countdownText": "01:00:00", "nextSlotTime": "06:00 – 19:30" },
+        "alerts": [ { "key": "planned_2026-11-13T06:00", "fireAt": "2026-11-13T05:45", "spanEnd": "2026-11-13T08:00", "durationMinutes": 120 } ],
+        "days": { "2026-11-13": { "totalOffMinutes": 810, "plannedCells": ["06:00-08:00", "16:30-19:30"], "emergencyCells": ["08:00-17:00"],
+          "rows": [
+            { "kind": "PLANNED", "from": "2026-11-13T06:00", "to": "2026-11-13T08:00", "status": "UPCOMING" },
+            { "kind": "REPAIR", "from": "2026-11-13T08:00", "to": "2026-11-13T17:00", "status": "UPCOMING" },
+            { "kind": "PLANNED", "from": "2026-11-13T16:30", "to": "2026-11-13T19:30", "status": "UPCOMING" }
+          ] } }
       }
     },
     {

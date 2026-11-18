@@ -1568,7 +1568,7 @@
   ],
   "groupAlerts": [
    {
-    "name": "two addresses on one queue share one alert; a repair work that extends one span splits it; planned-off item skipped; groups sorted by fireAt, start, key",
+    "name": "two addresses on one queue share one alert; a span with another end gets its own group; planned-off item skipped; groups sorted by fireAt, start, key",
     "store": {
      "schemaVersion": 1,
      "primaryId": "bbbb0002",

@@ -24,6 +24,7 @@ import {
 } from './localTime';
 import {
   OutageConfig,
+  isEmergencyLike,
   isPlannedLike,
   makeOutage,
   makeSlotState,
@@ -214,7 +215,7 @@ export function dayView(outages: readonly Outage[], date: LocalDate, now: LocalD
     const e = plusMinutes(s, OutageConfig.SLOT_MINUTES);
     return makeSlotState(
       relevant.some((o) => isPlannedLike(o) && o.start < e && o.end > s),
-      relevant.some((o) => o.kind === 'EMERGENCY' && o.start < e && o.end > s)
+      relevant.some((o) => isEmergencyLike(o) && o.start < e && o.end > s)
     );
   });
 
@@ -311,10 +312,10 @@ export function status(outages: readonly Outage[], now: LocalDateTime, zone: str
 // Alerts and widget transitions
 // ---------------------------------------------------------------------------------------------
 
-const PLANNED_KINDS: ReadonlySet<OutageKind> = new Set<OutageKind>(['PLANNED', 'REPAIR']);
+const PLANNED_KINDS: ReadonlySet<OutageKind> = new Set<OutageKind>(['PLANNED']);
 
 /**
- * One pre-warning per merged planned span (planned and repair works only), keyed by the span's
+ * One pre-warning per merged planned span (the ztoe schedule only; repair works get none), keyed by the span's
  * absolute start. Spans already started, or whose alert time has passed, never alert; a 00:00
  * continuation never gets its own alert because it is part of the earlier span.
  */
@@ -328,12 +329,12 @@ export function planAlerts(
     outages.filter((o) => !o.stale),
     PLANNED_KINDS
   );
-  const emergencies = outages.filter((o) => o.kind === 'EMERGENCY' && !o.stale);
+  const emergencies = outages.filter((o) => isEmergencyLike(o) && !o.stale);
   const out: AlertSpec[] = [];
   for (const sp of plannedSpans) {
     if (!(sp.start > now)) continue;
-    // One continuous outage, one warning (spec/OUTAGE_ENGINE.md 6.2 step 2a): an emergency that started before the
-    // block and is still on at its start means power is already off
+    // One continuous outage, one warning (spec/OUTAGE_ENGINE.md 6.2 step 2a): an emergency (or a repair work) that
+    // started before the block and is still on at its start means power is already off
     if (emergencies.some((e) => e.start < sp.start && (e.overdue || e.end >= sp.start))) continue;
     const fireAt = plusMinutes(sp.start, -advanceMinutes);
     if (!(fireAt > now)) continue;
@@ -349,7 +350,7 @@ export function planAlerts(
   return out;
 }
 
-/** The planned and repair spans of an address (not stale): what its pre-warnings are about. */
+/** The planned (ztoe schedule) spans of an address, not stale: what its pre-warnings are about. */
 export function plannedSpans(outages: readonly Outage[]): Span[] {
   return spans(outages.filter((o) => !o.stale), PLANNED_KINDS);
 }

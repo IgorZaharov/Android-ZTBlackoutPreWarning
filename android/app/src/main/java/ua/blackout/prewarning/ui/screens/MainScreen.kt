@@ -612,9 +612,16 @@ fun MainScreen(
                         horizontalArrangement = Arrangement.spacedBy(12.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                            LabelledValue(AppStrings.lastUpdated(lang), lastUpdated)
-                            LabelledValue(AppStrings.nextUpdated(lang), nextUpdated)
+                        Box(modifier = Modifier.weight(1f)) {
+                            // As wide as the widest pair, every label filling the rest of its row: both times
+                            // start at the same x, labels stay left-aligned and a wrapped label keeps its time
+                            Column(
+                                modifier = Modifier.width(IntrinsicSize.Max),
+                                verticalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                LabelledValue(AppStrings.lastUpdated(lang), lastUpdated)
+                                LabelledValue(AppStrings.nextUpdated(lang), nextUpdated)
+                            }
                         }
                         RefreshButton(
                             enabled = !isQueueUnselected,
@@ -1071,12 +1078,12 @@ private fun OutageRowItem(text: OutageRowFormat.RowText, lang: String) {
 
 @Composable
 private fun LabelledValue(label: String, value: String) {
-    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
         Text(
             text = label,
             style = ZtType.caption,
             color = TextTertiary,
-            modifier = Modifier.weight(1f, fill = false)
+            modifier = Modifier.weight(1f)
         )
         Text(
             text = value,

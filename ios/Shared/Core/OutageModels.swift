@@ -14,7 +14,8 @@ public enum OutageConfig {
     public static let ETA_CHANGE_MIN_DELTA_MINUTES = 10
 }
 
-/// What produced an outage. REPAIR (PowerOn planned works) is treated like PLANNED for alerts.
+/// What produced an outage. REPAIR (PowerOn "possible planned works") is treated like EMERGENCY: it counts
+/// as off and is drawn in the emergency half of the drum, but never gets a pre-warning (owner, 2026-11-18).
 public enum OutageKind: String, CaseIterable, Hashable, Sendable {
     case PLANNED, REPAIR, EMERGENCY
 
@@ -61,7 +62,12 @@ public struct Outage: Hashable, Sendable {
         self.label = label
     }
 
-    public var isPlannedLike: Bool { kind == .PLANNED || kind == .REPAIR }
+    /// Scheduled by the ztoe table: the only kind that gets pre-warnings and the planned half of the drum.
+    public var isPlannedLike: Bool { kind == .PLANNED }
+
+    /// EMERGENCY or REPAIR (PowerOn "possible planned works", owner 2026-11-18): drawn in the emergency half
+    /// of the drum, counted as off, never pre-warned.
+    public var isEmergencyLike: Bool { kind == .EMERGENCY || kind == .REPAIR }
 
     public func statusAt(_ now: LocalDateTime) -> IntervalStatus {
         if stale { return .FINISHED }

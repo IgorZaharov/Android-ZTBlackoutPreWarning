@@ -129,10 +129,12 @@ struct MainScreen: View {
                     ZtGlassCard(padding: 14) {
                         VStack(alignment: .leading, spacing: 10) {
                             HStack(spacing: 12) {
-                                VStack(alignment: .leading, spacing: 4) {
+                                // Two columns: labels left-aligned, both times starting at the same x
+                                Grid(alignment: .leadingFirstTextBaseline, horizontalSpacing: 6, verticalSpacing: 4) {
                                     LabelledValue(label: AppStrings.lastUpdated(lang), value: model.lastUpdated)
                                     LabelledValue(label: AppStrings.nextUpdated(lang), value: model.nextUpdated)
                                 }
+                                .accessibilityElement(children: .combine)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                                 RefreshDisc(enabled: !isQueueUnselected, busy: model.isRefreshing, lang: lang) { model.manualRefresh() }
                             }
@@ -515,11 +517,11 @@ private struct LabelledValue: View {
     let value: String
 
     var body: some View {
-        HStack(spacing: 6) {
+        // A GridRow, so the labels and the times of all rows line up in two columns
+        GridRow {
             Text(verbatim: label).ztText(ZtType.caption).foregroundStyle(UiColors.textTertiaryHi)
             Text(verbatim: value).ztText(ZtType.captionMono).foregroundStyle(Color.white).lineLimit(1).fixedSize()
         }
-        .accessibilityElement(children: .combine)
     }
 }
 

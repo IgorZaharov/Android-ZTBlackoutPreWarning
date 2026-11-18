@@ -67,7 +67,7 @@ fun AboutScreen(
         val resolved = when {
             !rawVersion.isNullOrBlank() && rawVersion.matches(semverRegex) -> rawVersion
             buildCfgVersion.matches(semverRegex) -> buildCfgVersion
-            else -> "1.4.1"
+            else -> "1.4.2"
         }
         "v$resolved"
     }

@@ -13,7 +13,7 @@ The adapters in the tree before 1.4.0 (`AlarmScheduler`, `AlarmReceiver`, `Notif
 
 ### 1.1 Plan
 
-`planAlerts(window, now, advanceMinutes) -> AlertSpec[]` (`OUTAGE_ENGINE.md` section 6.2): one alert per merged planned or repair span of the window yesterday..tomorrow, at `fireAt = span.start - advanceMinutes`, never retroactive, never for a started or finished span, never for a continuation after midnight. The plan is **recomputed from scratch** whenever its inputs change and diffed by key:
+`planAlerts(window, now, advanceMinutes) -> AlertSpec[]` (`OUTAGE_ENGINE.md` section 6.2): one alert per merged planned span (ztoe schedule only; repair works get none) of the window yesterday..tomorrow, at `fireAt = span.start - advanceMinutes`, never retroactive, never for a started or finished span, never for a continuation after midnight. The plan is **recomputed from scratch** whenever its inputs change and diffed by key:
 
 - keys no longer in the plan: cancel;
 - new keys: schedule;
@@ -112,7 +112,7 @@ Emergency events are gated by the master switch `alertsMaster` **and** the addre
 
 ### 2.4a One continuous outage: `emergencyDelivery(kind, start, eta, now, plannedSpans, plannedAlertsOn)`
 
-When emergency and scheduled outages of one address touch or overlap they are one continuous outage, and only its beginning is announced (owner request). `plannedSpans` are the address's `spans(outages not stale, {PLANNED, REPAIR})`; `plannedAlertsOn` is `plannedActive(master, item)` (`SUBSCRIPTIONS.md` 5). Spans include their bounds (`start <= t <= end`).
+When emergency and scheduled outages of one address touch or overlap they are one continuous outage, and only its beginning is announced (owner request). `plannedSpans` are the address's `spans(outages not stale, {PLANNED})` (repair works are not scheduled outages); `plannedAlertsOn` is `plannedActive(master, item)` (`SUBSCRIPTIONS.md` 5). Spans include their bounds (`start <= t <= end`).
 
 | Event | Rule | Result |
 |---|---|---|

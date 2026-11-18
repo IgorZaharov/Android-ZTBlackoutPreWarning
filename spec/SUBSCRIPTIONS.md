@@ -172,7 +172,7 @@ vibration are enabled exactly when the master is on.
 ### 8.1 Planned: one alert per queue and span
 
 For every item the platform computes `alerts(item)` = `OutageEngine.planAlerts` (`NOTIFICATIONS.md` 1.1)
-over that item's outages: the ztoe table of `item.queue` plus the repair works stored under its address key,
+over that item's outages: the ztoe table of `item.queue` (repair works stored under its address key take no part in alerts since 2026-11-18),
 with the same `now` and the global advance minutes. One ztoe fetch caches all 12 queues, so no extra request
 is needed per item; when the primary item has no queue, the fetch uses the first queue in `alertOrder`.
 
@@ -190,8 +190,8 @@ the group of **(item.queue, spanStart, spanEnd)**:
 | `memberIds` | item ids in walk order, each once |
 
 Groups are returned sorted by `fireAt`, then `spanStart`, then `key`. Two items on one queue share one group
-(owner decision 3: one merged notification); a repair work that extends one item's span gives that item a
-different `spanEnd` and so its own group. The platform schedules one alarm per pending group (8.2). With at
+(owner decision 3: one merged notification); items whose spans differ (for example two queues, or a span cut by
+an emergency that was already on) get different groups. The platform schedules one alarm per pending group (8.2). With at
 most 5 queues and 48 spans per queue in the window the plan stays far below Android's 500 alarm limit.
 
 ### 8.2 Dedupe and firing

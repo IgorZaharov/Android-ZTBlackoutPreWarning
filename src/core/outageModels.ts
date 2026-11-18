@@ -16,7 +16,10 @@ export const OutageConfig = {
   ETA_CHANGE_MIN_DELTA_MINUTES: 10,
 } as const;
 
-/** What produced an outage. REPAIR (PowerOn planned works) is treated like PLANNED for alerts. */
+/**
+ * What produced an outage. REPAIR (PowerOn "possible planned works") is treated like EMERGENCY: it counts
+ * as off and is drawn in the emergency half of the drum, but never gets a pre-warning (owner, 2026-11-18).
+ */
 export type OutageKind = 'PLANNED' | 'REPAIR' | 'EMERGENCY';
 /** Declaration order of the Kotlin enum; index = ordinal. */
 export const OUTAGE_KINDS: readonly OutageKind[] = ['PLANNED', 'REPAIR', 'EMERGENCY'];
@@ -54,7 +57,11 @@ export function makeOutage(
   };
 }
 
-export const isPlannedLike = (o: Outage): boolean => o.kind === 'PLANNED' || o.kind === 'REPAIR';
+/** Scheduled by the ztoe table: the only kind that gets pre-warnings and the planned half of the drum. */
+export const isPlannedLike = (o: Outage): boolean => o.kind === 'PLANNED';
+
+/** EMERGENCY or REPAIR: drawn in the emergency half of the drum. */
+export const isEmergencyLike = (o: Outage): boolean => o.kind === 'EMERGENCY' || o.kind === 'REPAIR';
 
 export function statusAt(o: Outage, now: LocalDateTime): IntervalStatus {
   if (o.stale) return 'FINISHED';

@@ -1,5 +1,13 @@
 # Changelog
 
+## [1.4.2] - 2026-11-18
+
+### Changed
+- **PowerOn planned works are «Можливі планові роботи» and behave like emergencies** (owner, 2026-11-18; spec/OUTAGE_ENGINE.md sections 1 and 6.2, spec/UI_DRUM.md, spec/NOTIFICATIONS.md 1.1 and 2.4a, spec/SUBSCRIPTIONS.md 8.1; `spec/vectors/outage_engine.json`): a `pw_accident_planeds` row (for example 08:00–17:00 on вул. Калинова, Оліївка, which is not on the PowerOn search page or the ztoe table) used to count as a scheduled outage: crimson on the drum, merged into the hour schedule and pre-warned. It is only a possible outage, so `REPAIR` now fills the bottom (emergency) half of the drum cells and widget drums, keeps the wrench with the tag «Можливі планові роботи» / «Possible planned works» (`AppStrings.kt`, `i18n.ts`, generated `AppStrings.swift`; comments in `OutageRowFormat.kt`, `outageRowFormat.ts`, `OutageRowFormat.swift`), still counts as off for the status, countdown and outage period, but gets no pre-warning and no longer extends the warned block or hides an emergency next to it. A scheduled block that starts while repair works are already on gets no warning, as with an emergency. Engines: `core/OutageEngine.kt`, `OutageModels.kt`, `src/core/outageEngine.ts`, `outageModels.ts`, `ios/Shared/Core/OutageEngine.swift`, `OutageModels.swift` (`isPlannedLike` is `PLANNED` only, new `isEmergencyLike`). The repair vector now expects emergency cells and no alert, and a new vector puts repair works between two scheduled blocks.
+- **The house list opens right after a street is chosen, and the keyboard only comes up for a long list** (`SearchablePickerField.kt`, `SettingsScreen.kt`, `SearchablePickerField.tsx`, `SettingsView.tsx`, `SearchablePicker.swift`, `AddressLookupSheet.swift`): choosing a street opens «Будинок» straight away. Every searchable list now focuses its search field (and so opens the keyboard) only when its rows do not all fit in the list area; a short list such as a few houses or the REMs stays fully visible and is picked by tapping. The rule is decided once, when the rows are known.
+- **Last and next refresh times line up** (`MainScreen.kt`, `MainScreen.swift`, `MainView.tsx`): «Останнє оновлення» and «Наступне оновлення» form two columns, labels left-aligned and both times starting at the same x.
+- Version 1.4.2 on Android, iOS and the web (`build.gradle.kts`, `ios/project.yml`, `package.json`, `vite.config.ts`, `AboutScreen.kt`, `AboutScreen.swift`, `AboutView.tsx`, README download link).
+
 ## [1.4.1] - 2026-11-17
 
 ### Fixed

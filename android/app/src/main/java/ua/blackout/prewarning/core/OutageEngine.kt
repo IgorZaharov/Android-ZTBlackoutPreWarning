@@ -195,7 +195,7 @@ object OutageEngine {
             val e = s.plusMinutes(OutageConfig.SLOT_MINUTES.toLong())
             SlotState(
                 planned = relevant.any { it.isPlannedLike && it.start.isBefore(e) && it.end.isAfter(s) },
-                emergency = relevant.any { it.kind == OutageKind.EMERGENCY && it.start.isBefore(e) && it.end.isAfter(s) }
+                emergency = relevant.any { it.isEmergencyLike && it.start.isBefore(e) && it.end.isAfter(s) }
             )
         }
 
@@ -276,7 +276,7 @@ object OutageEngine {
     // ---------------------------------------------------------------------------------------------
 
     /**
-     * One pre-warning per merged planned span (planned and repair works only), keyed by the span's
+     * One pre-warning per merged planned span (the ztoe schedule only; repair works get none), keyed by the span's
      * absolute start. Spans already started, or whose alert time has passed, never alert; a 00:00
      * continuation never gets its own alert because it is part of the earlier span.
      */
@@ -286,12 +286,12 @@ object OutageEngine {
         advanceMinutes: Int,
         zone: ZoneId = KYIV_ZONE
     ): List<AlertSpec> {
-        val plannedSpans = spans(outages.filter { !it.stale }, setOf(OutageKind.PLANNED, OutageKind.REPAIR))
-        val emergencies = outages.filter { it.kind == OutageKind.EMERGENCY && !it.stale }
+        val plannedSpans = spans(outages.filter { !it.stale }, setOf(OutageKind.PLANNED))
+        val emergencies = outages.filter { it.isEmergencyLike && !it.stale }
         return plannedSpans.mapNotNull { sp ->
             if (!sp.start.isAfter(now)) return@mapNotNull null
             // One continuous outage, one warning (spec/OUTAGE_ENGINE.md 6.2 step 2a): an emergency that started
-            // before the block and is still on at its start means power is already off
+            // (or a repair work) before the block and still on at its start means power is already off
             if (emergencies.any { it.start.isBefore(sp.start) && (it.overdue || !it.end.isBefore(sp.start)) }) return@mapNotNull null
             val fireAt = sp.start.minusMinutes(advanceMinutes.toLong())
             if (!fireAt.isAfter(now)) return@mapNotNull null
@@ -306,9 +306,9 @@ object OutageEngine {
         }
     }
 
-    /** The planned and repair spans of an address (not stale): what its pre-warnings are about. */
+    /** The planned (ztoe schedule) spans of an address, not stale: what its pre-warnings are about. */
     fun plannedSpans(outages: List<Outage>): List<Span> =
-        spans(outages.filter { !it.stale }, setOf(OutageKind.PLANNED, OutageKind.REPAIR))
+        spans(outages.filter { !it.stale }, setOf(OutageKind.PLANNED))
 
     /**
      * Whether an emergency event is announced when emergency and scheduled outages of one address form

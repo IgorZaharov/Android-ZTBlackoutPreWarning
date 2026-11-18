@@ -6,7 +6,7 @@ Status of this document: the planned/on/unclear cells, the needle and the ticks 
 
 ## 1. Cell states
 
-Input per cell: `SlotState(planned, emergency)` from `dayView` (`planned` is true for `PLANNED` and `REPAIR`). Mapping:
+Input per cell: `SlotState(planned, emergency)` from `dayView` (`planned` is true for `PLANNED`; `emergency` is true for `EMERGENCY` and for `REPAIR`, the PowerOn "possible planned works", which are drawn like an emergency since 2026-11-18). Mapping:
 
 | `planned` | `emergency` | State | Look |
 |---|---|---|---|
@@ -30,7 +30,7 @@ An emergency takes only the **bottom half** of its cells, so the planned state b
 
 Implementation note (not in the plan): anchor the stripe phase to the drum, not to each cell, so adjacent emergency cells form continuous stripes.
 
-**Unclear day** (Tomorrow before ztoe publishes, or Today with no valid cache): all 48 cells use the grey style; PowerOn outages already known for that day (emergency, repair) are still drawn on top with their normal states (`REPAIR` as planned crimson, emergency as amber stripes). The explanation lives in a glass notice card under the tabs (`SITE_STATE.md` section 7), not inside the bar. Legacy behaviour of `TimelineBar.kt`: when the slot list is empty the whole bar becomes one grey block 32 dp high with the centred label `outagesUnclear` (`Графіки не діють` / `Outages unclear`, 12 sp, ExtraBold, white).
+**Unclear day** (Tomorrow before ztoe publishes, or Today with no valid cache): all 48 cells use the grey style; PowerOn outages already known for that day (emergency, repair) are still drawn on top with their normal states (emergency and `REPAIR` as amber stripes in the bottom half). The explanation lives in a glass notice card under the tabs (`SITE_STATE.md` section 7), not inside the bar. Legacy behaviour of `TimelineBar.kt`: when the slot list is empty the whole bar becomes one grey block 32 dp high with the centred label `outagesUnclear` (`Графіки не діють` / `Outages unclear`, 12 sp, ExtraBold, white).
 
 ## 2. Geometry and chrome (as in `TimelineBar.kt`)
 
@@ -82,7 +82,7 @@ Rows come from `DayView.rows` in the given order (by `from`, then planned, repai
 | Comes from the previous day (`continuesFromPrevDay`) | Tomorrow shows `00:00 – 01:00` plus the tag `з 13.11 23:00` (the real start, uk) / `from 13.11 23:00` (en proposal); chip `2 год` again |
 | Day totals | count only the minutes inside the day, so the two days still sum to the real length (60 + 60 for the 23:00-01:00 example) |
 | `PLANNED` | 10 dp accent dot (`#FF5E3A`) |
-| `REPAIR` | wrench icon and the tag `Планові роботи` (en proposal `Planned works`) |
+| `REPAIR` | wrench icon and the tag `Можливі планові роботи` (en `Possible planned works`) |
 | `EMERGENCY` | 20 dp accent circle with `!` (white, Black weight) plus the text tag `Аварійне` (en proposal `Emergency`) and an accessibility label |
 | `FINISHED` | row at 55 % opacity plus the tag `завершено` (en proposal `finished`); finished rows never alert; a stale emergency is `FINISHED` |
 | `ACTIVE` | normal |
@@ -93,7 +93,7 @@ Leading slot: a fixed 20 x 20 box so the text of all rows starts at the same x.
 
 ## 6. Colour usage summary
 
-- Off (planned or repair): crimson. Emergency: amber with stripes. Both: crimson with amber stripes. On: ivory. Unknown: grey.
+- Off (planned): crimson. Emergency or repair: amber with stripes. Both: crimson with amber stripes. On: ivory. Unknown: grey.
 - The status dot of the hero is separate: on `#34D399`, off `#FF5E3A`, unclear `#9CA3AF`.
 
 ## Vectors

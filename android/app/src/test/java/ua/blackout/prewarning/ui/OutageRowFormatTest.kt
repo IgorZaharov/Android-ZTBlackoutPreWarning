@@ -138,7 +138,7 @@ class OutageRowFormatTest {
         val outage = Outage(id = "r1", kind = OutageKind.REPAIR, start = at(13, 8), end = at(13, 17))
         val text = OutageRowFormat.format("uk", rowsOf(outage, today).single())
         assertTrue(text.isRepair)
-        assertEquals("Планові роботи", text.kindTag)
+        assertEquals("Можливі планові роботи", text.kindTag)
         assertEquals("08:00 – 17:00", text.timeText)
         assertEquals("9${nbsp}год", text.durationText)
     }
@@ -168,7 +168,7 @@ class OutageRowFormatTest {
         val emergency = Outage(id = "e", kind = OutageKind.EMERGENCY, start = at(13, 10), end = at(13, 14), endIsEstimate = true)
         assertEquals("Emergency", OutageRowFormat.format("en", rowsOf(emergency, today).single()).kindTag)
         val repair = Outage(id = "r", kind = OutageKind.REPAIR, start = at(13, 8), end = at(13, 17))
-        assertEquals("Planned works", OutageRowFormat.format("en", rowsOf(repair, today).single()).kindTag)
+        assertEquals("Possible planned works", OutageRowFormat.format("en", rowsOf(repair, today).single()).kindTag)
     }
 
     // ---- drum summary --------------------------------------------------------------------------

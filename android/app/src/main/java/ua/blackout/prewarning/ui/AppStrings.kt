@@ -182,7 +182,7 @@ object AppStrings {
     fun poweronUnavailable(lang: String) = if (lang == "uk") "Аварійні відключення: дані недоступні" else "Emergency outages: data unavailable"
 
     fun kindPlanned(lang: String) = if (lang == "uk") "Планове" else "Planned"
-    fun kindRepair(lang: String) = if (lang == "uk") "Планові роботи" else "Planned works"
+    fun kindRepair(lang: String) = if (lang == "uk") "Можливі планові роботи" else "Possible planned works"
     fun kindEmergency(lang: String) = if (lang == "uk") "Аварійне" else "Emergency"
     fun rowFinished(lang: String) = if (lang == "uk") "завершено" else "finished"
     fun rowOverdue(lang: String) = if (lang == "uk") "очікується відновлення" else "restoration pending"

@@ -160,9 +160,9 @@ const StatusChipView: React.FC<{ chip: StatusChip }> = ({ chip }) => {
 };
 
 const LabelledValue: React.FC<{ label: string; value: string }> = ({ label, value }) => (
-  <div className="flex gap-1.5 text-[13px] leading-[19px]">
-    <span className={`${TEXT_TERTIARY} font-medium`}>{label}</span>
-    <span className="whitespace-nowrap font-mono font-bold tabular-nums text-white">{value}</span>
+  <div className="contents">
+    <span className={`${TEXT_TERTIARY} text-[13px] font-medium leading-[19px]`}>{label}</span>
+    <span className="whitespace-nowrap font-mono text-[13px] font-bold leading-[19px] tabular-nums text-white">{value}</span>
   </div>
 );
 
@@ -688,7 +688,8 @@ export const MainView: React.FC<MainViewProps> = ({
         {/* Last updated, site status chips and the circular refresh button */}
         <GlassCard padding={14} className="flex flex-col gap-2.5">
           <div className="flex items-center gap-3">
-            <div className="flex min-w-0 flex-1 flex-col gap-1">
+            {/* Two columns: labels left-aligned, both times starting at the same x (LabelledValue is display: contents) */}
+            <div className="grid min-w-0 flex-1 grid-cols-[auto_1fr] items-baseline gap-x-1.5 gap-y-1">
               <LabelledValue label={t.lastUpdated} value={lastUpdated} />
               <LabelledValue label={t.nextUpdated} value={nextUpdated} />
             </div>

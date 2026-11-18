@@ -11,7 +11,7 @@ public enum OutageRowFormat {
         public var timeText: String
         /// Full length of the outage ("2 год"); nil when the end is unknown (overdue emergency).
         public var durationText: String?
-        /// "Аварійне" / "Планові роботи"; nil for a plain planned outage (the dot is its marker).
+        /// "Аварійне" / "Можливі планові роботи"; nil for a plain planned outage (the dot is its marker).
         public var kindTag: String?
         /// "з 13.11 23:00" on the day an outage continues into.
         public var originTag: String?
