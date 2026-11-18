@@ -240,12 +240,16 @@ final class AppModel: ObservableObject {
 
     /// Pull to refresh on the main page: the round button's refresh, awaited so the spinner stays until it is
     /// done. A pull during a refresh that is already running waits for that one.
+    /// The work runs in its own Task: SwiftUI cancels the `.refreshable` task when the page re-renders mid-refresh
+    /// (`isRefreshing` flips), which cancelled the URLSession request and was reported as "site unreachable".
     func pullRefresh() async {
-        if isRefreshing {
-            while isRefreshing { try? await Task.sleep(for: .milliseconds(200)) }
-            return
-        }
-        await refreshWithBanner()
+        await Task { @MainActor in
+            if isRefreshing {
+                while isRefreshing { try? await Task.sleep(for: .milliseconds(200)) }
+                return
+            }
+            await refreshWithBanner()
+        }.value
     }
 
     private func refreshWithBanner() async {
