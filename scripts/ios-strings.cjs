@@ -24,8 +24,6 @@ const MANUAL_END = '    // END MANUAL';
 
 /** Android-only strings (plan section 2): the iOS app has no screen that shows them. */
 const ANDROID_ONLY = [
-  /^roulette/, // owner decision D3: no mini-game on iOS
-  /^formatRoulette/,
   /^exactAlarm/, // no exact-alarm permission on iOS
   /^refreshFloorHint$/, // iOS text: refreshFloorHintIos
   /^vibration$/, // no vibration control for iOS notifications

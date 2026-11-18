@@ -77,11 +77,6 @@ const additionalFiles = [
     description: 'Main navigation pager with time-of-day dynamic background and top scrim',
   },
   {
-    path: 'app/src/main/java/ua/blackout/prewarning/ui/screens/ZhytomyrRouletteScreen.kt',
-    language: 'kotlin',
-    description: 'Zhytomyr Roulette mini-game dialog screen',
-  },
-  {
     path: 'app/src/main/java/ua/blackout/prewarning/ui/components/FloatingShadow.kt',
     language: 'kotlin',
     description: 'Custom drop-shadow extension modifier with Gaussian BlurMaskFilter',

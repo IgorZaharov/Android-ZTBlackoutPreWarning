@@ -154,7 +154,6 @@ fun BlackoutAppNavigation(
     var soundEnabled by remember { mutableStateOf(initialSettings.soundEnabled) }
     var vibrationEnabled by remember { mutableStateOf(initialSettings.vibrationEnabled) }
     var currentLanguage by remember { mutableStateOf(initialSettings.language) }
-    var isRouletteOpen by remember { mutableStateOf(false) }
     var autoOpenQueueHelp by remember { mutableStateOf(false) }
     // First-run tour (spec/ONBOARDING.md): started by the first-launch button, never shown again once finished
     val onboarding = remember { OnboardingStore(appContext) }
@@ -256,7 +255,7 @@ fun BlackoutAppNavigation(
 
     // settledPage, not currentPage: currentPage flips half way through a swipe, and the work that hangs on it
     // (countdown on/off, snapshot, the Settings site check, recomposing both pages) made the swipe stutter
-    val isMainScreenVisible = pagerState.settledPage == 0 && !isRouletteOpen
+    val isMainScreenVisible = pagerState.settledPage == 0
     val isCountdownScreenActive = isMainScreenVisible && !isQueueUnselected
     var hasCompletedInitialScheduleFetch by remember { mutableStateOf(false) }
 
@@ -469,7 +468,6 @@ fun BlackoutAppNavigation(
     LaunchedEffect(openSubscriptionId) {
         val id = openSubscriptionId ?: return@LaunchedEffect
         shownSubscriptionId = id
-        isRouletteOpen = false
         pagerState.scrollToPage(0)
         onOpenSubscriptionHandled()
     }
@@ -623,7 +621,7 @@ fun BlackoutAppNavigation(
         HorizontalPager(
             state = pagerState,
             beyondViewportPageCount = 2,
-            userScrollEnabled = !isRouletteOpen && !isQueueUnselected,
+            userScrollEnabled = !isQueueUnselected,
             flingBehavior = PagerDefaults.flingBehavior(state = pagerState, snapAnimationSpec = PageGlide),
             modifier = Modifier.fillMaxSize()
         ) { page ->
@@ -856,22 +854,11 @@ fun BlackoutAppNavigation(
                 2 -> {
                     AboutScreen(
                         scrollState = pageScrolls[2],
-                        lang = resolvedLang,
-                        onOpenRoulette = { isRouletteOpen = true }
+                        lang = resolvedLang
                     )
                 }
             }
           }
-        }
-
-        if (isRouletteOpen) {
-            ZhytomyrRouletteDialog(
-                lang = resolvedLang,
-                providerUrl = siteUrl,
-                queue = queue.ifBlank { "1.1" },
-                onShowAppBanner = showAppBanner,
-                onDismiss = { isRouletteOpen = false }
-            )
         }
 
         // Top In-App Notification Banner with Application Icon (white lightning on #FF5E3A rounded square)
@@ -918,29 +905,27 @@ fun BlackoutAppNavigation(
             }
         }
 
-        // Floating Capsule Bottom Navigation Dock matching emulator (hidden when Житомирська Рулетка is open; dimmed & disabled when queue unselected)
-        if (!isRouletteOpen) {
+        // Floating Capsule Bottom Navigation Dock matching emulator (dimmed & disabled when queue unselected)
+        Box(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .navigationBarsPadding()
+                .padding(bottom = 16.dp)
+                .alpha(if (isQueueUnselected) 0.15f else 1f)
+        ) {
             Box(
                 modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .navigationBarsPadding()
-                    .padding(bottom = 16.dp)
-                    .alpha(if (isQueueUnselected) 0.15f else 1f)
+                    .glassSurface(CircleShape, 32.dp, background = Color(0xB8141A29))
+                    .padding(6.dp)
             ) {
-                Box(
-                    modifier = Modifier
-                        .glassSurface(CircleShape, 32.dp, background = Color(0xB8141A29))
-                        .padding(6.dp)
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        // Each tab reads the pager itself, so the live page highlight recomposes only the tab
-                        DockTab(pagerState, 0, Icons.Default.Home, "Графік", !isQueueUnselected, Modifier.coachTarget("dock-home")) { onDockTap(0) }
-                        DockTab(pagerState, 1, Icons.Default.Settings, "Налаштування", !isQueueUnselected) { onDockTap(1) }
-                        DockTab(pagerState, 2, Icons.Default.Info, "Про додаток", !isQueueUnselected, Modifier.coachTarget("dock-about")) { onDockTap(2) }
-                    }
+                    // Each tab reads the pager itself, so the live page highlight recomposes only the tab
+                    DockTab(pagerState, 0, Icons.Default.Home, "Графік", !isQueueUnselected, Modifier.coachTarget("dock-home")) { onDockTap(0) }
+                    DockTab(pagerState, 1, Icons.Default.Settings, "Налаштування", !isQueueUnselected) { onDockTap(1) }
+                    DockTab(pagerState, 2, Icons.Default.Info, "Про додаток", !isQueueUnselected, Modifier.coachTarget("dock-about")) { onDockTap(2) }
                 }
             }
         }

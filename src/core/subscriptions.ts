@@ -578,6 +578,19 @@ export function widgetLabel(store: SubscriptionStore, boundId: string | null): s
 }
 
 /** The distinct items the placed widgets show, in order of first appearance (redraw alarms, polling). */
+/**
+ * Android: the cards of a widget's address stack (spec/SUBSCRIPTIONS.md section 10). A widget that follows the
+ * primary shows every item when there are two or more, the primary first; otherwise its one item.
+ */
+export function widgetStackIds(store: SubscriptionStore, boundId: string | null): string[] {
+  if (boundId === null && store.items.length >= 2) {
+    const primary = store.items.find((s) => s.id === store.primaryId);
+    return [...(primary ? [primary.id] : []), ...store.items.filter((s) => s.id !== primary?.id).map((s) => s.id)];
+  }
+  const item = widgetItem(store, boundId);
+  return item ? [item.id] : [];
+}
+
 export function widgetItemIds(store: SubscriptionStore, boundIds: (string | null)[]): string[] {
   const out: string[] = [];
   for (const b of boundIds) {

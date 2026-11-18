@@ -55,9 +55,18 @@ object WidgetBindings {
         }
     }
 
-    /** The distinct items the placed widgets show (`widgetItemIds`): redraw alarms and PowerOn polling. */
+    /**
+     * The distinct items the placed widgets show, every card of an address stack included (`widgetStackIds`,
+     * spec/SUBSCRIPTIONS.md 10): redraw alarms and PowerOn polling.
+     */
     fun shownItemIds(context: Context, store: SubscriptionStore): List<String> =
-        Subscriptions.widgetItemIds(store, placedWidgetIds(context).map { boundId(context, it) })
+        placedWidgetIds(context).flatMap { Subscriptions.widgetStackIds(store, boundId(context, it)) }.distinct()
+
+    /** The cards of [appWidgetId]'s address stack (one id = no stack); null id = unknown widget. */
+    fun stackIds(context: Context, appWidgetId: Int?): List<String> {
+        val store = SubscriptionSync(context.applicationContext).store()
+        return Subscriptions.widgetStackIds(store, appWidgetId?.let { boundId(context, it) })
+    }
 }
 
 /** What one widget draws: the settings and snapshot of its item, the item id (tap target) and its label. */
@@ -81,6 +90,19 @@ internal fun widgetSource(context: Context, appWidgetId: Int?): WidgetSource {
         // The primary reads the mirrored single-address keys, exactly as before step 5
         return WidgetSource(settings, outageRepo.snapshot(settings), item?.id, label)
     }
+    val itemSettings = settings.copy(queue = item.queue.orEmpty(), customQueueStatusText = item.queueStatusText)
+    return WidgetSource(itemSettings, outageRepo.snapshotFor(item), item.id, label)
+}
+
+/** What one card of an address stack draws: the item [itemId] with its label (the primary when it is gone). */
+internal fun widgetSourceForItem(context: Context, itemId: String): WidgetSource {
+    val appCtx = context.applicationContext
+    val settings = SettingsRepository(appCtx).getSettings()
+    val outageRepo = OutageRepository(appCtx)
+    val store = SubscriptionSync(appCtx).store()
+    val item = store.items.firstOrNull { it.id == itemId } ?: return widgetSource(appCtx, null)
+    val label = Subscriptions.widgetLabel(store, item.id)
+    if (item.id == store.primaryId) return WidgetSource(settings, outageRepo.snapshot(settings), item.id, label)
     val itemSettings = settings.copy(queue = item.queue.orEmpty(), customQueueStatusText = item.queueStatusText)
     return WidgetSource(itemSettings, outageRepo.snapshotFor(item), item.id, label)
 }

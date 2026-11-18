@@ -302,6 +302,11 @@ class SubscriptionVectorsTest {
                 assertEquals(c.getString("name") + " " + b, vc.optStr("expect"), Subscriptions.widgetLabel(store, b))
             }
         }
+        for (c in v.getJSONArray("widgetStackIds").objects()) {
+            val bound = if (c.isNull("boundId")) null else c.getString("boundId")
+            val expect = c.getJSONArray("expect").let { a -> (0 until a.length()).map { a.getString(it) } }
+            assertEquals(c.getString("name"), expect, Subscriptions.widgetStackIds(storeOf(c.getJSONObject("store")), bound))
+        }
         for (c in v.getJSONArray("widgetItemIds").objects()) {
             val a = c.getJSONArray("boundIds")
             val bound = (0 until a.length()).map { if (a.isNull(it)) null else a.getString(it) }

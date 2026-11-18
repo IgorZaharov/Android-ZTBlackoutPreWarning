@@ -261,6 +261,8 @@ widgetItem(store, boundId)     = viewItem(store, boundId)   (boundId null = foll
 widgetLabel(store, boundId)    = null when widgetItem is null; else displayLabel(widgetItem) when store.items has
                                  2 or more items, or when boundId is not null and names no item; else null
 widgetItemIds(store, boundIds) = the distinct ids of widgetItem(store, b) for each b, in order of first appearance
+widgetStackIds(store, boundId) = (Android only) when boundId is null and store.items has 2 or more items: the primary,
+                                 then every other item in list order; else the id of widgetItem(store, boundId), or []
 ```
 
 * Each placed widget has a binding: absent or null means **follow the primary** (owner decision 6), so a new
@@ -276,6 +278,15 @@ widgetItemIds(store, boundIds) = the distinct ids of widgetItem(store, b) for ea
 * Every item in `widgetItemIds` of the placed widgets is polled on PowerOn whatever its switches (as the shown
   item of section 8.4) and gets widget redraw alarms at its own power transitions; equal transition times of
   different items share one alarm.
+* **Android: an address stack** (owner, 2026-11-18). A widget that follows the primary shows `widgetStackIds`:
+  with 2 or more items one address at a time fills the widget, and a vertical swipe flips to the next with the
+  platform `StackView` animation, the primary first; the cards behind are never seen. Each card is the widget's
+  content for its item, with its `widgetLabel`; a tap on a card opens the main screen with that item. The bell
+  and refresh buttons stay above the cards and act on everything, as before. A widget pinned to an item shows
+  only that item, and one item shows the 1.4.0 widget without a stack. All three widget sizes behave the same.
+  Polling and redraw alarms cover every item of every placed stack. Android 12 and later (the cards travel inline as
+  collection items; Android 8 to 11 keep one address per widget). iOS keeps one address per widget; several widgets
+  in a Smart Stack give the same swipe there.
 * Choosing the binding: Android adds a configure screen to the three widget providers
   (`reconfigurable|configuration_optional`): on Android 12+ the widget is placed following the primary and
   "reconfigure" opens the screen; older versions open it on placement and confirm at once when there are

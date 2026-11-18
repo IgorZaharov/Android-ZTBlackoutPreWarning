@@ -597,6 +597,9 @@ function subscriptionVectors(): number {
       n++;
     }
   }
+  for (const c of v.widget.widgetStackIds) {
+    assert.deepStrictEqual(Sub.widgetStackIds(storeOf(c.store), c.boundId), c.expect, c.name);
+  }
   for (const c of v.widget.widgetItemIds) {
     assert.deepStrictEqual(Sub.widgetItemIds(storeOf(c.store), c.boundIds), c.expect, c.name);
     n++;

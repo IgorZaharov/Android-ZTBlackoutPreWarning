@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Card of the widget address stack: the widget's dark glass (0xCC141A29), radius 20 dp. The cards behind are kept
+     outside the widget's bounds (AddressStack.STACK_SCALE), so nothing shows through. -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+    <solid android:color="#CC141A29" />
+    <corners android:radius="20dp" />
+</shape>
