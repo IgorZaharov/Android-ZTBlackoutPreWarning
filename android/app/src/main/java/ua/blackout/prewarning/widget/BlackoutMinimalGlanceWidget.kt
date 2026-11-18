@@ -90,7 +90,7 @@ class BlackoutMinimalGlanceWidget : GlanceAppWidget() {
             // the app widget id of an address stack (never bound, so it follows the primary), null = one address
             val stackWidgetId = appWidgetId?.takeIf { AddressStack.supported && WidgetBindings.stackIds(appContext, it).size >= 2 }
             val options = LocalAppWidgetOptions.current
-            // the cards are composed off the composition and land a moment later; until then the widget is as before
+            // the cards are composed off the composition and land a moment later in the frame drawn below
             val cards by produceState<List<Pair<String, RemoteViews>>?>(null, stackWidgetId, refreshTick, options) {
                 value = stackWidgetId?.let {
                     try {
@@ -104,10 +104,13 @@ class BlackoutMinimalGlanceWidget : GlanceAppWidget() {
                 }
             }
             val ready = cards
-            if (stackWidgetId != null && !ready.isNullOrEmpty() && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            if (stackWidgetId != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                 // one card over the whole widget and the refresh button above it, in the corner the card leaves empty
                 val widget = AddressStack.widgetSize(appContext, options, AddressStack.Kind.MINIMAL)
+                // the frame is drawn from the first frame on (switching from the one-address layout left the launcher
+                // reusing its views: its padding and background stayed and the buttons were lost); the cards follow
                 LaunchedEffect(ready) {
+                    if (ready.isNullOrEmpty()) return@LaunchedEffect
                     kotlinx.coroutines.delay(AddressStack.PUSH_DELAY_MS)
                     AddressStack.pushCards(appContext, stackWidgetId, ready, widget)
                 }

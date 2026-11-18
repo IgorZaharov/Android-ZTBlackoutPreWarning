@@ -2275,7 +2275,7 @@ open class BlackoutGlanceWidget(private val forceBigLayout: Boolean = false) : G
             // the app widget id of an address stack (spec/SUBSCRIPTIONS.md 10), null when this widget shows one address
             val stackWidgetId = appWidgetId?.takeIf { AddressStack.supported && WidgetBindings.stackIds(appContext, it).size >= 2 }
             val options = LocalAppWidgetOptions.current
-            // the cards are composed off the composition and land a moment later; until then the widget is as before
+            // the cards are composed off the composition and land a moment later in the frame drawn below
             val cards by produceState<List<Pair<String, RemoteViews>>?>(null, stackWidgetId, refreshTick, options, notificationsEnabled) {
                 value = stackWidgetId?.let {
                     try {
@@ -2290,11 +2290,14 @@ open class BlackoutGlanceWidget(private val forceBigLayout: Boolean = false) : G
             }
             val ready = cards
 
-            if (stackWidgetId != null && !ready.isNullOrEmpty() && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            if (stackWidgetId != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                 // Address stack (spec/SUBSCRIPTIONS.md 10): one card over the whole widget, and above it the buttons in
                 // the corner the card leaves empty; the cards follow this frame as a partial update (see AddressStack)
                 val widget = AddressStack.widgetSize(appContext, options, kind)
+                // the frame is drawn from the first frame on (switching from the one-address layout left the launcher
+                // reusing its views: its padding and background stayed and the buttons were lost); the cards follow
                 LaunchedEffect(ready) {
+                    if (ready.isNullOrEmpty()) return@LaunchedEffect
                     kotlinx.coroutines.delay(AddressStack.PUSH_DELAY_MS)
                     AddressStack.pushCards(appContext, stackWidgetId, ready, widget)
                 }
@@ -2655,10 +2658,13 @@ class BlackoutStripGlanceWidget : GlanceAppWidget() {
                 value = stackWidgetId?.let { AddressStack.buildCards(appContext, it, AddressStack.Kind.STRIP, options) }
             }
             val ready = cards
-            if (stackWidgetId != null && !ready.isNullOrEmpty() && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            if (stackWidgetId != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                 // Address stack (spec/SUBSCRIPTIONS.md 10): this widget has no buttons, so the cards are all of it;
                 // they follow this frame as a partial update (see AddressStack)
+                // the frame is drawn from the first frame on (switching from the one-address layout left the launcher
+                // reusing its views: its padding and background stayed and the buttons were lost); the cards follow
                 LaunchedEffect(ready) {
+                    if (ready.isNullOrEmpty()) return@LaunchedEffect
                     kotlinx.coroutines.delay(AddressStack.PUSH_DELAY_MS)
                     AddressStack.pushCards(appContext, stackWidgetId, ready, AddressStack.widgetSize(appContext, options, AddressStack.Kind.STRIP))
                 }
