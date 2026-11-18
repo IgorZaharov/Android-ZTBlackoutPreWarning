@@ -4,22 +4,27 @@ import android.app.PendingIntent
 import android.appwidget.AppWidgetManager
 import android.content.Context
 import android.content.Intent
+import android.content.res.Configuration
 import android.graphics.Bitmap
 import android.graphics.drawable.Icon
 import android.os.Build
 import android.os.Bundle
 import android.util.Log
+import android.util.SizeF
 import android.util.TypedValue
 import android.view.View
 import android.widget.RemoteViews
 import androidx.annotation.RequiresApi
+import androidx.compose.runtime.Composable
 import androidx.compose.ui.unit.DpSize
+import androidx.glance.LocalSize
+import androidx.glance.appwidget.LocalAppWidgetOptions
+import androidx.glance.appwidget.SizeMode
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import ua.blackout.prewarning.MainActivity
 import ua.blackout.prewarning.R
-import ua.blackout.prewarning.data.repository.SubscriptionSync
 import ua.blackout.prewarning.notification.NotificationHelper
 import ua.blackout.prewarning.ui.AppStrings
 import java.io.ByteArrayOutputStream
@@ -35,9 +40,9 @@ import java.io.ByteArrayOutputStream
  *   ([pushCards]) with inline [RemoteViews.RemoteCollectionItems]: the platform accepts a collection adapter only
  *   when it is applied from the widget root ("setRemoteAdapter can only be used for AppWidgets"), and Glance nests
  *   every view it is given; a partial update is applied from the root and finds the stack by its id.
- * - While a stack can show, the widgets draw with SizeMode.Single ([active]): a responsive widget is one
+ * - On Android 12+ the widgets always draw with SizeMode.Single ([sizeMode]): a responsive widget is one
  *   RemoteViews per size, and a partial update merged into that outer container is never applied.
- * - The cards are plain XML layouts (widget_card_big / _small / _strip) filled from the widget model: content
+ * - The cards are plain XML layouts (widget_card_big / _small / _strip / _minimal) filled from the widget model: content
  *   composed by Glance came out empty inside a stack item.
  * - Each drum goes as compressed PNG data ([Icon]), so five cards stay far below the binder limit of one update.
  *
@@ -63,35 +68,47 @@ object AddressStack {
     /** Inline collection items need Android 12; older versions keep one address per widget. */
     val supported: Boolean get() = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
 
-    @Volatile
-    private var appContext: Context? = null
+    /**
+     * The size mode of every widget: always SizeMode.Single on Android 12+, whether or not a stack shows, so the cards
+     * (a partial update) always find one RemoteViews to land in. Glance fixes the size mode when a widget's session
+     * starts, so a mode that followed the number of addresses stayed wrong until the session was restarted: cards
+     * bigger than the widget and no buttons until another widget was placed (owner report 2026-11-18).
+     */
+    fun sizeMode(older: SizeMode): SizeMode = if (supported) SizeMode.Single else older
 
-    /** Keeps the application context for [active], which Glance asks without one. */
-    fun remember(context: Context) {
-        appContext = context.applicationContext
-    }
+    /** The size a widget lays out for: the launcher's size on Android 12+ (see [sizeMode]), else Glance's size. */
+    @Composable
+    fun layoutSize(context: Context, kind: Kind): DpSize =
+        if (supported) widgetSize(context, LocalAppWidgetOptions.current, kind) else LocalSize.current
 
-    /** True while a stack can show (Android 12+, two or more saved addresses): the widgets then use SizeMode.Single. */
-    fun active(): Boolean {
-        val ctx = appContext ?: return false
-        return supported && try {
-            SubscriptionSync(ctx).store().items.size >= 2
-        } catch (_: Exception) {
-            false
+    enum class Kind { SMALL, BIG, STRIP, MINIMAL }
+
+    /**
+     * The widget's size in dp in the current orientation, or a default per kind when unknown. Android 12+ launchers
+     * list the exact size per orientation (OPTION_APPWIDGET_SIZES): portrait is the narrowest entry, landscape the
+     * widest. Otherwise the portrait size is min width x max height and the landscape one max width x min height. A
+     * card taller than the widget is cut at the bottom, so the exact size matters (owner report 2026-11-18, 2x1).
+     */
+    fun widgetSize(context: Context, options: Bundle?, kind: Kind): DpSize {
+        val landscape = context.resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            @Suppress("DEPRECATION")
+            val sizes = options?.getParcelableArrayList<SizeF>(AppWidgetManager.OPTION_APPWIDGET_SIZES)
+                ?.filter { it.width > 0f && it.height > 0f }
+            if (!sizes.isNullOrEmpty()) {
+                val s = if (landscape) sizes.maxBy { it.width } else sizes.minBy { it.width }
+                return DpSize(s.width.dp, s.height.dp)
+            }
         }
-    }
-
-    enum class Kind { SMALL, BIG, STRIP }
-
-    /** The widget's size in dp (portrait: min width, max height), or a default per kind when unknown. */
-    fun widgetSize(options: Bundle?, kind: Kind): DpSize {
-        val w = options?.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH, 0) ?: 0
-        val h = options?.getInt(AppWidgetManager.OPTION_APPWIDGET_MAX_HEIGHT, 0) ?: 0
+        fun opt(key: String) = options?.getInt(key, 0) ?: 0
+        val w = opt(if (landscape) AppWidgetManager.OPTION_APPWIDGET_MAX_WIDTH else AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH)
+        val h = opt(if (landscape) AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT else AppWidgetManager.OPTION_APPWIDGET_MAX_HEIGHT)
         if (w > 0 && h > 0) return DpSize(w.dp, h.dp)
         return when (kind) {
             Kind.SMALL -> DpSize(120.dp, 60.dp)
             Kind.BIG -> DpSize(250.dp, 110.dp)
             Kind.STRIP -> DpSize(250.dp, 40.dp)
+            Kind.MINIMAL -> DpSize(150.dp, 150.dp)
         }
     }
 
@@ -104,7 +121,7 @@ object AddressStack {
             val appCtx = context.applicationContext
             val ids = WidgetBindings.stackIds(appCtx, appWidgetId)
             if (ids.size < 2) return@withContext emptyList()
-            val widget = widgetSize(options, kind)
+            val widget = widgetSize(appCtx, options, kind)
             ids.map { id ->
                 val source = widgetSourceForItem(appCtx, id)
                 val model = BlackoutGlanceWidget.buildWidgetModel(source.settings, source.snapshot, source.label)
@@ -147,8 +164,8 @@ object AddressStack {
         val appCtx = context.applicationContext
         val items = RemoteViews.RemoteCollectionItems.Builder()
             .setHasStableIds(true)
-            // fixed and covering the three card layouts: the launcher reuses its adapter (and the front card)
-            .setViewTypeCount(3)
+            // fixed and covering the four card layouts: the launcher reuses its adapter (and the front card)
+            .setViewTypeCount(4)
         for ((id, card) in cards) items.addItem(id.hashCode().toLong(), card)
         val rv = RemoteViews(appCtx.packageName, R.layout.widget_address_stack)
         rv.setRemoteAdapter(R.id.address_stack, items.build())
@@ -175,6 +192,7 @@ object AddressStack {
             Kind.BIG -> R.layout.widget_card_big
             Kind.SMALL -> R.layout.widget_card_small
             Kind.STRIP -> R.layout.widget_card_strip
+            Kind.MINIMAL -> R.layout.widget_card_minimal
         }
         val rv = RemoteViews(context.packageName, layout)
         val status = when {
@@ -218,6 +236,16 @@ object AddressStack {
                     "${model.queueHeader}. ${if (model.isOffNow) "СВІТЛА НЕМАЄ" else "СВІТЛО Є"}"
                 }
                 setDrum(rv, model, description)
+            }
+            Kind.MINIMAL -> {
+                // the texts of the minimal widget (unclear: the status alone; no outage ahead: «Відключень немає»)
+                val m = minimalWidgetTexts(model.lang, model.isUnclear, model.isOffNow, model.countdown)
+                rv.setTextViewText(R.id.card_status, m.status)
+                rv.setViewVisibility(R.id.card_label, if (model.addressLabel == null) View.GONE else View.VISIBLE)
+                rv.setTextViewText(R.id.card_countdown_caption, m.label.orEmpty())
+                rv.setViewVisibility(R.id.card_countdown_caption, if (m.label == null) View.GONE else View.VISIBLE)
+                rv.setTextViewText(R.id.card_countdown, m.countdown.orEmpty())
+                rv.setViewVisibility(R.id.card_countdown, if (m.countdown == null) View.GONE else View.VISIBLE)
             }
         }
         rv.setOnClickFillInIntent(R.id.card_root, Intent().putExtra(NotificationHelper.EXTRA_SUBSCRIPTION_ID, id))

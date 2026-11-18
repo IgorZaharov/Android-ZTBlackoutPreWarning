@@ -283,7 +283,8 @@ widgetStackIds(store, boundId) = (Android only) when boundId is null and store.i
   platform `StackView` animation, the primary first; the cards behind are never seen. Each card is the widget's
   content for its item, with its `widgetLabel`; a tap on a card opens the main screen with that item. The bell
   and refresh buttons stay above the cards and act on everything, as before. A widget pinned to an item shows
-  only that item, and one item shows the 1.4.0 widget without a stack. All three widget sizes behave the same.
+  only that item, and one item shows the 1.4.0 widget without a stack. All four widgets behave the same; the 2x2
+  «Мінімальний» widget is never bound, so it always shows the stack (owner, 2026-11-18).
   Polling and redraw alarms cover every item of every placed stack. Android 12 and later (the cards travel inline as
   collection items; Android 8 to 11 keep one address per widget). iOS keeps one address per widget; several widgets
   in a Smart Stack give the same swipe there.

@@ -1,55 +1,67 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- One address of the 2x1 widget's address stack (BlackoutGlanceWidget WidgetBody, small layout), in three lines so
-     nothing is cut at 2x1 (about 170 dp wide): queue and status, the address label, countdown. Texts that could run
-     out of room shrink to fit. The bottom-right 74 x 34 dp stays empty: the Glance frame draws the refresh and bell
-     buttons there (StackButtons). -->
+     nothing is cut at 2x1 (about 170 dp wide): the queue header alone (it shrinks to fit, «Черга відсутня» is long),
+     the status with the address label after it (the status is never cut, the label is ellipsized), the countdown.
+     The top two lines share the room above the countdown row, so a low cell squeezes them instead of pushing the
+     countdown out. The bottom-right 74 x 34 dp stays empty: the Glance frame draws the refresh and bell buttons there,
+     8 dp from the bottom and 12 dp from the right (StackButtons). -->
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/card_root"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:background="@drawable/widget_card_bg"
-    android:gravity="bottom"
     android:orientation="vertical"
-    android:padding="12dp">
+    android:paddingStart="12dp"
+    android:paddingTop="8dp"
+    android:paddingEnd="12dp"
+    android:paddingBottom="8dp">
 
     <LinearLayout
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
+        android:layout_height="0dp"
+        android:layout_weight="1"
         android:gravity="center_vertical"
-        android:orientation="horizontal">
+        android:orientation="vertical">
 
         <TextView
             android:id="@+id/card_queue"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
+            android:layout_width="match_parent"
+            android:layout_height="20dp"
+            android:autoSizeMaxTextSize="14sp"
+            android:autoSizeMinTextSize="8sp"
+            android:autoSizeTextType="uniform"
+            android:gravity="start|center_vertical"
             android:maxLines="1"
             android:textColor="#FFFFFFFF"
             android:textSize="14sp"
             android:textStyle="bold" />
 
-        <TextView
-            android:id="@+id/card_status"
-            android:layout_width="0dp"
-            android:layout_height="18dp"
-            android:layout_marginStart="6dp"
-            android:layout_weight="1"
-            android:autoSizeMaxTextSize="10sp"
-            android:autoSizeMinTextSize="7sp"
-            android:autoSizeTextType="uniform"
-            android:gravity="end|center_vertical"
-            android:maxLines="1"
-            android:textSize="10sp"
-            android:textStyle="bold" />
-    </LinearLayout>
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
 
-    <TextView
-        android:id="@+id/card_label"
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:ellipsize="end"
-        android:maxLines="1"
-        android:textColor="#B3BAE6FD"
-        android:textSize="10sp" />
+            <TextView
+                android:id="@+id/card_status"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:maxLines="1"
+                android:textSize="10sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/card_label"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="6dp"
+                android:layout_weight="1"
+                android:ellipsize="end"
+                android:maxLines="1"
+                android:textColor="#B3BAE6FD"
+                android:textSize="10sp" />
+        </LinearLayout>
+    </LinearLayout>
 
     <LinearLayout
         android:layout_width="match_parent"

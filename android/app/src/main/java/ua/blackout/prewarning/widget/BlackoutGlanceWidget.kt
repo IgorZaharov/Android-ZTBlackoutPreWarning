@@ -29,7 +29,6 @@ import androidx.glance.GlanceModifier
 import androidx.glance.GlanceTheme
 import androidx.glance.Image
 import androidx.glance.ImageProvider
-import androidx.glance.LocalSize
 import androidx.glance.action.Action
 import androidx.glance.action.ActionParameters
 import androidx.glance.action.actionParametersOf
@@ -87,9 +86,8 @@ open class BlackoutGlanceWidget(private val forceBigLayout: Boolean = false) : G
         )
     )
 
-    /** One RemoteViews while an address stack can show, so its cards (a partial update) reach it (AddressStack.active). */
-    override val sizeMode: SizeMode
-        get() = if (AddressStack.active()) SizeMode.Single else responsive
+    /** One RemoteViews on Android 12+, so address-stack cards (a partial update) reach it (AddressStack.sizeMode). */
+    override val sizeMode: SizeMode = AddressStack.sizeMode(responsive)
 
     companion object {
         val KEY_NOTIFICATIONS_ENABLED = booleanPreferencesKey("glance_notifications_enabled")
@@ -231,7 +229,6 @@ open class BlackoutGlanceWidget(private val forceBigLayout: Boolean = false) : G
          */
         suspend fun syncAllWidgets(context: Context, refreshing: Boolean? = null) {
             val appCtx = context.applicationContext
-            AddressStack.remember(appCtx)
             val manager = GlanceAppWidgetManager(appCtx)
             val smallIds = manager.getGlanceIds(BlackoutGlanceWidget::class.java)
             val bigIds = manager.getGlanceIds(BlackoutBigGlanceWidget::class.java)
@@ -532,13 +529,18 @@ open class BlackoutGlanceWidget(private val forceBigLayout: Boolean = false) : G
             // the bell shows and toggles the master switch for all addresses (owner decision 4)
             val notificationsEnabled = SubscriptionSync(appContext).master()
 
-            val size = LocalSize.current
-            val isBigWidget = forceBigLayout || size.height >= 110.dp || size.width >= 220.dp
+            val kind = if (forceBigLayout) AddressStack.Kind.BIG else AddressStack.Kind.SMALL
+            val size = AddressStack.layoutSize(appContext, kind)
+            // Android 12+ lays out for the launcher's size; the big layout from the size of the 4x2 bucket of `responsive`
+            val isBigWidget = forceBigLayout || if (AddressStack.supported) {
+                size.width >= 250.dp && size.height >= 110.dp
+            } else {
+                size.height >= 110.dp || size.width >= 220.dp
+            }
             // the app widget id of an address stack (spec/SUBSCRIPTIONS.md 10), null when this widget shows one address
             val stackWidgetId = appWidgetId?.takeIf { AddressStack.supported && WidgetBindings.stackIds(appContext, it).size >= 2 }
             val options = LocalAppWidgetOptions.current
-            val kind = if (forceBigLayout) AddressStack.Kind.BIG else AddressStack.Kind.SMALL
-            // the cards are composed off the composition and land a moment later; until then the widget is as before
+            // the cards are composed off the composition and land a moment later in the frame drawn below
             val cards by produceState<List<Pair<String, RemoteViews>>?>(null, stackWidgetId, refreshTick, options, notificationsEnabled) {
                 value = stackWidgetId?.let {
                     try {
@@ -553,11 +555,14 @@ open class BlackoutGlanceWidget(private val forceBigLayout: Boolean = false) : G
             }
             val ready = cards
 
-            if (stackWidgetId != null && !ready.isNullOrEmpty() && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            if (stackWidgetId != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                 // Address stack (spec/SUBSCRIPTIONS.md 10): one card over the whole widget, and above it the buttons in
                 // the corner the card leaves empty; the cards follow this frame as a partial update (see AddressStack)
-                val widget = AddressStack.widgetSize(options, kind)
+                val widget = AddressStack.widgetSize(appContext, options, kind)
+                // the frame is drawn from the first frame on (switching from the one-address layout left the launcher
+                // reusing its views: its padding and background stayed and the buttons were lost); the cards follow
                 LaunchedEffect(ready) {
+                    if (ready.isNullOrEmpty()) return@LaunchedEffect
                     kotlinx.coroutines.delay(AddressStack.PUSH_DELAY_MS)
                     AddressStack.pushCards(appContext, stackWidgetId, ready, widget)
                 }
@@ -794,12 +799,14 @@ internal fun WidgetBody(
 
 /**
  * The refresh and bell buttons of an address stack, above the front card (see [AddressStack]): in the corner each
- * card leaves empty, 12 dp from it; top right on the 4x2 card, bottom right on the 2x1 card.
+ * card leaves empty: top right on the 4x2 card, 12 dp from the corner; bottom right on the 2x1 card, 12 dp from the
+ * right and 8 dp from the bottom (the card's padding, widget_card_small.xml).
  */
 @Composable
 internal fun StackButtons(isBigWidget: Boolean, notificationsEnabled: Boolean, isRefreshing: Boolean) {
     Box(
-        modifier = GlanceModifier.fillMaxSize().padding(12.dp),
+        modifier = GlanceModifier.fillMaxSize()
+            .padding(start = 12.dp, top = 12.dp, end = 12.dp, bottom = if (isBigWidget) 12.dp else 8.dp),
         contentAlignment = if (isBigWidget) Alignment.TopEnd else Alignment.BottomEnd
     ) {
         Row(verticalAlignment = Alignment.Vertical.CenterVertically) {
@@ -891,9 +898,8 @@ class BlackoutStripGlanceWidget : GlanceAppWidget() {
         )
     )
 
-    /** One RemoteViews while an address stack can show, so its cards (a partial update) reach it (AddressStack.active). */
-    override val sizeMode: SizeMode
-        get() = if (AddressStack.active()) SizeMode.Single else responsive
+    /** One RemoteViews on Android 12+, so address-stack cards (a partial update) reach it (AddressStack.sizeMode). */
+    override val sizeMode: SizeMode = AddressStack.sizeMode(responsive)
 
     override suspend fun provideGlance(context: Context, id: GlanceId) {
         val appContext = context.applicationContext
@@ -917,12 +923,15 @@ class BlackoutStripGlanceWidget : GlanceAppWidget() {
                 value = stackWidgetId?.let { AddressStack.buildCards(appContext, it, AddressStack.Kind.STRIP, options) }
             }
             val ready = cards
-            if (stackWidgetId != null && !ready.isNullOrEmpty() && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            if (stackWidgetId != null && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                 // Address stack (spec/SUBSCRIPTIONS.md 10): this widget has no buttons, so the cards are all of it;
                 // they follow this frame as a partial update (see AddressStack)
+                // the frame is drawn from the first frame on (switching from the one-address layout left the launcher
+                // reusing its views: its padding and background stayed and the buttons were lost); the cards follow
                 LaunchedEffect(ready) {
+                    if (ready.isNullOrEmpty()) return@LaunchedEffect
                     kotlinx.coroutines.delay(AddressStack.PUSH_DELAY_MS)
-                    AddressStack.pushCards(appContext, stackWidgetId, ready, AddressStack.widgetSize(options, AddressStack.Kind.STRIP))
+                    AddressStack.pushCards(appContext, stackWidgetId, ready, AddressStack.widgetSize(appContext, options, AddressStack.Kind.STRIP))
                 }
                 AndroidRemoteViews(
                     remoteViews = AddressStack.frame(appContext),
@@ -931,7 +940,8 @@ class BlackoutStripGlanceWidget : GlanceAppWidget() {
             } else {
                 val source = widgetSource(appContext, appWidgetId)
                 val model = BlackoutGlanceWidget.buildWidgetModel(source.settings, source.snapshot, source.label)
-                StripBody(model, openAppAction(source.itemId), showInfo = LocalSize.current.height >= INFO_MIN_HEIGHT)
+                val size = AddressStack.layoutSize(appContext, AddressStack.Kind.STRIP)
+                StripBody(model, openAppAction(source.itemId), showInfo = size.height >= INFO_MIN_HEIGHT)
             }
         }
     }
