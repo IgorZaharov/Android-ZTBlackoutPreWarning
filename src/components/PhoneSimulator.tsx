@@ -338,6 +338,12 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
               subscriptionStore={subscriptionStore}
               boundId={widgetBoundId}
               onBind={onBindWidget}
+              primarySnapshot={snapshot}
+              primarySettings={settings}
+              onOpenPrimary={() => {
+                if (subscriptionStore?.primaryId) onSelectSubscription?.(subscriptionStore.primaryId);
+                setActiveTab('schedule');
+              }}
               onOpenApp={() => {
                 if (widgetItemId) onSelectSubscription?.(widgetItemId);
                 setActiveTab('schedule');

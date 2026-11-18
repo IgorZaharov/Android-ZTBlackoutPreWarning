@@ -29,11 +29,36 @@ interface WidgetSimulatorProps {
   /** The bound item id; null = follow the primary. */
   boundId?: string | null;
   onBind?: (id: string | null) => void;
+  /** The primary address: the minimal 2x2 widget always shows it (no binding). Defaults to snapshot/settings. */
+  primarySnapshot?: OutageSnapshot;
+  primarySettings?: UserSettings;
+  /** Tap on the minimal widget: opens the app on the primary address. Defaults to onOpenApp. */
+  onOpenPrimary?: () => void;
 }
 
-export type WidgetSize = '2x1' | '3x2' | '4x1' | 'all';
+export type WidgetSize = '2x1' | '3x2' | '4x1' | '2x2' | 'all';
 
-/** Everything the three widget layouts show, derived from one OutageSnapshot (port of BlackoutGlanceWidget.buildWidgetModel). */
+/** Texts of the minimal 2x2 widget; null label or countdown = that line is not drawn (port of minimalWidgetTexts). */
+export interface MinimalWidgetTexts {
+  status: string;
+  label: string | null;
+  countdown: string | null;
+}
+
+/**
+ * Unclear: the status alone. No outage ahead while the power is on: «Відключень немає» instead of a countdown
+ * of dashes. Otherwise the label and the countdown of the other widgets (`HHг. MMхв.`).
+ */
+export function minimalWidgetTexts(lang: 'uk' | 'en', isUnclear: boolean, isOffNow: boolean, countdown: string): MinimalWidgetTexts {
+  const isUk = lang === 'uk';
+  if (isUnclear) return { status: translations[lang].statusUnclear, label: null, countdown: null };
+  const status = isOffNow ? (isUk ? 'СВІТЛА НЕМАЄ' : 'POWER OFF') : isUk ? 'СВІТЛО Є' : 'POWER ON';
+  if (!isOffNow && countdown.includes('--')) return { status, label: isUk ? 'Відключень немає' : 'No outages', countdown: null };
+  const label = isOffNow ? (isUk ? 'До увімкнення:' : 'Power on in:') : isUk ? 'До відключення:' : 'Time to blackout:';
+  return { status, label, countdown };
+}
+
+/** Everything the widget layouts show, derived from one OutageSnapshot (port of BlackoutGlanceWidget.buildWidgetModel). */
 export interface WidgetModel {
   queueHeader: string;
   isUnclear: boolean;
@@ -156,6 +181,9 @@ export const WidgetSimulator: React.FC<WidgetSimulatorProps> = ({
   subscriptionStore,
   boundId = null,
   onBind,
+  primarySnapshot,
+  primarySettings,
+  onOpenPrimary,
 }) => {
   const t = translations[lang];
   const isUk = lang === 'uk';
@@ -339,10 +367,54 @@ export const WidgetSimulator: React.FC<WidgetSimulatorProps> = ({
     </div>
   );
 
+  // Fourth widget (2x2, «Мінімальний»): queue of the primary address, status, countdown and the refresh button
+  // on a 50 % transparent layer; it always follows the primary address, so it has no address label.
+  const minimalModel = useMemo(
+    () => buildWidgetModel(primarySettings ?? settings, primarySnapshot ?? snapshot, lang),
+    [primarySettings, settings, primarySnapshot, snapshot, lang]
+  );
+  const mini = minimalWidgetTexts(lang, minimalModel.isUnclear, minimalModel.isOffNow, minimalModel.countdown);
+  const miniStatusColorClass = minimalModel.isUnclear ? 'text-[#9CA3AF]' : minimalModel.isOffNow ? 'text-[#FF5E3A]' : 'text-[#34D399]';
+  const openPrimary = onOpenPrimary ?? onOpenApp;
+  const minimal = (
+    <div key="minimal" data-testid="widget-minimal" className="flex flex-col gap-1.5">
+      <div className="text-center text-xs font-semibold text-sky-200/80">{t.widgetMinimalName}</div>
+      <div
+        role="button"
+        tabIndex={0}
+        onClick={openPrimary}
+        onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && openPrimary()}
+        aria-label={[minimalModel.queueHeader, mini.status, mini.label, mini.countdown].filter(Boolean).join('. ')}
+        className="flex aspect-square w-[180px] cursor-pointer flex-col rounded-[24px] bg-[#141A29]/50 p-4 text-white shadow-[0_12px_40px_rgba(0,0,0,0.35)] backdrop-blur-sm transition-colors hover:bg-[#141A29]/60"
+      >
+        <div className="flex items-center justify-between gap-2">
+          <span data-testid="widget-minimal-queue" className="truncate text-base font-bold tracking-tight text-white">
+            {minimalModel.queueHeader}
+          </span>
+          <RoundButton testId="widget-minimal-refresh" onClick={() => onRefresh?.()} title={refreshTitle}>
+            <RefreshCw className={`h-4 w-4 ${isRefreshing ? 'animate-spin' : ''}`} aria-hidden="true" />
+          </RoundButton>
+        </div>
+        <div className="flex min-h-0 flex-1 flex-col items-center justify-center text-center">
+          <span data-testid="widget-minimal-status" className={`whitespace-nowrap font-bold leading-tight ${mini.status.length > 9 ? 'text-lg' : 'text-2xl'} ${miniStatusColorClass}`}>
+            {mini.status}
+          </span>
+          {mini.label && <span className="mt-1 whitespace-nowrap text-xs text-[#A9B4C2]">{mini.label}</span>}
+          {mini.countdown && (
+            <span data-testid="widget-minimal-countdown" className="whitespace-nowrap font-mono text-2xl font-black text-white">
+              {mini.countdown}
+            </span>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+
   const sizes: { id: WidgetSize; label: string }[] = [
     { id: '2x1', label: t.widgetSize2x1 },
     { id: '3x2', label: t.widgetSize3x2 },
     { id: '4x1', label: t.widgetSize4x1 },
+    { id: '2x2', label: t.widgetSize2x2 },
     { id: 'all', label: t.widgetSizeAll },
   ];
 
@@ -360,7 +432,7 @@ export const WidgetSimulator: React.FC<WidgetSimulatorProps> = ({
           </span>
         </div>
 
-        <div role="radiogroup" aria-label={t.widgetPreviewTitle} className="grid grid-cols-2 gap-1 rounded-xl border border-white/10 bg-black/30 p-1 sm:grid-cols-4">
+        <div role="radiogroup" aria-label={t.widgetPreviewTitle} className="grid grid-cols-3 gap-1 rounded-xl border border-white/10 bg-black/30 p-1 sm:grid-cols-5">
           {sizes.map((s) => (
             <button
               key={s.id}
@@ -417,6 +489,7 @@ export const WidgetSimulator: React.FC<WidgetSimulatorProps> = ({
           {(widgetSize === '2x1' || widgetSize === 'all') && small}
           {(widgetSize === '3x2' || widgetSize === 'all') && big}
           {(widgetSize === '4x1' || widgetSize === 'all') && strip}
+          {(widgetSize === '2x2' || widgetSize === 'all') && minimal}
         </div>
       </div>
     </div>

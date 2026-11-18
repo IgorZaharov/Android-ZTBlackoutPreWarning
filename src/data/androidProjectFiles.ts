@@ -364,6 +364,20 @@ kotlin-compose = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "ko
                 android:resource="@xml/blackout_widget_strip_info" />
         </receiver>
 
+        <!-- Glance Home Screen Minimal (2x2) AppWidget Receiver: queue, status, countdown, refresh; primary address only -->
+        <receiver
+            android:name=".widget.BlackoutMinimalWidgetReceiver"
+            android:label="@string/widget_minimal_name"
+            android:enabled="true"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/blackout_widget_minimal_info" />
+        </receiver>
+
     </application>
 </manifest>`
   },
@@ -1939,7 +1953,8 @@ open class BlackoutGlanceWidget(private val forceBigLayout: Boolean = false) : G
                 val manager = GlanceAppWidgetManager(appCtx)
                 manager.getGlanceIds(BlackoutGlanceWidget::class.java).isNotEmpty() ||
                     manager.getGlanceIds(BlackoutBigGlanceWidget::class.java).isNotEmpty() ||
-                    manager.getGlanceIds(BlackoutStripGlanceWidget::class.java).isNotEmpty()
+                    manager.getGlanceIds(BlackoutStripGlanceWidget::class.java).isNotEmpty() ||
+                    manager.getGlanceIds(BlackoutMinimalGlanceWidget::class.java).isNotEmpty()
             } catch (_: Exception) {
                 false
             }
@@ -1956,7 +1971,8 @@ open class BlackoutGlanceWidget(private val forceBigLayout: Boolean = false) : G
             val smallIds = manager.getGlanceIds(BlackoutGlanceWidget::class.java)
             val bigIds = manager.getGlanceIds(BlackoutBigGlanceWidget::class.java)
             val stripIds = manager.getGlanceIds(BlackoutStripGlanceWidget::class.java)
-            if (smallIds.isEmpty() && bigIds.isEmpty() && stripIds.isEmpty()) return
+            val minimalIds = manager.getGlanceIds(BlackoutMinimalGlanceWidget::class.java)
+            if (smallIds.isEmpty() && bigIds.isEmpty() && stripIds.isEmpty() && minimalIds.isEmpty()) return
 
             val settings = SettingsRepository(appCtx).getSettings()
             val alertsMaster = SubscriptionSync(appCtx).master()
@@ -1996,6 +2012,15 @@ open class BlackoutGlanceWidget(private val forceBigLayout: Boolean = false) : G
                 try {
                     touch(gId)
                     BlackoutStripGlanceWidget().update(appCtx, gId)
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (_: Exception) {
+                }
+            }
+            for (gId in minimalIds) {
+                try {
+                    touch(gId)
+                    BlackoutMinimalGlanceWidget().update(appCtx, gId)
                 } catch (e: CancellationException) {
                     throw e
                 } catch (_: Exception) {
@@ -2920,6 +2945,10 @@ class BlackoutBigWidgetReceiver : BlackoutWidgetReceiver() {
 
 class BlackoutStripWidgetReceiver : BlackoutWidgetReceiver() {
     override val glanceAppWidget: GlanceAppWidget = BlackoutStripGlanceWidget()
+}
+
+class BlackoutMinimalWidgetReceiver : BlackoutWidgetReceiver() {
+    override val glanceAppWidget: GlanceAppWidget = BlackoutMinimalGlanceWidget()
 }
 `
   },

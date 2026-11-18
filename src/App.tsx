@@ -953,6 +953,13 @@ export default function App() {
                 subscriptionStore={subscriptionStore}
                 boundId={widgetBoundId}
                 onBind={setWidgetBoundId}
+                primarySnapshot={snapshot}
+                primarySettings={settings}
+                onOpenPrimary={() => {
+                  setShownSubscriptionId(subscriptionStore.primaryId);
+                  setActiveMode('app');
+                  setPhoneTab('schedule');
+                }}
                 onOpenApp={() => {
                   if (widgetItemId) setShownSubscriptionId(widgetItemId);
                   setActiveMode('app');
