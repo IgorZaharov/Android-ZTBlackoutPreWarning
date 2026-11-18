@@ -8,6 +8,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.produceState
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.datastore.preferences.core.Preferences
@@ -17,7 +18,6 @@ import androidx.glance.GlanceModifier
 import androidx.glance.GlanceTheme
 import androidx.glance.Image
 import androidx.glance.ImageProvider
-import androidx.glance.LocalSize
 import androidx.glance.action.clickable
 import androidx.glance.appwidget.AndroidRemoteViews
 import androidx.glance.appwidget.CircularProgressIndicator
@@ -65,9 +65,8 @@ class BlackoutMinimalGlanceWidget : GlanceAppWidget() {
 
     override val stateDefinition: GlanceStateDefinition<*> = PreferencesGlanceStateDefinition
 
-    /** One RemoteViews while an address stack can show, so its cards (a partial update) reach it (AddressStack.active). */
-    override val sizeMode: SizeMode
-        get() = if (AddressStack.active()) SizeMode.Single else SizeMode.Exact
+    /** One RemoteViews on Android 12+, so address-stack cards (a partial update) reach it (AddressStack.sizeMode). */
+    override val sizeMode: SizeMode = AddressStack.sizeMode(SizeMode.Exact)
 
     override suspend fun provideGlance(context: Context, id: GlanceId) {
         val appContext = context.applicationContext
@@ -127,14 +126,14 @@ class BlackoutMinimalGlanceWidget : GlanceAppWidget() {
                 }
             } else {
                 // null app widget id = follow the primary address
-                MinimalBody(widgetSource(appContext, null), isRefreshing)
+                MinimalBody(widgetSource(appContext, null), isRefreshing, AddressStack.layoutSize(appContext, AddressStack.Kind.MINIMAL))
             }
         }
     }
 
     /** The widget content of the primary address (one address, or Android 8 to 11). */
     @androidx.compose.runtime.Composable
-    private fun MinimalBody(source: WidgetSource, isRefreshing: Boolean) {
+    private fun MinimalBody(source: WidgetSource, isRefreshing: Boolean, size: DpSize) {
         val model = BlackoutGlanceWidget.buildWidgetModel(source.settings, source.snapshot)
         val openApp = openAppAction(source.itemId)
         val m = minimalWidgetTexts(model.lang, model.isUnclear, model.isOffNow, model.countdown)
@@ -145,7 +144,6 @@ class BlackoutMinimalGlanceWidget : GlanceAppWidget() {
             else -> Color(0xFF34D399)
         }
 
-        val size = LocalSize.current
         val scale = (minOf(size.width.value, size.height.value) / BASE_DP).coerceIn(0.8f, 1.8f)
         val pad = 12f * scale
         val button = 34f * scale

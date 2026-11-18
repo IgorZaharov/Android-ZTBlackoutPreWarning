@@ -16,12 +16,6 @@ import ua.blackout.prewarning.notification.AlarmScheduler
 open class BlackoutWidgetReceiver : GlanceAppWidgetReceiver() {
     override val glanceAppWidget: GlanceAppWidget = BlackoutGlanceWidget()
 
-    override fun onReceive(context: Context, intent: android.content.Intent) {
-        // Glance asks the widgets for their size mode without a context (AddressStack.active)
-        AddressStack.remember(context)
-        super.onReceive(context, intent)
-    }
-
     override fun onEnabled(context: Context) {
         super.onEnabled(context)
         refreshAndRedraw(context, forceNetwork = true)

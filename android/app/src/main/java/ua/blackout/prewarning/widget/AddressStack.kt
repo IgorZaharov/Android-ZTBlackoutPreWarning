@@ -15,13 +15,16 @@ import android.util.TypedValue
 import android.view.View
 import android.widget.RemoteViews
 import androidx.annotation.RequiresApi
+import androidx.compose.runtime.Composable
 import androidx.compose.ui.unit.DpSize
+import androidx.glance.LocalSize
+import androidx.glance.appwidget.LocalAppWidgetOptions
+import androidx.glance.appwidget.SizeMode
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import ua.blackout.prewarning.MainActivity
 import ua.blackout.prewarning.R
-import ua.blackout.prewarning.data.repository.SubscriptionSync
 import ua.blackout.prewarning.notification.NotificationHelper
 import ua.blackout.prewarning.ui.AppStrings
 import java.io.ByteArrayOutputStream
@@ -37,7 +40,7 @@ import java.io.ByteArrayOutputStream
  *   ([pushCards]) with inline [RemoteViews.RemoteCollectionItems]: the platform accepts a collection adapter only
  *   when it is applied from the widget root ("setRemoteAdapter can only be used for AppWidgets"), and Glance nests
  *   every view it is given; a partial update is applied from the root and finds the stack by its id.
- * - While a stack can show, the widgets draw with SizeMode.Single ([active]): a responsive widget is one
+ * - On Android 12+ the widgets always draw with SizeMode.Single ([sizeMode]): a responsive widget is one
  *   RemoteViews per size, and a partial update merged into that outer container is never applied.
  * - The cards are plain XML layouts (widget_card_big / _small / _strip / _minimal) filled from the widget model: content
  *   composed by Glance came out empty inside a stack item.
@@ -65,23 +68,18 @@ object AddressStack {
     /** Inline collection items need Android 12; older versions keep one address per widget. */
     val supported: Boolean get() = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
 
-    @Volatile
-    private var appContext: Context? = null
+    /**
+     * The size mode of every widget: always SizeMode.Single on Android 12+, whether or not a stack shows, so the cards
+     * (a partial update) always find one RemoteViews to land in. Glance fixes the size mode when a widget's session
+     * starts, so a mode that followed the number of addresses stayed wrong until the session was restarted: cards
+     * bigger than the widget and no buttons until another widget was placed (owner report 2026-11-18).
+     */
+    fun sizeMode(older: SizeMode): SizeMode = if (supported) SizeMode.Single else older
 
-    /** Keeps the application context for [active], which Glance asks without one. */
-    fun remember(context: Context) {
-        appContext = context.applicationContext
-    }
-
-    /** True while a stack can show (Android 12+, two or more saved addresses): the widgets then use SizeMode.Single. */
-    fun active(): Boolean {
-        val ctx = appContext ?: return false
-        return supported && try {
-            SubscriptionSync(ctx).store().items.size >= 2
-        } catch (_: Exception) {
-            false
-        }
-    }
+    /** The size a widget lays out for: the launcher's size on Android 12+ (see [sizeMode]), else Glance's size. */
+    @Composable
+    fun layoutSize(context: Context, kind: Kind): DpSize =
+        if (supported) widgetSize(context, LocalAppWidgetOptions.current, kind) else LocalSize.current
 
     enum class Kind { SMALL, BIG, STRIP, MINIMAL }
 

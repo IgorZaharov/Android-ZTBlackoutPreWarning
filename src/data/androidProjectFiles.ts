@@ -1764,7 +1764,6 @@ import androidx.glance.GlanceModifier
 import androidx.glance.GlanceTheme
 import androidx.glance.Image
 import androidx.glance.ImageProvider
-import androidx.glance.LocalSize
 import androidx.glance.action.Action
 import androidx.glance.action.ActionParameters
 import androidx.glance.action.actionParametersOf
@@ -1822,9 +1821,8 @@ open class BlackoutGlanceWidget(private val forceBigLayout: Boolean = false) : G
         )
     )
 
-    /** One RemoteViews while an address stack can show, so its cards (a partial update) reach it (AddressStack.active). */
-    override val sizeMode: SizeMode
-        get() = if (AddressStack.active()) SizeMode.Single else responsive
+    /** One RemoteViews on Android 12+, so address-stack cards (a partial update) reach it (AddressStack.sizeMode). */
+    override val sizeMode: SizeMode = AddressStack.sizeMode(responsive)
 
     companion object {
         val KEY_NOTIFICATIONS_ENABLED = booleanPreferencesKey("glance_notifications_enabled")
@@ -1966,7 +1964,6 @@ open class BlackoutGlanceWidget(private val forceBigLayout: Boolean = false) : G
          */
         suspend fun syncAllWidgets(context: Context, refreshing: Boolean? = null) {
             val appCtx = context.applicationContext
-            AddressStack.remember(appCtx)
             val manager = GlanceAppWidgetManager(appCtx)
             val smallIds = manager.getGlanceIds(BlackoutGlanceWidget::class.java)
             val bigIds = manager.getGlanceIds(BlackoutBigGlanceWidget::class.java)
@@ -2267,12 +2264,17 @@ open class BlackoutGlanceWidget(private val forceBigLayout: Boolean = false) : G
             // the bell shows and toggles the master switch for all addresses (owner decision 4)
             val notificationsEnabled = SubscriptionSync(appContext).master()
 
-            val size = LocalSize.current
-            val isBigWidget = forceBigLayout || size.height >= 110.dp || size.width >= 220.dp
+            val kind = if (forceBigLayout) AddressStack.Kind.BIG else AddressStack.Kind.SMALL
+            val size = AddressStack.layoutSize(appContext, kind)
+            // Android 12+ lays out for the launcher's size; the big layout from the size of the 4x2 bucket of \`responsive\`
+            val isBigWidget = forceBigLayout || if (AddressStack.supported) {
+                size.width >= 250.dp && size.height >= 110.dp
+            } else {
+                size.height >= 110.dp || size.width >= 220.dp
+            }
             // the app widget id of an address stack (spec/SUBSCRIPTIONS.md 10), null when this widget shows one address
             val stackWidgetId = appWidgetId?.takeIf { AddressStack.supported && WidgetBindings.stackIds(appContext, it).size >= 2 }
             val options = LocalAppWidgetOptions.current
-            val kind = if (forceBigLayout) AddressStack.Kind.BIG else AddressStack.Kind.SMALL
             // the cards are composed off the composition and land a moment later; until then the widget is as before
             val cards by produceState<List<Pair<String, RemoteViews>>?>(null, stackWidgetId, refreshTick, options, notificationsEnabled) {
                 value = stackWidgetId?.let {
@@ -2628,9 +2630,8 @@ class BlackoutStripGlanceWidget : GlanceAppWidget() {
         )
     )
 
-    /** One RemoteViews while an address stack can show, so its cards (a partial update) reach it (AddressStack.active). */
-    override val sizeMode: SizeMode
-        get() = if (AddressStack.active()) SizeMode.Single else responsive
+    /** One RemoteViews on Android 12+, so address-stack cards (a partial update) reach it (AddressStack.sizeMode). */
+    override val sizeMode: SizeMode = AddressStack.sizeMode(responsive)
 
     override suspend fun provideGlance(context: Context, id: GlanceId) {
         val appContext = context.applicationContext
@@ -2668,7 +2669,8 @@ class BlackoutStripGlanceWidget : GlanceAppWidget() {
             } else {
                 val source = widgetSource(appContext, appWidgetId)
                 val model = BlackoutGlanceWidget.buildWidgetModel(source.settings, source.snapshot, source.label)
-                StripBody(model, openAppAction(source.itemId), showInfo = LocalSize.current.height >= INFO_MIN_HEIGHT)
+                val size = AddressStack.layoutSize(appContext, AddressStack.Kind.STRIP)
+                StripBody(model, openAppAction(source.itemId), showInfo = size.height >= INFO_MIN_HEIGHT)
             }
         }
     }
@@ -2860,12 +2862,6 @@ import ua.blackout.prewarning.notification.AlarmScheduler
 
 open class BlackoutWidgetReceiver : GlanceAppWidgetReceiver() {
     override val glanceAppWidget: GlanceAppWidget = BlackoutGlanceWidget()
-
-    override fun onReceive(context: Context, intent: android.content.Intent) {
-        // Glance asks the widgets for their size mode without a context (AddressStack.active)
-        AddressStack.remember(context)
-        super.onReceive(context, intent)
-    }
 
     override fun onEnabled(context: Context) {
         super.onEnabled(context)
