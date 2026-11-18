@@ -36,7 +36,7 @@ struct AddressLookupSheet: View {
     @State private var settlementsState = LevelState()
     @State private var streetsState = LevelState()
     @State private var housesState = LevelState()
-    /// Grows when a street is chosen, so the house list opens right away (keyboard only for a long list).
+    /// Grows when a street is chosen, so the house list opens right away.
     @State private var houseOpenRequest = 0
 
     @State private var checking = false

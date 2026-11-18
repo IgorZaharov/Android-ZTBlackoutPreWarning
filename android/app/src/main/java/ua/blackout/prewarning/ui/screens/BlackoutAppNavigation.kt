@@ -34,6 +34,9 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.CompositingStrategy
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.foundation.pager.PagerState
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
@@ -151,7 +154,6 @@ fun BlackoutAppNavigation(
     var soundEnabled by remember { mutableStateOf(initialSettings.soundEnabled) }
     var vibrationEnabled by remember { mutableStateOf(initialSettings.vibrationEnabled) }
     var currentLanguage by remember { mutableStateOf(initialSettings.language) }
-    var isRouletteOpen by remember { mutableStateOf(false) }
     var autoOpenQueueHelp by remember { mutableStateOf(false) }
     // First-run tour (spec/ONBOARDING.md): started by the first-launch button, never shown again once finished
     val onboarding = remember { OnboardingStore(appContext) }
@@ -251,7 +253,9 @@ fun BlackoutAppNavigation(
         anyPlannedActive && !ExactAlarmGate.canScheduleExact(appContext)
     }
 
-    val isMainScreenVisible = pagerState.currentPage == 0 && !isRouletteOpen
+    // settledPage, not currentPage: currentPage flips half way through a swipe, and the work that hangs on it
+    // (countdown on/off, snapshot, the Settings site check, recomposing both pages) made the swipe stutter
+    val isMainScreenVisible = pagerState.settledPage == 0
     val isCountdownScreenActive = isMainScreenVisible && !isQueueUnselected
     var hasCompletedInitialScheduleFetch by remember { mutableStateOf(false) }
 
@@ -321,7 +325,9 @@ fun BlackoutAppNavigation(
     LaunchedEffect(isMainScreenVisible) {
         if (isMainScreenVisible) {
             currentTime = LocalTime.now(KYIV_ZONE)
-            recomputeSnapshot()
+            val settings = currentSettings
+            val key = addressKey
+            snapshot = withContext(Dispatchers.Default) { shownSnapshot(settings, LocalDateTime.now(KYIV_ZONE), key) }
             if (hasCompletedInitialScheduleFetch) {
                 runRefresh(force = false, resolveAddress = true)
             }
@@ -333,8 +339,10 @@ fun BlackoutAppNavigation(
         if (!isCountdownScreenActive) {
             val nowDt = LocalDateTime.now(KYIV_ZONE)
             currentTime = nowDt.toLocalTime()
-            snapshot = shownSnapshot(currentSettings, nowDt, addressKey)
-            statusInfo = snapshot.scheduleStatus()
+            // off the main thread: stores are read and the engine runs, which must not cost a frame of a swipe
+            val fresh = withContext(Dispatchers.Default) { shownSnapshot(currentSettings, nowDt, addressKey) }
+            snapshot = fresh
+            statusInfo = fresh.scheduleStatus()
             return@LaunchedEffect
         }
         lifecycleOwner.lifecycle.repeatOnLifecycle(Lifecycle.State.RESUMED) {
@@ -347,7 +355,7 @@ fun BlackoutAppNavigation(
             while (true) {
                 val nowDt = LocalDateTime.now(KYIV_ZONE)
                 currentTime = nowDt.toLocalTime()
-                val fresh = shownSnapshot(currentSettings, nowDt, addressKey)
+                val fresh = withContext(Dispatchers.Default) { shownSnapshot(currentSettings, nowDt, addressKey) }
                 snapshot = fresh
                 val updatedStatus = fresh.scheduleStatus()
                 statusInfo = updatedStatus
@@ -460,7 +468,6 @@ fun BlackoutAppNavigation(
     LaunchedEffect(openSubscriptionId) {
         val id = openSubscriptionId ?: return@LaunchedEffect
         shownSubscriptionId = id
-        isRouletteOpen = false
         pagerState.scrollToPage(0)
         onOpenSubscriptionHandled()
     }
@@ -614,7 +621,7 @@ fun BlackoutAppNavigation(
         HorizontalPager(
             state = pagerState,
             beyondViewportPageCount = 2,
-            userScrollEnabled = !isRouletteOpen && !isQueueUnselected,
+            userScrollEnabled = !isQueueUnselected,
             flingBehavior = PagerDefaults.flingBehavior(state = pagerState, snapAnimationSpec = PageGlide),
             modifier = Modifier.fillMaxSize()
         ) { page ->
@@ -623,6 +630,8 @@ fun BlackoutAppNavigation(
             modifier = Modifier
                 .fillMaxSize()
                 .graphicsLayer {
+                    // alpha per draw call instead of an offscreen copy of the whole page every frame
+                    compositingStrategy = CompositingStrategy.ModulateAlpha
                     val away = kotlin.math.abs((pagerState.currentPage - page) + pagerState.currentPageOffsetFraction).coerceIn(0f, 1f)
                     alpha = 1f - 0.35f * away
                     if (!reduceMotion) {
@@ -732,6 +741,10 @@ fun BlackoutAppNavigation(
                         onSetPlanned = { id, on -> onStoreResult(subscriptionSync.change { Subscriptions.setPlanned(it, id, on) }) },
                         onSetEmergency = { id, on -> onStoreResult(subscriptionSync.change { Subscriptions.setEmergency(it, id, on) }) },
                         onRenameSubscription = { id, label -> onStoreResult(subscriptionSync.change { Subscriptions.rename(it, id, label) }) },
+                        onEditAddress = { id, resolvedQueue, statusText, addressLabel, query ->
+                            val ok = onStoreResult(subscriptionSync.editAddress(id, resolvedQueue, statusText, addressLabel, query))
+                            if (ok) showAppBanner(AppStrings.addressChanged(resolvedLang))
+                        },
                         onMoveSubscription = { id, to -> onStoreResult(subscriptionSync.change { Subscriptions.move(it, id, to) }) },
                         onSiteUrlChanged = { newUrl ->
                             siteUrl = newUrl
@@ -835,28 +848,17 @@ fun BlackoutAppNavigation(
                                 }
                             }
                         },
-                        isVisible = pagerState.currentPage == 1
+                        isVisible = pagerState.settledPage == 1
                     )
                 }
                 2 -> {
                     AboutScreen(
                         scrollState = pageScrolls[2],
-                        lang = resolvedLang,
-                        onOpenRoulette = { isRouletteOpen = true }
+                        lang = resolvedLang
                     )
                 }
             }
           }
-        }
-
-        if (isRouletteOpen) {
-            ZhytomyrRouletteDialog(
-                lang = resolvedLang,
-                providerUrl = siteUrl,
-                queue = queue.ifBlank { "1.1" },
-                onShowAppBanner = showAppBanner,
-                onDismiss = { isRouletteOpen = false }
-            )
         }
 
         // Top In-App Notification Banner with Application Icon (white lightning on #FF5E3A rounded square)
@@ -903,86 +905,27 @@ fun BlackoutAppNavigation(
             }
         }
 
-        // Floating Capsule Bottom Navigation Dock matching emulator (hidden when Житомирська Рулетка is open; dimmed & disabled when queue unselected)
-        if (!isRouletteOpen) {
+        // Floating Capsule Bottom Navigation Dock matching emulator (dimmed & disabled when queue unselected)
+        Box(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .navigationBarsPadding()
+                .padding(bottom = 16.dp)
+                .alpha(if (isQueueUnselected) 0.15f else 1f)
+        ) {
             Box(
                 modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .navigationBarsPadding()
-                    .padding(bottom = 16.dp)
-                    .alpha(if (isQueueUnselected) 0.15f else 1f)
+                    .glassSurface(CircleShape, 32.dp, background = Color(0xB8141A29))
+                    .padding(6.dp)
             ) {
-                Box(
-                    modifier = Modifier
-                        .glassSurface(CircleShape, 32.dp, background = Color(0xB8141A29))
-                        .padding(6.dp)
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        // Schedule Tab
-                        val isSchedule = pagerState.currentPage == 0
-                        Box(
-                            modifier = Modifier
-                                .coachTarget("dock-home")
-                                .size(44.dp)
-                                .clip(CircleShape)
-                                .background(if (isSchedule) Color.White else Color.Transparent)
-                                .clickable(enabled = !isQueueUnselected) {
-                                    onDockTap(0)
-                                },
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                Icons.Default.Home,
-                                contentDescription = "Графік",
-                                tint = if (isSchedule) Color.Black else Color(0xB3BAE6FD),
-                                modifier = Modifier.size(20.dp)
-                            )
-                        }
-
-                        // Settings Tab
-                        val isSettings = pagerState.currentPage == 1
-                        Box(
-                            modifier = Modifier
-                                .size(44.dp)
-                                .clip(CircleShape)
-                                .background(if (isSettings) Color.White else Color.Transparent)
-                                .clickable(enabled = !isQueueUnselected) {
-                                    onDockTap(1)
-                                },
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                Icons.Default.Settings,
-                                contentDescription = "Налаштування",
-                                tint = if (isSettings) Color.Black else Color(0xB3BAE6FD),
-                                modifier = Modifier.size(20.dp)
-                            )
-                        }
-
-                        // About Tab
-                        val isAbout = pagerState.currentPage == 2
-                        Box(
-                            modifier = Modifier
-                                .coachTarget("dock-about")
-                                .size(44.dp)
-                                .clip(CircleShape)
-                                .background(if (isAbout) Color.White else Color.Transparent)
-                                .clickable(enabled = !isQueueUnselected) {
-                                    onDockTap(2)
-                                },
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Icon(
-                                Icons.Default.Info,
-                                contentDescription = "Про додаток",
-                                tint = if (isAbout) Color.Black else Color(0xB3BAE6FD),
-                                modifier = Modifier.size(20.dp)
-                            )
-                        }
-                    }
+                    // Each tab reads the pager itself, so the live page highlight recomposes only the tab
+                    DockTab(pagerState, 0, Icons.Default.Home, "Графік", !isQueueUnselected, Modifier.coachTarget("dock-home")) { onDockTap(0) }
+                    DockTab(pagerState, 1, Icons.Default.Settings, "Налаштування", !isQueueUnselected) { onDockTap(1) }
+                    DockTab(pagerState, 2, Icons.Default.Info, "Про додаток", !isQueueUnselected, Modifier.coachTarget("dock-about")) { onDockTap(2) }
                 }
             }
         }
@@ -990,7 +933,7 @@ fun BlackoutAppNavigation(
         // First-run tour on the main window: RENAME, ALERTS (Settings) and ABOUT (main screen); the lookup
         // dialog draws PICK and APPLY in its own window
         if (tourActive) {
-            val tourPage = when (pagerState.currentPage) {
+            val tourPage = when (pagerState.settledPage) {
                 0 -> TourPage.SCHEDULE
                 1 -> TourPage.SETTINGS
                 2 -> TourPage.ABOUT
@@ -1045,5 +988,34 @@ fun BlackoutAppNavigation(
             }
         }
     }
+    }
+}
+
+/** One dock button; reads [PagerState.currentPage] here so a swipe recomposes only this button. */
+@Composable
+private fun DockTab(
+    pagerState: PagerState,
+    page: Int,
+    icon: ImageVector,
+    description: String,
+    enabled: Boolean,
+    modifier: Modifier = Modifier,
+    onTap: () -> Unit
+) {
+    val selected = pagerState.currentPage == page
+    Box(
+        modifier = modifier
+            .size(44.dp)
+            .clip(CircleShape)
+            .background(if (selected) Color.White else Color.Transparent)
+            .clickable(enabled = enabled, onClick = onTap),
+        contentAlignment = Alignment.Center
+    ) {
+        Icon(
+            icon,
+            contentDescription = description,
+            tint = if (selected) Color.Black else Color(0xB3BAE6FD),
+            modifier = Modifier.size(20.dp)
+        )
     }
 }

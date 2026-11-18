@@ -294,6 +294,25 @@ object Subscriptions {
         }
     }
 
+    /**
+     * The user edited the item's address (`spec/SUBSCRIPTIONS.md` section 4): address, queue and status text come
+     * from the lookup; id, label, switches, position and primary stay. Another item with the new identity is a duplicate.
+     */
+    fun setAddress(store: SubscriptionStore, id: String, address: SubscriptionAddress, queue: String?, statusText: String?): StoreResult {
+        val item = store.items.firstOrNull { it.id == id } ?: return StoreResult.Error(ERR_NOT_FOUND)
+        val changed = normalize(
+            item.copy(
+                address = address,
+                queue = queue,
+                queueSource = QueueSource.LOOKUP,
+                queueStatusText = statusText?.takeIf { it.isNotBlank() }
+            )
+        )
+        if (changed.address == null) return StoreResult.Error(ERR_INVALID)
+        store.items.firstOrNull { it.id != id && it.identity == changed.identity }?.let { return StoreResult.Error(ERR_DUPLICATE, it.id) }
+        return update(store, id) { changed }
+    }
+
     private inline fun update(store: SubscriptionStore, id: String, change: (Subscription) -> Subscription): StoreResult {
         if (store.items.none { it.id == id }) return StoreResult.Error(ERR_NOT_FOUND)
         return StoreResult.Ok(store.copy(items = store.items.map { if (it.id == id) change(it) else it }))
@@ -460,6 +479,18 @@ object Subscriptions {
     /** The distinct items the placed widgets show, in order of first appearance (redraw alarms, polling). */
     fun widgetItemIds(store: SubscriptionStore, boundIds: List<String?>): List<String> =
         boundIds.mapNotNull { widgetItem(store, it)?.id }.distinct()
+
+    /**
+     * Android: the cards of a widget's address stack (`spec/SUBSCRIPTIONS.md` section 10). A widget that follows
+     * the primary shows every item when there are two or more, the primary first; otherwise its one item.
+     */
+    fun widgetStackIds(store: SubscriptionStore, boundId: String?): List<String> {
+        if (boundId == null && store.items.size >= 2) {
+            val primary = store.items.firstOrNull { it.id == store.primaryId }
+            return listOfNotNull(primary?.id) + store.items.filter { it.id != primary?.id }.map { it.id }
+        }
+        return listOfNotNull(widgetItem(store, boundId)?.id)
+    }
 }
 
 /** One planned pre-warning shared by every item on one queue with the same span (`spec/SUBSCRIPTIONS.md` 8.1). */

@@ -7,7 +7,12 @@ struct RootView: View {
     @StateObject private var model = AppModel()
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var pagePosition: CGFloat = 0
+    /// Scroll position of the pager in pages, written every frame of a swipe. A separate observable, so only the
+    /// background that draws the parallax re-renders, not this view and the three pages under it.
+    @State private var pagerMotion = PagerMotion()
+    /// The page the scroll view is on; `model.page` follows it once the swipe has settled,
+    /// so the whole app does not re-render in the middle of the swipe.
+    @State private var scrolledPage: Int? = 0
     @State private var paletteMinute = KyivZone.minuteOfDay()
     /// Tour targets of the main window (spec/ONBOARDING.md); the address lookup collects its own.
     @State private var coachRects: [String: CGRect] = [:]
@@ -26,8 +31,8 @@ struct RootView: View {
         let unselected = model.isQueueUnselected
         ZStack(alignment: .top) {
             // recomputed once a minute, not every second (Android keys it by minute-of-day too)
-            AmbientBackground(palette: TimeOfDayPalette.colors(hour: paletteMinute / 60, minute: paletteMinute % 60),
-                              pagePosition: pagePosition, dimmed: unselected)
+            PagerBackground(palette: TimeOfDayPalette.colors(hour: paletteMinute / 60, minute: paletteMinute % 60),
+                            motion: pagerMotion, dimmed: unselected)
 
             GeometryReader { outer in
               ScrollViewReader { proxy in
@@ -53,16 +58,25 @@ struct RootView: View {
                 }
                 .coordinateSpace(name: "pager")
                 .scrollTargetBehavior(.paging)
-                .scrollPosition(id: $model.page)
+                .scrollPosition(id: $scrolledPage)
                 .scrollIndicators(.hidden)
                 .scrollDisabled(unselected)
-                .onPreferenceChange(PagerOffset.self) { pagePosition = $0 }
+                .onPreferenceChange(PagerOffset.self) { pagerMotion.position = $0 }
+                // the app learns the page only after the swipe settles (Android settledPage)
+                .task(id: scrolledPage) {
+                    guard let target = scrolledPage, target != model.page else { return }
+                    try? await Task.sleep(for: .milliseconds(300))
+                    guard !Task.isCancelled else { return }
+                    model.page = target
+                }
                 // a page asked for by the app (dock, "Select queue", reset); also the one a launch
                 // argument set before the first layout, which scrollPosition alone ignores
                 .onChange(of: model.pageJump) { _, jump in
                     withAnimation(ZtMotion.pageGlide) { proxy.scrollTo(jump.page, anchor: .leading) }
                 }
                 .onAppear {
+                    // the settle task above must not move a launch page back to 0
+                    scrolledPage = model.page
                     let start = model.pageJump.page
                     if start != 0 { DispatchQueue.main.async { proxy.scrollTo(start, anchor: .leading) } }
                 }
@@ -78,7 +92,7 @@ struct RootView: View {
             }
         }
         .overlay(alignment: .bottom) {
-            Dock(page: page, enabled: !unselected) { target in
+            Dock(page: scrolledPage ?? page, enabled: !unselected) { target in
                 model.go(to: target)
             } onDoubleTap: { target in
                 model.scrollToTop(target)
@@ -265,5 +279,23 @@ private struct Dock: View {
             .ztGlassSurface(cornerRadius: 32, tint: Color(argb: 0xB8141A29), interactive: true)
         }
         .disabled(!enabled)
+    }
+}
+
+/// The pager's scroll position in pages (0, 1, 2 and fractions while swiping). Observation tracks it per
+/// view, so writing it every frame re-renders only `PagerBackground`.
+@Observable
+final class PagerMotion {
+    var position: CGFloat = 0
+}
+
+/// The ambient background with the swipe parallax; the only reader of `PagerMotion.position`.
+private struct PagerBackground: View {
+    let palette: TimePaletteColors
+    let motion: PagerMotion
+    let dimmed: Bool
+
+    var body: some View {
+        AmbientBackground(palette: palette, pagePosition: motion.position, dimmed: dimmed)
     }
 }

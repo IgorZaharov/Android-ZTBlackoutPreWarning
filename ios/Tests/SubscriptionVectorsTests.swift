@@ -119,6 +119,9 @@ final class SubscriptionVectorsTests: XCTestCase {
                 case "setQueueInfo":
                     result = Subscriptions.setQueueInfo(store, id: id, queue: s.str("queue"), statusText: s.str("statusText"),
                                                         addressText: s.str("addressText"))
+                case "setAddress":
+                    let address = Subscriptions.itemFromMap(["id": "addr0000", "address": s.obj("address")!]).address!
+                    result = Subscriptions.setAddress(store, id: id, address: address, queue: s.str("queue"), statusText: s.str("statusText"))
                 default:
                     XCTFail("unknown op in \(label)")
                     continue

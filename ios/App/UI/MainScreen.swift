@@ -160,6 +160,8 @@ struct MainScreen: View {
               }
             }
             .scrollDisabled(isQueueUnselected)
+            // pull the page down to refresh, as in a browser (owner, 2026-11-18); off without a queue, like scrolling
+            .refreshable { await model.pullRefresh() }
             .opacity(isQueueUnselected ? 0.15 : 1)
             // the overlay below is the only interactive thing: hide this layer from VoiceOver too
             .accessibilityHidden(isQueueUnselected)
@@ -169,8 +171,7 @@ struct MainScreen: View {
                 FirstLaunchOverlay(model: model)
             }
         }
-        // another address starts on Today (spec/SUBSCRIPTIONS.md 9)
-        .onChange(of: model.shownSubscriptionId) { _, _ in isTomorrow = false }
+        // Today / Tomorrow stays when another address is shown (spec/SUBSCRIPTIONS.md 9, owner 2026-11-18)
     }
 
     // MARK: - Pieces

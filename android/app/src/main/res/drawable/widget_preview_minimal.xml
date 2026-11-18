@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Preview of the 2x2 minimal widget: queue, refresh button, status, label and countdown on a 50 % layer -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="160dp"
+    android:height="160dp"
+    android:viewportWidth="160"
+    android:viewportHeight="160">
+
+    <!-- Rounded widget background (#141A29 at 50 %) -->
+    <path
+        android:fillColor="#80141A29"
+        android:pathData="M24,4 L136,4 A20,20 0 0,1 156,24 L156,136 A20,20 0 0,1 136,156 L24,156 A20,20 0 0,1 4,136 L4,24 A20,20 0 0,1 24,4 Z" />
+
+    <!-- Subtle border -->
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#33FFFFFF"
+        android:strokeWidth="1.5"
+        android:pathData="M24,4 L136,4 A20,20 0 0,1 156,24 L156,136 A20,20 0 0,1 136,156 L24,156 A20,20 0 0,1 4,136 L4,24 A20,20 0 0,1 24,4 Z" />
+
+    <!-- Queue title ("Черга 5.2") -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M21,22 L77,22 A5,5 0 0,1 82,27 L82,31 A5,5 0 0,1 77,36 L21,36 A5,5 0 0,1 16,31 L16,27 A5,5 0 0,1 21,22 Z" />
+
+    <!-- Round refresh button (#26FFFFFF) -->
+    <path
+        android:fillColor="#26FFFFFF"
+        android:pathData="M127,29 m-15,0 a15,15 0 1,0 30,0 a15,15 0 1,0 -30,0" />
+    <path
+        android:fillColor="#00000000"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="2.2"
+        android:pathData="M127,22 A7,7 0 1,1 120.5,31.5 M127,19 L127,25 L121,25" />
+
+    <!-- Green status ("СВІТЛО Є") -->
+    <path
+        android:fillColor="#34D399"
+        android:pathData="M38,64 L122,64 A7,7 0 0,1 129,71 L129,75 A7,7 0 0,1 122,82 L38,82 A7,7 0 0,1 31,75 L31,71 A7,7 0 0,1 38,64 Z" />
+
+    <!-- Countdown label ("До відключення:") -->
+    <path
+        android:fillColor="#99A9B4C2"
+        android:pathData="M37,94 L123,94 A4,4 0 0,1 127,98 L127,100 A4,4 0 0,1 123,104 L37,104 A4,4 0 0,1 33,100 L33,98 A4,4 0 0,1 37,94 Z" />
+
+    <!-- Countdown value ("00г. 46хв.") -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M28,114 L132,114 A8,8 0 0,1 140,122 L140,128 A8,8 0 0,1 132,136 L28,136 A8,8 0 0,1 20,128 L20,122 A8,8 0 0,1 28,114 Z" />
+</vector>

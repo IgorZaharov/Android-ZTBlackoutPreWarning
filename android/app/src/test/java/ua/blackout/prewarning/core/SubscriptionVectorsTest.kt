@@ -131,6 +131,13 @@ class SubscriptionVectorsTest {
                     "setQueueInfo" -> Subscriptions.setQueueInfo(
                         store, s.getString("id"), s.optStr("queue"), s.optStr("statusText"), s.optStr("addressText")
                     )
+                    "setAddress" -> Subscriptions.setAddress(
+                        store,
+                        s.getString("id"),
+                        Subscriptions.itemFromMap(mapOf("id" to "addr0000", "address" to plain(s.getJSONObject("address")))).address!!,
+                        s.optStr("queue"),
+                        s.optStr("statusText")
+                    )
                     else -> error("unknown op in $label")
                 }
                 val expectError = s.optStr("expectError")
@@ -294,6 +301,11 @@ class SubscriptionVectorsTest {
                 val b = vc.optStr("boundId")
                 assertEquals(c.getString("name") + " " + b, vc.optStr("expect"), Subscriptions.widgetLabel(store, b))
             }
+        }
+        for (c in v.getJSONArray("widgetStackIds").objects()) {
+            val bound = if (c.isNull("boundId")) null else c.getString("boundId")
+            val expect = c.getJSONArray("expect").let { a -> (0 until a.length()).map { a.getString(it) } }
+            assertEquals(c.getString("name"), expect, Subscriptions.widgetStackIds(storeOf(c.getJSONObject("store")), bound))
         }
         for (c in v.getJSONArray("widgetItemIds").objects()) {
             val a = c.getJSONArray("boundIds")

@@ -468,6 +468,9 @@ function subscriptionVectors(): number {
         case 'rename': result = Sub.rename(store, s.id, s.label); break;
         case 'move': result = Sub.move(store, s.id, s.toIndex); break;
         case 'setQueueInfo': result = Sub.setQueueInfo(store, s.id, optStr(s, 'queue'), optStr(s, 'statusText'), optStr(s, 'addressText')); break;
+        case 'setAddress':
+          result = Sub.setAddress(store, s.id, Sub.itemFromMap({ id: 'addr0000', address: s.address }).address!, optStr(s, 'queue'), optStr(s, 'statusText'));
+          break;
         default: throw new Error(`unknown op in ${label}`);
       }
       const expectError = optStr(s, 'expectError');
@@ -593,6 +596,9 @@ function subscriptionVectors(): number {
       assert.equal(Sub.widgetLabel(store, vc.boundId), vc.expect, `${c.name}: ${vc.boundId}`);
       n++;
     }
+  }
+  for (const c of v.widget.widgetStackIds) {
+    assert.deepStrictEqual(Sub.widgetStackIds(storeOf(c.store), c.boundId), c.expect, c.name);
   }
   for (const c of v.widget.widgetItemIds) {
     assert.deepStrictEqual(Sub.widgetItemIds(storeOf(c.store), c.boundIds), c.expect, c.name);

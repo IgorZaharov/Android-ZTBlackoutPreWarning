@@ -8,7 +8,14 @@ import android.graphics.Paint
 import android.graphics.RectF
 import android.graphics.Shader
 import android.graphics.Typeface
+import android.os.Build
+import android.widget.RemoteViews
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.produceState
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -28,7 +35,9 @@ import androidx.glance.action.ActionParameters
 import androidx.glance.action.actionParametersOf
 import androidx.glance.action.actionStartActivity
 import androidx.glance.action.clickable
+import androidx.glance.appwidget.AndroidRemoteViews
 import androidx.glance.appwidget.CircularProgressIndicator
+import androidx.glance.appwidget.LocalAppWidgetOptions
 import androidx.glance.appwidget.GlanceAppWidget
 import androidx.glance.appwidget.GlanceAppWidgetManager
 import androidx.glance.appwidget.SizeMode
@@ -70,13 +79,17 @@ open class BlackoutGlanceWidget(private val forceBigLayout: Boolean = false) : G
 
     override val stateDefinition: GlanceStateDefinition<*> = PreferencesGlanceStateDefinition
 
-    override val sizeMode = SizeMode.Responsive(
+    private val responsive = SizeMode.Responsive(
         setOf(
             DpSize(120.dp, 60.dp),   // 2x1 Small
             DpSize(250.dp, 110.dp),  // 4x2 Big
             DpSize(250.dp, 160.dp)   // 3x2 Big
         )
     )
+
+    /** One RemoteViews while an address stack can show, so its cards (a partial update) reach it (AddressStack.active). */
+    override val sizeMode: SizeMode
+        get() = if (AddressStack.active()) SizeMode.Single else responsive
 
     companion object {
         val KEY_NOTIFICATIONS_ENABLED = booleanPreferencesKey("glance_notifications_enabled")
@@ -205,7 +218,8 @@ open class BlackoutGlanceWidget(private val forceBigLayout: Boolean = false) : G
                 val manager = GlanceAppWidgetManager(appCtx)
                 manager.getGlanceIds(BlackoutGlanceWidget::class.java).isNotEmpty() ||
                     manager.getGlanceIds(BlackoutBigGlanceWidget::class.java).isNotEmpty() ||
-                    manager.getGlanceIds(BlackoutStripGlanceWidget::class.java).isNotEmpty()
+                    manager.getGlanceIds(BlackoutStripGlanceWidget::class.java).isNotEmpty() ||
+                    manager.getGlanceIds(BlackoutMinimalGlanceWidget::class.java).isNotEmpty()
             } catch (_: Exception) {
                 false
             }
@@ -217,11 +231,13 @@ open class BlackoutGlanceWidget(private val forceBigLayout: Boolean = false) : G
          */
         suspend fun syncAllWidgets(context: Context, refreshing: Boolean? = null) {
             val appCtx = context.applicationContext
+            AddressStack.remember(appCtx)
             val manager = GlanceAppWidgetManager(appCtx)
             val smallIds = manager.getGlanceIds(BlackoutGlanceWidget::class.java)
             val bigIds = manager.getGlanceIds(BlackoutBigGlanceWidget::class.java)
             val stripIds = manager.getGlanceIds(BlackoutStripGlanceWidget::class.java)
-            if (smallIds.isEmpty() && bigIds.isEmpty() && stripIds.isEmpty()) return
+            val minimalIds = manager.getGlanceIds(BlackoutMinimalGlanceWidget::class.java)
+            if (smallIds.isEmpty() && bigIds.isEmpty() && stripIds.isEmpty() && minimalIds.isEmpty()) return
 
             val settings = SettingsRepository(appCtx).getSettings()
             val alertsMaster = SubscriptionSync(appCtx).master()
@@ -266,6 +282,15 @@ open class BlackoutGlanceWidget(private val forceBigLayout: Boolean = false) : G
                 } catch (_: Exception) {
                 }
             }
+            for (gId in minimalIds) {
+                try {
+                    touch(gId)
+                    BlackoutMinimalGlanceWidget().update(appCtx, gId)
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (_: Exception) {
+                }
+            }
         }
 
         /**
@@ -273,6 +298,7 @@ open class BlackoutGlanceWidget(private val forceBigLayout: Boolean = false) : G
          * and caches it by (slotStatuses, currentH, currentM) to avoid redundant Bitmap allocations
          * and Canvas redraws within the same minute (e.g., when toggling the alert bell icon).
          */
+        @Synchronized
         fun renderAnalogCounterBitmap(
             slots: List<BlackoutSlot>,
             currentH: Int,
@@ -503,361 +529,339 @@ open class BlackoutGlanceWidget(private val forceBigLayout: Boolean = false) : G
             val isRefreshing = refreshingSince > 0L && System.currentTimeMillis() - refreshingSince < REFRESH_BUSY_MAX_MS
             val source = widgetSource(appContext, appWidgetId)
             val model = buildWidgetModel(source.settings, source.snapshot, source.label)
-            val openApp = openAppAction(source.itemId)
-
-            val resolvedLang = model.lang
             // the bell shows and toggles the master switch for all addresses (owner decision 4)
             val notificationsEnabled = SubscriptionSync(appContext).master()
-            val isUnclear = model.isUnclear
-            val isBlackoutNow = model.isOffNow
-            val countdownText = model.countdown
-            val nextSlotTime = model.period
-            val nextBlackoutText = model.nextOutage
-            val slots = model.slots
-            val queueHeaderText = model.queueHeader
-            val addressLabel = model.addressLabel
-            val staleCaption = model.staleCaption
 
             val size = LocalSize.current
             val isBigWidget = forceBigLayout || size.height >= 110.dp || size.width >= 220.dp
-
-            val statusText = when {
-                isUnclear -> AppStrings.powerUnclear(resolvedLang)
-                isBlackoutNow -> "СВІТЛА НЕМАЄ"
-                else -> "СВІТЛО Є"
+            // the app widget id of an address stack (spec/SUBSCRIPTIONS.md 10), null when this widget shows one address
+            val stackWidgetId = appWidgetId?.takeIf { AddressStack.supported && WidgetBindings.stackIds(appContext, it).size >= 2 }
+            val options = LocalAppWidgetOptions.current
+            val kind = if (forceBigLayout) AddressStack.Kind.BIG else AddressStack.Kind.SMALL
+            // the cards are composed off the composition and land a moment later; until then the widget is as before
+            val cards by produceState<List<Pair<String, RemoteViews>>?>(null, stackWidgetId, refreshTick, options, notificationsEnabled) {
+                value = stackWidgetId?.let {
+                    try {
+                        AddressStack.buildCards(appContext, it, kind, options)
+                    } catch (e: CancellationException) {
+                        throw e
+                    } catch (e: Exception) {
+                        android.util.Log.w("AddressStack", "cards not built: widget $it", e)
+                        null
+                    }
+                }
             }
-            val statusColor = when {
-                isUnclear -> Color(0xFF9CA3AF)
-                isBlackoutNow -> Color(0xFFFF5E3A)
-                else -> Color(0xFF34D399)
-            }
+            val ready = cards
 
-            GlanceTheme {
-                Box(
-                    modifier = GlanceModifier
-                        .fillMaxSize()
-                        .cornerRadius(20.dp)
-                        .background(ColorProvider(Color(0xCC141A29)))
-                        .padding(12.dp)
+            if (stackWidgetId != null && !ready.isNullOrEmpty() && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                // Address stack (spec/SUBSCRIPTIONS.md 10): one card over the whole widget, and above it the buttons in
+                // the corner the card leaves empty; the cards follow this frame as a partial update (see AddressStack)
+                val widget = AddressStack.widgetSize(options, kind)
+                LaunchedEffect(ready) {
+                    kotlinx.coroutines.delay(AddressStack.PUSH_DELAY_MS)
+                    AddressStack.pushCards(appContext, stackWidgetId, ready, widget)
+                }
+                Box(modifier = GlanceModifier.fillMaxSize()) {
+                    AndroidRemoteViews(
+                        remoteViews = AddressStack.frame(appContext),
+                        modifier = GlanceModifier.fillMaxSize()
+                    )
+                    StackButtons(isBigWidget, notificationsEnabled, isRefreshing)
+                }
+            } else {
+                WidgetBody(model, isBigWidget, notificationsEnabled, isRefreshing, openAppAction(source.itemId))
+            }
+        }
+    }
+}
+
+private fun GlanceModifier.clickableIf(action: Action?): GlanceModifier = if (action != null) clickable(action) else this
+
+/** The 2x1 and 4x2 widget content of one address ([BlackoutGlanceWidget]). */
+@Composable
+internal fun WidgetBody(
+    model: BlackoutGlanceWidget.Companion.WidgetModel,
+    isBigWidget: Boolean,
+    notificationsEnabled: Boolean,
+    isRefreshing: Boolean,
+    openApp: Action?
+) {
+    fun ink(c: Color): ColorProvider = ColorProvider(c)
+    val open = openApp
+
+    val resolvedLang = model.lang
+    val isUnclear = model.isUnclear
+    val isBlackoutNow = model.isOffNow
+    val statusText = when {
+        isUnclear -> AppStrings.powerUnclear(resolvedLang)
+        isBlackoutNow -> "СВІТЛА НЕМАЄ"
+        else -> "СВІТЛО Є"
+    }
+    val statusColor = when {
+        isUnclear -> Color(0xFF9CA3AF)
+        isBlackoutNow -> Color(0xFFFF5E3A)
+        else -> Color(0xFF34D399)
+    }
+
+    GlanceTheme {
+        Box(
+            modifier = GlanceModifier
+                .fillMaxSize()
+                .cornerRadius(20.dp)
+                .background(ink(Color(0xCC141A29)))
+                .padding(12.dp)
+        ) {
+            if (isBigWidget) {
+                // ----------------- 3x2 BIG WIDGET -----------------
+                Column(
+                    modifier = GlanceModifier.fillMaxSize(),
+                    verticalAlignment = Alignment.Vertical.CenterVertically
                 ) {
-                    if (isBigWidget) {
-                        val chartBitmap = renderAnalogCounterBitmap(slots, model.nowHour, model.nowMinute, resolvedLang)
-
-                        // ----------------- 3x2 BIG WIDGET -----------------
-                        Column(
-                            modifier = GlanceModifier.fillMaxSize(),
-                            verticalAlignment = Alignment.Vertical.CenterVertically
-                        ) {
-                            // Top Row: Queue + Status + Round Refresh Button + Round Notification Toggle Button
-                            Row(
-                                modifier = GlanceModifier.fillMaxWidth(),
-                                verticalAlignment = Alignment.Vertical.CenterVertically
-                            ) {
-                                Column(
-                                    modifier = GlanceModifier
-                                        .defaultWeight()
-                                        .clickable(openApp)
-                                ) {
-                                    Row(verticalAlignment = Alignment.Vertical.CenterVertically) {
-                                        Text(
-                                            text = queueHeaderText,
-                                            style = TextStyle(
-                                                fontWeight = FontWeight.Bold,
-                                                fontSize = 16.sp,
-                                                color = ColorProvider(Color.White)
-                                            ),
-                                            maxLines = 1
-                                        )
-                                        if (addressLabel != null) {
-                                            Spacer(modifier = GlanceModifier.width(6.dp))
-                                            Text(
-                                                text = addressLabel,
-                                                style = TextStyle(fontSize = 11.sp, color = ColorProvider(Color(0xB3BAE6FD))),
-                                                maxLines = 1
-                                            )
-                                        }
-                                    }
-                                    Row(verticalAlignment = Alignment.Vertical.CenterVertically) {
-                                        Text(
-                                            text = statusText,
-                                            style = TextStyle(
-                                                fontWeight = FontWeight.Bold,
-                                                fontSize = 11.sp,
-                                                color = ColorProvider(statusColor)
-                                            )
-                                        )
-                                        if (staleCaption != null) {
-                                            Spacer(modifier = GlanceModifier.width(6.dp))
-                                            Text(
-                                                text = staleCaption,
-                                                style = TextStyle(
-                                                    fontSize = 9.sp,
-                                                    color = ColorProvider(Color(0xFFFFB020))
-                                                ),
-                                                maxLines = 1
-                                            )
-                                        }
-                                    }
-                                }
-
-                                // Round Refresh Button (same style as Notification toggle)
-                                Box(
-                                    modifier = GlanceModifier
-                                        .size(36.dp)
-                                        .cornerRadius(18.dp)
-                                        .background(ColorProvider(Color(0x26FFFFFF)))
-                                        .clickable(actionRunCallback<RefreshWidgetActionCallback>()),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    if (isRefreshing) {
-                                        // Glance cannot rotate an image; the platform progress ring animates on its own
-                                        CircularProgressIndicator(
-                                            color = ColorProvider(Color.White),
-                                            modifier = GlanceModifier.size(18.dp)
-                                        )
-                                    } else {
-                                        Image(
-                                            provider = ImageProvider(R.drawable.ic_refresh),
-                                            contentDescription = "Оновити дані",
-                                            colorFilter = ColorFilter.tint(ColorProvider(Color.White)),
-                                            modifier = GlanceModifier.size(18.dp)
-                                        )
-                                    }
-                                }
-
-                                Spacer(modifier = GlanceModifier.width(8.dp))
-
-                                // Round Notification Toggle Button
-                                Box(
-                                    modifier = GlanceModifier
-                                        .size(36.dp)
-                                        .cornerRadius(18.dp)
-                                        .background(ColorProvider(if (notificationsEnabled) Color.White else Color(0x26FFFFFF)))
-                                        .clickable(actionRunCallback<ToggleAlertsActionCallback>()),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Image(
-                                        provider = ImageProvider(
-                                            if (notificationsEnabled) R.drawable.ic_notification else R.drawable.ic_notification_off
-                                        ),
-                                        contentDescription = "Toggle alerts",
-                                        colorFilter = ColorFilter.tint(
-                                            ColorProvider(if (notificationsEnabled) Color(0xFFFF5E3A) else Color.White)
-                                        ),
-                                        modifier = GlanceModifier.size(20.dp)
-                                    )
-                                }
-                            }
-
-                            Spacer(modifier = GlanceModifier.height(6.dp))
-
-                            // Countdown Card Row (clickable to open app)
-                            Row(
-                                modifier = GlanceModifier
-                                    .fillMaxWidth()
-                                    .cornerRadius(12.dp)
-                                    .background(ColorProvider(Color(0x33000000)))
-                                    .padding(horizontal = 10.dp, vertical = 6.dp)
-                                    .clickable(openApp),
-                                verticalAlignment = Alignment.Vertical.CenterVertically
-                            ) {
-                                Column(modifier = GlanceModifier.defaultWeight()) {
+                    // Top Row: Queue + Status + Round Refresh Button + Round Notification Toggle Button
+                    Row(
+                        modifier = GlanceModifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.Vertical.CenterVertically
+                    ) {
+                        Column(modifier = GlanceModifier.defaultWeight().clickableIf(open)) {
+                            Row(verticalAlignment = Alignment.Vertical.CenterVertically) {
+                                Text(
+                                    text = model.queueHeader,
+                                    style = TextStyle(fontWeight = FontWeight.Bold, fontSize = 16.sp, color = ink(Color.White)),
+                                    maxLines = 1
+                                )
+                                if (model.addressLabel != null) {
+                                    Spacer(modifier = GlanceModifier.width(6.dp))
                                     Text(
-                                        text = if (isBlackoutNow) "До увімкнення:" else "До відключення:",
-                                        style = TextStyle(fontSize = 10.sp, color = ColorProvider(Color(0xB3BAE6FD)))
-                                    )
-                                    Text(
-                                        text = countdownText,
-                                        style = TextStyle(
-                                            fontSize = 20.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            color = ColorProvider(Color.White)
-                                        ),
+                                        text = model.addressLabel,
+                                        style = TextStyle(fontSize = 11.sp, color = ink(Color(0xB3BAE6FD))),
                                         maxLines = 1
                                     )
                                 }
-                                Column(horizontalAlignment = Alignment.Horizontal.End) {
-                                    Text(
-                                        text = "Період",
-                                        style = TextStyle(fontSize = 10.sp, color = ColorProvider(Color(0xB3BAE6FD)))
-                                    )
-                                    Text(
-                                        text = nextSlotTime,
-                                        style = TextStyle(
-                                            fontSize = 12.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            color = ColorProvider(Color.White)
-                                        )
-                                    )
-                                }
                             }
-
-                            Spacer(modifier = GlanceModifier.height(6.dp))
-
-                            // 24-Hour Analog Electricity Counter (САЗУ-ИТ) Chart rendered via Bitmap
-                            Image(
-                                provider = ImageProvider(chartBitmap),
-                                contentDescription = "24-годинний графік відключень",
-                                contentScale = ContentScale.FillBounds,
-                                modifier = GlanceModifier
-                                    .fillMaxWidth()
-                                    .height(52.dp)
-                                    .clickable(openApp)
-                            )
-
-                            // Upcoming Outage Interval ("Наступне відключення")
-                            Spacer(modifier = GlanceModifier.height(4.dp))
-                            Row(
-                                modifier = GlanceModifier
-                                    .fillMaxWidth()
-                                    .cornerRadius(8.dp)
-                                    .background(ColorProvider(Color(0x26000000)))
-                                    .padding(horizontal = 8.dp, vertical = 3.dp)
-                                    .clickable(openApp),
-                                verticalAlignment = Alignment.Vertical.CenterVertically
-                            ) {
-                                Text(
-                                    text = nextBlackoutText,
-                                    style = TextStyle(
-                                        fontSize = 11.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = ColorProvider(Color.White)
-                                    )
-                                )
-                                Spacer(modifier = GlanceModifier.defaultWeight())
-                                Text(
-                                    text = "Наступне відключення",
-                                    style = TextStyle(
-                                        fontSize = 10.sp,
-                                        color = ColorProvider(Color(0xFFFF5E3A))
-                                    )
-                                )
-                            }
-                        }
-                    } else {
-                        // ----------------- 2x1 SMALL WIDGET -----------------
-                        Column(
-                            modifier = GlanceModifier.fillMaxSize(),
-                            verticalAlignment = Alignment.Vertical.CenterVertically
-                        ) {
-                            // Top Row: Queue + Status
-                            Row(
-                                modifier = GlanceModifier.fillMaxWidth(),
-                                verticalAlignment = Alignment.Vertical.CenterVertically
-                            ) {
-                                Text(
-                                    text = queueHeaderText,
-                                    style = TextStyle(
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 14.sp,
-                                        color = ColorProvider(Color.White)
-                                    ),
-                                    maxLines = 1,
-                                    modifier = GlanceModifier.clickable(openApp)
-                                )
-                                if (addressLabel != null) {
-                                    Spacer(modifier = GlanceModifier.width(6.dp))
-                                    Text(
-                                        text = addressLabel,
-                                        style = TextStyle(fontSize = 10.sp, color = ColorProvider(Color(0xB3BAE6FD))),
-                                        maxLines = 1,
-                                        modifier = GlanceModifier.defaultWeight().clickable(openApp)
-                                    )
-                                    Spacer(modifier = GlanceModifier.width(6.dp))
-                                } else {
-                                    Spacer(modifier = GlanceModifier.defaultWeight())
-                                }
+                            Row(verticalAlignment = Alignment.Vertical.CenterVertically) {
                                 Text(
                                     text = statusText,
-                                    style = TextStyle(
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 10.sp,
-                                        color = ColorProvider(statusColor)
-                                    ),
-                                    modifier = GlanceModifier.clickable(openApp)
+                                    style = TextStyle(fontWeight = FontWeight.Bold, fontSize = 11.sp, color = ink(statusColor))
                                 )
-                            }
-
-                            Spacer(modifier = GlanceModifier.height(4.dp))
-
-                            // Bottom Row: Countdown + Round Refresh Button + Round Notification Toggle Button
-                            Row(
-                                modifier = GlanceModifier.fillMaxWidth(),
-                                verticalAlignment = Alignment.Vertical.CenterVertically
-                            ) {
-                                Column(
-                                    modifier = GlanceModifier
-                                        .defaultWeight()
-                                        .clickable(openApp)
-                                ) {
+                                if (model.staleCaption != null) {
+                                    Spacer(modifier = GlanceModifier.width(6.dp))
                                     Text(
-                                        text = if (isBlackoutNow) "До увімкнення:" else "До відключення:",
-                                        style = TextStyle(fontSize = 10.sp, color = ColorProvider(Color(0xB3BAE6FD)))
-                                    )
-                                    Text(
-                                        text = countdownText,
-                                        style = TextStyle(
-                                            fontSize = 12.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            color = ColorProvider(Color.White)
-                                        ),
+                                        text = model.staleCaption,
+                                        style = TextStyle(fontSize = 9.sp, color = ink(Color(0xFFFFB020))),
                                         maxLines = 1
-                                    )
-                                }
-
-                                // Round Refresh Button (same style as Notification toggle)
-                                Box(
-                                    modifier = GlanceModifier
-                                        .size(34.dp)
-                                        .cornerRadius(17.dp)
-                                        .background(ColorProvider(Color(0x26FFFFFF)))
-                                        .clickable(actionRunCallback<RefreshWidgetActionCallback>()),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    if (isRefreshing) {
-                                        // Glance cannot rotate an image; the platform progress ring animates on its own
-                                        CircularProgressIndicator(
-                                            color = ColorProvider(Color.White),
-                                            modifier = GlanceModifier.size(16.dp)
-                                        )
-                                    } else {
-                                        Image(
-                                            provider = ImageProvider(R.drawable.ic_refresh),
-                                            contentDescription = "Оновити дані",
-                                            colorFilter = ColorFilter.tint(ColorProvider(Color.White)),
-                                            modifier = GlanceModifier.size(16.dp)
-                                        )
-                                    }
-                                }
-
-                                Spacer(modifier = GlanceModifier.width(6.dp))
-
-                                // Round Notification Toggle Button
-                                Box(
-                                    modifier = GlanceModifier
-                                        .size(34.dp)
-                                        .cornerRadius(17.dp)
-                                        .background(ColorProvider(if (notificationsEnabled) Color.White else Color(0x26FFFFFF)))
-                                        .clickable(actionRunCallback<ToggleAlertsActionCallback>()),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Image(
-                                        provider = ImageProvider(
-                                            if (notificationsEnabled) R.drawable.ic_notification else R.drawable.ic_notification_off
-                                        ),
-                                        contentDescription = "Toggle alerts",
-                                        colorFilter = ColorFilter.tint(
-                                            ColorProvider(if (notificationsEnabled) Color(0xFFFF5E3A) else Color.White)
-                                        ),
-                                        modifier = GlanceModifier.size(18.dp)
                                     )
                                 }
                             }
                         }
+                        RefreshButton(36.dp, 18.dp, isRefreshing)
+                        Spacer(modifier = GlanceModifier.width(8.dp))
+                        BellButton(36.dp, 20.dp, notificationsEnabled)
+                    }
+
+                    Spacer(modifier = GlanceModifier.height(6.dp))
+
+                    // Countdown Card Row (clickable to open app)
+                    Row(
+                        modifier = GlanceModifier
+                            .fillMaxWidth()
+                            .cornerRadius(12.dp)
+                            .background(ink(Color(0x33000000)))
+                            .padding(horizontal = 10.dp, vertical = 6.dp)
+                            .clickableIf(open),
+                        verticalAlignment = Alignment.Vertical.CenterVertically
+                    ) {
+                        Column(modifier = GlanceModifier.defaultWeight()) {
+                            Text(
+                                text = if (isBlackoutNow) "До увімкнення:" else "До відключення:",
+                                style = TextStyle(fontSize = 10.sp, color = ink(Color(0xB3BAE6FD)))
+                            )
+                            Text(
+                                text = model.countdown,
+                                style = TextStyle(fontSize = 20.sp, fontWeight = FontWeight.Bold, color = ink(Color.White)),
+                                maxLines = 1
+                            )
+                        }
+                        Column(horizontalAlignment = Alignment.Horizontal.End) {
+                            Text(
+                                text = "Період",
+                                style = TextStyle(fontSize = 10.sp, color = ink(Color(0xB3BAE6FD)))
+                            )
+                            Text(
+                                text = model.period,
+                                style = TextStyle(fontSize = 12.sp, fontWeight = FontWeight.Bold, color = ink(Color.White))
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = GlanceModifier.height(6.dp))
+
+                    // 24-Hour Analog Electricity Counter (САЗУ-ИТ) Chart rendered via Bitmap
+                    val chartBitmap = BlackoutGlanceWidget.renderAnalogCounterBitmap(
+                        model.slots, model.nowHour, model.nowMinute, resolvedLang
+                    )
+                    Image(
+                        provider = ImageProvider(chartBitmap),
+                        contentDescription = "24-годинний графік відключень",
+                        contentScale = ContentScale.FillBounds,
+                        modifier = GlanceModifier.fillMaxWidth().height(52.dp).clickableIf(open)
+                    )
+
+                    // Upcoming Outage Interval ("Наступне відключення")
+                    Spacer(modifier = GlanceModifier.height(4.dp))
+                    Row(
+                        modifier = GlanceModifier
+                            .fillMaxWidth()
+                            .cornerRadius(8.dp)
+                            .background(ink(Color(0x26000000)))
+                            .padding(horizontal = 8.dp, vertical = 3.dp)
+                            .clickableIf(open),
+                        verticalAlignment = Alignment.Vertical.CenterVertically
+                    ) {
+                        Text(
+                            text = model.nextOutage,
+                            style = TextStyle(fontSize = 11.sp, fontWeight = FontWeight.Bold, color = ink(Color.White))
+                        )
+                        Spacer(modifier = GlanceModifier.defaultWeight())
+                        Text(
+                            text = "Наступне відключення",
+                            style = TextStyle(fontSize = 10.sp, color = ink(Color(0xFFFF5E3A)))
+                        )
+                    }
+                }
+            } else {
+                // ----------------- 2x1 SMALL WIDGET -----------------
+                Column(
+                    modifier = GlanceModifier.fillMaxSize(),
+                    verticalAlignment = Alignment.Vertical.CenterVertically
+                ) {
+                    // Top Row: Queue + Status
+                    Row(
+                        modifier = GlanceModifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.Vertical.CenterVertically
+                    ) {
+                        Text(
+                            text = model.queueHeader,
+                            style = TextStyle(fontWeight = FontWeight.Bold, fontSize = 14.sp, color = ink(Color.White)),
+                            maxLines = 1,
+                            modifier = GlanceModifier.clickableIf(open)
+                        )
+                        if (model.addressLabel != null) {
+                            Spacer(modifier = GlanceModifier.width(6.dp))
+                            Text(
+                                text = model.addressLabel,
+                                style = TextStyle(fontSize = 10.sp, color = ink(Color(0xB3BAE6FD))),
+                                maxLines = 1,
+                                modifier = GlanceModifier.defaultWeight().clickableIf(open)
+                            )
+                            Spacer(modifier = GlanceModifier.width(6.dp))
+                        } else {
+                            Spacer(modifier = GlanceModifier.defaultWeight())
+                        }
+                        Text(
+                            text = statusText,
+                            style = TextStyle(fontWeight = FontWeight.Bold, fontSize = 10.sp, color = ink(statusColor)),
+                            modifier = GlanceModifier.clickableIf(open)
+                        )
+                    }
+
+                    Spacer(modifier = GlanceModifier.height(4.dp))
+
+                    // Bottom Row: Countdown + Round Refresh Button + Round Notification Toggle Button
+                    Row(
+                        modifier = GlanceModifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.Vertical.CenterVertically
+                    ) {
+                        Column(modifier = GlanceModifier.defaultWeight().clickableIf(open)) {
+                            Text(
+                                text = if (isBlackoutNow) "До увімкнення:" else "До відключення:",
+                                style = TextStyle(fontSize = 10.sp, color = ink(Color(0xB3BAE6FD)))
+                            )
+                            Text(
+                                text = model.countdown,
+                                style = TextStyle(fontSize = 12.sp, fontWeight = FontWeight.Bold, color = ink(Color.White)),
+                                maxLines = 1
+                            )
+                        }
+                        RefreshButton(34.dp, 16.dp, isRefreshing)
+                        Spacer(modifier = GlanceModifier.width(6.dp))
+                        BellButton(34.dp, 18.dp, notificationsEnabled)
                     }
                 }
             }
         }
+    }
+}
+
+/**
+ * The refresh and bell buttons of an address stack, above the front card (see [AddressStack]): in the corner each
+ * card leaves empty, 12 dp from it; top right on the 4x2 card, bottom right on the 2x1 card.
+ */
+@Composable
+internal fun StackButtons(isBigWidget: Boolean, notificationsEnabled: Boolean, isRefreshing: Boolean) {
+    Box(
+        modifier = GlanceModifier.fillMaxSize().padding(12.dp),
+        contentAlignment = if (isBigWidget) Alignment.TopEnd else Alignment.BottomEnd
+    ) {
+        Row(verticalAlignment = Alignment.Vertical.CenterVertically) {
+            if (isBigWidget) {
+                RefreshButton(36.dp, 18.dp, isRefreshing)
+                Spacer(modifier = GlanceModifier.width(8.dp))
+                BellButton(36.dp, 20.dp, notificationsEnabled)
+            } else {
+                RefreshButton(34.dp, 16.dp, isRefreshing)
+                Spacer(modifier = GlanceModifier.width(6.dp))
+                BellButton(34.dp, 18.dp, notificationsEnabled)
+            }
+        }
+    }
+}
+
+/** Round refresh button (same style as the notification toggle). */
+@Composable
+private fun RefreshButton(boxSize: Dp, iconSize: Dp, isRefreshing: Boolean) {
+    Box(
+        modifier = GlanceModifier
+            .size(boxSize)
+            .cornerRadius(boxSize / 2)
+            .background(ColorProvider(Color(0x26FFFFFF)))
+            .clickable(actionRunCallback<RefreshWidgetActionCallback>()),
+        contentAlignment = Alignment.Center
+    ) {
+        if (isRefreshing) {
+            // Glance cannot rotate an image; the platform progress ring animates on its own
+            CircularProgressIndicator(color = ColorProvider(Color.White), modifier = GlanceModifier.size(iconSize))
+        } else {
+            Image(
+                provider = ImageProvider(R.drawable.ic_refresh),
+                contentDescription = "Оновити дані",
+                colorFilter = ColorFilter.tint(ColorProvider(Color.White)),
+                modifier = GlanceModifier.size(iconSize)
+            )
+        }
+    }
+}
+
+/** Round notification toggle (the master switch for all addresses, owner decision 4). */
+@Composable
+private fun BellButton(boxSize: Dp, iconSize: Dp, notificationsEnabled: Boolean) {
+    Box(
+        modifier = GlanceModifier
+            .size(boxSize)
+            .cornerRadius(boxSize / 2)
+            .background(ColorProvider(if (notificationsEnabled) Color.White else Color(0x26FFFFFF)))
+            .clickable(actionRunCallback<ToggleAlertsActionCallback>()),
+        contentAlignment = Alignment.Center
+    ) {
+        Image(
+            provider = ImageProvider(
+                if (notificationsEnabled) R.drawable.ic_notification else R.drawable.ic_notification_off
+            ),
+            contentDescription = "Toggle alerts",
+            colorFilter = ColorFilter.tint(
+                ColorProvider(if (notificationsEnabled) Color(0xFFFF5E3A) else Color.White)
+            ),
+            modifier = GlanceModifier.size(iconSize)
+        )
     }
 }
 
@@ -880,12 +884,16 @@ class BlackoutStripGlanceWidget : GlanceAppWidget() {
 
     override val stateDefinition: GlanceStateDefinition<*> = PreferencesGlanceStateDefinition
 
-    override val sizeMode = SizeMode.Responsive(
+    private val responsive = SizeMode.Responsive(
         setOf(
             DpSize(250.dp, 40.dp),              // drum only
             DpSize(250.dp, INFO_MIN_HEIGHT)     // info line + drum
         )
     )
+
+    /** One RemoteViews while an address stack can show, so its cards (a partial update) reach it (AddressStack.active). */
+    override val sizeMode: SizeMode
+        get() = if (AddressStack.active()) SizeMode.Single else responsive
 
     override suspend fun provideGlance(context: Context, id: GlanceId) {
         val appContext = context.applicationContext
@@ -902,107 +910,135 @@ class BlackoutStripGlanceWidget : GlanceAppWidget() {
             val prefs = currentState<Preferences>()
             @Suppress("UNUSED_VARIABLE")
             val refreshTick = prefs[BlackoutGlanceWidget.KEY_REFRESH_TICK] ?: 0L
-            val source = widgetSource(appContext, appWidgetId)
-            val model = BlackoutGlanceWidget.buildWidgetModel(source.settings, source.snapshot, source.label)
-            val openApp = openAppAction(source.itemId)
-            // Same bitmap as the big widget's drum (720 x 132), drawn at the same 52 dp height
-            val chartBitmap = BlackoutGlanceWidget.renderAnalogCounterBitmap(
-                model.slots, model.nowHour, model.nowMinute, model.lang
-            )
-            val statusText = when {
-                model.isUnclear -> AppStrings.powerUnclear(model.lang)
-                model.isOffNow -> "СВІТЛА НЕМАЄ"
-                else -> "СВІТЛО Є"
+            // the app widget id of an address stack (spec/SUBSCRIPTIONS.md 10), null when this widget shows one address
+            val stackWidgetId = appWidgetId?.takeIf { AddressStack.supported && WidgetBindings.stackIds(appContext, it).size >= 2 }
+            val options = LocalAppWidgetOptions.current
+            val cards by produceState<List<Pair<String, RemoteViews>>?>(null, stackWidgetId, refreshTick, options) {
+                value = stackWidgetId?.let { AddressStack.buildCards(appContext, it, AddressStack.Kind.STRIP, options) }
             }
-            val statusColor = when {
-                model.isUnclear -> Color(0xFF9CA3AF)
-                model.isOffNow -> Color(0xFFFF5E3A)
-                else -> Color(0xFF34D399)
-            }
-            val description = if (model.isUnclear) {
-                AppStrings.outagesUnclear(model.lang)
-            } else {
-                "${model.queueHeader}. ${if (model.isOffNow) "СВІТЛА НЕМАЄ" else "СВІТЛО Є"}"
-            }
-            val showInfo = LocalSize.current.height >= INFO_MIN_HEIGHT
-
-            GlanceTheme {
-                Column(
-                    modifier = GlanceModifier
-                        .fillMaxSize()
-                        .cornerRadius(20.dp)
-                        .background(ColorProvider(Color(0xCC141A29)))
-                        .padding(6.dp)
-                        .clickable(openApp),
-                    verticalAlignment = Alignment.Vertical.CenterVertically
-                ) {
-                    if (showInfo) {
-                        Row(
-                            modifier = GlanceModifier.fillMaxWidth().padding(horizontal = 6.dp),
-                            verticalAlignment = Alignment.Vertical.CenterVertically
-                        ) {
-                            Text(
-                                text = model.queueHeader,
-                                style = TextStyle(
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 12.sp,
-                                    color = ColorProvider(Color.White)
-                                ),
-                                maxLines = 1
-                            )
-                            Spacer(modifier = GlanceModifier.width(6.dp))
-                            if (model.addressLabel != null) {
-                                Text(
-                                    text = model.addressLabel,
-                                    style = TextStyle(fontSize = 10.sp, color = ColorProvider(Color(0xB3BAE6FD))),
-                                    maxLines = 1,
-                                    modifier = GlanceModifier.defaultWeight()
-                                )
-                                Spacer(modifier = GlanceModifier.width(6.dp))
-                            }
-                            Text(
-                                text = statusText,
-                                style = TextStyle(
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 10.sp,
-                                    color = ColorProvider(statusColor)
-                                ),
-                                maxLines = 1,
-                                modifier = if (model.addressLabel == null) GlanceModifier.defaultWeight() else GlanceModifier
-                            )
-                            if (model.addressLabel != null && !model.isUnclear) Spacer(modifier = GlanceModifier.width(6.dp))
-                            if (!model.isUnclear) {
-                                Text(
-                                    text = model.countdown,
-                                    style = TextStyle(
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 12.sp,
-                                        color = ColorProvider(Color.White)
-                                    ),
-                                    maxLines = 1
-                                )
-                            }
-                        }
-                        Spacer(modifier = GlanceModifier.height(4.dp))
-                    }
-                    Image(
-                        provider = ImageProvider(chartBitmap),
-                        contentDescription = description,
-                        contentScale = ContentScale.FillBounds,
-                        modifier = GlanceModifier
-                            .fillMaxWidth()
-                            .height(DRUM_HEIGHT)
-                    )
+            val ready = cards
+            if (stackWidgetId != null && !ready.isNullOrEmpty() && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                // Address stack (spec/SUBSCRIPTIONS.md 10): this widget has no buttons, so the cards are all of it;
+                // they follow this frame as a partial update (see AddressStack)
+                LaunchedEffect(ready) {
+                    kotlinx.coroutines.delay(AddressStack.PUSH_DELAY_MS)
+                    AddressStack.pushCards(appContext, stackWidgetId, ready, AddressStack.widgetSize(options, AddressStack.Kind.STRIP))
                 }
+                AndroidRemoteViews(
+                    remoteViews = AddressStack.frame(appContext),
+                    modifier = GlanceModifier.fillMaxSize()
+                )
+            } else {
+                val source = widgetSource(appContext, appWidgetId)
+                val model = BlackoutGlanceWidget.buildWidgetModel(source.settings, source.snapshot, source.label)
+                StripBody(model, openAppAction(source.itemId), showInfo = LocalSize.current.height >= INFO_MIN_HEIGHT)
             }
         }
     }
 
-    private companion object {
+    companion object {
         /** Drum height of the big widget, so both widgets show the drum at the same size. */
-        val DRUM_HEIGHT = 52.dp
+        internal val DRUM_HEIGHT = 52.dp
         /** Smallest widget height with room for the info line: 52 drum + 12 padding + 4 gap + 16 line. */
-        val INFO_MIN_HEIGHT = 84.dp
+        internal val INFO_MIN_HEIGHT = 84.dp
+    }
+}
+
+/** The «Графік» widget content of one address: the info line (when there is room) and the drum. */
+@Composable
+internal fun StripBody(
+    model: BlackoutGlanceWidget.Companion.WidgetModel,
+    openApp: Action?,
+    showInfo: Boolean
+) {
+    // Same bitmap as the big widget's drum (720 x 132), drawn at the same 52 dp height
+    val chartBitmap = BlackoutGlanceWidget.renderAnalogCounterBitmap(
+        model.slots, model.nowHour, model.nowMinute, model.lang
+    )
+    val statusText = when {
+        model.isUnclear -> AppStrings.powerUnclear(model.lang)
+        model.isOffNow -> "СВІТЛА НЕМАЄ"
+        else -> "СВІТЛО Є"
+    }
+    val statusColor = when {
+        model.isUnclear -> Color(0xFF9CA3AF)
+        model.isOffNow -> Color(0xFFFF5E3A)
+        else -> Color(0xFF34D399)
+    }
+    val description = if (model.isUnclear) {
+        AppStrings.outagesUnclear(model.lang)
+    } else {
+        "${model.queueHeader}. ${if (model.isOffNow) "СВІТЛА НЕМАЄ" else "СВІТЛО Є"}"
+    }
+
+    GlanceTheme {
+        Column(
+            modifier = GlanceModifier
+                .fillMaxSize()
+                .cornerRadius(20.dp)
+                .background(ColorProvider(Color(0xCC141A29)))
+                .padding(6.dp)
+                .clickableIf(openApp),
+            verticalAlignment = Alignment.Vertical.CenterVertically
+        ) {
+            if (showInfo) {
+                Row(
+                    modifier = GlanceModifier.fillMaxWidth().padding(horizontal = 6.dp),
+                    verticalAlignment = Alignment.Vertical.CenterVertically
+                ) {
+                    Text(
+                        text = model.queueHeader,
+                        style = TextStyle(
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 12.sp,
+                            color = ColorProvider(Color.White)
+                        ),
+                        maxLines = 1
+                    )
+                    Spacer(modifier = GlanceModifier.width(6.dp))
+                    if (model.addressLabel != null) {
+                        Text(
+                            text = model.addressLabel,
+                            style = TextStyle(fontSize = 10.sp, color = ColorProvider(Color(0xB3BAE6FD))),
+                            maxLines = 1,
+                            modifier = GlanceModifier.defaultWeight()
+                        )
+                        Spacer(modifier = GlanceModifier.width(6.dp))
+                    }
+                    Text(
+                        text = statusText,
+                        style = TextStyle(
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 10.sp,
+                            color = ColorProvider(statusColor)
+                        ),
+                        maxLines = 1,
+                        modifier = if (model.addressLabel == null) GlanceModifier.defaultWeight() else GlanceModifier
+                    )
+                    if (model.addressLabel != null && !model.isUnclear) Spacer(modifier = GlanceModifier.width(6.dp))
+                    if (!model.isUnclear) {
+                        Text(
+                            text = model.countdown,
+                            style = TextStyle(
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 12.sp,
+                                color = ColorProvider(Color.White)
+                            ),
+                            maxLines = 1
+                        )
+                    }
+                }
+                Spacer(modifier = GlanceModifier.height(4.dp))
+            }
+            Image(
+                provider = ImageProvider(chartBitmap),
+                contentDescription = description,
+                contentScale = ContentScale.FillBounds,
+                modifier = GlanceModifier
+                    .fillMaxWidth()
+                    .height(BlackoutStripGlanceWidget.DRUM_HEIGHT)
+            )
+        }
     }
 }
 

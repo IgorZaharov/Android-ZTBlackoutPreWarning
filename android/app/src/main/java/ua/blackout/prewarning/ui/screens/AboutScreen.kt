@@ -39,7 +39,6 @@ import ua.blackout.prewarning.ui.components.glassSurface
 @Composable
 fun AboutScreen(
     lang: String = "uk",
-    onOpenRoulette: (() -> Unit)? = null,
     /** Hoisted by the navigation: a double tap on this page's dock button scrolls it back to the top. */
     scrollState: ScrollState = rememberScrollState()
 ) {
@@ -50,9 +49,6 @@ fun AboutScreen(
     }
     var faviconBitmaps by remember {
         mutableStateOf<Map<String, Bitmap>>(emptyMap())
-    }
-    var showRouletteDialog by remember {
-        mutableStateOf(false)
     }
 
     val currentBuildVersion = remember {
@@ -400,36 +396,6 @@ fun AboutScreen(
                     }
                 }
             }
-        }
-
-        // Житомирська Рулетка Button (after Donations block)
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .glassSurface(RoundedCornerShape(24.dp), 24.dp)
-                .clickable {
-                    if (onOpenRoulette != null) {
-                        onOpenRoulette()
-                    } else {
-                        showRouletteDialog = true
-                    }
-                }
-                .padding(16.dp),
-            contentAlignment = Alignment.Center
-        ) {
-            Text(
-                text = AppStrings.rouletteLaunchButton(lang),
-                fontSize = 14.sp,
-                fontWeight = FontWeight.Bold,
-                color = Color(0xFFFDE68A)
-            )
-        }
-
-        if (showRouletteDialog && onOpenRoulette == null) {
-            ZhytomyrRouletteDialog(
-                lang = lang,
-                onDismiss = { showRouletteDialog = false }
-            )
         }
 
         // 5. Disclaimer Card about ztoe.com.ua

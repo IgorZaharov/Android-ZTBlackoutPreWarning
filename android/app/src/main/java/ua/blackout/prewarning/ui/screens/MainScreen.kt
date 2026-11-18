@@ -33,11 +33,16 @@ import androidx.compose.material.icons.filled.OpenInNew
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.Star
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
+import androidx.compose.material3.pulltorefresh.PullToRefreshBox
+import androidx.compose.material3.pulltorefresh.PullToRefreshDefaults
+import androidx.compose.material3.pulltorefresh.rememberPullToRefreshState
 import androidx.compose.material3.Text
 import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
+import kotlinx.coroutines.delay
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -205,6 +210,7 @@ private fun StatusDot(color: Color, pulsing: Boolean) {
     )
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MainScreen(
     queue: String = "",
@@ -245,8 +251,8 @@ fun MainScreen(
     val tomorrowDate = todayDate.plusDays(1)
     val now = snapshot.now
 
-    // Another address starts on Today (spec/SUBSCRIPTIONS.md 9)
-    var selectedDayTab by rememberSaveable(shownAddressId) { mutableStateOf(TAB_TODAY) }
+    // Today / Tomorrow stays when another address is shown (spec/SUBSCRIPTIONS.md 9, owner 2026-11-18)
+    var selectedDayTab by rememberSaveable { mutableStateOf(TAB_TODAY) }
     val isTomorrowSelected = selectedDayTab == TAB_TOMORROW
     val activeDate = if (isTomorrowSelected) tomorrowDate else todayDate
 
@@ -297,7 +303,35 @@ fun MainScreen(
         clock.format(DateTimeFormatter.ofPattern("HH:mm"))
     }
 
-    Box(modifier = Modifier.fillMaxSize()) {
+    // Pull the page down to refresh, as in a browser (owner, 2026-11-18). The spinner shows only for a pull: the
+    // quiet refresh on entering the page also sets isRefreshing. Without a queue the page does not scroll, so it
+    // can not be pulled either.
+    val pullState = rememberPullToRefreshState()
+    var pulled by remember { mutableStateOf(false) }
+    LaunchedEffect(isRefreshing) { if (!isRefreshing) pulled = false }
+    LaunchedEffect(pulled) {
+        // a pull whose refresh never started (one was already running and ended) must not spin forever
+        if (pulled) { delay(1_500); if (!isRefreshing) pulled = false }
+    }
+    val pullSpinning = pulled
+    PullToRefreshBox(
+        isRefreshing = pullSpinning,
+        onRefresh = {
+            pulled = true
+            if (!isRefreshing) onRefresh()
+        },
+        modifier = Modifier.fillMaxSize(),
+        state = pullState,
+        indicator = {
+            PullToRefreshDefaults.Indicator(
+                state = pullState,
+                isRefreshing = pullSpinning,
+                modifier = Modifier.align(Alignment.TopCenter).statusBarsPadding(),
+                containerColor = ZtColors.CardSolid,
+                color = ZtColors.Accent
+            )
+        }
+    ) {
         Column(
             modifier = Modifier
                 .fillMaxSize()

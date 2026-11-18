@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { AlertCircle, AlertTriangle, Bell, ExternalLink, Globe, HelpCircle, Loader2, Pencil, Plus, RotateCcw, Send, Sliders, Star, Trash2, Vibrate, Volume2, X, Zap, RefreshCw, GripVertical, Clock } from 'lucide-react';
-import { Language, UserSettings } from '../types';
+import { Language, SelectedAddressQuery, UserSettings } from '../types';
 import { QUEUES, DEFAULT_ZTOE_URL, verifyZtoeSiteAndData } from '../services/ztoeParser';
 import {
   checkAddressOnZtoeWebsite,
@@ -204,6 +204,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const [showQueueHelp, setShowQueueHelp] = useState(Boolean(autoOpenQueueHelp));
   const [removeCandidate, setRemoveCandidate] = useState<Subscription | null>(null);
   const [renameCandidate, setRenameCandidate] = useState<Subscription | null>(null);
+  /** The item whose address the lookup edits (opened from the card's edit dialog, owner 2026-11-18). */
+  const [editAddressCandidate, setEditAddressCandidate] = useState<Subscription | null>(null);
   const [renameText, setRenameText] = useState('');
   const [verification, setVerification] = useState<{ isChecking: boolean; status: RefreshStatus }>({ isChecking: true, status: 'SUCCESS' });
 
@@ -790,6 +792,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         <AddressLookupDialog
           settings={settings}
           lang={lang}
+          // a new address starts empty (only the city is filled in), not from the last added (owner, 2026-11-18)
+          saved={null}
           onDismiss={() => setShowQueueHelp(false)}
           onApply={(next, toast) => {
             const wasEmpty = store.items.length === 0;
@@ -799,6 +803,34 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
             setShowQueueHelp(false);
             // the user stays in Settings (owner request): the address is added in place
             if (applySync(synced)) showToast(wasEmpty ? toast : t.addressAdded);
+          }}
+        />
+        </ModalPortal>
+      )}
+
+      {editAddressCandidate && (
+        <ModalPortal>
+        <AddressLookupDialog
+          settings={settings}
+          lang={lang}
+          // the item's own address; a queue-only item starts empty like a new address
+          saved={
+            editAddressCandidate.address
+              ? {
+                  remId: editAddressCandidate.address.remSlug,
+                  settlementId: editAddressCandidate.address.settlementId,
+                  streetId: editAddressCandidate.address.streetId,
+                  house: editAddressCandidate.address.house,
+                }
+              : null
+          }
+          onDismiss={() => setEditAddressCandidate(null)}
+          onApply={(next) => {
+            const id = editAddressCandidate.id;
+            setEditAddressCandidate(null);
+            if (!next.selectedAddressQuery) return;
+            const synced = sync.editAddress(settings, id, next.queue, next.customQueueStatusText, next.selectedAddress ?? '', next.selectedAddressQuery);
+            if (applySync(synced)) showToast(t.addressChanged);
           }}
         />
         </ModalPortal>
@@ -844,6 +876,19 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                 className="min-h-14 w-full rounded-2xl border border-white/20 bg-white/[0.08] px-4 py-2 text-base font-medium text-white placeholder:text-white/40 focus:border-[#FF5E3A] focus:outline-none"
               />
               <p className={`text-[13px] leading-[19px] ${TEXT_TERTIARY}`}>{t.renameHint}</p>
+              {/* the address itself can be changed too (owner, 2026-11-18): opens the lookup on this item */}
+              <button
+                type="button"
+                data-testid="edit-address-button"
+                onClick={() => {
+                  setEditAddressCandidate(renameCandidate);
+                  setRenameCandidate(null);
+                }}
+                className="flex min-h-12 w-full cursor-pointer items-center gap-2.5 rounded-2xl border border-white/20 bg-white/10 px-3.5 py-2.5 text-sm font-semibold text-white hover:bg-white/20"
+              >
+                <Pencil className="h-5 w-5" aria-hidden="true" />
+                {t.editAddress}
+              </button>
               <div className="flex gap-2">
                 <ActionButton text={t.cancel} onClick={() => setRenameCandidate(null)} />
                 <ActionButton
@@ -926,21 +971,22 @@ const HouseVariantChooser: React.FC<{
 interface AddressLookupDialogProps {
   settings: UserSettings;
   lang: 'uk' | 'en';
+  /** Where the cascade starts: an item's address when editing it, null for a new address (Zhytomyr city). */
+  saved: SelectedAddressQuery | null;
   onDismiss: () => void;
   onApply: (next: UserSettings, toast: string) => void;
 }
 
-const AddressLookupDialog: React.FC<AddressLookupDialogProps> = ({ settings, lang, onDismiss, onApply }) => {
+const AddressLookupDialog: React.FC<AddressLookupDialogProps> = ({ settings, lang, saved, onDismiss, onApply }) => {
   const t = translations[lang];
   const siteUrl = settings.url;
-  const saved = settings.selectedAddressQuery;
 
   // The cascade starts from the saved address, or from Zhytomyr city on a first launch. After that a REM
   // never picks a city for the user: choosing another REM clears city, street and house.
   const [selectedRemId, setSelectedRemId] = useState<string>(saved?.remId || 'zhytomyr');
   const [selectedSettlementId, setSelectedSettlementId] = useState<string>(saved?.settlementId || 'zt_city');
   const [selectedStreetId, setSelectedStreetId] = useState<string>(saved?.streetId || '');
-  /** Grows when a street is chosen, so the house list opens right away (focus only for a long list). */
+  /** Grows when a street is chosen, so the house list opens right away. */
   const [houseOpenRequest, setHouseOpenRequest] = useState(0);
   const [selectedHouse, setSelectedHouse] = useState<string>(saved?.house || '');
 

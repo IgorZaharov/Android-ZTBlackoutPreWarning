@@ -299,6 +299,33 @@ export function remove(store: SubscriptionStore, id: string): StoreResult {
 }
 
 /** Result of a ZTOE lookup for an address item (spec/SUBSCRIPTIONS.md section 4). */
+/**
+ * The user edited the item's address (spec/SUBSCRIPTIONS.md section 4): address, queue and status text come from
+ * the lookup; id, label, switches, position and primary stay. Another item with the new identity is a duplicate.
+ */
+export function setAddress(
+  store: SubscriptionStore,
+  id: string,
+  address: SubscriptionAddress,
+  queue: string | null,
+  statusText: string | null,
+): StoreResult {
+  const item = store.items.find((s) => s.id === id);
+  if (!item) return fail(ERR_NOT_FOUND);
+  const changed = normalize({
+    ...item,
+    address,
+    queue,
+    queueSource: 'LOOKUP',
+    queueStatusText: statusText !== null && !isBlank(statusText) ? statusText : null,
+  });
+  if (changed.address === null) return fail(ERR_INVALID);
+  const key = identity(changed);
+  const dup = store.items.find((s) => s.id !== id && identity(s) === key);
+  if (dup) return fail(ERR_DUPLICATE, dup.id);
+  return update(store, id, () => changed);
+}
+
 export function setQueueInfo(
   store: SubscriptionStore,
   id: string,
@@ -551,6 +578,19 @@ export function widgetLabel(store: SubscriptionStore, boundId: string | null): s
 }
 
 /** The distinct items the placed widgets show, in order of first appearance (redraw alarms, polling). */
+/**
+ * Android: the cards of a widget's address stack (spec/SUBSCRIPTIONS.md section 10). A widget that follows the
+ * primary shows every item when there are two or more, the primary first; otherwise its one item.
+ */
+export function widgetStackIds(store: SubscriptionStore, boundId: string | null): string[] {
+  if (boundId === null && store.items.length >= 2) {
+    const primary = store.items.find((s) => s.id === store.primaryId);
+    return [...(primary ? [primary.id] : []), ...store.items.filter((s) => s.id !== primary?.id).map((s) => s.id)];
+  }
+  const item = widgetItem(store, boundId);
+  return item ? [item.id] : [];
+}
+
 export function widgetItemIds(store: SubscriptionStore, boundIds: (string | null)[]): string[] {
   const out: string[] = [];
   for (const b of boundIds) {

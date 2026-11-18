@@ -101,6 +101,7 @@ Each returns either the new store or an error code; the input store is never cha
 | `rename(id, raw)` | `not_found` | stores `cleanLabel(raw)`; empty -> automatic |
 | `move(id, toIndex)` | `not_found` | moves the item to position `toIndex` (clamped to `0 .. items.size - 1`) and shifts the others; the primary and every field stay unchanged. The list order is the order of the Settings card, the main-screen chips (section 9) and the widget configure list (section 10) |
 | `setQueueInfo(id, queue, statusText, addressText)` | `not_found`, `invalid` (item has no address) | result of a ZTOE lookup for an address item: `queue` (invalid -> null), `queueStatusText` (blank -> null); `address.text` = `addressText` when that is not blank, else unchanged. `queueSource` is unchanged |
+| `setAddress(id, address, queue, statusText)` | checked in this order: `not_found`, `invalid` (the address fails repair step 2), `duplicate` (another item has the new identity; the error carries its id) | the user edited the item's address (Settings, the card's edit dialog; owner 2026-11-18): `address` replaced, `queue` (invalid -> null), `queueStatusText` (blank -> null), `queueSource = LOOKUP`. `id`, `label`, both switches, `createdAtMs`, the list position and the primary stay, so a queue-only item becomes an address item. The item keeps its own identity, so saving its own address again is not a duplicate |
 
 ## 5. Effective switches (derived)
 
@@ -241,7 +242,8 @@ noAlertsCaption(master, store) = master AND store.items not empty AND NOT anyAle
   chip per item (`displayLabel`, the primary marked with a star), under the global banners (exact alarms,
   site state) and above everything that belongs to one address (emergency banner, hero, day tabs, drum, rows).
 * `selectedId` is session state: a cold start shows the primary (owner decision 5). An id that no longer
-  exists (the item was removed) falls back to the primary. Selecting another item resets the day tab to Today.
+  exists (the item was removed) falls back to the primary. Selecting another item keeps the day tab
+  (Today or Tomorrow) as it is (owner, 2026-11-18; until then it reset to Today).
 * The shown item supplies the queue title, the address caption, the ZTOE status text of a house without a
   queue and the outages (`outagesFor(item.queue, item.address.key)`, local state only). The site state is
   global (one site); the PowerOn line is the shown item's (section 8.4).
@@ -259,6 +261,8 @@ widgetItem(store, boundId)     = viewItem(store, boundId)   (boundId null = foll
 widgetLabel(store, boundId)    = null when widgetItem is null; else displayLabel(widgetItem) when store.items has
                                  2 or more items, or when boundId is not null and names no item; else null
 widgetItemIds(store, boundIds) = the distinct ids of widgetItem(store, b) for each b, in order of first appearance
+widgetStackIds(store, boundId) = (Android only) when boundId is null and store.items has 2 or more items: the primary,
+                                 then every other item in list order; else the id of widgetItem(store, boundId), or []
 ```
 
 * Each placed widget has a binding: absent or null means **follow the primary** (owner decision 6), so a new
@@ -274,6 +278,15 @@ widgetItemIds(store, boundIds) = the distinct ids of widgetItem(store, b) for ea
 * Every item in `widgetItemIds` of the placed widgets is polled on PowerOn whatever its switches (as the shown
   item of section 8.4) and gets widget redraw alarms at its own power transitions; equal transition times of
   different items share one alarm.
+* **Android: an address stack** (owner, 2026-11-18). A widget that follows the primary shows `widgetStackIds`:
+  with 2 or more items one address at a time fills the widget, and a vertical swipe flips to the next with the
+  platform `StackView` animation, the primary first; the cards behind are never seen. Each card is the widget's
+  content for its item, with its `widgetLabel`; a tap on a card opens the main screen with that item. The bell
+  and refresh buttons stay above the cards and act on everything, as before. A widget pinned to an item shows
+  only that item, and one item shows the 1.4.0 widget without a stack. All three widget sizes behave the same.
+  Polling and redraw alarms cover every item of every placed stack. Android 12 and later (the cards travel inline as
+  collection items; Android 8 to 11 keep one address per widget). iOS keeps one address per widget; several widgets
+  in a Smart Stack give the same swipe there.
 * Choosing the binding: Android adds a configure screen to the three widget providers
   (`reconfigurable|configuration_optional`): on Android 12+ the widget is placed following the primary and
   "reconfigure" opens the screen; older versions open it on placement and confirm at once when there are

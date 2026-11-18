@@ -124,40 +124,6 @@ object AppStrings {
     const val ABOUT_GITHUB_README_URL = "https://github.com/IgorZaharov/Android-ZTBlackoutPreWarning/blob/main/README.md"
     fun disclaimerText(lang: String) = if (lang == "uk") "Дані про графіки завантажуються безпосередньо з сайту ztoe.com.ua. Застосунок не є офіційним сервісом АТ «Житомиробленерго» та не несе відповідальності за раптові зміни або аварійні відключення з боку НЕК «Укренерго»." else "Data loaded directly from ztoe.com.ua. App is not an official service of JSC Zhytomyroblenergo and is not responsible for sudden emergency cuts."
 
-    // Zhytomyr Roulette Mini-Game Texts (Ukrainian / English depending on Main Application settings)
-    fun rouletteLaunchButton(lang: String = "uk") = if (lang == "en") "Zhytomyr Roulette" else "Житомирська Рулетка"
-    fun rouletteTitle(lang: String) = if (lang == "uk") "Житомирська Рулетка" else "Zhytomyr Roulette"
-    fun rouletteSubtitle(lang: String) = if (lang == "uk") {
-        "Стирайте захисний шар із 48 півгодинних білетів графіка відключень. Кожен світлий білет із цілою лампочкою збільшує рахунок (+1, +2, +3...), білет X2 подвоює бали, а червоний білет викликає блекаут!"
-    } else {
-        "Scratch off the 48 half-hour blackout timeslot tickets. Each beige ticket with an intact lightbulb increases your score (+1, +2, +3...), an X2 ticket doubles your score, while a red ticket triggers a blackout!"
-    }
-    fun rouletteStartBtn(lang: String) = if (lang == "uk") "Почати гру" else "Start"
-    fun rouletteCloseBtn(lang: String) = if (lang == "uk") "Закрити гру" else "Close Game"
-    fun roulettePowerPointsLabel(lang: String) = if (lang == "uk") "Бали Потужності" else "Power Points"
-    fun roulettePowerShopBtn(lang: String) = if (lang == "uk") "Магазин Потужності" else "Power Shop"
-    fun rouletteBackBtn(lang: String) = if (lang == "uk") "Назад" else "Back"
-    fun roulettePointsLabel(lang: String) = if (lang == "uk") "Бали" else "Points"
-    fun rouletteStreakLabel(lang: String) = if (lang == "uk") "Серія" else "Streak"
-    fun rouletteRestartBtn(lang: String) = if (lang == "uk") "Спочатку" else "Restart Game"
-    fun rouletteNewTicketsBtn(lang: String) = if (lang == "uk") "Нові білети" else "Get New Tickets"
-    fun formatRouletteNewTicketsBtnWithCost(lang: String, refreshCount: Int): String {
-        val base = rouletteNewTicketsBtn(lang)
-        val cost = refreshCount.coerceAtLeast(0)
-        val costStr = if (cost == 0) "0" else "-$cost"
-        return "$base ($costStr)"
-    }
-    fun rouletteGameOverTitle(lang: String) = if (lang == "uk") "БЛЕКАУТ! ГРУ ЗАКІНЧЕНО" else "GAME OVER"
-    fun rouletteFinalScoreLabel(lang: String) = if (lang == "uk") "Фінальний рахунок" else "Final Score"
-    fun rouletteAllTimeBestScoreLabel(lang: String) = if (lang == "uk") "Найкращий Результат" else "All time best score"
-    fun rouletteMainMenuBtn(lang: String = "uk") = if (lang == "uk") "Головне Меню" else "Main Menu"
-    fun rouletteShareBtn(lang: String = "uk") = if (lang == "uk") "Поділитися" else "Share"
-    fun rouletteDownloadImageBtn(lang: String = "uk") = if (lang == "uk") "Завантажити зображення" else "Download Image"
-    fun rouletteImageSavedToast(lang: String = "uk") = if (lang == "uk") "Зображення збережено" else "Image saved"
-    fun rouletteSoundLabel(lang: String = "uk") = if (lang == "uk") "Звук" else "Sound"
-    fun rouletteMusicLabel(lang: String = "uk") = if (lang == "uk") "Музика" else "Music"
-    fun rouletteLoadingText(lang: String) = if (lang == "uk") "Роздача білетів..." else "Dealing tickets..."
-
     // =========================================================================================
     // v1.4.0: ZTOE site status, outage rows, notifications, exact alarms.
     // Wording is mirrored in src/services/i18n.ts and listed in spec/NOTIFICATIONS.md and spec/SITE_STATE.md.
@@ -377,6 +343,8 @@ object AppStrings {
     fun addressLimitReached(lang: String, max: Int) = if (lang == "uk") "Досягнуто ліміт: $max адрес" else "Limit reached: $max addresses"
     fun addressDuplicate(lang: String) = if (lang == "uk") "Ця адреса вже є у списку" else "This address is already in the list"
     fun addressAdded(lang: String) = if (lang == "uk") "Адресу додано" else "Address added"
+    fun addressChanged(lang: String) = if (lang == "uk") "Адресу змінено" else "Address changed"
+    fun editAddress(lang: String) = if (lang == "uk") "Змінити адресу" else "Change address"
     fun removeAddress(lang: String) = if (lang == "uk") "Видалити" else "Remove"
     fun removeConfirmTitle(lang: String) = if (lang == "uk") "Видалити адресу?" else "Remove this address?"
     fun removeConfirmBody(lang: String, label: String) =

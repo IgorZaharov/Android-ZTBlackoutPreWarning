@@ -17,7 +17,6 @@ import {
   getDonationsWithDailyRefresh,
   getFaviconCandidateUrls,
 } from '../services/donationsService';
-import { ZhytomyrRouletteModal } from './ZhytomyrRouletteModal';
 
 declare const __APP_VERSION__: string | undefined;
 const CURRENT_BUILD_VERSION = `v${typeof __APP_VERSION__ !== 'undefined' && /^[0-9]+\.[0-9]+/.test(__APP_VERSION__) ? __APP_VERSION__ : '1.4.2'}`;
@@ -42,13 +41,11 @@ const DonationFavicon: React.FC<{ url: string; title: string }> = ({ url, title 
 
 interface AboutViewProps {
   lang: 'uk' | 'en';
-  onOpenRoulette?: () => void;
 }
 
-export const AboutView: React.FC<AboutViewProps> = ({ lang, onOpenRoulette }) => {
+export const AboutView: React.FC<AboutViewProps> = ({ lang }) => {
   const t = translations[lang];
   const [donations, setDonations] = useState<DonationLink[]>(() => getCachedDonations());
-  const [isRouletteOpen, setIsRouletteOpen] = useState(false);
 
   useEffect(() => {
     let mounted = true;
@@ -211,30 +208,6 @@ export const AboutView: React.FC<AboutViewProps> = ({ lang, onOpenRoulette }) =>
           </a>
         ))}
       </div>
-
-      {/* Житомирська Рулетка / Zhytomyr Roulette Button (after Donations block) */}
-      <button
-        type="button"
-        data-testid="open-zhytomyr-roulette-btn"
-        onClick={() => {
-          if (onOpenRoulette) {
-            onOpenRoulette();
-          } else {
-            setIsRouletteOpen(true);
-          }
-        }}
-        className="w-full zt-glass hover:bg-[#1B2338]/85 rounded-3xl p-4 border border-amber-300/35 flex items-center justify-center text-sm font-bold text-amber-200 transition-all cursor-pointer active:scale-[0.99]"
-      >
-        {lang === 'en' ? 'Zhytomyr Roulette' : 'Житомирська Рулетка'}
-      </button>
-
-      {!onOpenRoulette && (
-        <ZhytomyrRouletteModal
-          isOpen={isRouletteOpen}
-          onClose={() => setIsRouletteOpen(false)}
-          lang={lang}
-        />
-      )}
 
       {/* Google Play Console Status Card */}
       <div className="zt-glass rounded-3xl p-5 flex items-center gap-3.5">

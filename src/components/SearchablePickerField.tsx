@@ -35,7 +35,7 @@ interface SearchablePickerFieldProps {
   testId?: string;
   /**
    * Opens the list whenever it grows above 0 (the address form opens the houses right after a street is
-   * chosen); the search field gets the focus only when the rows do not all fit (see PickerDialog).
+   * chosen); the search field is focused, as for every list.
    */
   openRequest?: number;
 }
@@ -155,21 +155,11 @@ const PickerDialog: React.FC<PickerDialogProps> = ({ title, items, selectedId, l
   const [scrollTop, setScrollTop] = useState(0);
   const [viewport, setViewport] = useState(480);
   const [activeIdx, setActiveIdx] = useState(-1);
-  const areaRef = useRef<HTMLDivElement>(null);
-  const focusDecided = useRef(false);
 
-  // The search field gets the focus (the phone keyboard) only when the rows do not all fit in the list area:
-  // a short list (a few houses, the REMs) is picked by tapping, and the keyboard would only cover it. Decided
-  // once, when the rows are known (loading finished, or already more rows than fit).
+  // The search field is focused on open, so the phone keyboard comes up at once (owner, 2026-11-18)
   useEffect(() => {
-    if (focusDecided.current) return;
-    const height = areaRef.current?.clientHeight ?? 0;
-    if (height <= 0) return;
-    const tooLong = unique.length * ROW_HEIGHT > height;
-    if (!tooLong && loading) return;
-    focusDecided.current = true;
-    if (tooLong) inputRef.current?.focus();
-  }, [loading, unique.length]);
+    inputRef.current?.focus();
+  }, []);
 
   // Open scrolled to the selected row
   useLayoutEffect(() => {
@@ -304,7 +294,7 @@ const PickerDialog: React.FC<PickerDialogProps> = ({ title, items, selectedId, l
         </div>
       )}
 
-      <div ref={areaRef} className="relative min-h-0 flex-1">
+      <div className="relative min-h-0 flex-1">
         {shown.length > 0 ? (
           <div
             ref={listRef}

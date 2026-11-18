@@ -1,5 +1,5 @@
 {
- "_doc": "Golden vectors for spec/SUBSCRIPTIONS.md (multi-address store, alerts and main screen, steps 1-4). Stores are compared as plain maps after toMap: every item map has all nine fields, address maps all six. 'addressKey' is settlementId|StreetKey|HouseKey, identical to the 1.4.0 key of ledger_*, repair_*, ids_* and emergency alert keys. 'fanout' (section 8): alert specs are given as engine text times; the AlertSpec key is planned_<spanStart>; 'pending' lists the pending members of each expected group, in order, for a fired registry holding 'notified'. 'main' (section 9): switcherItems and viewItem give item ids. 'widget' (section 10): boundId null means follow primary; widgetItem and widgetItemIds give item ids.",
+ "_doc": "Golden vectors for spec/SUBSCRIPTIONS.md (multi-address store, alerts and main screen, steps 1-4). Stores are compared as plain maps after toMap: every item map has all nine fields, address maps all six. 'addressKey' is settlementId|StreetKey|HouseKey, identical to the 1.4.0 key of ledger_*, repair_*, ids_* and emergency alert keys. 'fanout' (section 8): alert specs are given as engine text times; the AlertSpec key is planned_<spanStart>; 'pending' lists the pending members of each expected group, in order, for a fired registry holding 'notified'. 'main' (section 9): switcherItems and viewItem give item ids. 'widget' (section 10): boundId null means follow primary; widgetItem, widgetItemIds and widgetStackIds (Android only) give item ids.",
  "labels": {
   "defaultLabel": [
    {
@@ -1154,6 +1154,215 @@
       "queueStatusText": null,
       "plannedAlerts": true,
       "emergencyAlerts": true,
+      "createdAtMs": 3
+     }
+    ]
+   }
+  },
+  {
+   "name": "setAddress edits an item's address in place: id, label, switches, order and primary stay; the queue comes from the lookup; a queue-only item becomes an address item; another item's address is a duplicate",
+   "start": {
+    "schemaVersion": 1,
+    "primaryId": "aaaa0001",
+    "items": [
+     {
+      "id": "aaaa0001",
+      "label": "Дім",
+      "address": {
+       "remSlug": "zhytomyr",
+       "settlementId": "16657",
+       "streetId": "st_123",
+       "streetName": "вул. Київська",
+       "house": "77",
+       "text": "Житомирський РЕМ, м. Житомир, вул. Київська, буд. 77"
+      },
+      "queue": "5.2",
+      "queueSource": "LOOKUP",
+      "queueStatusText": null,
+      "plannedAlerts": false,
+      "emergencyAlerts": true,
+      "createdAtMs": 1
+     },
+     {
+      "id": "aaaa0002",
+      "label": "",
+      "address": {
+       "remSlug": "zhytomyr",
+       "settlementId": "16657",
+       "streetId": "st_200",
+       "streetName": "вул. Шевченка",
+       "house": "1",
+       "text": "Житомирський РЕМ, м. Житомир, вул. Шевченка, буд. 1"
+      },
+      "queue": "3.1",
+      "queueSource": "LOOKUP",
+      "queueStatusText": null,
+      "plannedAlerts": true,
+      "emergencyAlerts": true,
+      "createdAtMs": 2
+     },
+     {
+      "id": "aaaa0003",
+      "label": "Дача",
+      "address": null,
+      "queue": "2.2",
+      "queueSource": "MANUAL",
+      "queueStatusText": null,
+      "plannedAlerts": true,
+      "emergencyAlerts": false,
+      "createdAtMs": 3
+     }
+    ]
+   },
+   "steps": [
+    {
+     "op": "setAddress",
+     "id": "aaaa0001",
+     "address": {
+      "remSlug": "zhytomyr",
+      "settlementId": "16658",
+      "streetId": "174892",
+      "streetName": "вул. Калинова",
+      "house": "37А",
+      "text": "Житомирський РЕМ, с. ОЛІЇВКА, вул. Калинова, буд. 37А"
+     },
+     "queue": "6.1",
+     "statusText": "  ",
+     "expectError": null
+    },
+    {
+     "op": "setAddress",
+     "id": "aaaa0003",
+     "address": {
+      "remSlug": "zhytomyr",
+      "settlementId": "16657",
+      "streetId": "173952",
+      "streetName": "вул. Степана Бандери",
+      "house": "18",
+      "text": "Житомирський РЕМ, м. Житомир, вул. Степана Бандери, буд. 18"
+     },
+     "queue": "",
+     "statusText": "Не підлягає відключенням",
+     "expectError": null
+    },
+    {
+     "op": "setAddress",
+     "id": "aaaa0002",
+     "address": {
+      "remSlug": "zhytomyr",
+      "settlementId": "16658",
+      "streetId": "174892",
+      "streetName": "вул. Калинова",
+      "house": "37а",
+      "text": "інший текст"
+     },
+     "queue": "1.1",
+     "statusText": null,
+     "expectError": "duplicate",
+     "expectExistingId": "aaaa0001"
+    },
+    {
+     "op": "setAddress",
+     "id": "aaaa0001",
+     "address": {
+      "remSlug": "zhytomyr",
+      "settlementId": "16658",
+      "streetId": "174892",
+      "streetName": "вул. Калинова",
+      "house": "37А",
+      "text": "Житомирський РЕМ, с. ОЛІЇВКА, вул. Калинова, буд. 37А"
+     },
+     "queue": "6.1",
+     "statusText": null,
+     "expectError": null
+    },
+    {
+     "op": "setAddress",
+     "id": "aaaa0002",
+     "address": {
+      "remSlug": "zhytomyr",
+      "settlementId": "16657",
+      "streetId": "st_200",
+      "streetName": "вул. Шевченка",
+      "house": "",
+      "text": "Житомирський РЕМ, м. Житомир, вул. Шевченка, буд. 1"
+     },
+     "queue": "3.1",
+     "statusText": null,
+     "expectError": "invalid"
+    },
+    {
+     "op": "setAddress",
+     "id": "nope0000",
+     "address": {
+      "remSlug": "zhytomyr",
+      "settlementId": "16657",
+      "streetId": "st_200",
+      "streetName": "вул. Шевченка",
+      "house": "1",
+      "text": "Житомирський РЕМ, м. Житомир, вул. Шевченка, буд. 1"
+     },
+     "queue": "3.1",
+     "statusText": null,
+     "expectError": "not_found"
+    }
+   ],
+   "expect": {
+    "schemaVersion": 1,
+    "primaryId": "aaaa0001",
+    "items": [
+     {
+      "id": "aaaa0001",
+      "label": "Дім",
+      "address": {
+       "remSlug": "zhytomyr",
+       "settlementId": "16658",
+       "streetId": "174892",
+       "streetName": "вул. Калинова",
+       "house": "37А",
+       "text": "Житомирський РЕМ, с. ОЛІЇВКА, вул. Калинова, буд. 37А"
+      },
+      "queue": "6.1",
+      "queueSource": "LOOKUP",
+      "queueStatusText": null,
+      "plannedAlerts": false,
+      "emergencyAlerts": true,
+      "createdAtMs": 1
+     },
+     {
+      "id": "aaaa0002",
+      "label": "",
+      "address": {
+       "remSlug": "zhytomyr",
+       "settlementId": "16657",
+       "streetId": "st_200",
+       "streetName": "вул. Шевченка",
+       "house": "1",
+       "text": "Житомирський РЕМ, м. Житомир, вул. Шевченка, буд. 1"
+      },
+      "queue": "3.1",
+      "queueSource": "LOOKUP",
+      "queueStatusText": null,
+      "plannedAlerts": true,
+      "emergencyAlerts": true,
+      "createdAtMs": 2
+     },
+     {
+      "id": "aaaa0003",
+      "label": "Дача",
+      "address": {
+       "remSlug": "zhytomyr",
+       "settlementId": "16657",
+       "streetId": "173952",
+       "streetName": "вул. Степана Бандери",
+       "house": "18",
+       "text": "Житомирський РЕМ, м. Житомир, вул. Степана Бандери, буд. 18"
+      },
+      "queue": null,
+      "queueSource": "LOOKUP",
+      "queueStatusText": "Не підлягає відключенням",
+      "plannedAlerts": true,
+      "emergencyAlerts": false,
       "createdAtMs": 3
      }
     ]
@@ -2976,6 +3185,265 @@
      null,
      "aaaa0001"
     ],
+    "expect": []
+   }
+  ],
+  "widgetStackIds": [
+   {
+    "name": "follow the primary with 2+ items: the primary first, then the others in list order",
+    "store": {
+     "schemaVersion": 1,
+     "primaryId": "bbbb0002",
+     "items": [
+      {
+       "id": "aaaa0001",
+       "label": "",
+       "address": {
+        "remSlug": "zhytomyr",
+        "settlementId": "16657",
+        "streetId": "st_123",
+        "streetName": "вул. Київська",
+        "house": "77",
+        "text": "Житомирський РЕМ, м. Житомир, вул. Київська, буд. 77"
+       },
+       "queue": "5.2",
+       "queueSource": "LOOKUP",
+       "queueStatusText": null,
+       "plannedAlerts": true,
+       "emergencyAlerts": true,
+       "createdAtMs": 10
+      },
+      {
+       "id": "bbbb0002",
+       "label": "",
+       "address": {
+        "remSlug": "zhytomyr",
+        "settlementId": "16657",
+        "streetId": "st_200",
+        "streetName": "вул. Соборна",
+        "house": "3",
+        "text": ""
+       },
+       "queue": "5.2",
+       "queueSource": "LOOKUP",
+       "queueStatusText": null,
+       "plannedAlerts": true,
+       "emergencyAlerts": true,
+       "createdAtMs": 20
+      },
+      {
+       "id": "cccc0003",
+       "label": "",
+       "address": null,
+       "queue": "3.1",
+       "queueSource": "MANUAL",
+       "queueStatusText": null,
+       "plannedAlerts": false,
+       "emergencyAlerts": true,
+       "createdAtMs": 5
+      },
+      {
+       "id": "dddd0004",
+       "label": "",
+       "address": null,
+       "queue": "1.1",
+       "queueSource": "MANUAL",
+       "queueStatusText": null,
+       "plannedAlerts": true,
+       "emergencyAlerts": true,
+       "createdAtMs": 30
+      }
+     ]
+    },
+    "boundId": null,
+    "expect": [
+     "bbbb0002",
+     "aaaa0001",
+     "cccc0003",
+     "dddd0004"
+    ]
+   },
+   {
+    "name": "a pinned widget shows only its item",
+    "store": {
+     "schemaVersion": 1,
+     "primaryId": "bbbb0002",
+     "items": [
+      {
+       "id": "aaaa0001",
+       "label": "",
+       "address": {
+        "remSlug": "zhytomyr",
+        "settlementId": "16657",
+        "streetId": "st_123",
+        "streetName": "вул. Київська",
+        "house": "77",
+        "text": "Житомирський РЕМ, м. Житомир, вул. Київська, буд. 77"
+       },
+       "queue": "5.2",
+       "queueSource": "LOOKUP",
+       "queueStatusText": null,
+       "plannedAlerts": true,
+       "emergencyAlerts": true,
+       "createdAtMs": 10
+      },
+      {
+       "id": "bbbb0002",
+       "label": "",
+       "address": {
+        "remSlug": "zhytomyr",
+        "settlementId": "16657",
+        "streetId": "st_200",
+        "streetName": "вул. Соборна",
+        "house": "3",
+        "text": ""
+       },
+       "queue": "5.2",
+       "queueSource": "LOOKUP",
+       "queueStatusText": null,
+       "plannedAlerts": true,
+       "emergencyAlerts": true,
+       "createdAtMs": 20
+      },
+      {
+       "id": "cccc0003",
+       "label": "",
+       "address": null,
+       "queue": "3.1",
+       "queueSource": "MANUAL",
+       "queueStatusText": null,
+       "plannedAlerts": false,
+       "emergencyAlerts": true,
+       "createdAtMs": 5
+      },
+      {
+       "id": "dddd0004",
+       "label": "",
+       "address": null,
+       "queue": "1.1",
+       "queueSource": "MANUAL",
+       "queueStatusText": null,
+       "plannedAlerts": true,
+       "emergencyAlerts": true,
+       "createdAtMs": 30
+      }
+     ]
+    },
+    "boundId": "cccc0003",
+    "expect": [
+     "cccc0003"
+    ]
+   },
+   {
+    "name": "a binding to a removed item shows the primary alone (the label tells)",
+    "store": {
+     "schemaVersion": 1,
+     "primaryId": "bbbb0002",
+     "items": [
+      {
+       "id": "aaaa0001",
+       "label": "",
+       "address": {
+        "remSlug": "zhytomyr",
+        "settlementId": "16657",
+        "streetId": "st_123",
+        "streetName": "вул. Київська",
+        "house": "77",
+        "text": "Житомирський РЕМ, м. Житомир, вул. Київська, буд. 77"
+       },
+       "queue": "5.2",
+       "queueSource": "LOOKUP",
+       "queueStatusText": null,
+       "plannedAlerts": true,
+       "emergencyAlerts": true,
+       "createdAtMs": 10
+      },
+      {
+       "id": "bbbb0002",
+       "label": "",
+       "address": {
+        "remSlug": "zhytomyr",
+        "settlementId": "16657",
+        "streetId": "st_200",
+        "streetName": "вул. Соборна",
+        "house": "3",
+        "text": ""
+       },
+       "queue": "5.2",
+       "queueSource": "LOOKUP",
+       "queueStatusText": null,
+       "plannedAlerts": true,
+       "emergencyAlerts": true,
+       "createdAtMs": 20
+      },
+      {
+       "id": "cccc0003",
+       "label": "",
+       "address": null,
+       "queue": "3.1",
+       "queueSource": "MANUAL",
+       "queueStatusText": null,
+       "plannedAlerts": false,
+       "emergencyAlerts": true,
+       "createdAtMs": 5
+      },
+      {
+       "id": "dddd0004",
+       "label": "",
+       "address": null,
+       "queue": "1.1",
+       "queueSource": "MANUAL",
+       "queueStatusText": null,
+       "plannedAlerts": true,
+       "emergencyAlerts": true,
+       "createdAtMs": 30
+      }
+     ]
+    },
+    "boundId": "zzzz9999",
+    "expect": [
+     "bbbb0002"
+    ]
+   },
+   {
+    "name": "one item: no stack",
+    "store": {
+     "schemaVersion": 1,
+     "primaryId": "aaaa0001",
+     "items": [
+      {
+       "id": "aaaa0001",
+       "label": "",
+       "address": {
+        "remSlug": "zhytomyr",
+        "settlementId": "16657",
+        "streetId": "st_123",
+        "streetName": "вул. Київська",
+        "house": "77",
+        "text": "Житомирський РЕМ, м. Житомир, вул. Київська, буд. 77"
+       },
+       "queue": "5.2",
+       "queueSource": "LOOKUP",
+       "queueStatusText": null,
+       "plannedAlerts": true,
+       "emergencyAlerts": true,
+       "createdAtMs": 10
+      }
+     ]
+    },
+    "boundId": null,
+    "expect": [
+     "aaaa0001"
+    ]
+   },
+   {
+    "name": "empty store: nothing",
+    "store": {
+     "schemaVersion": 1,
+     "primaryId": null,
+     "items": []
+    },
+    "boundId": null,
     "expect": []
    }
   ]

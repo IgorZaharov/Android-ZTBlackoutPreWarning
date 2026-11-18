@@ -431,6 +431,24 @@ public enum Subscriptions {
         }
     }
 
+    /// The user edited the item's address (spec/SUBSCRIPTIONS.md section 4): address, queue and status text come
+    /// from the lookup; id, label, switches, position and primary stay. Another item with the new identity is a duplicate.
+    public static func setAddress(_ store: SubscriptionStore, id: String, address: SubscriptionAddress, queue: String?,
+                                  statusText: String?) -> StoreResult {
+        guard var changed = store.items.first(where: { $0.id == id }) else { return .error(code: ERR_NOT_FOUND, existingId: nil) }
+        changed.address = address
+        changed.queue = queue
+        changed.queueSource = .LOOKUP
+        changed.queueStatusText = statusText.flatMap { $0.ktIsBlank ? nil : $0 }
+        changed = normalize(changed)
+        if changed.address == nil { return .error(code: ERR_INVALID, existingId: nil) }
+        if let dup = store.items.first(where: { $0.id != id && $0.identity == changed.identity }) {
+            return .error(code: ERR_DUPLICATE, existingId: dup.id)
+        }
+        let result = changed
+        return update(store, id: id) { $0 = result }
+    }
+
     private static func update(_ store: SubscriptionStore, id: String, _ change: (inout Subscription) -> Void) -> StoreResult {
         guard store.items.contains(where: { $0.id == id }) else { return .error(code: ERR_NOT_FOUND, existingId: nil) }
         var s = store

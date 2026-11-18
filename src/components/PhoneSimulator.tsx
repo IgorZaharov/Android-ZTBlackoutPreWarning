@@ -20,8 +20,6 @@ import { WidgetSimulator } from './WidgetSimulator';
 import { CoachTour } from './CoachTour';
 import { isOnboardingDone, setOnboardingDone, tourFinishedBy, type TourPage } from '../services/onboarding';
 import { AnimatePresence, motion, useReducedMotion, type PanInfo } from 'motion/react';
-import { ZhytomyrRouletteModal } from './ZhytomyrRouletteModal';
-import { cacheQueueSlotsForRoulette } from '../services/rouletteGame';
 import { noAlertsCaption, switcherItems, type SubscriptionStore } from '../core/subscriptions';
 
 interface PhoneSimulatorProps {
@@ -86,8 +84,6 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
   now = new Date()
 }) => {
   const t = translations[lang];
-  const [isRouletteOpen, setIsRouletteOpen] = React.useState(false);
-  const [imitatedNotification, setImitatedNotification] = React.useState<NotificationRecord | null>(null);
   const [autoOpenQueueHelp, setAutoOpenQueueHelp] = React.useState(false);
   // First-run tour (spec/ONBOARDING.md): started by the first-launch button, never shown again once finished
   const [tour, setTour] = React.useState({ active: false, reachedRename: false, renameDone: false });
@@ -104,8 +100,6 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
 
   React.useEffect(() => {
     const handleFirstLaunchReset = () => {
-      setIsRouletteOpen(false);
-      setImitatedNotification(null);
       setAutoOpenQueueHelp(false);
       setOnboardingDone(false);
       setTour({ active: false, reachedRename: false, renameDone: false });
@@ -113,20 +107,6 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
     window.addEventListener('zt-app-first-launch-reset', handleFirstLaunchReset);
     return () => window.removeEventListener('zt-app-first-launch-reset', handleFirstLaunchReset);
   }, []);
-
-  React.useEffect(() => {
-    // The roulette plays on today's 48 cells of the selected queue, the same cells the drum shows
-    const slots = snapshot.slotsFor(snapshot.today);
-    if (snapshot.queue && slots.length) {
-      cacheQueueSlotsForRoulette(snapshot.queue, slots);
-    }
-  }, [snapshot]);
-
-  React.useEffect(() => {
-    if (activeTab !== 'about') {
-      setIsRouletteOpen(false);
-    }
-  }, [activeTab]);
 
   const currentTimeStr = React.useMemo(() => {
     const h = now.getHours().toString().padStart(2, '0');
@@ -170,7 +150,7 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
   };
   const pageRef = React.useRef<HTMLDivElement>(null);
 
-  const displayedNotification = imitatedNotification || activeNotification;
+  const displayedNotification = activeNotification;
   const hasFeaturedEmergency = React.useMemo(() => snapshot.featuredEmergency() !== null, [snapshot]);
   const isQueueUnselectedView =
     (!settings.queue || settings.queue.trim() === '') && !settings.customQueueStatusText && !hasFeaturedEmergency && activeTab === 'schedule';
@@ -243,13 +223,13 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
                   <Zap className="w-4 h-4 fill-current" />
                 </div>
                 <div
-                  role={!imitatedNotification && onOpenNotification ? 'button' : undefined}
-                  tabIndex={!imitatedNotification && onOpenNotification ? 0 : undefined}
+                  role={onOpenNotification ? 'button' : undefined}
+                  tabIndex={onOpenNotification ? 0 : undefined}
                   data-testid="heads-up-open"
                   onClick={() => {
-                    if (!imitatedNotification && activeNotification) onOpenNotification?.(activeNotification);
+                    if (activeNotification) onOpenNotification?.(activeNotification);
                   }}
-                  className={!imitatedNotification && onOpenNotification ? 'cursor-pointer' : undefined}
+                  className={onOpenNotification ? 'cursor-pointer' : undefined}
                 >
                   <div className="flex items-center gap-2">
                     <span className="text-[11px] font-bold text-[#FF5E3A] uppercase tracking-wider">Світло в Житомирі</span>
@@ -265,13 +245,7 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
               </div>
 
               <button
-                onClick={() => {
-                  if (imitatedNotification) {
-                    setImitatedNotification(null);
-                  } else {
-                    onDismissNotification();
-                  }
-                }}
+                onClick={() => onDismissNotification()}
                 className="text-zinc-400 hover:text-white p-1 rounded-lg"
               >
                 <X className="w-4 h-4" />
@@ -310,7 +284,7 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
             animate="center"
             exit="exit"
             transition={{ x: { type: 'spring', stiffness: 300, damping: 30 }, opacity: { duration: 0.2, ease: [0.215, 0.61, 0.355, 1] } }}
-            drag={isRouletteOpen || isQueueUnselectedView ? false : 'x'}
+            drag={isQueueUnselectedView ? false : 'x'}
             dragDirectionLock
             dragConstraints={{ left: 0, right: 0 }}
             dragElastic={{ left: tabIndex < tabOrder.length - 1 ? 1 : 0.2, right: tabIndex > 0 ? 1 : 0.2 }}
@@ -364,6 +338,12 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
               subscriptionStore={subscriptionStore}
               boundId={widgetBoundId}
               onBind={onBindWidget}
+              primarySnapshot={snapshot}
+              primarySettings={settings}
+              onOpenPrimary={() => {
+                if (subscriptionStore?.primaryId) onSelectSubscription?.(subscriptionStore.primaryId);
+                setActiveTab('schedule');
+              }}
               onOpenApp={() => {
                 if (widgetItemId) onSelectSubscription?.(widgetItemId);
                 setActiveTab('schedule');
@@ -388,28 +368,14 @@ export const PhoneSimulator: React.FC<PhoneSimulatorProps> = ({
           )}
 
           {activeTab === 'about' && (
-            <AboutView
-              lang={lang}
-              onOpenRoulette={() => setIsRouletteOpen(true)}
-            />
+            <AboutView lang={lang} />
           )}
           </motion.div>
           </AnimatePresence>
         </div>
 
-        {/* Zhytomyr Roulette Full-Screen Overlay (positioned below Android Status Bar, hiding Navigation Bar) */}
-        <ZhytomyrRouletteModal
-          isOpen={isRouletteOpen}
-          onClose={() => setIsRouletteOpen(false)}
-          lang={lang}
-          providerUrl={settings.url}
-          queue={settings.queue}
-          now={now}
-          onImitatedNotification={(record) => setImitatedNotification(record)}
-        />
-
-        {/* Floating Capsule Bottom Navigation Dock in Frosted Glass (hidden while Zhytomyr Roulette is open) */}
-        {!isRouletteOpen && (
+        {/* Floating Capsule Bottom Navigation Dock in Frosted Glass */}
+        {(
           <div
             data-testid="bottom-nav-dock"
             className={`absolute bottom-5 left-1/2 -translate-x-1/2 z-40 w-[84%] max-w-[320px] transition-all duration-300 ${

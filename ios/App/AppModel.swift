@@ -235,18 +235,30 @@ final class AppModel: ObservableObject {
     /// Manual refresh: always goes to the network and tells the user what the site answered.
     func manualRefresh() {
         guard !isRefreshing else { return }
-        Task {
-            let outcome = await runRefresh(force: true, resolveAddress: true)
-            let l = lang
-            let message: String
-            switch outcome.siteState {
-            case nil, .AVAILABLE_WITH_TABLE: message = AppStrings.refreshSuccessToast(l)
-            case .AVAILABLE_NO_TABLE: message = AppStrings.siteStateNoTable(l)
-            case .SITE_UNREACHABLE: message = AppStrings.siteStateUnreachable(l)
-            case .NO_INTERNET: message = AppStrings.siteStateNoInternet(l)
-            }
-            showBanner(message)
+        Task { await refreshWithBanner() }
+    }
+
+    /// Pull to refresh on the main page: the round button's refresh, awaited so the spinner stays until it is
+    /// done. A pull during a refresh that is already running waits for that one.
+    func pullRefresh() async {
+        if isRefreshing {
+            while isRefreshing { try? await Task.sleep(for: .milliseconds(200)) }
+            return
         }
+        await refreshWithBanner()
+    }
+
+    private func refreshWithBanner() async {
+        let outcome = await runRefresh(force: true, resolveAddress: true)
+        let l = lang
+        let message: String
+        switch outcome.siteState {
+        case nil, .AVAILABLE_WITH_TABLE: message = AppStrings.refreshSuccessToast(l)
+        case .AVAILABLE_NO_TABLE: message = AppStrings.siteStateNoTable(l)
+        case .SITE_UNREACHABLE: message = AppStrings.siteStateUnreachable(l)
+        case .NO_INTERNET: message = AppStrings.siteStateNoInternet(l)
+        }
+        showBanner(message)
     }
 
     /// Loads the address index from the disk cache and the site after the first frame, so the "?"
@@ -327,6 +339,13 @@ final class AppModel: ObservableObject {
         // the user stays in Settings (owner request): the address is added in place
         if apply(sync.addFromLookup(queue: queue, statusText: statusText, addressText: addressLabel, query: query)) {
             showBanner(AppStrings.addressAdded(lang))
+        }
+    }
+
+    /// The address of item `id` was edited in Settings (spec/SUBSCRIPTIONS.md section 4, `setAddress`).
+    func editAddress(_ id: String, queue: String, statusText: String?, addressLabel: String, query: SelectedAddressQuery) {
+        if apply(sync.editAddress(id, queue: queue, statusText: statusText, addressText: addressLabel, query: query)) {
+            showBanner(AppStrings.addressChanged(lang))
         }
     }
 

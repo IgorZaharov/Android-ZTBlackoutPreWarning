@@ -71,6 +71,20 @@ class SubscriptionSync(context: Context) {
         return change { Subscriptions.add(it, item) }
     }
 
+    /** The user edited the address of item [id] in Settings (`Subscriptions.setAddress`). */
+    fun editAddress(id: String, queue: String, statusText: String?, addressText: String, query: SelectedAddressQuery): StoreResult {
+        ensureReady()
+        val address = SubscriptionAddress(
+            remSlug = query.remId,
+            settlementId = query.settlementId,
+            streetId = query.streetId,
+            streetName = SubscriptionRepository.resolveStreetName(query.streetId).orEmpty(),
+            house = query.house,
+            text = addressText
+        )
+        return change { Subscriptions.setAddress(it, id, address, queue, statusText) }
+    }
+
     fun addQueueOnly(queue: String): StoreResult {
         ensureReady()
         val item = Subscription(

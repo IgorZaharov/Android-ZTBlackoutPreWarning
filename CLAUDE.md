@@ -9,7 +9,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 The repo holds **three implementations that must stay in logic/UI/text parity**:
 - `android/` — native Kotlin app (Compose M3, Glance widgets, WorkManager, AlarmManager, Jsoup). Package `ua.blackout.prewarning`.
 - `src/` — React 19 + TS + Vite web simulator/workbench mirroring the Android logic (`src/services/ztoeParser.ts` mirrors `ZtoeParser.kt` + `ScheduleRepository.kt`; `MainView.tsx`/`WidgetSimulator.tsx` mirror `MainScreen.kt`/`TimelineBar.kt`/`BlackoutGlanceWidget.kt`; `i18n.ts` mirrors `AppStrings.kt`). When changing behavior on one side, change the other.
-- `ios/` — native SwiftUI app + WidgetKit extension (iOS 17+, built with Xcode 26, XcodeGen `ios/project.yml`), being ported to 1.4.0 milestone by milestone: `docs/ios/IOS_PORT_PLAN.md` is the plan (owner decisions, Liquid Glass with fallback, App Review items, milestones). No roulette on iOS. Pure Swift core in `ios/Shared/Core/` mirrors `core/*.kt`.
+- `ios/` — native SwiftUI app + WidgetKit extension (iOS 17+, built with Xcode 26, XcodeGen `ios/project.yml`), being ported to 1.4.0 milestone by milestone: `docs/ios/IOS_PORT_PLAN.md` is the plan (owner decisions, Liquid Glass with fallback, App Review items, milestones). The Zhytomyr roulette mini-game was removed from every platform (owner, 2026-11-18). Pure Swift core in `ios/Shared/Core/` mirrors `core/*.kt`.
 
 ## Commands
 

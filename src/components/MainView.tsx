@@ -186,8 +186,7 @@ export const MainView: React.FC<MainViewProps> = ({
   // the header bell shows and toggles the master switch for all addresses (owner decision 4)
   const alertsOn = settings.alertsMaster ?? settings.notificationsEnabled;
   const [selectedDayTab, setSelectedDayTab] = useState<'today' | 'tomorrow'>('today');
-  // Another address starts on Today (spec/SUBSCRIPTIONS.md 9)
-  useEffect(() => setSelectedDayTab('today'), [shownAddressId]);
+  // Today / Tomorrow stays when another address is shown (spec/SUBSCRIPTIONS.md 9, owner 2026-11-18)
   const hasSwitcher = addresses.length > 0;
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
