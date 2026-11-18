@@ -40,7 +40,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -51,8 +50,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.layout.onSizeChanged
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -71,7 +68,7 @@ import ua.blackout.prewarning.ui.theme.ZtMinTouch
 import ua.blackout.prewarning.ui.theme.ZtShapes
 import ua.blackout.prewarning.ui.theme.ZtType
 
-/** Minimum height of one list row; also what [PickerDialog] uses to decide whether the rows fit. */
+/** Minimum height of one list row. */
 private val PICKER_ROW_HEIGHT = 52.dp
 
 /** One row of a [SearchablePickerField]. [id] must be unique inside one list; duplicates are dropped. */
@@ -117,7 +114,7 @@ fun glassFieldColors(
  * @param enabled when false the field is dimmed and does not open ([disabledHint] is read by TalkBack)
  * @param kind [PickerSearch.Kind.HOUSE] for house numbers ("16А" equals "16a", "34-А" equals "34а")
  * @param openRequest opens the list whenever it grows above 0 (the address form opens the houses right after a
- *   street is chosen); the search field gets the keyboard only when the rows do not all fit (see [PickerDialog])
+ *   street is chosen); the search field is focused and the keyboard opens, as for every list
  */
 @Composable
 fun SearchablePickerField(
@@ -230,19 +227,8 @@ private fun PickerDialog(
     val listState = rememberLazyListState(initialFirstVisibleItemIndex = initialIndex)
     val focusRequester = remember { FocusRequester() }
     val keyboard = LocalSoftwareKeyboardController.current
-    val rowPx = with(LocalDensity.current) { PICKER_ROW_HEIGHT.toPx() }
-    var listHeightPx by remember { mutableIntStateOf(0) }
-    var focusDecided by remember { mutableStateOf(false) }
-
-    // The search field gets the keyboard only when the rows do not all fit in the list area: a short list
-    // (a few houses, the REMs) is picked by tapping, and the keyboard would only cover it. Decided once, when
-    // the rows are known (loading finished, or already more rows than fit).
-    LaunchedEffect(loading, unique.size, listHeightPx) {
-        if (focusDecided || listHeightPx <= 0) return@LaunchedEffect
-        val tooLong = unique.size * rowPx > listHeightPx
-        if (!tooLong && loading) return@LaunchedEffect
-        focusDecided = true
-        if (!tooLong) return@LaunchedEffect
+    // The search field is focused on open, so the keyboard comes up at once (owner, 2026-11-18)
+    LaunchedEffect(Unit) {
         withFrameNanos { }
         try {
             focusRequester.requestFocus()
@@ -329,7 +315,7 @@ private fun PickerDialog(
                 )
             }
 
-            Box(modifier = Modifier.weight(1f).fillMaxWidth().onSizeChanged { listHeightPx = it.height }) {
+            Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
                 when {
                     shown.isNotEmpty() -> LazyColumn(
                         state = listState,

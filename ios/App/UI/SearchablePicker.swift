@@ -26,7 +26,7 @@ struct SearchablePickerField: View {
     /// CI screenshots only: opens the list as soon as the field appears.
     var autoOpen: Bool = false
     /// Opens the list whenever it grows above 0 (the address form opens the houses right after a street is
-    /// chosen); the search field gets the keyboard only when the rows do not all fit (see `PickerList`).
+    /// chosen); the search field is focused and the keyboard opens, as for every list.
     var openRequest: Int = 0
     let onSelect: (PickerItem) -> Void
 
@@ -97,8 +97,7 @@ struct SearchablePickerField: View {
     }
 }
 
-/// Full-screen list. The search field gets the keyboard on open only when the rows do not all fit in the list
-/// area: a short list (a few houses, the REMs) is picked by tapping, and the keyboard would only cover it.
+/// Full-screen list with the search field focused on open, so the keyboard comes up at once (owner, 2026-11-18).
 private struct PickerList: View {
     let title: String
     let items: [PickerItem]
@@ -113,20 +112,9 @@ private struct PickerList: View {
 
     @State private var query = ""
     @FocusState private var focused: Bool
-    @State private var listHeight: CGFloat = 0
-    @State private var focusDecided = false
 
-    /// Minimum height of one row (`row(_:)`); also what the keyboard rule compares against.
+    /// Minimum height of one row (`row(_:)`).
     private static let rowHeight: CGFloat = 52
-
-    /// Decided once, when the rows are known (loading finished, or already more rows than fit).
-    private func decideFocus(rowCount: Int) {
-        guard !focusDecided, listHeight > 0 else { return }
-        let tooLong = CGFloat(rowCount) * Self.rowHeight > listHeight
-        if !tooLong && loading { return }
-        focusDecided = true
-        if tooLong { focused = true }
-    }
 
     var body: some View {
         // duplicate ids would confuse the lazy list, so the list is made unique once
@@ -217,15 +205,10 @@ private struct PickerList: View {
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height in
-                listHeight = height
-                decideFocus(rowCount: unique.count)
-            }
         }
         .background(ZtColors.cardSolid.ignoresSafeArea())
         .preferredColorScheme(.dark)
-        .onChange(of: loading) { decideFocus(rowCount: unique.count) }
-        .onChange(of: unique.count) { decideFocus(rowCount: unique.count) }
+        .onAppear { focused = true }
     }
 
     private func row(_ item: PickerItem) -> some View {

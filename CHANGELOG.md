@@ -1,5 +1,16 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+- **Pull the main page down to refresh, as in a browser** (owner, 2026-11-18). Android `MainScreen.kt` (Material 3 `PullToRefreshBox`, accent spinner on the dark card colour) and iOS `MainScreen.swift` (`.refreshable`, `AppModel.pullRefresh()`): the same refresh and result banner as the round button. The spinner shows only for a pull, not for the quiet refresh when the page is entered, and a pull during a running refresh waits for it instead of starting another. Without a chosen queue the page does not scroll, so it can not be pulled.
+
+### Fixed
+- **Swiping from the main page to Settings no longer stutters** (owner report 2026-11-18, some devices). Android (`BlackoutAppNavigation.kt`): the countdown switch, the snapshot, the Settings site check and the first-run tour now follow `pagerState.settledPage` instead of `currentPage`, which flipped half way through the swipe and recomposed both pages, including Settings, while it was still moving. The snapshot of the countdown is built off the main thread, so a tick that falls into a swipe no longer costs frames. The dock buttons read the live page themselves (`DockTab`), so only they recompose. The receding page fades with `CompositingStrategy.ModulateAlpha` instead of an offscreen copy of the whole page every frame. iOS (`RootView.swift`): the pager keeps its own scroll page and passes it to the app only once the swipe has settled (300 ms), so the app model does not re-render every page in the middle of the swipe. The swipe parallax lives in an observable read only by the background (`PagerMotion`, `PagerBackground`), so the root view is no longer rebuilt on every frame.
+
+### Changed
+- **Every searchable list focuses its search field again** (owner, 2026-11-18; `SearchablePickerField.kt`, `SearchablePicker.swift`, `SearchablePickerField.tsx`): settlement, street and house open with the keyboard up, as before 1.4.2. The house list still opens by itself right after a street is chosen.
+
 ## [1.4.2] - 2026-11-18
 
 ### Changed
