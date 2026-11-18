@@ -2291,7 +2291,7 @@ open class BlackoutGlanceWidget(private val forceBigLayout: Boolean = false) : G
             if (stackWidgetId != null && !ready.isNullOrEmpty() && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
                 // Address stack (spec/SUBSCRIPTIONS.md 10): one card over the whole widget, and above it the buttons in
                 // the corner the card leaves empty; the cards follow this frame as a partial update (see AddressStack)
-                val widget = AddressStack.widgetSize(options, kind)
+                val widget = AddressStack.widgetSize(appContext, options, kind)
                 LaunchedEffect(ready) {
                     kotlinx.coroutines.delay(AddressStack.PUSH_DELAY_MS)
                     AddressStack.pushCards(appContext, stackWidgetId, ready, widget)
@@ -2529,12 +2529,14 @@ internal fun WidgetBody(
 
 /**
  * The refresh and bell buttons of an address stack, above the front card (see [AddressStack]): in the corner each
- * card leaves empty, 12 dp from it; top right on the 4x2 card, bottom right on the 2x1 card.
+ * card leaves empty: top right on the 4x2 card, 12 dp from the corner; bottom right on the 2x1 card, 12 dp from the
+ * right and 8 dp from the bottom (the card's padding, widget_card_small.xml).
  */
 @Composable
 internal fun StackButtons(isBigWidget: Boolean, notificationsEnabled: Boolean, isRefreshing: Boolean) {
     Box(
-        modifier = GlanceModifier.fillMaxSize().padding(12.dp),
+        modifier = GlanceModifier.fillMaxSize()
+            .padding(start = 12.dp, top = 12.dp, end = 12.dp, bottom = if (isBigWidget) 12.dp else 8.dp),
         contentAlignment = if (isBigWidget) Alignment.TopEnd else Alignment.BottomEnd
     ) {
         Row(verticalAlignment = Alignment.Vertical.CenterVertically) {
@@ -2657,7 +2659,7 @@ class BlackoutStripGlanceWidget : GlanceAppWidget() {
                 // they follow this frame as a partial update (see AddressStack)
                 LaunchedEffect(ready) {
                     kotlinx.coroutines.delay(AddressStack.PUSH_DELAY_MS)
-                    AddressStack.pushCards(appContext, stackWidgetId, ready, AddressStack.widgetSize(options, AddressStack.Kind.STRIP))
+                    AddressStack.pushCards(appContext, stackWidgetId, ready, AddressStack.widgetSize(appContext, options, AddressStack.Kind.STRIP))
                 }
                 AndroidRemoteViews(
                     remoteViews = AddressStack.frame(appContext),
