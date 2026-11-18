@@ -22,7 +22,7 @@ object OutageRowFormat {
         val timeText: String,
         /** Full length of the outage ("2 год"); null when the end is unknown (overdue emergency). */
         val durationText: String?,
-        /** "Аварійне" / "Планові роботи"; null for a plain planned outage (the dot is its marker). */
+        /** "Аварійне" / "Можливі планові роботи"; null for a plain planned outage (the dot is its marker). */
         val kindTag: String?,
         /** "з 13.11 23:00" on the day an outage continues into. */
         val originTag: String?,

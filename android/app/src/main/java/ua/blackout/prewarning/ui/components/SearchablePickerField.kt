@@ -40,6 +40,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -50,6 +51,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -67,6 +70,9 @@ import ua.blackout.prewarning.ui.theme.ZtColors
 import ua.blackout.prewarning.ui.theme.ZtMinTouch
 import ua.blackout.prewarning.ui.theme.ZtShapes
 import ua.blackout.prewarning.ui.theme.ZtType
+
+/** Minimum height of one list row; also what [PickerDialog] uses to decide whether the rows fit. */
+private val PICKER_ROW_HEIGHT = 52.dp
 
 /** One row of a [SearchablePickerField]. [id] must be unique inside one list; duplicates are dropped. */
 @Immutable
@@ -110,6 +116,8 @@ fun glassFieldColors(
  * @param selectedId id of the current value; gets the check mark and the initial scroll position
  * @param enabled when false the field is dimmed and does not open ([disabledHint] is read by TalkBack)
  * @param kind [PickerSearch.Kind.HOUSE] for house numbers ("16А" equals "16a", "34-А" equals "34а")
+ * @param openRequest opens the list whenever it grows above 0 (the address form opens the houses right after a
+ *   street is chosen); the search field gets the keyboard only when the rows do not all fit (see [PickerDialog])
  */
 @Composable
 fun SearchablePickerField(
@@ -126,9 +134,13 @@ fun SearchablePickerField(
     loadFailed: Boolean = false,
     onRetry: (() -> Unit)? = null,
     kind: PickerSearch.Kind = PickerSearch.Kind.TEXT,
-    disabledHint: String? = null
+    disabledHint: String? = null,
+    openRequest: Int = 0
 ) {
     var open by remember { mutableStateOf(false) }
+    LaunchedEffect(openRequest) {
+        if (openRequest > 0 && enabled) open = true
+    }
     val shape = ZtShapes.Control
     val shownText = value?.takeIf { it.isNotBlank() } ?: placeholder
 
@@ -218,8 +230,19 @@ private fun PickerDialog(
     val listState = rememberLazyListState(initialFirstVisibleItemIndex = initialIndex)
     val focusRequester = remember { FocusRequester() }
     val keyboard = LocalSoftwareKeyboardController.current
+    val rowPx = with(LocalDensity.current) { PICKER_ROW_HEIGHT.toPx() }
+    var listHeightPx by remember { mutableIntStateOf(0) }
+    var focusDecided by remember { mutableStateOf(false) }
 
-    LaunchedEffect(Unit) {
+    // The search field gets the keyboard only when the rows do not all fit in the list area: a short list
+    // (a few houses, the REMs) is picked by tapping, and the keyboard would only cover it. Decided once, when
+    // the rows are known (loading finished, or already more rows than fit).
+    LaunchedEffect(loading, unique.size, listHeightPx) {
+        if (focusDecided || listHeightPx <= 0) return@LaunchedEffect
+        val tooLong = unique.size * rowPx > listHeightPx
+        if (!tooLong && loading) return@LaunchedEffect
+        focusDecided = true
+        if (!tooLong) return@LaunchedEffect
         withFrameNanos { }
         try {
             focusRequester.requestFocus()
@@ -306,7 +329,7 @@ private fun PickerDialog(
                 )
             }
 
-            Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
+            Box(modifier = Modifier.weight(1f).fillMaxWidth().onSizeChanged { listHeightPx = it.height }) {
                 when {
                     shown.isNotEmpty() -> LazyColumn(
                         state = listState,
@@ -356,7 +379,7 @@ private fun PickerRow(text: String, selected: Boolean, lang: String, onClick: ()
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .heightIn(min = 52.dp)
+            .heightIn(min = PICKER_ROW_HEIGHT)
             .selectable(selected = selected, role = Role.RadioButton, onClick = onClick)
             .background(if (selected) ZtColors.InnerRow else Color.Transparent)
             .padding(horizontal = 16.dp, vertical = 8.dp),

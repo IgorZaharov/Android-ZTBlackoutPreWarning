@@ -21,8 +21,8 @@ DATA SOURCES (both public, no login, no API key)
 ⟳ We checked from a server outside Ukraine (GitHub Actions, United States) that both hosts answer; the check runs on every build.
 
 HOW TO TEST (no account needed)
-1. On the first screen choose a language, then tap "Виберіть чергу" / "Select queue".
-2. The quickest path: pick any queue, for example 5.2. To test an address: tap "?" and choose district "Житомирський РЕМ", settlement Zhytomyr (Житомир), any street and house; the app finds the queue on the power company's site.
+1. On the first screen choose a language, then tap "Виберіть чергу" / "Select queue". A short first-run tour then dims the screen around the next control to use. "Пропустити підказки" / "Skip tips" ends it, and it is shown only once.
+2. The address lookup opens. Choose district "Житомирський РЕМ", settlement Zhytomyr (Житомир), any street and house; the app finds the queue on the power company's site. Buildings that the company lists with two queues (households and businesses) get one button per queue. Example: street "проспект Миру", house 23. The quickest path instead: close the lookup and pick any queue, for example 5.2.
 3. The Main page shows whether power is on, the countdown to the next change, the timeline for today and tomorrow, and the list of outages. All times are Kyiv time, whatever the device time zone. The dock at the bottom (or a swipe) opens Settings and About.
 4. Notifications: after a queue is chosen, a card on the Main page asks for permission. Settings has a "Тест сповіщення" / "Test notification" button that sends one at once.
 5. Widgets: add "Світло в Житомирі" from the home-screen widget gallery (small, medium, large, and the "Графік" timeline widget). Long-press a widget and choose "Edit Widget" to pick which saved address it shows. On the widgets the bell turns all warnings on or off and the arrow reloads the schedule, without opening the app.

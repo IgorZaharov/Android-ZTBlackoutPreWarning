@@ -760,7 +760,7 @@ test('alerts: fires once at fireAt with the engine text; never twice, never for 
   clearNotifiedHistory();
 });
 
-test('alerts: consecutive slots, a repair next to them and an emergency are ONE span; stale emergencies never alert', () => {
+test('alerts: consecutive slots are ONE span; a repair work and an emergency after it do not extend the alert; stale emergencies never alert', () => {
   clearNotifiedHistory();
   const planned = planned14to16();
   const repair = makeOutage({ id: 'repair_x', kind: 'REPAIR', start: dt('2026-11-13T16:00'), end: dt('2026-11-13T17:00') });
@@ -768,7 +768,7 @@ test('alerts: consecutive slots, a repair next to them and an emergency are ONE 
   const stale = makeOutage({ id: 'pw_stale', kind: 'EMERGENCY', start: dt('2026-11-13T20:00'), end: dt('2026-11-13T21:00'), stale: true });
   const fired = checkAndTriggerPlannedAlerts([...planned, repair, emergency, stale], dt('2026-11-13T13:45'), alertSettings, 'uk');
   assert.equal(fired.length, 1);
-  assert.ok(fired[0].message.includes('орієнтовно до 17:00 (3'), fired[0].message);
+  assert.ok(fired[0].message.includes('орієнтовно до 16:00 (2'), fired[0].message);
   const planOnly = planPreWarnings([stale], dt('2026-11-13T10:00'), alertSettings);
   assert.deepEqual(planOnly, []);
   clearNotifiedHistory();

@@ -25,6 +25,9 @@ struct SearchablePickerField: View {
     var disabledHint: String? = nil
     /// CI screenshots only: opens the list as soon as the field appears.
     var autoOpen: Bool = false
+    /// Opens the list whenever it grows above 0 (the address form opens the houses right after a street is
+    /// chosen); the search field gets the keyboard only when the rows do not all fit (see `PickerList`).
+    var openRequest: Int = 0
     let onSelect: (PickerItem) -> Void
 
     @State private var open = false
@@ -66,6 +69,13 @@ struct SearchablePickerField: View {
             try? await Task.sleep(for: .seconds(1))
             withoutAnimation { open = true }
         }
+        .task(id: openRequest) {
+            guard openRequest > 0, enabled else { return }
+            // let the list that triggered this (the streets) finish closing before this one is presented
+            try? await Task.sleep(for: .milliseconds(350))
+            guard !Task.isCancelled else { return }
+            withoutAnimation { open = true }
+        }
         .fullScreenCover(isPresented: $open) {
             PickerList(
                 title: label, items: items, selectedId: selectedId, lang: lang,
@@ -87,7 +97,8 @@ struct SearchablePickerField: View {
     }
 }
 
-/// Full-screen list with the search field focused on open.
+/// Full-screen list. The search field gets the keyboard on open only when the rows do not all fit in the list
+/// area: a short list (a few houses, the REMs) is picked by tapping, and the keyboard would only cover it.
 private struct PickerList: View {
     let title: String
     let items: [PickerItem]
@@ -102,6 +113,20 @@ private struct PickerList: View {
 
     @State private var query = ""
     @FocusState private var focused: Bool
+    @State private var listHeight: CGFloat = 0
+    @State private var focusDecided = false
+
+    /// Minimum height of one row (`row(_:)`); also what the keyboard rule compares against.
+    private static let rowHeight: CGFloat = 52
+
+    /// Decided once, when the rows are known (loading finished, or already more rows than fit).
+    private func decideFocus(rowCount: Int) {
+        guard !focusDecided, listHeight > 0 else { return }
+        let tooLong = CGFloat(rowCount) * Self.rowHeight > listHeight
+        if !tooLong && loading { return }
+        focusDecided = true
+        if tooLong { focused = true }
+    }
 
     var body: some View {
         // duplicate ids would confuse the lazy list, so the list is made unique once
@@ -192,10 +217,15 @@ private struct PickerList: View {
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height in
+                listHeight = height
+                decideFocus(rowCount: unique.count)
+            }
         }
         .background(ZtColors.cardSolid.ignoresSafeArea())
         .preferredColorScheme(.dark)
-        .onAppear { focused = true }
+        .onChange(of: loading) { decideFocus(rowCount: unique.count) }
+        .onChange(of: unique.count) { decideFocus(rowCount: unique.count) }
     }
 
     private func row(_ item: PickerItem) -> some View {
@@ -212,7 +242,7 @@ private struct PickerList: View {
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 8)
-            .frame(minHeight: 52)
+            .frame(minHeight: Self.rowHeight)
             .background(selected ? ZtColors.innerRow : Color.clear)
             .contentShape(Rectangle())
         }

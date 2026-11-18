@@ -940,6 +940,8 @@ const AddressLookupDialog: React.FC<AddressLookupDialogProps> = ({ settings, lan
   const [selectedRemId, setSelectedRemId] = useState<string>(saved?.remId || 'zhytomyr');
   const [selectedSettlementId, setSelectedSettlementId] = useState<string>(saved?.settlementId || 'zt_city');
   const [selectedStreetId, setSelectedStreetId] = useState<string>(saved?.streetId || '');
+  /** Grows when a street is chosen, so the house list opens right away (focus only for a long list). */
+  const [houseOpenRequest, setHouseOpenRequest] = useState(0);
   const [selectedHouse, setSelectedHouse] = useState<string>(saved?.house || '');
 
   const [allRems, setAllRems] = useState<ZtoeRemOption[]>(() => getRems());
@@ -1297,6 +1299,7 @@ const AddressLookupDialog: React.FC<AddressLookupDialogProps> = ({ settings, lan
                 setSelectedHouse('');
                 setHousesList(getHousesForStreet(item.id));
                 setLookup(null);
+                setHouseOpenRequest((n) => n + 1);
               }
             }}
           />
@@ -1315,6 +1318,7 @@ const AddressLookupDialog: React.FC<AddressLookupDialogProps> = ({ settings, lan
             loadFailed={houses.failed && Boolean(currentStreet)}
             onRetry={() => patch(setHouses, { retry: houses.retry + 1 })}
             kind="HOUSE"
+            openRequest={houseOpenRequest}
             onSelect={(item) => {
               setSelectedHouse(item.id);
               setLookup(null);

@@ -107,7 +107,7 @@ final class OutageRowFormatTests: XCTestCase {
         let outage = Outage(id: "r1", kind: .REPAIR, start: at(13, 8), end: at(13, 17))
         let text = OutageRowFormat.format("uk", row(outage, today))
         XCTAssertTrue(text.isRepair)
-        XCTAssertEqual(text.kindTag, "Планові роботи")
+        XCTAssertEqual(text.kindTag, "Можливі планові роботи")
         XCTAssertEqual(text.timeText, "08:00 – 17:00")
         XCTAssertEqual(text.durationText, "9\(nbsp)год")
     }
@@ -131,7 +131,7 @@ final class OutageRowFormatTests: XCTestCase {
         let emergency = Outage(id: "e", kind: .EMERGENCY, start: at(13, 10), end: at(13, 14), endIsEstimate: true)
         XCTAssertEqual(OutageRowFormat.format("en", row(emergency, today)).kindTag, "Emergency")
         let repair = Outage(id: "r", kind: .REPAIR, start: at(13, 8), end: at(13, 17))
-        XCTAssertEqual(OutageRowFormat.format("en", row(repair, today)).kindTag, "Planned works")
+        XCTAssertEqual(OutageRowFormat.format("en", row(repair, today)).kindTag, "Possible planned works")
     }
 
     // MARK: - drum summary

@@ -23,7 +23,10 @@ object OutageConfig {
     const val ETA_CHANGE_MIN_DELTA_MINUTES = 10L
 }
 
-/** What produced an outage. REPAIR (PowerOn planned works) is treated like PLANNED for alerts. */
+/**
+ * What produced an outage. REPAIR (PowerOn "possible planned works") is treated like EMERGENCY: it counts
+ * as off and is drawn in the emergency half of the drum, but never gets a pre-warning (owner, 2026-11-18).
+ */
 enum class OutageKind { PLANNED, REPAIR, EMERGENCY }
 
 enum class IntervalStatus { FINISHED, ACTIVE, UPCOMING, OVERDUE }
@@ -43,7 +46,11 @@ data class Outage(
     val stale: Boolean = false,
     val label: String? = null
 ) {
-    val isPlannedLike: Boolean get() = kind == OutageKind.PLANNED || kind == OutageKind.REPAIR
+    /** Scheduled by the ztoe table: the only kind that gets pre-warnings and the planned half of the drum. */
+    val isPlannedLike: Boolean get() = kind == OutageKind.PLANNED
+
+    /** EMERGENCY or REPAIR: drawn in the emergency half of the drum. */
+    val isEmergencyLike: Boolean get() = kind == OutageKind.EMERGENCY || kind == OutageKind.REPAIR
 
     fun statusAt(now: LocalDateTime): IntervalStatus = when {
         stale -> IntervalStatus.FINISHED

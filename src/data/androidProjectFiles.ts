@@ -34,7 +34,7 @@ android {
         targetSdk = 36
         versionCode = (System.getenv("GITHUB_RUN_NUMBER")?.toIntOrNull() ?: 300) + 300
         val semverEnv = System.getenv("APP_VERSION_NAME")?.removePrefix("v")?.trim()?.takeIf { it.matches(Regex("^[0-9]+\\\\.[0-9]+\\\\.[0-9]+.*")) }
-        versionName = semverEnv ?: "1.4.1"
+        versionName = semverEnv ?: "1.4.2"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
@@ -3598,9 +3598,16 @@ fun MainScreen(
                         horizontalArrangement = Arrangement.spacedBy(12.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Column(modifier = Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                            LabelledValue(AppStrings.lastUpdated(lang), lastUpdated)
-                            LabelledValue(AppStrings.nextUpdated(lang), nextUpdated)
+                        Box(modifier = Modifier.weight(1f)) {
+                            // As wide as the widest pair, every label filling the rest of its row: both times
+                            // start at the same x, labels stay left-aligned and a wrapped label keeps its time
+                            Column(
+                                modifier = Modifier.width(IntrinsicSize.Max),
+                                verticalArrangement = Arrangement.spacedBy(4.dp)
+                            ) {
+                                LabelledValue(AppStrings.lastUpdated(lang), lastUpdated)
+                                LabelledValue(AppStrings.nextUpdated(lang), nextUpdated)
+                            }
                         }
                         RefreshButton(
                             enabled = !isQueueUnselected,
@@ -4057,12 +4064,12 @@ private fun OutageRowItem(text: OutageRowFormat.RowText, lang: String) {
 
 @Composable
 private fun LabelledValue(label: String, value: String) {
-    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
         Text(
             text = label,
             style = ZtType.caption,
             color = TextTertiary,
-            modifier = Modifier.weight(1f, fill = false)
+            modifier = Modifier.weight(1f)
         )
         Text(
             text = value,
@@ -5580,6 +5587,8 @@ private fun AddressLookupDialog(
     val settlementsState = remember { LevelState() }
     val streetsState = remember { LevelState() }
     val housesState = remember { LevelState() }
+    /** Grows when a street is chosen, so the house list opens right away (keyboard only for a long list). */
+    var houseOpenRequest by remember { mutableIntStateOf(0) }
 
     var isCheckingAddressOnSite by remember { mutableStateOf(false) }
     var addressCheckFailed by remember { mutableStateOf(false) }
@@ -5915,6 +5924,7 @@ private fun AddressLookupDialog(
                                     selectedHouse = ""
                                     housesList = ZtoeAddressLookup.getHousesForStreet(item.id)
                                     addressLookupResult = null
+                                    houseOpenRequest++
                                 }
                             },
                             lang = lang,
@@ -5942,7 +5952,8 @@ private fun AddressLookupDialog(
                             loading = housesState.loading,
                             loadFailed = housesState.failed && currentStreet != null,
                             onRetry = { housesState.retry++ },
-                            kind = PickerSearch.Kind.HOUSE
+                            kind = PickerSearch.Kind.HOUSE,
+                            openRequest = houseOpenRequest
                         )
 
                         // Result card (shown when a house is selected)
@@ -8020,7 +8031,7 @@ fun AboutScreen(
         val resolved = when {
             !rawVersion.isNullOrBlank() && rawVersion.matches(semverRegex) -> rawVersion
             buildCfgVersion.matches(semverRegex) -> buildCfgVersion
-            else -> "1.4.1"
+            else -> "1.4.2"
         }
         "v$resolved"
     }
@@ -14546,7 +14557,7 @@ object OutageEngine {
             val e = s.plusMinutes(OutageConfig.SLOT_MINUTES.toLong())
             SlotState(
                 planned = relevant.any { it.isPlannedLike && it.start.isBefore(e) && it.end.isAfter(s) },
-                emergency = relevant.any { it.kind == OutageKind.EMERGENCY && it.start.isBefore(e) && it.end.isAfter(s) }
+                emergency = relevant.any { it.isEmergencyLike && it.start.isBefore(e) && it.end.isAfter(s) }
             )
         }
 
@@ -14627,7 +14638,7 @@ object OutageEngine {
     // ---------------------------------------------------------------------------------------------
 
     /**
-     * One pre-warning per merged planned span (planned and repair works only), keyed by the span's
+     * One pre-warning per merged planned span (the ztoe schedule only; repair works get none), keyed by the span's
      * absolute start. Spans already started, or whose alert time has passed, never alert; a 00:00
      * continuation never gets its own alert because it is part of the earlier span.
      */
@@ -14637,12 +14648,12 @@ object OutageEngine {
         advanceMinutes: Int,
         zone: ZoneId = KYIV_ZONE
     ): List<AlertSpec> {
-        val plannedSpans = spans(outages.filter { !it.stale }, setOf(OutageKind.PLANNED, OutageKind.REPAIR))
-        val emergencies = outages.filter { it.kind == OutageKind.EMERGENCY && !it.stale }
+        val plannedSpans = spans(outages.filter { !it.stale }, setOf(OutageKind.PLANNED))
+        val emergencies = outages.filter { it.isEmergencyLike && !it.stale }
         return plannedSpans.mapNotNull { sp ->
             if (!sp.start.isAfter(now)) return@mapNotNull null
             // One continuous outage, one warning (spec/OUTAGE_ENGINE.md 6.2 step 2a): an emergency that started
-            // before the block and is still on at its start means power is already off
+            // (or a repair work) before the block and still on at its start means power is already off
             if (emergencies.any { it.start.isBefore(sp.start) && (it.overdue || !it.end.isBefore(sp.start)) }) return@mapNotNull null
             val fireAt = sp.start.minusMinutes(advanceMinutes.toLong())
             if (!fireAt.isAfter(now)) return@mapNotNull null
@@ -14657,9 +14668,9 @@ object OutageEngine {
         }
     }
 
-    /** The planned and repair spans of an address (not stale): what its pre-warnings are about. */
+    /** The planned (ztoe schedule) spans of an address, not stale: what its pre-warnings are about. */
     fun plannedSpans(outages: List<Outage>): List<Span> =
-        spans(outages.filter { !it.stale }, setOf(OutageKind.PLANNED, OutageKind.REPAIR))
+        spans(outages.filter { !it.stale }, setOf(OutageKind.PLANNED))
 
     /**
      * Whether an emergency event is announced when emergency and scheduled outages of one address form
@@ -14729,7 +14740,10 @@ object OutageConfig {
     const val ETA_CHANGE_MIN_DELTA_MINUTES = 10L
 }
 
-/** What produced an outage. REPAIR (PowerOn planned works) is treated like PLANNED for alerts. */
+/**
+ * What produced an outage. REPAIR (PowerOn "possible planned works") is treated like EMERGENCY: it counts
+ * as off and is drawn in the emergency half of the drum, but never gets a pre-warning (owner, 2026-11-18).
+ */
 enum class OutageKind { PLANNED, REPAIR, EMERGENCY }
 
 enum class IntervalStatus { FINISHED, ACTIVE, UPCOMING, OVERDUE }
@@ -14749,7 +14763,11 @@ data class Outage(
     val stale: Boolean = false,
     val label: String? = null
 ) {
-    val isPlannedLike: Boolean get() = kind == OutageKind.PLANNED || kind == OutageKind.REPAIR
+    /** Scheduled by the ztoe table: the only kind that gets pre-warnings and the planned half of the drum. */
+    val isPlannedLike: Boolean get() = kind == OutageKind.PLANNED
+
+    /** EMERGENCY or REPAIR: drawn in the emergency half of the drum. */
+    val isEmergencyLike: Boolean get() = kind == OutageKind.EMERGENCY || kind == OutageKind.REPAIR
 
     fun statusAt(now: LocalDateTime): IntervalStatus = when {
         stale -> IntervalStatus.FINISHED
@@ -16308,6 +16326,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -16318,6 +16337,8 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -16335,6 +16356,9 @@ import ua.blackout.prewarning.ui.theme.ZtColors
 import ua.blackout.prewarning.ui.theme.ZtMinTouch
 import ua.blackout.prewarning.ui.theme.ZtShapes
 import ua.blackout.prewarning.ui.theme.ZtType
+
+/** Minimum height of one list row; also what [PickerDialog] uses to decide whether the rows fit. */
+private val PICKER_ROW_HEIGHT = 52.dp
 
 /** One row of a [SearchablePickerField]. [id] must be unique inside one list; duplicates are dropped. */
 @Immutable
@@ -16378,6 +16402,8 @@ fun glassFieldColors(
  * @param selectedId id of the current value; gets the check mark and the initial scroll position
  * @param enabled when false the field is dimmed and does not open ([disabledHint] is read by TalkBack)
  * @param kind [PickerSearch.Kind.HOUSE] for house numbers ("16А" equals "16a", "34-А" equals "34а")
+ * @param openRequest opens the list whenever it grows above 0 (the address form opens the houses right after a
+ *   street is chosen); the search field gets the keyboard only when the rows do not all fit (see [PickerDialog])
  */
 @Composable
 fun SearchablePickerField(
@@ -16394,9 +16420,13 @@ fun SearchablePickerField(
     loadFailed: Boolean = false,
     onRetry: (() -> Unit)? = null,
     kind: PickerSearch.Kind = PickerSearch.Kind.TEXT,
-    disabledHint: String? = null
+    disabledHint: String? = null,
+    openRequest: Int = 0
 ) {
     var open by remember { mutableStateOf(false) }
+    LaunchedEffect(openRequest) {
+        if (openRequest > 0 && enabled) open = true
+    }
     val shape = ZtShapes.Control
     val shownText = value?.takeIf { it.isNotBlank() } ?: placeholder
 
@@ -16486,8 +16516,19 @@ private fun PickerDialog(
     val listState = rememberLazyListState(initialFirstVisibleItemIndex = initialIndex)
     val focusRequester = remember { FocusRequester() }
     val keyboard = LocalSoftwareKeyboardController.current
+    val rowPx = with(LocalDensity.current) { PICKER_ROW_HEIGHT.toPx() }
+    var listHeightPx by remember { mutableIntStateOf(0) }
+    var focusDecided by remember { mutableStateOf(false) }
 
-    LaunchedEffect(Unit) {
+    // The search field gets the keyboard only when the rows do not all fit in the list area: a short list
+    // (a few houses, the REMs) is picked by tapping, and the keyboard would only cover it. Decided once, when
+    // the rows are known (loading finished, or already more rows than fit).
+    LaunchedEffect(loading, unique.size, listHeightPx) {
+        if (focusDecided || listHeightPx <= 0) return@LaunchedEffect
+        val tooLong = unique.size * rowPx > listHeightPx
+        if (!tooLong && loading) return@LaunchedEffect
+        focusDecided = true
+        if (!tooLong) return@LaunchedEffect
         withFrameNanos { }
         try {
             focusRequester.requestFocus()
@@ -16574,7 +16615,7 @@ private fun PickerDialog(
                 )
             }
 
-            Box(modifier = Modifier.weight(1f).fillMaxWidth()) {
+            Box(modifier = Modifier.weight(1f).fillMaxWidth().onSizeChanged { listHeightPx = it.height }) {
                 when {
                     shown.isNotEmpty() -> LazyColumn(
                         state = listState,
@@ -16624,7 +16665,7 @@ private fun PickerRow(text: String, selected: Boolean, lang: String, onClick: ()
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .heightIn(min = 52.dp)
+            .heightIn(min = PICKER_ROW_HEIGHT)
             .selectable(selected = selected, role = Role.RadioButton, onClick = onClick)
             .background(if (selected) ZtColors.InnerRow else Color.Transparent)
             .padding(horizontal = 16.dp, vertical = 8.dp),
@@ -17072,7 +17113,7 @@ object OutageRowFormat {
         val timeText: String,
         /** Full length of the outage ("2 год"); null when the end is unknown (overdue emergency). */
         val durationText: String?,
-        /** "Аварійне" / "Планові роботи"; null for a plain planned outage (the dot is its marker). */
+        /** "Аварійне" / "Можливі планові роботи"; null for a plain planned outage (the dot is its marker). */
         val kindTag: String?,
         /** "з 13.11 23:00" on the day an outage continues into. */
         val originTag: String?,

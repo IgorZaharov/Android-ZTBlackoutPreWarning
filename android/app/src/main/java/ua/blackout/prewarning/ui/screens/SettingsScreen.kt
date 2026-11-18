@@ -1367,6 +1367,8 @@ private fun AddressLookupDialog(
     val settlementsState = remember { LevelState() }
     val streetsState = remember { LevelState() }
     val housesState = remember { LevelState() }
+    /** Grows when a street is chosen, so the house list opens right away (keyboard only for a long list). */
+    var houseOpenRequest by remember { mutableIntStateOf(0) }
 
     var isCheckingAddressOnSite by remember { mutableStateOf(false) }
     var addressCheckFailed by remember { mutableStateOf(false) }
@@ -1702,6 +1704,7 @@ private fun AddressLookupDialog(
                                     selectedHouse = ""
                                     housesList = ZtoeAddressLookup.getHousesForStreet(item.id)
                                     addressLookupResult = null
+                                    houseOpenRequest++
                                 }
                             },
                             lang = lang,
@@ -1729,7 +1732,8 @@ private fun AddressLookupDialog(
                             loading = housesState.loading,
                             loadFailed = housesState.failed && currentStreet != null,
                             onRetry = { housesState.retry++ },
-                            kind = PickerSearch.Kind.HOUSE
+                            kind = PickerSearch.Kind.HOUSE,
+                            openRequest = houseOpenRequest
                         )
 
                         // Result card (shown when a house is selected)

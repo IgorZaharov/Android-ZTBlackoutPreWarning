@@ -215,7 +215,7 @@ public enum AppStrings {
     public static func siteNoticeA11y(_ lang: String) -> String { lang == "uk" ? "Повідомлення Житомиробленерго" : "Zhytomyroblenergo notice" }
     public static func poweronUnavailable(_ lang: String) -> String { lang == "uk" ? "Аварійні відключення: дані недоступні" : "Emergency outages: data unavailable" }
     public static func kindPlanned(_ lang: String) -> String { lang == "uk" ? "Планове" : "Planned" }
-    public static func kindRepair(_ lang: String) -> String { lang == "uk" ? "Планові роботи" : "Planned works" }
+    public static func kindRepair(_ lang: String) -> String { lang == "uk" ? "Можливі планові роботи" : "Possible planned works" }
     public static func kindEmergency(_ lang: String) -> String { lang == "uk" ? "Аварійне" : "Emergency" }
     public static func rowFinished(_ lang: String) -> String { lang == "uk" ? "завершено" : "finished" }
     public static func rowOverdue(_ lang: String) -> String { lang == "uk" ? "очікується відновлення" : "restoration pending" }

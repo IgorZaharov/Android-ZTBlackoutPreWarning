@@ -33,6 +33,11 @@ interface SearchablePickerFieldProps {
   kind?: SearchKind;
   disabledHint?: string;
   testId?: string;
+  /**
+   * Opens the list whenever it grows above 0 (the address form opens the houses right after a street is
+   * chosen); the search field gets the focus only when the rows do not all fit (see PickerDialog).
+   */
+  openRequest?: number;
 }
 
 const ROW_HEIGHT = 52;
@@ -53,9 +58,15 @@ export const SearchablePickerField: React.FC<SearchablePickerFieldProps> = ({
   kind = 'TEXT',
   disabledHint,
   testId,
+  openRequest = 0,
 }) => {
   const t = translations[lang];
   const [open, setOpen] = useState(false);
+
+  useEffect(() => {
+    if (openRequest > 0 && enabled) setOpen(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [openRequest]);
   const shownText = value && value.trim() !== '' ? value : placeholder;
   const triggerRef = useRef<HTMLButtonElement>(null);
 
@@ -144,10 +155,21 @@ const PickerDialog: React.FC<PickerDialogProps> = ({ title, items, selectedId, l
   const [scrollTop, setScrollTop] = useState(0);
   const [viewport, setViewport] = useState(480);
   const [activeIdx, setActiveIdx] = useState(-1);
+  const areaRef = useRef<HTMLDivElement>(null);
+  const focusDecided = useRef(false);
 
+  // The search field gets the focus (the phone keyboard) only when the rows do not all fit in the list area:
+  // a short list (a few houses, the REMs) is picked by tapping, and the keyboard would only cover it. Decided
+  // once, when the rows are known (loading finished, or already more rows than fit).
   useEffect(() => {
-    inputRef.current?.focus();
-  }, []);
+    if (focusDecided.current) return;
+    const height = areaRef.current?.clientHeight ?? 0;
+    if (height <= 0) return;
+    const tooLong = unique.length * ROW_HEIGHT > height;
+    if (!tooLong && loading) return;
+    focusDecided.current = true;
+    if (tooLong) inputRef.current?.focus();
+  }, [loading, unique.length]);
 
   // Open scrolled to the selected row
   useLayoutEffect(() => {
@@ -282,7 +304,7 @@ const PickerDialog: React.FC<PickerDialogProps> = ({ title, items, selectedId, l
         </div>
       )}
 
-      <div className="relative min-h-0 flex-1">
+      <div ref={areaRef} className="relative min-h-0 flex-1">
         {shown.length > 0 ? (
           <div
             ref={listRef}

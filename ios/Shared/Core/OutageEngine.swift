@@ -167,7 +167,7 @@ public enum OutageEngine {
             let e = s.plusMinutes(OutageConfig.SLOT_MINUTES)
             return SlotState(
                 planned: relevant.contains { $0.isPlannedLike && $0.start.isBefore(e) && $0.end.isAfter(s) },
-                emergency: relevant.contains { $0.kind == .EMERGENCY && $0.start.isBefore(e) && $0.end.isAfter(s) }
+                emergency: relevant.contains { $0.isEmergencyLike && $0.start.isBefore(e) && $0.end.isAfter(s) }
             )
         }
 
@@ -258,7 +258,7 @@ public enum OutageEngine {
 
     // MARK: - Alerts and widget transitions
 
-    /// One pre-warning per merged planned span (planned and repair works only), keyed by the span's
+    /// One pre-warning per merged planned span (the ztoe schedule only; repair works get none), keyed by the span's
     /// absolute start. Spans already started, or whose alert time has passed, never alert; a 00:00
     /// continuation never gets its own alert because it is part of the earlier span.
     public static func planAlerts(
@@ -267,12 +267,12 @@ public enum OutageEngine {
         advanceMinutes: Int,
         zone: TimeZone = KyivTime.zone
     ) -> [AlertSpec] {
-        let plannedSpans = spans(outages.filter { !$0.stale }, kinds: [.PLANNED, .REPAIR])
-        let emergencies = outages.filter { $0.kind == .EMERGENCY && !$0.stale }
+        let plannedSpans = spans(outages.filter { !$0.stale }, kinds: [.PLANNED])
+        let emergencies = outages.filter { $0.isEmergencyLike && !$0.stale }
         return plannedSpans.compactMap { sp -> AlertSpec? in
             if !sp.start.isAfter(now) { return nil }
-            // One continuous outage, one warning (spec/OUTAGE_ENGINE.md 6.2 step 2a): an emergency that
-            // started before the block and is still on at its start means power is already off
+            // One continuous outage, one warning (spec/OUTAGE_ENGINE.md 6.2 step 2a): an emergency (or a repair
+            // work) that started before the block and is still on at its start means power is already off
             if emergencies.contains(where: { $0.start.isBefore(sp.start) && ($0.overdue || !$0.end.isBefore(sp.start)) }) {
                 return nil
             }
@@ -289,9 +289,9 @@ public enum OutageEngine {
         }
     }
 
-    /// The planned and repair spans of an address (not stale): what its pre-warnings are about.
+    /// The planned (ztoe schedule) spans of an address, not stale: what its pre-warnings are about.
     public static func plannedSpans(_ outages: [Outage]) -> [Span] {
-        spans(outages.filter { !$0.stale }, kinds: [.PLANNED, .REPAIR])
+        spans(outages.filter { !$0.stale }, kinds: [.PLANNED])
     }
 
     /// Whether an emergency event is announced when emergency and scheduled outages of one address form

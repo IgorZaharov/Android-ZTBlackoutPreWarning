@@ -36,6 +36,8 @@ struct AddressLookupSheet: View {
     @State private var settlementsState = LevelState()
     @State private var streetsState = LevelState()
     @State private var housesState = LevelState()
+    /// Grows when a street is chosen, so the house list opens right away (keyboard only for a long list).
+    @State private var houseOpenRequest = 0
 
     @State private var checking = false
     @State private var checkFailed = false
@@ -356,6 +358,7 @@ struct AddressLookupSheet: View {
                     house = ""
                     houses = ZtoeAddressLookup.getHousesForStreet(item.id)
                     lookup = nil
+                    houseOpenRequest += 1
                 }
             }
             .coachTarget("street")
@@ -372,7 +375,8 @@ struct AddressLookupSheet: View {
                 loadFailed: housesState.failed && currentStreet != nil,
                 onRetry: { housesState.retry += 1 },
                 kind: .HOUSE,
-                disabledHint: AppStrings.pickerChooseFirst(lang)
+                disabledHint: AppStrings.pickerChooseFirst(lang),
+                openRequest: houseOpenRequest
             ) { item in
                 house = item.id
                 lookup = nil
