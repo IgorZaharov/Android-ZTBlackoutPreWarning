@@ -342,6 +342,13 @@ final class AppModel: ObservableObject {
         }
     }
 
+    /// The address of item `id` was edited in Settings (spec/SUBSCRIPTIONS.md section 4, `setAddress`).
+    func editAddress(_ id: String, queue: String, statusText: String?, addressLabel: String, query: SelectedAddressQuery) {
+        if apply(sync.editAddress(id, queue: queue, statusText: statusText, addressText: addressLabel, query: query)) {
+            showBanner(AppStrings.addressChanged(lang))
+        }
+    }
+
     func addQueueOnly(_ queue: String) { apply(sync.addQueueOnly(queue)) }
     func remove(_ id: String) { apply(sync.change { Subscriptions.remove($0, id: id) }) }
     func makePrimary(_ id: String) { apply(sync.change { Subscriptions.setPrimary($0, id: id) }) }

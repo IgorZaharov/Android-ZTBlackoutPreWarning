@@ -1158,6 +1158,215 @@
      }
     ]
    }
+  },
+  {
+   "name": "setAddress edits an item's address in place: id, label, switches, order and primary stay; the queue comes from the lookup; a queue-only item becomes an address item; another item's address is a duplicate",
+   "start": {
+    "schemaVersion": 1,
+    "primaryId": "aaaa0001",
+    "items": [
+     {
+      "id": "aaaa0001",
+      "label": "Дім",
+      "address": {
+       "remSlug": "zhytomyr",
+       "settlementId": "16657",
+       "streetId": "st_123",
+       "streetName": "вул. Київська",
+       "house": "77",
+       "text": "Житомирський РЕМ, м. Житомир, вул. Київська, буд. 77"
+      },
+      "queue": "5.2",
+      "queueSource": "LOOKUP",
+      "queueStatusText": null,
+      "plannedAlerts": false,
+      "emergencyAlerts": true,
+      "createdAtMs": 1
+     },
+     {
+      "id": "aaaa0002",
+      "label": "",
+      "address": {
+       "remSlug": "zhytomyr",
+       "settlementId": "16657",
+       "streetId": "st_200",
+       "streetName": "вул. Шевченка",
+       "house": "1",
+       "text": "Житомирський РЕМ, м. Житомир, вул. Шевченка, буд. 1"
+      },
+      "queue": "3.1",
+      "queueSource": "LOOKUP",
+      "queueStatusText": null,
+      "plannedAlerts": true,
+      "emergencyAlerts": true,
+      "createdAtMs": 2
+     },
+     {
+      "id": "aaaa0003",
+      "label": "Дача",
+      "address": null,
+      "queue": "2.2",
+      "queueSource": "MANUAL",
+      "queueStatusText": null,
+      "plannedAlerts": true,
+      "emergencyAlerts": false,
+      "createdAtMs": 3
+     }
+    ]
+   },
+   "steps": [
+    {
+     "op": "setAddress",
+     "id": "aaaa0001",
+     "address": {
+      "remSlug": "zhytomyr",
+      "settlementId": "16658",
+      "streetId": "174892",
+      "streetName": "вул. Калинова",
+      "house": "37А",
+      "text": "Житомирський РЕМ, с. ОЛІЇВКА, вул. Калинова, буд. 37А"
+     },
+     "queue": "6.1",
+     "statusText": "  ",
+     "expectError": null
+    },
+    {
+     "op": "setAddress",
+     "id": "aaaa0003",
+     "address": {
+      "remSlug": "zhytomyr",
+      "settlementId": "16657",
+      "streetId": "173952",
+      "streetName": "вул. Степана Бандери",
+      "house": "18",
+      "text": "Житомирський РЕМ, м. Житомир, вул. Степана Бандери, буд. 18"
+     },
+     "queue": "",
+     "statusText": "Не підлягає відключенням",
+     "expectError": null
+    },
+    {
+     "op": "setAddress",
+     "id": "aaaa0002",
+     "address": {
+      "remSlug": "zhytomyr",
+      "settlementId": "16658",
+      "streetId": "174892",
+      "streetName": "вул. Калинова",
+      "house": "37а",
+      "text": "інший текст"
+     },
+     "queue": "1.1",
+     "statusText": null,
+     "expectError": "duplicate",
+     "expectExistingId": "aaaa0001"
+    },
+    {
+     "op": "setAddress",
+     "id": "aaaa0001",
+     "address": {
+      "remSlug": "zhytomyr",
+      "settlementId": "16658",
+      "streetId": "174892",
+      "streetName": "вул. Калинова",
+      "house": "37А",
+      "text": "Житомирський РЕМ, с. ОЛІЇВКА, вул. Калинова, буд. 37А"
+     },
+     "queue": "6.1",
+     "statusText": null,
+     "expectError": null
+    },
+    {
+     "op": "setAddress",
+     "id": "aaaa0002",
+     "address": {
+      "remSlug": "zhytomyr",
+      "settlementId": "16657",
+      "streetId": "st_200",
+      "streetName": "вул. Шевченка",
+      "house": "",
+      "text": "Житомирський РЕМ, м. Житомир, вул. Шевченка, буд. 1"
+     },
+     "queue": "3.1",
+     "statusText": null,
+     "expectError": "invalid"
+    },
+    {
+     "op": "setAddress",
+     "id": "nope0000",
+     "address": {
+      "remSlug": "zhytomyr",
+      "settlementId": "16657",
+      "streetId": "st_200",
+      "streetName": "вул. Шевченка",
+      "house": "1",
+      "text": "Житомирський РЕМ, м. Житомир, вул. Шевченка, буд. 1"
+     },
+     "queue": "3.1",
+     "statusText": null,
+     "expectError": "not_found"
+    }
+   ],
+   "expect": {
+    "schemaVersion": 1,
+    "primaryId": "aaaa0001",
+    "items": [
+     {
+      "id": "aaaa0001",
+      "label": "Дім",
+      "address": {
+       "remSlug": "zhytomyr",
+       "settlementId": "16658",
+       "streetId": "174892",
+       "streetName": "вул. Калинова",
+       "house": "37А",
+       "text": "Житомирський РЕМ, с. ОЛІЇВКА, вул. Калинова, буд. 37А"
+      },
+      "queue": "6.1",
+      "queueSource": "LOOKUP",
+      "queueStatusText": null,
+      "plannedAlerts": false,
+      "emergencyAlerts": true,
+      "createdAtMs": 1
+     },
+     {
+      "id": "aaaa0002",
+      "label": "",
+      "address": {
+       "remSlug": "zhytomyr",
+       "settlementId": "16657",
+       "streetId": "st_200",
+       "streetName": "вул. Шевченка",
+       "house": "1",
+       "text": "Житомирський РЕМ, м. Житомир, вул. Шевченка, буд. 1"
+      },
+      "queue": "3.1",
+      "queueSource": "LOOKUP",
+      "queueStatusText": null,
+      "plannedAlerts": true,
+      "emergencyAlerts": true,
+      "createdAtMs": 2
+     },
+     {
+      "id": "aaaa0003",
+      "label": "Дача",
+      "address": {
+       "remSlug": "zhytomyr",
+       "settlementId": "16657",
+       "streetId": "173952",
+       "streetName": "вул. Степана Бандери",
+       "house": "18",
+       "text": "Житомирський РЕМ, м. Житомир, вул. Степана Бандери, буд. 18"
+      },
+      "queue": null,
+      "queueSource": "LOOKUP",
+      "queueStatusText": "Не підлягає відключенням",
+      "plannedAlerts": true,
+      "emergencyAlerts": false,
+      "createdAtMs": 3
+     }
+    ]
+   }
   }
  ],
  "effective": {

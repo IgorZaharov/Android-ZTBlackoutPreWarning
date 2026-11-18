@@ -101,6 +101,7 @@ Each returns either the new store or an error code; the input store is never cha
 | `rename(id, raw)` | `not_found` | stores `cleanLabel(raw)`; empty -> automatic |
 | `move(id, toIndex)` | `not_found` | moves the item to position `toIndex` (clamped to `0 .. items.size - 1`) and shifts the others; the primary and every field stay unchanged. The list order is the order of the Settings card, the main-screen chips (section 9) and the widget configure list (section 10) |
 | `setQueueInfo(id, queue, statusText, addressText)` | `not_found`, `invalid` (item has no address) | result of a ZTOE lookup for an address item: `queue` (invalid -> null), `queueStatusText` (blank -> null); `address.text` = `addressText` when that is not blank, else unchanged. `queueSource` is unchanged |
+| `setAddress(id, address, queue, statusText)` | checked in this order: `not_found`, `invalid` (the address fails repair step 2), `duplicate` (another item has the new identity; the error carries its id) | the user edited the item's address (Settings, the card's edit dialog; owner 2026-11-18): `address` replaced, `queue` (invalid -> null), `queueStatusText` (blank -> null), `queueSource = LOOKUP`. `id`, `label`, both switches, `createdAtMs`, the list position and the primary stay, so a queue-only item becomes an address item. The item keeps its own identity, so saving its own address again is not a duplicate |
 
 ## 5. Effective switches (derived)
 
@@ -241,7 +242,8 @@ noAlertsCaption(master, store) = master AND store.items not empty AND NOT anyAle
   chip per item (`displayLabel`, the primary marked with a star), under the global banners (exact alarms,
   site state) and above everything that belongs to one address (emergency banner, hero, day tabs, drum, rows).
 * `selectedId` is session state: a cold start shows the primary (owner decision 5). An id that no longer
-  exists (the item was removed) falls back to the primary. Selecting another item resets the day tab to Today.
+  exists (the item was removed) falls back to the primary. Selecting another item keeps the day tab
+  (Today or Tomorrow) as it is (owner, 2026-11-18; until then it reset to Today).
 * The shown item supplies the queue title, the address caption, the ZTOE status text of a house without a
   queue and the outages (`outagesFor(item.queue, item.address.key)`, local state only). The site state is
   global (one site); the PowerOn line is the shown item's (section 8.4).

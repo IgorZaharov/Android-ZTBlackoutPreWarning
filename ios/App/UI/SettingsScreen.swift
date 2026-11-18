@@ -18,6 +18,8 @@ struct SettingsScreen: View {
     @State private var showReset = false
     @State private var removeCandidate: Subscription?
     @State private var renameCandidate: Subscription?
+    /// The item whose address the lookup edits (opened from the card's edit dialog, owner 2026-11-18).
+    @State private var editAddressCandidate: Subscription?
     @State private var renameText = ""
     @State private var urlText = ""
     @State private var urlStatus: FetchStatus = .SUCCESS
@@ -189,7 +191,8 @@ struct SettingsScreen: View {
             AddressLookupSheet(
                 siteUrl: settings.cityUrl,
                 lang: lang,
-                saved: settings.selectedAddressQuery,
+                // a new address starts empty (only the city is filled in), not from the last added (owner, 2026-11-18)
+                saved: nil,
                 tourActive: model.tourActive,
                 onTourSkip: { model.endTour() },
                 onDismiss: { showLookup = false },
@@ -199,6 +202,24 @@ struct SettingsScreen: View {
                 },
                 onBanner: { model.showBanner($0) }
             )
+        }
+        .fullScreenCover(isPresented: Binding(get: { editAddressCandidate != nil }, set: { if !$0 { editAddressCandidate = nil } })) {
+            if let item = editAddressCandidate {
+                AddressLookupSheet(
+                    siteUrl: settings.cityUrl,
+                    lang: lang,
+                    // the item's own address; a queue-only item starts empty like a new address
+                    saved: item.address.map { SelectedAddressQuery(remId: $0.remSlug, settlementId: $0.settlementId, streetId: $0.streetId, house: $0.house) },
+                    tourActive: false,
+                    onTourSkip: {},
+                    onDismiss: { editAddressCandidate = nil },
+                    onApply: { queue, status, label, query in
+                        model.editAddress(item.id, queue: queue, statusText: status, addressLabel: label, query: query)
+                        editAddressCandidate = nil
+                    },
+                    onBanner: { model.showBanner($0) }
+                )
+            }
         }
         .alert(Text(verbatim: AppStrings.removeConfirmTitle(lang)), isPresented: Binding(get: { removeCandidate != nil }, set: { if !$0 { removeCandidate = nil } }), presenting: removeCandidate) { item in
             Button(role: .destructive) { model.remove(item.id) } label: { Text(verbatim: AppStrings.removeAddress(lang)) }
@@ -213,6 +234,10 @@ struct SettingsScreen: View {
                 Text(verbatim: Subscriptions.defaultLabel(item))
             }
             Button { model.rename(item.id, renameText) } label: { Text(verbatim: AppStrings.save(lang)) }
+            // the address itself can be changed too (owner, 2026-11-18): the lookup opens once the alert has closed
+            Button {
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) { editAddressCandidate = item }
+            } label: { Text(verbatim: AppStrings.editAddress(lang)) }
             Button(role: .cancel) {} label: { Text(verbatim: AppStrings.cancel(lang)) }
         } message: { _ in
             Text(verbatim: AppStrings.renameHint(lang))

@@ -299,6 +299,33 @@ export function remove(store: SubscriptionStore, id: string): StoreResult {
 }
 
 /** Result of a ZTOE lookup for an address item (spec/SUBSCRIPTIONS.md section 4). */
+/**
+ * The user edited the item's address (spec/SUBSCRIPTIONS.md section 4): address, queue and status text come from
+ * the lookup; id, label, switches, position and primary stay. Another item with the new identity is a duplicate.
+ */
+export function setAddress(
+  store: SubscriptionStore,
+  id: string,
+  address: SubscriptionAddress,
+  queue: string | null,
+  statusText: string | null,
+): StoreResult {
+  const item = store.items.find((s) => s.id === id);
+  if (!item) return fail(ERR_NOT_FOUND);
+  const changed = normalize({
+    ...item,
+    address,
+    queue,
+    queueSource: 'LOOKUP',
+    queueStatusText: statusText !== null && !isBlank(statusText) ? statusText : null,
+  });
+  if (changed.address === null) return fail(ERR_INVALID);
+  const key = identity(changed);
+  const dup = store.items.find((s) => s.id !== id && identity(s) === key);
+  if (dup) return fail(ERR_DUPLICATE, dup.id);
+  return update(store, id, () => changed);
+}
+
 export function setQueueInfo(
   store: SubscriptionStore,
   id: string,

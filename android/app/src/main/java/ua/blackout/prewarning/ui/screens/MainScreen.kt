@@ -251,8 +251,8 @@ fun MainScreen(
     val tomorrowDate = todayDate.plusDays(1)
     val now = snapshot.now
 
-    // Another address starts on Today (spec/SUBSCRIPTIONS.md 9)
-    var selectedDayTab by rememberSaveable(shownAddressId) { mutableStateOf(TAB_TODAY) }
+    // Today / Tomorrow stays when another address is shown (spec/SUBSCRIPTIONS.md 9, owner 2026-11-18)
+    var selectedDayTab by rememberSaveable { mutableStateOf(TAB_TODAY) }
     val isTomorrowSelected = selectedDayTab == TAB_TOMORROW
     val activeDate = if (isTomorrowSelected) tomorrowDate else todayDate
 

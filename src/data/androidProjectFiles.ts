@@ -3237,8 +3237,8 @@ fun MainScreen(
     val tomorrowDate = todayDate.plusDays(1)
     val now = snapshot.now
 
-    // Another address starts on Today (spec/SUBSCRIPTIONS.md 9)
-    var selectedDayTab by rememberSaveable(shownAddressId) { mutableStateOf(TAB_TODAY) }
+    // Today / Tomorrow stays when another address is shown (spec/SUBSCRIPTIONS.md 9, owner 2026-11-18)
+    var selectedDayTab by rememberSaveable { mutableStateOf(TAB_TODAY) }
     val isTomorrowSelected = selectedDayTab == TAB_TOMORROW
     val activeDate = if (isTomorrowSelected) tomorrowDate else todayDate
 
@@ -4463,6 +4463,14 @@ fun SettingsScreen(
     onSetPlanned: (id: String, on: Boolean) -> Unit = { _, _ -> },
     onSetEmergency: (id: String, on: Boolean) -> Unit = { _, _ -> },
     onRenameSubscription: (id: String, label: String) -> Unit = { _, _ -> },
+    /** The address of an existing item was edited (spec/SUBSCRIPTIONS.md section 4, \`setAddress\`). */
+    onEditAddress: (
+        id: String,
+        queue: String,
+        statusText: String?,
+        addressLabel: String,
+        query: SelectedAddressQuery
+    ) -> Unit = { _, _, _, _, _ -> },
     /** Moves an address to a new list position (spec/SUBSCRIPTIONS.md section 4, \`move\`). */
     onMoveSubscription: (id: String, toIndex: Int) -> Unit = { _, _ -> },
     onToggleMaster: (Boolean) -> Unit = {},
@@ -4493,6 +4501,8 @@ fun SettingsScreen(
     var showResetConfirmDialog by remember { mutableStateOf(false) }
     var removeCandidate by remember { mutableStateOf<Subscription?>(null) }
     var renameCandidate by remember { mutableStateOf<Subscription?>(null) }
+    /** The item whose address the lookup edits (opened from the card's edit dialog). */
+    var editAddressCandidate by remember { mutableStateOf<Subscription?>(null) }
     var renameWasOpen by remember { mutableStateOf(false) }
     LaunchedEffect(renameCandidate) {
         if (renameCandidate != null) {
@@ -4899,7 +4909,8 @@ fun SettingsScreen(
         AddressLookupDialog(
             siteUrl = siteUrl,
             lang = lang,
-            saved = selectedAddressQuery,
+            // a new address starts empty (only the city is filled in), not from the last added (owner, 2026-11-18)
+            saved = null,
             onDismiss = { showQueueHelpDialog = false },
             onApply = { queue, statusText, addressLabel, query ->
                 onAddAddress(queue, statusText, addressLabel, query)
@@ -4908,6 +4919,21 @@ fun SettingsScreen(
             onShowAppBanner = onShowAppBanner,
             tourActive = tourActive,
             onTourSkip = onTourSkip
+        )
+    }
+
+    editAddressCandidate?.let { item ->
+        AddressLookupDialog(
+            siteUrl = siteUrl,
+            lang = lang,
+            // the item's own address; a queue-only item starts empty like a new address
+            saved = item.address?.let { a -> SelectedAddressQuery(a.remSlug, a.settlementId, a.streetId, a.house) },
+            onDismiss = { editAddressCandidate = null },
+            onApply = { queue, statusText, addressLabel, query ->
+                onEditAddress(item.id, queue, statusText, addressLabel, query)
+                editAddressCandidate = null
+            },
+            onShowAppBanner = onShowAppBanner
         )
     }
 
@@ -4960,6 +4986,25 @@ fun SettingsScreen(
                         colors = glassFieldColors()
                     )
                     Text(AppStrings.renameHint(lang), style = ZtType.caption, color = ZtColors.TextTertiary)
+                    // the address itself can be changed too (owner, 2026-11-18): opens the lookup on this item
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(min = ZtMinTouch)
+                            .clip(ZtShapes.Control)
+                            .background(Color(0x1AFFFFFF))
+                            .border(1.dp, ZtColors.InputBorder, ZtShapes.Control)
+                            .clickable(role = Role.Button) {
+                                editAddressCandidate = item
+                                renameCandidate = null
+                            }
+                            .padding(horizontal = 14.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Icon(Icons.Default.Edit, contentDescription = null, tint = Color.White, modifier = Modifier.size(20.dp))
+                        Text(AppStrings.editAddress(lang), style = ZtType.label, color = Color.White)
+                    }
                 }
             },
             confirmButton = {
@@ -5621,7 +5666,7 @@ private fun AddressLookupDialog(
     val settlementsState = remember { LevelState() }
     val streetsState = remember { LevelState() }
     val housesState = remember { LevelState() }
-    /** Grows when a street is chosen, so the house list opens right away (keyboard only for a long list). */
+    /** Grows when a street is chosen, so the house list opens right away. */
     var houseOpenRequest by remember { mutableIntStateOf(0) }
 
     var isCheckingAddressOnSite by remember { mutableStateOf(false) }
@@ -9213,6 +9258,10 @@ fun BlackoutAppNavigation(
                         onSetPlanned = { id, on -> onStoreResult(subscriptionSync.change { Subscriptions.setPlanned(it, id, on) }) },
                         onSetEmergency = { id, on -> onStoreResult(subscriptionSync.change { Subscriptions.setEmergency(it, id, on) }) },
                         onRenameSubscription = { id, label -> onStoreResult(subscriptionSync.change { Subscriptions.rename(it, id, label) }) },
+                        onEditAddress = { id, resolvedQueue, statusText, addressLabel, query ->
+                            val ok = onStoreResult(subscriptionSync.editAddress(id, resolvedQueue, statusText, addressLabel, query))
+                            if (ok) showAppBanner(AppStrings.addressChanged(resolvedLang))
+                        },
                         onMoveSubscription = { id, to -> onStoreResult(subscriptionSync.change { Subscriptions.move(it, id, to) }) },
                         onSiteUrlChanged = { newUrl ->
                             siteUrl = newUrl
@@ -17649,6 +17698,25 @@ object Subscriptions {
         }
     }
 
+    /**
+     * The user edited the item's address (\`spec/SUBSCRIPTIONS.md\` section 4): address, queue and status text come
+     * from the lookup; id, label, switches, position and primary stay. Another item with the new identity is a duplicate.
+     */
+    fun setAddress(store: SubscriptionStore, id: String, address: SubscriptionAddress, queue: String?, statusText: String?): StoreResult {
+        val item = store.items.firstOrNull { it.id == id } ?: return StoreResult.Error(ERR_NOT_FOUND)
+        val changed = normalize(
+            item.copy(
+                address = address,
+                queue = queue,
+                queueSource = QueueSource.LOOKUP,
+                queueStatusText = statusText?.takeIf { it.isNotBlank() }
+            )
+        )
+        if (changed.address == null) return StoreResult.Error(ERR_INVALID)
+        store.items.firstOrNull { it.id != id && it.identity == changed.identity }?.let { return StoreResult.Error(ERR_DUPLICATE, it.id) }
+        return update(store, id) { changed }
+    }
+
     private inline fun update(store: SubscriptionStore, id: String, change: (Subscription) -> Subscription): StoreResult {
         if (store.items.none { it.id == id }) return StoreResult.Error(ERR_NOT_FOUND)
         return StoreResult.Ok(store.copy(items = store.items.map { if (it.id == id) change(it) else it }))
@@ -18057,6 +18125,20 @@ class SubscriptionSync(context: Context) {
             createdAtMs = System.currentTimeMillis()
         )
         return change { Subscriptions.add(it, item) }
+    }
+
+    /** The user edited the address of item [id] in Settings (\`Subscriptions.setAddress\`). */
+    fun editAddress(id: String, queue: String, statusText: String?, addressText: String, query: SelectedAddressQuery): StoreResult {
+        ensureReady()
+        val address = SubscriptionAddress(
+            remSlug = query.remId,
+            settlementId = query.settlementId,
+            streetId = query.streetId,
+            streetName = SubscriptionRepository.resolveStreetName(query.streetId).orEmpty(),
+            house = query.house,
+            text = addressText
+        )
+        return change { Subscriptions.setAddress(it, id, address, queue, statusText) }
     }
 
     fun addQueueOnly(queue: String): StoreResult {

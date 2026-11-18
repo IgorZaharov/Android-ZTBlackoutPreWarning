@@ -743,6 +743,10 @@ fun BlackoutAppNavigation(
                         onSetPlanned = { id, on -> onStoreResult(subscriptionSync.change { Subscriptions.setPlanned(it, id, on) }) },
                         onSetEmergency = { id, on -> onStoreResult(subscriptionSync.change { Subscriptions.setEmergency(it, id, on) }) },
                         onRenameSubscription = { id, label -> onStoreResult(subscriptionSync.change { Subscriptions.rename(it, id, label) }) },
+                        onEditAddress = { id, resolvedQueue, statusText, addressLabel, query ->
+                            val ok = onStoreResult(subscriptionSync.editAddress(id, resolvedQueue, statusText, addressLabel, query))
+                            if (ok) showAppBanner(AppStrings.addressChanged(resolvedLang))
+                        },
                         onMoveSubscription = { id, to -> onStoreResult(subscriptionSync.change { Subscriptions.move(it, id, to) }) },
                         onSiteUrlChanged = { newUrl ->
                             siteUrl = newUrl

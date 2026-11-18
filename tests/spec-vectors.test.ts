@@ -468,6 +468,9 @@ function subscriptionVectors(): number {
         case 'rename': result = Sub.rename(store, s.id, s.label); break;
         case 'move': result = Sub.move(store, s.id, s.toIndex); break;
         case 'setQueueInfo': result = Sub.setQueueInfo(store, s.id, optStr(s, 'queue'), optStr(s, 'statusText'), optStr(s, 'addressText')); break;
+        case 'setAddress':
+          result = Sub.setAddress(store, s.id, Sub.itemFromMap({ id: 'addr0000', address: s.address }).address!, optStr(s, 'queue'), optStr(s, 'statusText'));
+          break;
         default: throw new Error(`unknown op in ${label}`);
       }
       const expectError = optStr(s, 'expectError');

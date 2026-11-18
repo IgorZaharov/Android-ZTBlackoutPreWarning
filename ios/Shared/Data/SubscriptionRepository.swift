@@ -186,6 +186,20 @@ public final class SubscriptionSync {
         return change { Subscriptions.add($0, item) }
     }
 
+    /// The user edited the address of item `id` in Settings (`Subscriptions.setAddress`).
+    public func editAddress(_ id: String, queue: String, statusText: String?, addressText: String, query: SelectedAddressQuery) -> StoreResult {
+        ensureReady()
+        let address = SubscriptionAddress(
+            remSlug: query.remId,
+            settlementId: query.settlementId,
+            streetId: query.streetId,
+            streetName: SubscriptionRepository.resolveStreetName(query.streetId) ?? "",
+            house: query.house,
+            text: addressText
+        )
+        return change { Subscriptions.setAddress($0, id: id, address: address, queue: queue, statusText: statusText) }
+    }
+
     @discardableResult
     public func addQueueOnly(_ queue: String) -> StoreResult {
         ensureReady()

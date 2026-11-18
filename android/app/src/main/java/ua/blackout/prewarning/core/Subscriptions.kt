@@ -294,6 +294,25 @@ object Subscriptions {
         }
     }
 
+    /**
+     * The user edited the item's address (`spec/SUBSCRIPTIONS.md` section 4): address, queue and status text come
+     * from the lookup; id, label, switches, position and primary stay. Another item with the new identity is a duplicate.
+     */
+    fun setAddress(store: SubscriptionStore, id: String, address: SubscriptionAddress, queue: String?, statusText: String?): StoreResult {
+        val item = store.items.firstOrNull { it.id == id } ?: return StoreResult.Error(ERR_NOT_FOUND)
+        val changed = normalize(
+            item.copy(
+                address = address,
+                queue = queue,
+                queueSource = QueueSource.LOOKUP,
+                queueStatusText = statusText?.takeIf { it.isNotBlank() }
+            )
+        )
+        if (changed.address == null) return StoreResult.Error(ERR_INVALID)
+        store.items.firstOrNull { it.id != id && it.identity == changed.identity }?.let { return StoreResult.Error(ERR_DUPLICATE, it.id) }
+        return update(store, id) { changed }
+    }
+
     private inline fun update(store: SubscriptionStore, id: String, change: (Subscription) -> Subscription): StoreResult {
         if (store.items.none { it.id == id }) return StoreResult.Error(ERR_NOT_FOUND)
         return StoreResult.Ok(store.copy(items = store.items.map { if (it.id == id) change(it) else it }))

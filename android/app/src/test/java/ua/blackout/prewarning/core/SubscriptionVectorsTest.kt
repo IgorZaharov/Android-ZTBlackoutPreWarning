@@ -131,6 +131,13 @@ class SubscriptionVectorsTest {
                     "setQueueInfo" -> Subscriptions.setQueueInfo(
                         store, s.getString("id"), s.optStr("queue"), s.optStr("statusText"), s.optStr("addressText")
                     )
+                    "setAddress" -> Subscriptions.setAddress(
+                        store,
+                        s.getString("id"),
+                        Subscriptions.itemFromMap(mapOf("id" to "addr0000", "address" to plain(s.getJSONObject("address")))).address!!,
+                        s.optStr("queue"),
+                        s.optStr("statusText")
+                    )
                     else -> error("unknown op in $label")
                 }
                 val expectError = s.optStr("expectError")

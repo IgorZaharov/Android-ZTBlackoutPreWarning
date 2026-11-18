@@ -377,6 +377,8 @@ object AppStrings {
     fun addressLimitReached(lang: String, max: Int) = if (lang == "uk") "Досягнуто ліміт: $max адрес" else "Limit reached: $max addresses"
     fun addressDuplicate(lang: String) = if (lang == "uk") "Ця адреса вже є у списку" else "This address is already in the list"
     fun addressAdded(lang: String) = if (lang == "uk") "Адресу додано" else "Address added"
+    fun addressChanged(lang: String) = if (lang == "uk") "Адресу змінено" else "Address changed"
+    fun editAddress(lang: String) = if (lang == "uk") "Змінити адресу" else "Change address"
     fun removeAddress(lang: String) = if (lang == "uk") "Видалити" else "Remove"
     fun removeConfirmTitle(lang: String) = if (lang == "uk") "Видалити адресу?" else "Remove this address?"
     fun removeConfirmBody(lang: String, label: String) =

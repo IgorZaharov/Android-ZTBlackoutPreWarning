@@ -171,8 +171,7 @@ struct MainScreen: View {
                 FirstLaunchOverlay(model: model)
             }
         }
-        // another address starts on Today (spec/SUBSCRIPTIONS.md 9)
-        .onChange(of: model.shownSubscriptionId) { _, _ in isTomorrow = false }
+        // Today / Tomorrow stays when another address is shown (spec/SUBSCRIPTIONS.md 9, owner 2026-11-18)
     }
 
     // MARK: - Pieces
