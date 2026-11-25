@@ -16,7 +16,7 @@ settings:
     SWIFT_VERSION: "5.0"
     SWIFT_STRICT_CONCURRENCY: minimal
     # Keep in step with android/app/build.gradle.kts versionName (release checklist in CLAUDE.md).
-    MARKETING_VERSION: "1.4.2"
+    MARKETING_VERSION: "1.4.3"
     # CI overrides this with the run number: CURRENT_PROJECT_VERSION=<n>.
     CURRENT_PROJECT_VERSION: "1"
     # CI passes DEVELOPMENT_TEAM from the APPLE_TEAM_ID secret; local builds sign automatically.
