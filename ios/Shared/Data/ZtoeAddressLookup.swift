@@ -1633,10 +1633,11 @@ public enum ZtoeAddressLookup {
 
         guard let found = resolved else { return nil }
         var base = HouseVariants.pick(found.choices, preferredQueue: preferred?.queue, preferredConsumers: preferred?.consumers ?? []).map { found.withVariant($0) } ?? found
+        // Without the street name the label stays empty, so callers keep the stored address instead of
+        // replacing it with "РЕМ, місто,\nбуд. N" (the name is unknown when the street index lacks the id).
+        let streetName = street?.nameUk.ktTrim() ?? ""
         let head = [rem?.nameUk, settlement?.nameUk].compactMap { $0 }.filter { !$0.ktIsBlank }.joined(separator: ", ")
-        var streetPart = ""
-        if let name = street?.nameUk, !name.ktIsBlank { streetPart = "\(name), " }
-        base.addressLabel = (head.isEmpty ? "" : "\(head),\n") + streetPart + "буд. " + house.ktTrim()
+        base.addressLabel = streetName.isEmpty ? "" : (head.isEmpty ? "" : "\(head),\n") + "\(streetName), буд. " + house.ktTrim()
         return base
     }
 }

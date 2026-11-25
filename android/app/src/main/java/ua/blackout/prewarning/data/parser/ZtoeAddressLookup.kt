@@ -1464,9 +1464,11 @@ object ZtoeAddressLookup {
 
         val found = resolved ?: return null
         val base = HouseVariants.pick(found.choices, preferred?.queue, preferred?.consumers.orEmpty())?.let { found.withVariant(it) } ?: found
+        // Without the street name the label stays empty, so callers keep the stored address instead of
+        // replacing it with "РЕМ, місто,\nбуд. N" (the name is unknown when the street index lacks the id).
+        val streetName = street?.nameUk?.trim().orEmpty()
         val head = listOf(rem?.nameUk, settlement?.nameUk).filter { !it.isNullOrBlank() }.joinToString(", ")
-        val streetPart = street?.nameUk?.takeIf { it.isNotBlank() }?.let { "$it, " } ?: ""
-        val label = (if (head.isNotEmpty()) "$head,\n" else "") + streetPart + "буд. " + query.house.trim()
+        val label = if (streetName.isEmpty()) "" else (if (head.isNotEmpty()) "$head,\n" else "") + "$streetName, буд. " + query.house.trim()
         return base.copy(emergencyOutage = null, addressLabel = label)
     }
 }

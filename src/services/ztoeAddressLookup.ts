@@ -582,12 +582,14 @@ export async function checkAddressOnZtoeWebsite(
   if (!resolved) return null;
   const chosen = HouseVariants.pick(houseChoices(resolved), preferred?.queue ?? null, preferred?.consumers ?? []);
   if (chosen) resolved = withHouseVariant(resolved, chosen);
+  // Without the street name the label stays empty, so callers keep the stored address instead of
+  // replacing it with "РЕМ, місто,\nбуд. N" (the name is unknown when the street index lacks the id).
+  const streetName = streetObj?.nameUk?.trim() ?? '';
   const head = [remObj?.nameUk, settlementObj?.nameUk].filter((x): x is string => Boolean(x && x.trim())).join(', ');
-  const streetPart = streetObj?.nameUk?.trim() ? `${streetObj.nameUk}, ` : '';
   return {
     ...resolved,
     emergencyOutage: undefined,
-    addressLabel: (head ? `${head},\n` : '') + streetPart + 'буд. ' + query.house.trim(),
+    addressLabel: streetName ? (head ? `${head},\n` : '') + `${streetName}, буд. ` + query.house.trim() : '',
   };
 }
 

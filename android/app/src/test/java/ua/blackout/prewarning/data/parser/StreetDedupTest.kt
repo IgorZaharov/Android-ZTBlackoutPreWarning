@@ -223,6 +223,27 @@ class StreetDedupTest {
     }
 
     @Test
+    fun recheckLabelIsEmptyWhenTheStreetNameIsUnknown() {
+        ZtoeAddressLookup.parseZtoeStreetOptionsHtml("zt_city", streetSelect(173934 to "вул. Київська"))
+        val houses = "{\"version\":${ZtoeAddressLookup.CACHE_VERSION},\"houses\":[" +
+            "{\"streetId\":\"st_173934\",\"house\":\"5\",\"queue\":\"3.1\"}," +
+            "{\"streetId\":\"st_999999\",\"house\":\"7\",\"queue\":\"2.2\"}]}"
+        assertTrue(ZtoeAddressLookup.hydrateCacheFromJson(houses))
+        // an unknown REM id keeps the check offline: no street index reload and no house request
+        val known = ZtoeAddressLookup.checkAddressOnZtoeWebsite(
+            ua.blackout.prewarning.data.model.SelectedAddressQuery("no_rem", "zt_city", "st_173934", "5")
+        )
+        assertEquals("3.1", known?.queue)
+        assertTrue(known!!.addressLabel, known.addressLabel.endsWith("вул. Київська, буд. 5"))
+        // the street is not in the index: a label without the street would replace the stored address
+        val unknown = ZtoeAddressLookup.checkAddressOnZtoeWebsite(
+            ua.blackout.prewarning.data.model.SelectedAddressQuery("no_rem", "zt_city", "st_999999", "7")
+        )
+        assertEquals("2.2", unknown?.queue)
+        assertEquals("", unknown?.addressLabel)
+    }
+
+    @Test
     fun streetNamesAreMatchedStrictlyNotBySubstring() {
         val streets = listOf(ZtoeStreetOption("zt_shevchenka", "zt_city", 174478, "вул. Шевченка", "x"))
         val html = "<table>$bulkHeader" +
