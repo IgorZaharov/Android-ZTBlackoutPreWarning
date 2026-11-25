@@ -72,7 +72,12 @@ struct RootView: View {
                 // a page asked for by the app (dock, "Select queue", reset); also the one a launch
                 // argument set before the first layout, which scrollPosition alone ignores
                 .onChange(of: model.pageJump) { _, jump in
-                    withAnimation(ZtMotion.pageGlide) { proxy.scrollTo(jump.page, anchor: .leading) }
+                    // the dock shows `scrolledPage`, and a proxy scroll does not write it back
+                    // (only a swipe does), so set it too or the dock keeps the old page lit
+                    withAnimation(ZtMotion.pageGlide) {
+                        scrolledPage = jump.page
+                        proxy.scrollTo(jump.page, anchor: .leading)
+                    }
                 }
                 .onAppear {
                     // the settle task above must not move a launch page back to 0

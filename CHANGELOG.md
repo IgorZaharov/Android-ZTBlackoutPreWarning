@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.4.3] - 2026-11-25
+
+### Fixed
+- **The main screen no longer loses the street of the address** (owner report 2026-11-25, Android and iOS). The address re-check on each refresh (`checkAddressOnZtoeWebsite` in `ZtoeAddressLookup.kt`, `ZtoeAddressLookup.swift` and the web mirror `ztoeAddressLookup.ts`) found the house by its street id even when the street index did not have that id (after a process restart or restore, with a cached street list that skips the reload, or with the site unreachable). The street name was then empty, and the label «РЕМ, місто,\nбуд. N» replaced the stored address until a later refresh knew the name again. The label is now empty when the street name is unknown, so the stored address stays. Tests: `StreetDedupTest.kt`, `tests/services.test.ts`.
+- **iOS: the dock lights the tapped page** (owner report 2026-11-19; `RootView.swift`): a tap on a dock button switched the page, but the white disc stayed on the old button; only a swipe moved it. Since the swipe-settle change the dock follows the pager's own scroll page, which a programmatic `ScrollViewReader.scrollTo` does not write back. A page jump (dock, «Select queue», reset, notification or widget tap) now sets that scroll page together with the scroll.
+
+### Changed
+- Version 1.4.3 on Android, iOS and the web (`build.gradle.kts`, `ios/project.yml`, `package.json`, `vite.config.ts`, `AboutScreen.kt`, `AboutScreen.swift`, `AboutView.tsx`, README download link): App Store Connect closed 1.4.2 for new TestFlight builds after its approval.
+
 ## [1.4.2] - 2026-11-18
 
 ### Added

@@ -686,6 +686,30 @@ test('streets: checkAddressOnZtoeWebsite asks once per merged vulica id and unio
   }
 });
 
+test('streets: the address label of a re-check is empty when the street name is unknown', async () => {
+  resetAddressIndexCache(true);
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = (async () => {
+    throw new Error('offline');
+  }) as typeof fetch;
+  try {
+    seedAddressIndexForTests({
+      streetsBySettlementId: { zt_city: [{ id: 'st_173934', settlementId: 'zt_city', ztoeVulicaId: '173934', nameUk: 'вул. Київська', nameEn: 'k' }] },
+      housesByStreetId: { st_173934: [{ house: '5', queue: '3.1' }], st_999999: [{ house: '7', queue: '2.2' }] },
+    });
+    const known = await checkAddressOnZtoeWebsite({ remId: 'zhytomyr', settlementId: 'zt_city', streetId: 'st_173934', house: '5' });
+    assert.equal(known?.queue, '3.1');
+    assert.ok(known?.addressLabel?.endsWith('вул. Київська, буд. 5'), known?.addressLabel);
+    // the street is not in the index: a label without the street would replace the stored address
+    const unknown = await checkAddressOnZtoeWebsite({ remId: 'zhytomyr', settlementId: 'zt_city', streetId: 'st_999999', house: '7' });
+    assert.equal(unknown?.queue, '2.2');
+    assert.equal(unknown?.addressLabel, '');
+  } finally {
+    globalThis.fetch = realFetch;
+    resetAddressIndexCache(true);
+  }
+});
+
 test('streets: the street request asks for every record (all=1) and keeps only rows of that street', async () => {
   resetAddressIndexCache(true);
   seedAddressIndexForTests({
