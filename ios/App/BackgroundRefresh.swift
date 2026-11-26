@@ -26,6 +26,8 @@ enum BackgroundRefresh {
     static func run() async {
         schedule()
         ZtoeAddressLookup.initDiskCache()
+        // saved addresses follow ztoe's renumbering (spec/ADDRESS_KEY.md section 7) before anything asks the site
+        await SubscriptionSync.shared.repairAddresses(siteUrl: SettingsRepository.shared.getSettings().cityUrl)
         let settings = SettingsRepository.shared.getSettings()
 
         // A house without a queue may be given one by the site later. Only the fields of this check are

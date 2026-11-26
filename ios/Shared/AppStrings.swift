@@ -315,6 +315,7 @@ public enum AppStrings {
     public static func addressAdded(_ lang: String) -> String { lang == "uk" ? "Адресу додано" : "Address added" }
     public static func addressChanged(_ lang: String) -> String { lang == "uk" ? "Адресу змінено" : "Address changed" }
     public static func editAddress(_ lang: String) -> String { lang == "uk" ? "Змінити адресу" : "Change address" }
+    public static func streetLost(_ lang: String) -> String { lang == "uk" ? "Вулицю не знайдено на сайті ZTOE. Змініть адресу й оберіть вулицю знову." : "The street is no longer on the ZTOE site. Change the address and choose the street again." }
     public static func removeAddress(_ lang: String) -> String { lang == "uk" ? "Видалити" : "Remove" }
     public static func removeConfirmTitle(_ lang: String) -> String { lang == "uk" ? "Видалити адресу?" : "Remove this address?" }
     public static func removeConfirmBody(_ lang: String, _ label: String) -> String { lang == "uk" ? "«\(label)» зникне зі списку разом зі своїми сповіщеннями." : "\"\(label)\" and its alerts will be removed." }

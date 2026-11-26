@@ -345,6 +345,8 @@ object AppStrings {
     fun addressAdded(lang: String) = if (lang == "uk") "Адресу додано" else "Address added"
     fun addressChanged(lang: String) = if (lang == "uk") "Адресу змінено" else "Address changed"
     fun editAddress(lang: String) = if (lang == "uk") "Змінити адресу" else "Change address"
+    /** A saved street ztoe no longer lists (spec/ADDRESS_KEY.md section 7). */
+    fun streetLost(lang: String) = if (lang == "uk") "Вулицю не знайдено на сайті ZTOE. Змініть адресу й оберіть вулицю знову." else "The street is no longer on the ZTOE site. Change the address and choose the street again."
     fun removeAddress(lang: String) = if (lang == "uk") "Видалити" else "Remove"
     fun removeConfirmTitle(lang: String) = if (lang == "uk") "Видалити адресу?" else "Remove this address?"
     fun removeConfirmBody(lang: String, label: String) =

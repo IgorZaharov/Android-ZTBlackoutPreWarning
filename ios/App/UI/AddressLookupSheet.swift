@@ -86,8 +86,11 @@ struct AddressLookupSheet: View {
     private var currentSettlement: ZtoeSettlementOption? {
         settlementId.ktIsBlank ? nil : (settlements.first { $0.id == settlementId } ?? ZtoeAddressLookup.findSettlementById(settlementId))
     }
+    /// A saved street ztoe no longer lists has no name: it counts as not chosen, so the user picks it again
+    /// and no text like ", буд. N" is built (spec/ADDRESS_KEY.md section 7).
     private var currentStreet: ZtoeStreetOption? {
-        streetId.ktIsBlank ? nil : (streets.first { $0.id == streetId } ?? ZtoeAddressLookup.findStreetById(streetId))
+        let street = streetId.ktIsBlank ? nil : (streets.first { $0.id == streetId } ?? ZtoeAddressLookup.findStreetById(streetId))
+        return street.flatMap { $0.nameUk.ktIsBlank ? nil : $0 }
     }
     private var currentHouseRecord: ZtoeHouseLookupResult? {
         houses.first { $0.house.caseInsensitiveCompare(house) == .orderedSame }

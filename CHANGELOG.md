@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.4.4] - 2026-11-26
+
+### Fixed
+- **Saved addresses follow ztoe's renumbering of settlements and streets** (owner report 2026-11-26, several users, Android and iOS; spec/ADDRESS_KEY.md section 7). ztoe gave new ids to its settlements and streets (місто Житомир 16657 became 18544, вул. Київська 173934 became 195659). Saved addresses kept the old ids: the street had no name, the address read «Житомирський РЕМ, м. Житомир, , буд. 10», and a request with an old street id got the table of the whole REM, so the house number of another street could give the queue (on the owner's phone the check found 4.1 for an address saved with 4.2). Now:
+  - A settlement whose id is gone gets an alias to the live settlement with the same name, and the settlement bulk request is sent once more with the current id (`ZtoeAddressLookup.kt`, `ZtoeAddressLookup.swift`, `ztoeAddressLookup.ts`).
+  - Each refresh with the address re-check, and the background refresh, first checks every saved address (`checkSavedStreet`, `SubscriptionSync.repairAddresses` in `SubscriptionSync.kt`, `SubscriptionRepository.swift`, `subscriptionSync.ts`; called from `BlackoutAppNavigation.kt`, `ScheduleSyncWorker.kt`, `AppModel.swift`, `BackgroundRefresh.swift`, `App.tsx`). A renumbered street is found again by the street name saved with the address and gets its new ids and a text with the street; its queue, switches, name and house variant choice stay. A current address costs no request.
+  - Without a street name the address lookup gives no queue at all, so the saved queue stays, and the first-page fallback keeps only rows of the street.
+  - The address index cache version goes up (Android and iOS 5, web 8), so lists read through old ids are dropped; the street names of the old cache are kept as repair input.
+  - An address whose street can not be found again shows «Вулицю не знайдено на сайті ZTOE. Змініть адресу й оберіть вулицю знову.» under it on the main screen and on its Settings card (`MainScreen.kt`, `SettingsScreen.kt`, `MainView.tsx`, `SettingsView.tsx`, `MainScreen.swift`, `SettingsScreen.swift`; string `streetLost` in `AppStrings.kt`, `i18n.ts` and the generated `AppStrings.swift`). In the address lookup a street without a name counts as not chosen (`SettingsScreen.kt`, `SettingsView.tsx`, `AddressLookupSheet.swift`), so no «, буд. N» text is built.
+  - Tests: `StaleAddressRepairTest.kt`, `StreetDedupTest.kt`, `StaleAddressRepairTests.swift`, `tests/services.test.ts`. A probe against the live site repaired a made-up old id of вул. Малинська and вул. Мар'янівська to their current ids, and the house lookup then gave the street's own queue.
+
+### Changed
+- Version 1.4.4 on Android, iOS and the web (`build.gradle.kts`, `ios/project.yml`, `package.json`, `vite.config.ts`, `AboutScreen.kt`, `AboutScreen.swift`, `AboutView.tsx`, README download link).
+
 ## [1.4.3] - 2026-11-25
 
 ### Fixed

@@ -49,6 +49,11 @@ import {
 import {
   ZTOE_STREET_OPTIONS,
   checkAddressOnZtoeWebsite,
+  checkSavedStreet,
+  addressText,
+  settlementNameFromText,
+  matchSettlementByName,
+  readLegacyStreetNamesForTests,
   fetchHousesForStreet,
   getHousesForStreet,
   findStreetById,
@@ -686,7 +691,7 @@ test('streets: checkAddressOnZtoeWebsite asks once per merged vulica id and unio
   }
 });
 
-test('streets: the address label of a re-check is empty when the street name is unknown', async () => {
+test('streets: a re-check without a street name gives no queue and no label', async () => {
   resetAddressIndexCache(true);
   const realFetch = globalThis.fetch;
   globalThis.fetch = (async () => {
@@ -700,14 +705,74 @@ test('streets: the address label of a re-check is empty when the street name is 
     const known = await checkAddressOnZtoeWebsite({ remId: 'zhytomyr', settlementId: 'zt_city', streetId: 'st_173934', house: '5' });
     assert.equal(known?.queue, '3.1');
     assert.ok(known?.addressLabel?.endsWith('вул. Київська, буд. 5'), known?.addressLabel);
-    // the street is not in the index: a label without the street would replace the stored address
+    // the street is not in the index: no queue from a street that can not be told apart (spec/ADDRESS_KEY.md
+    // section 7), and no label without the street that would replace the stored address
     const unknown = await checkAddressOnZtoeWebsite({ remId: 'zhytomyr', settlementId: 'zt_city', streetId: 'st_999999', house: '7' });
-    assert.equal(unknown?.queue, '2.2');
-    assert.equal(unknown?.addressLabel, '');
+    assert.equal(unknown, null);
   } finally {
     globalThis.fetch = realFetch;
     resetAddressIndexCache(true);
   }
+});
+
+test('repair: a renumbered street is found again by its saved name (spec/ADDRESS_KEY.md section 7)', async () => {
+  resetAddressIndexCache(true);
+  const realFetch = globalThis.fetch;
+  globalThis.fetch = (async () => {
+    throw new Error('offline');
+  }) as typeof fetch;
+  try {
+    seedAddressIndexForTests({
+      streetsBySettlementId: {
+        zt_city: [
+          { id: 'st_195700', settlementId: 'zt_city', ztoeVulicaId: '195700', nameUk: 'вул. Небесної Сотні', nameEn: 'n' },
+          { id: 'st_195701', settlementId: 'zt_city', ztoeVulicaId: '195701', nameUk: 'вул. Садова', nameEn: 's' },
+        ],
+      },
+    });
+    assert.deepEqual(await checkSavedStreet('zhytomyr', 'zt_city', 'м. Житомир', 'st_195700', 'вул. Небесної Сотні'), { kind: 'current' });
+    assert.deepEqual(await checkSavedStreet('zhytomyr', 'zt_city', 'м. Житомир', 'st_174100', 'вулиця Небесної Сотні'), {
+      kind: 'moved',
+      settlementId: 'zt_city',
+      settlementName: 'м. Житомир',
+      streetId: 'st_195700',
+      streetName: 'вул. Небесної Сотні',
+    });
+    assert.deepEqual(await checkSavedStreet('zhytomyr', 'zt_city', 'м. Житомир', 'st_174100', ''), { kind: 'lost' });
+    assert.deepEqual(await checkSavedStreet('zhytomyr', 'zt_city', 'м. Житомир', 'st_174100', 'вул. Інша'), { kind: 'lost' });
+  } finally {
+    globalThis.fetch = realFetch;
+    resetAddressIndexCache(true);
+  }
+});
+
+test('repair: the street names of a discarded schema-7 index still repair', async () => {
+  resetAddressIndexCache(true);
+  const old = JSON.stringify({
+    version: 7,
+    streetsBySettlementId: { zt_city: [{ id: 'st_174100', settlementId: 'zt_city', ztoeVulicaId: '174100', nameUk: 'вул. Небесної Сотні', allIds: ['st_174100', 'st_174101'] }] },
+  });
+  assert.equal(readLegacyStreetNamesForTests(old), false);
+  seedAddressIndexForTests({
+    streetsBySettlementId: { zt_city: [{ id: 'st_195700', settlementId: 'zt_city', ztoeVulicaId: '195700', nameUk: 'вул. Небесної Сотні', nameEn: 'n' }] },
+  });
+  const moved = await checkSavedStreet('zhytomyr', 'zt_city', 'м. Житомир', 'st_174101', '');
+  assert.equal(moved.kind === 'moved' && moved.streetId, 'st_195700');
+  resetAddressIndexCache(true);
+});
+
+test('repair: address text, settlement hint and settlement match by name', () => {
+  assert.equal(addressText('Житомирський РЕМ', 'м. Житомир', 'вул. Київська', ' 10 '), 'Житомирський РЕМ, м. Житомир,\nвул. Київська, буд. 10');
+  assert.equal(addressText('Житомирський РЕМ', 'м. Житомир', ' ', '10'), '');
+  assert.equal(settlementNameFromText('Житомирський РЕМ, м. Житомир,\n, буд. 10'), 'м. Житомир');
+  assert.equal(settlementNameFromText('Київська 10'), '');
+  const list = [
+    { id: 'np_18544', remId: 'zhytomyr', ztoeNaspunktId: '18544', nameUk: 'м. Житомир', nameEn: 'm' },
+    { id: 'np_18600', remId: 'zhytomyr', ztoeNaspunktId: '18600', nameUk: 'с. Тетерівка', nameEn: 't' },
+    { id: 'np_18601', remId: 'zhytomyr', ztoeNaspunktId: '18601', nameUk: 'с. Тетерівка', nameEn: 't' },
+  ];
+  assert.equal(matchSettlementByName('місто Житомир', list)?.id, 'np_18544');
+  assert.equal(matchSettlementByName('с. Тетерівка', list), undefined);
 });
 
 test('streets: the street request asks for every record (all=1) and keeps only rows of that street', async () => {

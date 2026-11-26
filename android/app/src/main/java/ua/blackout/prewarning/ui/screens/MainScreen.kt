@@ -216,6 +216,8 @@ fun MainScreen(
     queue: String = "",
     customQueueStatusText: String? = null,
     selectedAddress: String? = null,
+    /** The shown address has a street ztoe no longer lists (spec/ADDRESS_KEY.md section 7): a notice under it. */
+    streetLost: Boolean = false,
     snapshot: OutageSnapshot,
     statusInfo: ScheduleStatusInfo,
     isRefreshing: Boolean = false,
@@ -371,6 +373,9 @@ fun MainScreen(
                             maxLines = 3,
                             overflow = TextOverflow.Ellipsis
                         )
+                        if (streetLost) {
+                            Text(text = AppStrings.streetLost(lang), style = ZtType.caption, color = ZtColors.ChipAmberText)
+                        }
                     }
                 }
 

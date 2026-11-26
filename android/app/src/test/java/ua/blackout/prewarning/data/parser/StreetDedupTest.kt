@@ -235,12 +235,12 @@ class StreetDedupTest {
         )
         assertEquals("3.1", known?.queue)
         assertTrue(known!!.addressLabel, known.addressLabel.endsWith("вул. Київська, буд. 5"))
-        // the street is not in the index: a label without the street would replace the stored address
+        // the street is not in the index: no queue from a street that can not be told apart (spec/ADDRESS_KEY.md section 7),
+        // and no label without the street that would replace the stored address
         val unknown = ZtoeAddressLookup.checkAddressOnZtoeWebsite(
             ua.blackout.prewarning.data.model.SelectedAddressQuery("no_rem", "zt_city", "st_999999", "7")
         )
-        assertEquals("2.2", unknown?.queue)
-        assertEquals("", unknown?.addressLabel)
+        assertNull(unknown)
     }
 
     @Test

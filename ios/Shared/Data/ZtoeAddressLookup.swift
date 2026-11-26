@@ -156,7 +156,9 @@ public enum ZtoeAddressLookup {
     /// Bumped to 2 when merged street ids were introduced; caches of other versions are discarded.
     /// 3: drops street house lists that were cut to ztoe's first page of 10 records (per-street request without all=1).
     /// 4: houses keep every queue variant (households / non-household), spec/ADDRESS_KEY.md section 6.
-    static let CACHE_VERSION = 4
+    /// 5: ztoe renumbered its settlements and streets (2026-11); the old lists and the house rows read through old ids
+    /// are dropped, only the street names are kept for the repair (spec/ADDRESS_KEY.md section 7).
+    static let CACHE_VERSION = 5
     /// One JSON file in the App Group container (Android: SharedPreferences `zt_address_index_cache_v1`).
     static let CACHE_FILE_NAME = "zt_address_index_cache_v1.json"
     private static let MAX_PERSISTED_HOUSE_STREETS = 50
@@ -229,6 +231,10 @@ public enum ZtoeAddressLookup {
     private static var cachedHousesByStreet: [String: [ZtoeHouseLookupResult]] = [:]
     private static var houseCacheUpdatedAtByStreet: [String: Int64] = [:]
     private static var bulkFetchedAtBySettlement: [String: Int64] = [:]
+    /// Old settlement id to its current id, learned when ztoe renumbered its settlements (spec/ADDRESS_KEY.md section 7).
+    private static var settlementAliases: [String: String] = [:]
+    /// Street names of a discarded cache of the previous `CACHE_VERSION`, by every street id; repair input only.
+    private static var legacyStreetNames: [String: String] = [:]
     private static var inFlight: [String: InFlight] = [:]
     private static var flightCounter: UInt64 = 0
     private static var recentHouseStreets: [String] = []
@@ -288,7 +294,29 @@ public enum ZtoeAddressLookup {
     }
 
     private static func canonicalSettlementId(_ id: String) -> String {
-        ZtoeStaticDirectory.LEGACY_SETTLEMENT_IDS[id] ?? id
+        let legacy = ZtoeStaticDirectory.LEGACY_SETTLEMENT_IDS[id] ?? id
+        return sync { settlementAliases[legacy] } ?? legacy
+    }
+
+    /// The one settlement of `list` whose `cityKey` equals the key of `name`; nil when none or several.
+    static func matchSettlementByName(_ name: String, _ list: [ZtoeSettlementOption]) -> ZtoeSettlementOption? {
+        let key = cityKey(name)
+        if key.isEmpty { return nil }
+        let hits = list.filter { cityKey($0.nameUk) == key }
+        return hits.count == 1 ? hits[0] : nil
+    }
+
+    /// Publishes a live settlement list of `remId`. A settlement of the previous list whose id is gone
+    /// (ztoe renumbered it) gets an alias to the live settlement with the same name (spec/ADDRESS_KEY.md section 7).
+    private static func adoptSettlements(_ remId: String, _ live: [ZtoeSettlementOption]) {
+        sync {
+            let previous = cachedSettlementsByRem[remId] ?? []
+            cachedSettlementsByRem[remId] = live
+            let liveIds = Set(live.map { $0.id })
+            for old in previous where !liveIds.contains(old.id) && !old.nameUk.ktIsBlank {
+                if let match = matchSettlementByName(old.nameUk, live) { settlementAliases[old.id] = match.id }
+            }
+        }
     }
 
     public static func findSettlementById(_ settlementId: String) -> ZtoeSettlementOption? {
@@ -725,6 +753,8 @@ public enum ZtoeAddressLookup {
             var bulk: [String: Any] = [:]
             for (sid, at) in bulkFetchedAtBySettlement { bulk[sid] = NSNumber(value: at) }
             root["bulkAt"] = bulk
+            root["settlementAliases"] = settlementAliases
+            root["legacyStreetNames"] = legacyStreetNames
             return root
         }
     }
@@ -747,7 +777,29 @@ public enum ZtoeAddressLookup {
         return hydrateCacheFromObject(root)
     }
 
+    /// Keeps the street names of a cache before the renumbering (version 4) and the names already kept
+    /// by a current cache, so a saved street id that ztoe no longer knows still has a name to search by.
+    private static func readLegacyStreetNames(_ root: [String: Any]) {
+        sync {
+            if let o = root["legacyStreetNames"] as? [String: Any] {
+                for (id, value) in o {
+                    if let name = value as? String, !name.ktIsBlank, legacyStreetNames[id] == nil { legacyStreetNames[id] = name }
+                }
+            }
+            guard optInt(root["version"], -1) == 4, let arr = root["streets"] as? [Any] else { return }
+            for item in arr {
+                guard let o = item as? [String: Any] else { continue }
+                let name = stripHtmlFast((o["nameUk"] as? String) ?? "")
+                if name.ktIsBlank { continue }
+                var ids = jStrList(o, "allIds")
+                if let id = o["id"] as? String, !id.isEmpty { ids.insert(id, at: 0) }
+                for id in ids where legacyStreetNames[id] == nil { legacyStreetNames[id] = name }
+            }
+        }
+    }
+
     static func hydrateCacheFromObject(_ root: [String: Any]) -> Bool {
+        readLegacyStreetNames(root)
         if optInt(root["version"], -1) != CACHE_VERSION { return false }
         sync {
             if let arr = root["rems"] as? [Any] {
@@ -872,6 +924,12 @@ public enum ZtoeAddressLookup {
                     if at > 0 && bulkFetchedAtBySettlement[sid] == nil { bulkFetchedAtBySettlement[sid] = at }
                 }
             }
+
+            if let aliases = root["settlementAliases"] as? [String: Any] {
+                for (old, value) in aliases {
+                    if let current = value as? String, !current.isEmpty, settlementAliases[old] == nil { settlementAliases[old] = current }
+                }
+            }
             diskCacheHydrated = true
         }
         return true
@@ -925,6 +983,8 @@ public enum ZtoeAddressLookup {
             cachedHousesByStreet.removeAll()
             houseCacheUpdatedAtByStreet.removeAll()
             bulkFetchedAtBySettlement.removeAll()
+            settlementAliases.removeAll()
+            legacyStreetNames.removeAll()
             inFlight.removeAll()
             recentHouseStreets.removeAll()
         }
@@ -1389,7 +1449,7 @@ public enum ZtoeAddressLookup {
             }
             let liveList = parseZtoeSettlementOptionsHtml(remId, html)
             if !liveList.isEmpty {
-                sync { cachedSettlementsByRem[remId] = liveList }
+                adoptSettlements(remId, liveList)
                 persistToDiskCache()
                 return liveList
             }
@@ -1428,24 +1488,34 @@ public enum ZtoeAddressLookup {
         guard let rem = findRem(remId) else { return getStreetsForSettlement(settlementId) }
         guard let settlement = findSettlementById(settlementId) else { return getStreetsForSettlement(settlementId) }
 
-        let html = await postZtoeForm("rem_id=\(rem.ztoeRemId)&naspunkt_id=\(settlement.ztoeNaspunktId)&all=1", siteUrl)
-        if let html, !isBlank(html) {
+        var npId = settlement.ztoeNaspunktId
+        // Two tries: when ztoe renumbered the settlement, the first answer has no streets but its settlement
+        // list gives the current id (spec/ADDRESS_KEY.md section 7).
+        for _ in 0..<2 {
+            guard let html = await postZtoeForm("rem_id=\(rem.ztoeRemId)&naspunkt_id=\(npId)&all=1", siteUrl), !isBlank(html) else {
+                return getStreetsForSettlement(settlementId)
+            }
             let liveRems = parseZtoeRemOptionsHtml(html)
             if !liveRems.isEmpty {
                 sync { cachedRems = liveRems }
             }
             let liveSettlements = parseZtoeSettlementOptionsHtml(remId, html)
             if !liveSettlements.isEmpty {
-                sync { cachedSettlementsByRem[remId] = liveSettlements }
+                adoptSettlements(remId, liveSettlements)
             }
-            let liveStreets = parseZtoeStreetOptionsHtml(settlementId, html)
+            let sid = canonicalSettlementId(settlementId)
+            let liveStreets = parseZtoeStreetOptionsHtml(sid, html)
             if !liveStreets.isEmpty {
-                registerStreets(settlementId, liveStreets)
-                parseZtoeSettlementHousesTableHtml(settlementId, liveStreets, html)
-                sync { bulkFetchedAtBySettlement[settlementId] = nowMs() }
+                registerStreets(sid, liveStreets)
+                parseZtoeSettlementHousesTableHtml(sid, liveStreets, html)
+                sync { bulkFetchedAtBySettlement[sid] = nowMs() }
                 persistToDiskCache()
                 return liveStreets
             }
+            guard let current = findSettlementById(settlementId)?.ztoeNaspunktId, current != npId, current > 0 else {
+                return getStreetsForSettlement(settlementId)
+            }
+            npId = current
         }
         return getStreetsForSettlement(settlementId)
     }
@@ -1475,8 +1545,10 @@ public enum ZtoeAddressLookup {
                 for row in rows { map.put(row) }
                 continue
             }
+            // Only rows of this street: for an id ztoe no longer knows, the page lists other streets
+            // (spec/ADDRESS_KEY.md section 7), and without a street name nothing can be kept.
             guard let firstPage = await postZtoeForm(form, siteUrl) else { continue }
-            for row in parseZtoeAddressLookupTableHtml(firstPage) { map.put(row) }
+            for row in parseZtoeSettlementHousesTableHtml(settlement.id, [street], firstPage, cache: false).values.flatMap({ $0 }) { map.put(row) }
         }
         return anyResponse ? sortHouses(map.values) : nil
     }
@@ -1620,12 +1692,16 @@ public enum ZtoeAddressLookup {
             street = findStreetById(streetId) ?? street
         }
 
-        let canonical = street?.id ?? streetId
+        // A street without a name can not be told apart from the other streets of the page: no queue at all,
+        // so the saved queue stays (spec/ADDRESS_KEY.md section 7).
+        guard let namedStreet = street, !namedStreet.nameUk.ktIsBlank else { return nil }
+
+        let canonical = namedStreet.id
         let cachedRows = sync { cachedHousesByStreet[canonical] }
         var resolved = cachedRows?.first(where: { HouseKey.of($0.house) == targetKey })
 
-        if let rem, let settlement, let street {
-            if let rows = await fetchStreetHouseRows(rem, settlement, street, siteUrl), !rows.isEmpty {
+        if let rem, let settlement {
+            if let rows = await fetchStreetHouseRows(rem, settlement, namedStreet, siteUrl), !rows.isEmpty {
                 storeStreetHouses(canonical, rows)
                 if let live = rows.first(where: { HouseKey.of($0.house) == targetKey }) { resolved = live }
             }
@@ -1633,12 +1709,87 @@ public enum ZtoeAddressLookup {
 
         guard let found = resolved else { return nil }
         var base = HouseVariants.pick(found.choices, preferredQueue: preferred?.queue, preferredConsumers: preferred?.consumers ?? []).map { found.withVariant($0) } ?? found
-        // Without the street name the label stays empty, so callers keep the stored address instead of
-        // replacing it with "РЕМ, місто,\nбуд. N" (the name is unknown when the street index lacks the id).
-        let streetName = street?.nameUk.ktTrim() ?? ""
-        let head = [rem?.nameUk, settlement?.nameUk].compactMap { $0 }.filter { !$0.ktIsBlank }.joined(separator: ", ")
-        base.addressLabel = streetName.isEmpty ? "" : (head.isEmpty ? "" : "\(head),\n") + "\(streetName), буд. " + house.ktTrim()
+        base.addressLabel = addressText(rem?.nameUk, settlement?.nameUk, namedStreet.nameUk, house)
         return base
+    }
+
+    /// `"РЕМ, місто,\nвулиця, буд. N"`, the stored address text; empty without a street name.
+    public static func addressText(_ remName: String?, _ settlementName: String?, _ streetName: String, _ house: String) -> String {
+        let street = streetName.ktTrim()
+        if street.isEmpty { return "" }
+        let head = [remName, settlementName].compactMap { $0 }.filter { !$0.ktIsBlank }.joined(separator: ", ")
+        return (head.isEmpty ? "" : "\(head),\n") + "\(street), буд. " + house.ktTrim()
+    }
+
+    /// The settlement of a stored address text (`"РЕМ, місто,\n…"`); empty when the text has no such head line.
+    public static func settlementNameFromText(_ text: String) -> String {
+        guard let nl = text.firstIndex(of: "\n") else { return "" }
+        let parts = text[..<nl].split(separator: ",").map { String($0).ktTrim() }.filter { !$0.isEmpty }
+        return parts.count >= 2 ? parts[1] : ""
+    }
+
+    /// What `checkSavedStreet` found for a saved address (spec/ADDRESS_KEY.md section 7).
+    public enum SavedStreet: Equatable, Sendable {
+        /// The ids are current.
+        case current
+        /// ztoe renumbered the address: these are its current ids.
+        case moved(settlementId: String, settlementName: String, streetId: String, streetName: String)
+        /// The street list was read, and the street is not on it (no name, or no single street with that name).
+        case lost
+        /// The site could not be read or the settlement is not known: nothing can be said.
+        case unknown
+    }
+
+    /// Checks a saved address against ztoe's current ids (spec/ADDRESS_KEY.md section 7); mirrors
+    /// ZtoeAddressLookup.checkSavedStreet on Android. Network only when the street id is missing from the
+    /// cached street list and that list is due for a reload, so a current address costs nothing.
+    public static func checkSavedStreet(
+        remId: String,
+        settlementId: String,
+        settlementNameHint: String,
+        streetId: String,
+        streetName: String,
+        siteUrl: String = DEFAULT_SITE_URL
+    ) async -> SavedStreet {
+        if settlementId.ktIsBlank || streetId.ktIsBlank { return .unknown }
+        // A legacy id of an earlier app version is not a renumbering: it stays as saved.
+        let savedId = ZtoeStaticDirectory.LEGACY_SETTLEMENT_IDS[settlementId] ?? settlementId
+        var settlement = findSettlementById(settlementId).flatMap { $0.nameUk.ktIsBlank ? nil : $0 }
+        if let s = settlement, s.id == savedId, onStreetList(savedId, streetId) != nil { return .current }
+
+        if settlement == nil {
+            await fetchSettlementsForRem(remId, siteUrl: siteUrl, forceRefresh: true)
+            guard let match = matchSettlementByName(settlementNameHint, getSettlementsForRem(remId)) else { return .unknown }
+            settlement = match
+            if match.id != savedId { sync { settlementAliases[savedId] = match.id } }
+        }
+        guard let known = settlement else { return .unknown }
+        await fetchStreetsForSettlement(remId, known.id, siteUrl: siteUrl)
+        let current = findSettlementById(known.id) ?? known
+        if sync({ bulkFetchedAtBySettlement[current.id] }) == nil { return .unknown }
+        let newSettlementId = current.id == savedId ? settlementId : current.id
+
+        if let street = onStreetList(current.id, streetId) {
+            return newSettlementId == settlementId
+                ? .current
+                : .moved(settlementId: newSettlementId, settlementName: current.nameUk, streetId: street.id, streetName: street.nameUk)
+        }
+        var name = streetName
+        if name.ktIsBlank { name = findStreetById(streetId)?.nameUk ?? "" }
+        if name.ktIsBlank { name = sync { legacyStreetNames[streetId] } ?? "" }
+        let key = StreetKey.of(name)
+        if key.isEmpty { return .lost }
+        let hits = getStreetsForSettlement(current.id).filter { StreetKey.of($0.nameUk) == key }
+        guard hits.count == 1 else { return .lost }
+        return .moved(settlementId: newSettlementId, settlementName: current.nameUk, streetId: hits[0].id, streetName: hits[0].nameUk)
+    }
+
+    /// The street of the cached list of `settlementId` that holds `streetId` (or its legacy id); nil when none does.
+    private static func onStreetList(_ settlementId: String, _ streetId: String) -> ZtoeStreetOption? {
+        let id = ZtoeStaticDirectory.LEGACY_STREET_IDS[streetId] ?? streetId
+        let sid = canonicalSettlementId(settlementId)
+        guard let list = sync({ cachedStreetsBySettlement[sid] }) else { return nil }
+        return list.first { $0.allIds.contains(id) || $0.allIds.contains(streetId) }
     }
 }
 

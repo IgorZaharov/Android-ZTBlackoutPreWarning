@@ -197,7 +197,74 @@ public final class SubscriptionSync {
             house: query.house,
             text: addressText
         )
-        return change { Subscriptions.setAddress($0, id: id, address: address, queue: queue, statusText: statusText) }
+        let result = change { Subscriptions.setAddress($0, id: id, address: address, queue: queue, statusText: statusText) }
+        if case .ok = result { forgetLost(id) }
+        return result
+    }
+
+    /// Brings every saved address to ztoe's current ids (spec/ADDRESS_KEY.md section 7); mirrors
+    /// SubscriptionSync.repairAddresses on Android. A renumbered address gets its new ids and a text with the
+    /// street, keeping its queue, switches and name; an address whose street can not be found again is
+    /// remembered for the notice (`lostStreetIds`). Network; never throws.
+    public func repairAddresses(siteUrl: String) async {
+        ensureReady()
+        var lost = Set<String>()
+        var known = Set<String>()
+        for item in repo.store().items {
+            guard let a = item.address else { continue }
+            let check = await ZtoeAddressLookup.checkSavedStreet(
+                remId: a.remSlug, settlementId: a.settlementId,
+                settlementNameHint: ZtoeAddressLookup.settlementNameFromText(a.text),
+                streetId: a.streetId, streetName: a.streetName, siteUrl: siteUrl
+            )
+            switch check {
+            case let .moved(settlementId, settlementName, streetId, streetName):
+                let rem = ZtoeAddressLookup.getRems().first { $0.id == a.remSlug }
+                    ?? ZtoeAddressLookup.ZTOE_REM_OPTIONS.first { $0.id == a.remSlug }
+                var moved = a
+                moved.settlementId = settlementId
+                moved.streetId = streetId
+                // the saved name is the address key: it stays, and is only filled in when it was missing
+                if moved.streetName.ktIsBlank { moved.streetName = streetName }
+                moved.text = ZtoeAddressLookup.addressText(rem?.nameUk, settlementName, streetName, a.house)
+                if let choice = HouseVariantChoices.get(streetId: a.streetId, house: a.house) {
+                    HouseVariantChoices.put(streetId: streetId, house: a.house, variant: choice)
+                }
+                let result = change { Subscriptions.setAddress($0, id: item.id, address: moved, queue: item.queue, statusText: item.queueStatusText) }
+                if case .ok = result { known.insert(item.id) }
+            case .current:
+                known.insert(item.id)
+            case .lost:
+                lost.insert(item.id)
+            case .unknown:
+                break
+            }
+        }
+        // an address that could not be checked keeps its previous mark
+        writeLost(readLost().subtracting(known).union(lost))
+    }
+
+    /// Ids of saved addresses whose street ztoe no longer lists (spec/ADDRESS_KEY.md section 7).
+    public func lostStreetIds() -> Set<String> {
+        let present = Set(repo.store().items.map { $0.id })
+        return readLost().intersection(present)
+    }
+
+    private static var lostPrefs: Prefs { Prefs("address_repair") }
+    private static let KEY_LOST = "lost_street_ids"
+
+    private func readLost() -> Set<String> {
+        let raw = Self.lostPrefs.string(Self.KEY_LOST) ?? ""
+        return Set(raw.split(separator: ",").map(String.init).filter { !$0.isEmpty })
+    }
+
+    private func writeLost(_ ids: Set<String>) {
+        Self.lostPrefs.set(Self.KEY_LOST, ids.sorted().joined(separator: ","))
+    }
+
+    private func forgetLost(_ id: String) {
+        let ids = readLost()
+        if ids.contains(id) { writeLost(ids.subtracting([id])) }
     }
 
     @discardableResult

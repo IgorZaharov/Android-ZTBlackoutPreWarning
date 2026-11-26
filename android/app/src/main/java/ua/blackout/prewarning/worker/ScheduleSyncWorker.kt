@@ -27,6 +27,14 @@ class ScheduleSyncWorker(
         val appContext = context.applicationContext
         try {
             val settingsRepo = SettingsRepository(appContext)
+            // saved addresses follow ztoe's renumbering (spec/ADDRESS_KEY.md section 7) before anything asks the site
+            try {
+                ZtoeAddressLookup.initDiskCache(appContext)
+                SubscriptionSync(appContext).repairAddresses(settingsRepo.getSettings().cityUrl)
+            } catch (e: CancellationException) {
+                throw e
+            } catch (_: Exception) {
+            }
             val settings = settingsRepo.getSettings()
 
             // A house without a queue may be given one by the site later. Only the two fields that

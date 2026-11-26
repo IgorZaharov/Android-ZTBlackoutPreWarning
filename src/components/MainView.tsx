@@ -28,6 +28,7 @@ import { poweronLine, siteBanner, siteChips, siteNotice as siteNoticeOf, TONE_CO
 import { DrumChart } from './DrumChart';
 import { GlassCard, TEXT_SECONDARY, TEXT_TERTIARY } from './GlassCard';
 import { displayLabel, type Subscription } from '../core/subscriptions';
+import { getSubscriptionSync } from '../services/subscriptionSync';
 
 export type RefreshStatus = 'SUCCESS' | 'NO_INTERNET' | 'NO_QUEUES_FOUND';
 
@@ -212,6 +213,12 @@ export const MainView: React.FC<MainViewProps> = ({
   const hasCustomNoQueueStatus = customStatus !== null && !hasEmergencyOutage;
   const isQueueUnselected = !hasQueue && !hasCustomNoQueueStatus && !hasEmergencyOutage;
   const formattedSelectedAddress = formatAddressAfterCity(settings.selectedAddress);
+  // The shown address has a street ztoe no longer lists (spec/ADDRESS_KEY.md section 7): a notice under it
+  const streetLost = (() => {
+    const sync = getSubscriptionSync();
+    const id = shownAddressId ?? sync.store(settings).primaryId;
+    return id !== null && sync.lostStreetIds(settings).has(id);
+  })();
 
   // The ztoe table of the shown day is not known: the drum is grey, known emergency/repair outages are drawn on top
   const isTodayUnclear = !hasCustomNoQueueStatus && hasQueue && !snapshot.plannedKnown;
@@ -370,6 +377,11 @@ export const MainView: React.FC<MainViewProps> = ({
             <div className={`line-clamp-3 whitespace-pre-line text-[13px] font-medium leading-[19px] ${TEXT_SECONDARY}`}>
               {formattedSelectedAddress ?? t.mainUtilityName}
             </div>
+            {streetLost && (
+              <div data-testid="main-street-lost" className="text-[13px] font-medium leading-[19px] text-[#FBBF24]">
+                {t.streetLost}
+              </div>
+            )}
           </div>
         )}
 

@@ -22,6 +22,8 @@ final class AppModel: ObservableObject {
     @Published private(set) var settings: UserSettings
     @Published private(set) var subscriptions: SubscriptionStore
     @Published private(set) var alertsMaster: Bool
+    /// Saved addresses whose street ztoe no longer lists (spec/ADDRESS_KEY.md section 7): they show a notice.
+    @Published private(set) var lostStreetIds: Set<String> = []
 
     // Session state
     /// The address the main screen shows; a cold start shows the primary (spec/SUBSCRIPTIONS.md 9).
@@ -154,6 +156,7 @@ final class AppModel: ObservableObject {
         settings = settingsRepo.getSettings()
         subscriptions = sync.store()
         alertsMaster = sync.master()
+        lostStreetIds = sync.lostStreetIds()
         recompute()
     }
 
@@ -178,6 +181,8 @@ final class AppModel: ObservableObject {
     func runRefresh(force: Bool, resolveAddress: Bool) async -> RefreshOutcome {
         isRefreshing = true
         defer { isRefreshing = false }
+        // saved addresses follow ztoe's renumbering first, so the re-check below asks with current ids
+        if resolveAddress { await sync.repairAddresses(siteUrl: settingsRepo.getSettings().cityUrl) }
         let current = settingsRepo.getSettings()
         if resolveAddress, let q = current.selectedAddressQuery, !q.streetId.ktIsBlank, !q.house.ktIsBlank {
             if let lookup = await ZtoeAddressLookup.checkAddressOnZtoeWebsite(

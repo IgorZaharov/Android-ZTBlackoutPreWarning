@@ -124,6 +124,15 @@ export default function App() {
       const repo = getOutageRepository();
       let effective = currentSettings;
 
+      // Saved addresses follow ztoe's renumbering first (spec/ADDRESS_KEY.md section 7)
+      const repaired = await getSubscriptionSync().repairAddresses(effective, effective.url);
+      if (repaired !== effective) {
+        effective = repaired;
+        skipNextSettingsRefresh.current = true;
+        setSettings(effective);
+        saveUserSettings(effective);
+      }
+
       // A house that "is not disconnected" can get a queue later: re-check the address when no queue is stored
       if (currentSettings.selectedAddressQuery && (!currentSettings.queue || currentSettings.queue.trim() === '')) {
         const latest = await checkAddressOnZtoeWebsite(

@@ -187,6 +187,10 @@ struct MainScreen: View {
                         .ztText(ZtType.caption)
                         .foregroundStyle(UiColors.textSecondaryHi)
                         .lineLimit(3)
+                    // the shown address has a street ztoe no longer lists (spec/ADDRESS_KEY.md section 7)
+                    if model.lostStreetIds.contains(model.otherShownItem?.id ?? model.subscriptions.primaryId ?? "") {
+                        Text(verbatim: AppStrings.streetLost(lang)).ztText(ZtType.caption).foregroundStyle(ZtChipTone.amber.text)
+                    }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(.trailing, 12)
