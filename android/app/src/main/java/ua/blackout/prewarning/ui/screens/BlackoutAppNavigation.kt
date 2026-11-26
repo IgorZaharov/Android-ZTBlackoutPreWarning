@@ -137,6 +137,8 @@ fun BlackoutAppNavigation(
     val subscriptionSync = remember { SubscriptionSync(appContext) }
     var subscriptions by remember { mutableStateOf(subscriptionSync.ensureReady()) }
     var alertsMaster by remember { mutableStateOf(subscriptionSync.master()) }
+    // Saved addresses whose street ztoe no longer lists (spec/ADDRESS_KEY.md section 7): they show a notice
+    var lostStreetIds by remember { mutableStateOf(subscriptionSync.lostStreetIds()) }
     // The address the main screen shows (step 4): session state, a cold start shows the primary (decision 5)
     var shownSubscriptionId by rememberSaveable { mutableStateOf<String?>(null) }
 
@@ -268,6 +270,8 @@ fun BlackoutAppNavigation(
         try {
             val outcome = withContext(Dispatchers.IO) {
                 ZtoeAddressLookup.initDiskCache(appContext)
+                // saved addresses follow ztoe's renumbering first, so the re-check below asks with current ids
+                if (resolveAddress) subscriptionSync.repairAddresses(settingsRepo.getSettings().cityUrl)
                 val addrQuery = settingsRepo.getSettings().selectedAddressQuery
                 if (resolveAddress && addrQuery != null && addrQuery.streetId.isNotBlank() && addrQuery.house.isNotBlank()) {
                     val saved = settingsRepo.getSettings()
@@ -315,6 +319,8 @@ fun BlackoutAppNavigation(
                 result
             }
             snapshot = shownSnapshot(settingsRepo.getSettings())
+            subscriptions = subscriptionSync.store()
+            lostStreetIds = subscriptionSync.lostStreetIds()
             return outcome
         } finally {
             isRefreshing = false
@@ -654,6 +660,7 @@ fun BlackoutAppNavigation(
                             selectedAddress
                         },
                         addresses = Subscriptions.switcherItems(subscriptions),
+                        streetLost = (other?.id ?: subscriptions.primaryId) in lostStreetIds,
                         primaryAddressId = subscriptions.primaryId,
                         shownAddressId = Subscriptions.viewItem(subscriptions, shownSubscriptionId)?.id,
                         onSelectAddress = { shownSubscriptionId = it },
@@ -714,6 +721,7 @@ fun BlackoutAppNavigation(
                         scrollState = pageScrolls[1],
                         currentQueue = queue,
                         subscriptions = subscriptions,
+                        lostStreetIds = lostStreetIds,
                         alertsMaster = alertsMaster,
                         selectedAddressQuery = selectedAddressQuery,
                         siteUrl = siteUrl,

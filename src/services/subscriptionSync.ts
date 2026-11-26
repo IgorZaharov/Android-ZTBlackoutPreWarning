@@ -21,7 +21,40 @@ import {
 } from '../core/subscriptions';
 import type { SelectedAddressQuery, UserSettings } from '../types';
 import { SubscriptionRepository } from './subscriptionStore';
-import { findStreetById } from './ztoeAddressLookup';
+import { getHouseVariantChoice, setHouseVariantChoice } from './houseVariantChoices';
+import {
+  ZTOE_REM_OPTIONS,
+  addressText as buildAddressText,
+  checkSavedStreet,
+  findStreetById,
+  getRems,
+  settlementNameFromText,
+  type SavedStreet,
+} from './ztoeAddressLookup';
+
+const LOST_STORAGE_KEY = 'zt_lost_street_ids';
+let lostInMemory: string[] = [];
+
+function readLost(): string[] {
+  try {
+    if (typeof localStorage !== 'undefined') {
+      const raw = localStorage.getItem(LOST_STORAGE_KEY);
+      return raw ? (JSON.parse(raw) as string[]) : [];
+    }
+  } catch {
+    // storage blocked: memory only
+  }
+  return lostInMemory;
+}
+
+function writeLost(ids: string[]): void {
+  lostInMemory = ids;
+  try {
+    if (typeof localStorage !== 'undefined') localStorage.setItem(LOST_STORAGE_KEY, JSON.stringify(ids));
+  } catch {
+    // storage blocked: memory only
+  }
+}
 
 export function resolveStreetName(streetId: string | undefined): string | null {
   if (!streetId) return null;
@@ -164,7 +197,63 @@ export class SubscriptionSync {
       house: query.house,
       text: addressText,
     };
-    return this.change(settings, (s) => setAddress(s, id, address, queue, statusText ?? null));
+    const synced = this.change(settings, (s) => setAddress(s, id, address, queue, statusText ?? null));
+    if (synced.result.ok) writeLost(readLost().filter((x) => x !== id));
+    return synced;
+  }
+
+  /**
+   * Brings every saved address to ztoe's current ids (spec/ADDRESS_KEY.md section 7); mirrors
+   * SubscriptionSync.repairAddresses on Android. A renumbered address gets its new ids and a text with the
+   * street, keeping its queue, switches and name; an address whose street can not be found again is
+   * remembered for the notice (`lostStreetIds`). Returns the settings to save. Never throws.
+   */
+  async repairAddresses(settings: UserSettings, siteUrl?: string): Promise<UserSettings> {
+    this.ensureReady(settings);
+    let next = settings;
+    const lost = new Set<string>();
+    const known = new Set<string>();
+    for (const item of this.repo.store().items) {
+      const a = item.address;
+      if (!a) continue;
+      let check: SavedStreet;
+      try {
+        check = await checkSavedStreet(a.remSlug, a.settlementId, settlementNameFromText(a.text), a.streetId, a.streetName, siteUrl);
+      } catch {
+        check = { kind: 'unknown' };
+      }
+      if (check.kind === 'moved') {
+        const rem = getRems().find((r) => r.id === a.remSlug) ?? ZTOE_REM_OPTIONS.find((r) => r.id === a.remSlug);
+        const moved = {
+          ...a,
+          settlementId: check.settlementId,
+          streetId: check.streetId,
+          // the saved name is the address key: it stays, and is only filled in when it was missing
+          streetName: a.streetName || check.streetName,
+          text: buildAddressText(rem?.nameUk, check.settlementName, check.streetName, a.house),
+        };
+        const choice = getHouseVariantChoice(a.streetId, a.house);
+        if (choice) setHouseVariantChoice(check.streetId, a.house, choice);
+        const synced = this.change(next, (s) => setAddress(s, item.id, moved, item.queue, item.queueStatusText));
+        if (synced.result.ok) {
+          next = synced.settings;
+          known.add(item.id);
+        }
+      } else if (check.kind === 'current') {
+        known.add(item.id);
+      } else if (check.kind === 'lost') {
+        lost.add(item.id);
+      }
+    }
+    // an address that could not be checked keeps its previous mark
+    writeLost([...new Set([...readLost().filter((id) => !known.has(id)), ...lost])]);
+    return next;
+  }
+
+  /** Ids of saved addresses whose street ztoe no longer lists (spec/ADDRESS_KEY.md section 7). */
+  lostStreetIds(settings: UserSettings): Set<string> {
+    const present = new Set(this.store(settings).items.map((i) => i.id));
+    return new Set(readLost().filter((id) => present.has(id)));
   }
 
   addQueueOnly(settings: UserSettings, queue: string): SyncResult {

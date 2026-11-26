@@ -8,6 +8,7 @@ import ua.blackout.prewarning.core.SubscriptionAddress
 import ua.blackout.prewarning.core.SubscriptionStore
 import ua.blackout.prewarning.core.Subscriptions
 import ua.blackout.prewarning.data.model.SelectedAddressQuery
+import ua.blackout.prewarning.data.parser.ZtoeAddressLookup
 
 /**
  * The one way to change addresses and alert switches since multi-address step 2
@@ -82,7 +83,9 @@ class SubscriptionSync(context: Context) {
             house = query.house,
             text = addressText
         )
-        return change { Subscriptions.setAddress(it, id, address, queue, statusText) }
+        val result = change { Subscriptions.setAddress(it, id, address, queue, statusText) }
+        if (result is StoreResult.Ok) forgetLost(id)
+        return result
     }
 
     fun addQueueOnly(queue: String): StoreResult {
@@ -94,6 +97,71 @@ class SubscriptionSync(context: Context) {
             createdAtMs = System.currentTimeMillis()
         )
         return change { Subscriptions.add(it, item) }
+    }
+
+    /**
+     * Brings every saved address to ztoe's current ids (spec/ADDRESS_KEY.md section 7): a renumbered
+     * address gets its new ids and a text with the street, keeping its queue, switches and name; an address
+     * whose street can not be found again is remembered for the notice ([lostStreetIds]). Network; never throws.
+     */
+    fun repairAddresses(siteUrl: String) {
+        ensureReady()
+        val lost = HashSet<String>()
+        val known = HashSet<String>()
+        for (item in repo.store().items) {
+            val a = item.address ?: continue
+            val check = try {
+                ZtoeAddressLookup.checkSavedStreet(
+                    a.remSlug, a.settlementId, ZtoeAddressLookup.settlementNameFromText(a.text), a.streetId, a.streetName, siteUrl
+                )
+            } catch (_: Exception) {
+                ZtoeAddressLookup.SavedStreet.Unknown
+            }
+            when (check) {
+                is ZtoeAddressLookup.SavedStreet.Moved -> {
+                    val rem = ZtoeAddressLookup.getRems().firstOrNull { it.id == a.remSlug }
+                        ?: ZtoeAddressLookup.ZTOE_REM_OPTIONS.firstOrNull { it.id == a.remSlug }
+                    val moved = a.copy(
+                        settlementId = check.settlementId,
+                        streetId = check.streetId,
+                        // the saved name is the address key: it stays, and is only filled in when it was missing
+                        streetName = a.streetName.ifBlank { check.streetName },
+                        text = ZtoeAddressLookup.addressText(rem?.nameUk, check.settlementName, check.streetName, a.house)
+                    )
+                    HouseVariantChoices.get(appContext, a.streetId, a.house)?.let { choice ->
+                        HouseVariantChoices.put(appContext, check.streetId, a.house, choice)
+                    }
+                    if (change { Subscriptions.setAddress(it, item.id, moved, item.queue, item.queueStatusText) } is StoreResult.Ok) {
+                        known += item.id
+                    }
+                }
+                ZtoeAddressLookup.SavedStreet.Current -> known += item.id
+                ZtoeAddressLookup.SavedStreet.Lost -> lost += item.id
+                ZtoeAddressLookup.SavedStreet.Unknown -> Unit
+            }
+        }
+        // an address that could not be checked keeps its previous mark
+        val next = (lostStreetIds() - known) + lost
+        lostPrefs().edit().putStringSet(KEY_LOST, next).apply()
+    }
+
+    /** Ids of saved addresses whose street ztoe no longer lists (spec/ADDRESS_KEY.md section 7). */
+    fun lostStreetIds(): Set<String> {
+        val ids = lostPrefs().getStringSet(KEY_LOST, emptySet()).orEmpty()
+        val present = repo.store().items.mapTo(HashSet()) { it.id }
+        return ids.filterTo(HashSet()) { it in present }
+    }
+
+    private fun forgetLost(id: String) {
+        val ids = lostPrefs().getStringSet(KEY_LOST, emptySet()).orEmpty()
+        if (id in ids) lostPrefs().edit().putStringSet(KEY_LOST, ids - id).apply()
+    }
+
+    private fun lostPrefs() = appContext.getSharedPreferences(LOST_PREFS, Context.MODE_PRIVATE)
+
+    private companion object {
+        const val LOST_PREFS = "address_repair"
+        const val KEY_LOST = "lost_street_ids"
     }
 
     /** A background ZTOE lookup for the primary address found its queue (or "no queue"). */

@@ -178,6 +178,8 @@ private const val ZTOE_SEARCH_URL = "https://www.ztoe.com.ua/unhooking-search.ph
 fun SettingsScreen(
     currentQueue: String = "",
     subscriptions: SubscriptionStore = SubscriptionStore.EMPTY,
+    /** Saved addresses whose street ztoe no longer lists (spec/ADDRESS_KEY.md section 7). */
+    lostStreetIds: Set<String> = emptySet(),
     alertsMaster: Boolean = true,
     selectedAddressQuery: SelectedAddressQuery? = null,
     siteUrl: String = ZTOE_SEARCH_URL,
@@ -352,6 +354,7 @@ fun SettingsScreen(
         // 1. My addresses: up to 5 addresses (or queues), each with its own planned / emergency switches
         MyAddressesCard(
             store = subscriptions,
+            lostStreetIds = lostStreetIds,
             alertsMaster = alertsMaster,
             advanceMinutes = advanceMinutes,
             lang = lang,
@@ -809,6 +812,7 @@ private val PaddingValues18 = PaddingValues(18.dp)
 @Composable
 private fun MyAddressesCard(
     store: SubscriptionStore,
+    lostStreetIds: Set<String>,
     /** Master off: every address's switches show off and are locked; their own values are kept. */
     alertsMaster: Boolean,
     advanceMinutes: Int,
@@ -936,6 +940,7 @@ private fun MyAddressesCard(
                     }
                 SubscriptionBlock(
                     item = item,
+                    streetLost = item.id in lostStreetIds,
                     alertsMaster = alertsMaster,
                     isPrimary = item.id == store.primaryId,
                     advanceMinutes = advanceMinutes,
@@ -996,6 +1001,7 @@ private fun MyAddressesCard(
 @Composable
 private fun SubscriptionBlock(
     item: Subscription,
+    streetLost: Boolean,
     alertsMaster: Boolean,
     isPrimary: Boolean,
     advanceMinutes: Int,
@@ -1069,6 +1075,9 @@ private fun SubscriptionBlock(
         val caption = item.address?.text?.takeIf { it.isNotBlank() } ?: if (item.address == null) AppStrings.queueOnlyCaption(lang) else null
         if (caption != null) {
             Text(text = caption, style = ZtType.caption, color = ZtColors.TextSecondary)
+        }
+        if (streetLost) {
+            Text(text = AppStrings.streetLost(lang), style = ZtType.caption, color = ZtColors.ChipAmberText)
         }
         SwitchRow(
             icon = Icons.Default.Notifications,
@@ -1526,8 +1535,11 @@ private fun AddressLookupDialog(
     val currentSettlement = if (selectedSettlementId.isBlank()) null else {
         settlementsList.find { it.id == selectedSettlementId } ?: ZtoeAddressLookup.findSettlementById(selectedSettlementId)
     }
+    // A saved street ztoe no longer lists has no name: it counts as not chosen, so the user picks it again
+    // and no text like ", буд. N" is built (spec/ADDRESS_KEY.md section 7).
     val currentStreet = if (selectedStreetId.isBlank()) null else {
-        streetsList.find { it.id == selectedStreetId } ?: ZtoeAddressLookup.findStreetById(selectedStreetId)
+        (streetsList.find { it.id == selectedStreetId } ?: ZtoeAddressLookup.findStreetById(selectedStreetId))
+            ?.takeIf { it.nameUk.isNotBlank() }
     }
     val currentHouseRecord = housesList.find { it.house.equals(selectedHouse, ignoreCase = true) }
 
@@ -1582,7 +1594,7 @@ private fun AddressLookupDialog(
         }
     }
 
-    val selectedAddressStr = if (currentStreet != null && selectedHouse.isNotBlank()) {
+    val selectedAddressStr = if (currentStreet != null && currentStreet.nameUk.isNotBlank() && selectedHouse.isNotBlank()) {
         val remName = currentRem?.displayName(lang).orEmpty()
         val settlementName = currentSettlement?.displayName(lang).orEmpty()
         val streetName = currentStreet.displayName(lang)

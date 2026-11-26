@@ -556,6 +556,9 @@ export async function checkAddressOnZtoeWebsite(
     ZTOE_REM_OPTIONS.find((r) => r.id === query.remId);
   const settlementObj = findSettlementById(query.settlementId);
   const streetObj = findStreetById(query.streetId);
+  // A street without a name can not be told apart from the other streets of a page: no queue at all,
+  // so the saved queue stays (spec/ADDRESS_KEY.md section 7).
+  if (!streetObj?.nameUk?.trim()) return null;
   const vulicaIds = streetObj?.ztoeVulicaIds ?? (streetObj?.ztoeVulicaId ? [streetObj.ztoeVulicaId] : []);
 
   const sameHouse = (h: ZtoeHouseLookupResult) => HouseKey.of(h.house) === targetHouseKey;
@@ -582,22 +585,93 @@ export async function checkAddressOnZtoeWebsite(
   if (!resolved) return null;
   const chosen = HouseVariants.pick(houseChoices(resolved), preferred?.queue ?? null, preferred?.consumers ?? []);
   if (chosen) resolved = withHouseVariant(resolved, chosen);
-  // Without the street name the label stays empty, so callers keep the stored address instead of
-  // replacing it with "РЕМ, місто,\nбуд. N" (the name is unknown when the street index lacks the id).
-  const streetName = streetObj?.nameUk?.trim() ?? '';
-  const head = [remObj?.nameUk, settlementObj?.nameUk].filter((x): x is string => Boolean(x && x.trim())).join(', ');
   return {
     ...resolved,
     emergencyOutage: undefined,
-    addressLabel: streetName ? (head ? `${head},\n` : '') + `${streetName}, буд. ` + query.house.trim() : '',
+    addressLabel: addressText(remObj?.nameUk, settlementObj?.nameUk, streetObj.nameUk, query.house),
   };
+}
+
+/** `"РЕМ, місто,\nвулиця, буд. N"`, the stored address text; empty without a street name. */
+export function addressText(remName: string | undefined, settlementName: string | undefined, streetName: string, house: string): string {
+  const street = streetName.trim();
+  if (!street) return '';
+  const head = [remName, settlementName].filter((x): x is string => Boolean(x && x.trim())).join(', ');
+  return (head ? `${head},\n` : '') + `${street}, буд. ` + house.trim();
+}
+
+/** The settlement of a stored address text (`"РЕМ, місто,\n…"`); empty when the text has no such head line. */
+export function settlementNameFromText(text: string): string {
+  const nl = text.indexOf('\n');
+  if (nl < 0) return '';
+  const parts = text.slice(0, nl).split(',').map((x) => x.trim()).filter(Boolean);
+  return parts.length >= 2 ? parts[1] : '';
+}
+
+/** What checkSavedStreet found for a saved address (spec/ADDRESS_KEY.md section 7). */
+export type SavedStreet =
+  | { kind: 'current' }
+  | { kind: 'moved'; settlementId: string; settlementName: string; streetId: string; streetName: string }
+  | { kind: 'lost' }
+  | { kind: 'unknown' };
+
+/** The street of the cached list of `settlementId` that holds `streetId`; undefined when none does. */
+function onStreetList(settlementId: string, streetId: string): ZtoeStreetOption | undefined {
+  const list = dynamicStreetsBySettlementId[canonicalSettlementId(settlementId)];
+  const legacy = canonicalStreetId(streetId);
+  return list?.find((st) => st.allIds.includes(streetId) || st.allIds.includes(legacy));
+}
+
+/**
+ * Checks a saved address against ztoe's current ids (spec/ADDRESS_KEY.md section 7); mirrors
+ * ZtoeAddressLookup.checkSavedStreet. Network only when the street id is missing from the cached list.
+ */
+export async function checkSavedStreet(
+  remId: string,
+  settlementId: string,
+  settlementNameHint: string,
+  streetId: string,
+  streetName: string,
+  siteUrl?: string
+): Promise<SavedStreet> {
+  if (!settlementId || !streetId) return { kind: 'unknown' };
+  let settlement = findSettlementById(settlementId);
+  if (settlement && !settlement.nameUk.trim()) settlement = undefined;
+  if (settlement && settlement.id === settlementId && onStreetList(settlementId, streetId)) return { kind: 'current' };
+
+  if (!settlement) {
+    await fetchSettlementsForRem(remId, siteUrl, true);
+    settlement = matchSettlementByName(settlementNameHint, getSettlementsForRem(remId));
+    if (!settlement) return { kind: 'unknown' };
+    if (settlement.id !== settlementId) settlementAliases[settlementId] = settlement.id;
+  }
+  if (!liveStreetSettlements.has(canonicalSettlementId(settlement.id))) {
+    await fetchStreetsForSettlement(remId, settlement.id, siteUrl, true);
+  }
+  const current = findSettlementById(settlement.id) ?? settlement;
+  if (!liveStreetSettlements.has(current.id)) return { kind: 'unknown' };
+  const newSettlementId = current.id === settlementId ? settlementId : current.id;
+
+  const onList = onStreetList(current.id, streetId);
+  if (onList) {
+    return newSettlementId === settlementId
+      ? { kind: 'current' }
+      : { kind: 'moved', settlementId: newSettlementId, settlementName: current.nameUk, streetId: onList.id, streetName: onList.nameUk };
+  }
+  const name = streetName.trim() || findStreetById(streetId)?.nameUk?.trim() || legacyStreetNames[streetId] || '';
+  const key = name ? StreetKey.of(name) : '';
+  if (!key) return { kind: 'lost' };
+  const hits = getStreetsForSettlement(current.id).filter((st) => StreetKey.of(st.nameUk) === key);
+  if (hits.length !== 1) return { kind: 'lost' };
+  return { kind: 'moved', settlementId: newSettlementId, settlementName: current.nameUk, streetId: hits[0].id, streetName: hits[0].nameUk };
 }
 
 export const ADDRESS_INDEX_STORAGE_KEY = 'zt_address_index_cache_v1';
 // v5: duplicate streets are merged and the fake default houses / injected emergencies of v4 are gone
 // 6: drops street house lists cut to ztoe's first page of 10 records (per-street request without all=1)
 // 7: houses keep every queue variant (households / non-household), spec/ADDRESS_KEY.md section 6
-const CACHE_SCHEMA_VERSION = 7;
+// 8: ztoe renumbered its settlements and streets (2026-11); only the street names of a 7 index are kept (spec/ADDRESS_KEY.md section 7)
+const CACHE_SCHEMA_VERSION = 8;
 const MAX_PERSISTED_HOUSE_STREETS = 50;
 const FRESH_HOUSE_CACHE_TTL_MS = 120_000;
 
@@ -609,6 +683,8 @@ export interface PersistedAddressIndexCache {
   streetsBySettlementId?: Record<string, ZtoeStreetOption[]>;
   housesByStreetId?: Record<string, ZtoeHouseLookupResult[]>;
   recentHouseStreetIds?: string[];
+  settlementAliases?: Record<string, string>;
+  legacyStreetNames?: Record<string, string>;
 }
 
 let dynamicRems: ZtoeRemOption[] | null = null;
@@ -619,6 +695,52 @@ const houseCacheUpdatedAtByStreetId: Record<string, number> = {};
 const inFlightSettlementPromises = new Map<string, Promise<ZtoeStreetOption[]>>();
 let recentHouseStreetOrder: string[] = [];
 let hasHydratedFromStorage = false;
+/** Old settlement id to its current id, learned when ztoe renumbered its settlements (spec/ADDRESS_KEY.md section 7). */
+const settlementAliases: Record<string, string> = {};
+/** Street names of a discarded index of the previous schema, by every street id; repair input only. */
+const legacyStreetNames: Record<string, string> = {};
+/** Settlements whose street list was read from the site in this session (Android: a bulk time). */
+const liveStreetSettlements = new Set<string>();
+
+function canonicalSettlementId(id: string): string {
+  return settlementAliases[id] ?? id;
+}
+
+/** The one settlement of `list` whose place key equals the key of `name`; undefined when none or several. */
+export function matchSettlementByName(name: string, list: readonly ZtoeSettlementOption[]): ZtoeSettlementOption | undefined {
+  const key = normalizePlaceName(name);
+  if (!key) return undefined;
+  const hits = list.filter((s) => normalizePlaceName(s.nameUk) === key);
+  return hits.length === 1 ? hits[0] : undefined;
+}
+
+/** Publishes a live settlement list; a settlement whose id is gone gets an alias to the live one with its name. */
+function adoptSettlements(remId: string, live: ZtoeSettlementOption[]): void {
+  const previous = dynamicSettlementsByRemId[remId] ?? [];
+  dynamicSettlementsByRemId[remId] = live;
+  const liveIds = new Set(live.map((s) => s.id));
+  for (const old of previous) {
+    if (liveIds.has(old.id) || !old.nameUk.trim()) continue;
+    const match = matchSettlementByName(old.nameUk, live);
+    if (match) settlementAliases[old.id] = match.id;
+  }
+}
+
+function readLegacyStreetNames(parsed: Partial<PersistedAddressIndexCache>): void {
+  for (const [id, name] of Object.entries(parsed.legacyStreetNames ?? {})) {
+    if (name && !(id in legacyStreetNames)) legacyStreetNames[id] = name;
+  }
+  if (parsed.version !== 7 || !parsed.streetsBySettlementId) return;
+  for (const list of Object.values(parsed.streetsBySettlementId)) {
+    for (const st of list ?? []) {
+      const name = stripHtmlTags(st.nameUk || '');
+      if (!name) continue;
+      for (const id of [st.id, ...((st as Partial<ZtoeStreetOption>).allIds ?? [])]) {
+        if (id && !(id in legacyStreetNames)) legacyStreetNames[id] = name;
+      }
+    }
+  }
+}
 
 function recordRecentHouseStreet(streetId: string): void {
   if (!streetId) return;
@@ -649,6 +771,7 @@ export function hydrateAddressIndexFromStorage(): boolean {
     if (!raw) return false;
     const parsed = JSON.parse(raw) as Partial<PersistedAddressIndexCache>;
     if (!parsed || typeof parsed !== 'object') return false;
+    readLegacyStreetNames(parsed);
 
     // Validate schema version and ensure Zhytomyr REM has ztoeRemId === '7'
     const cachedZtRem = Array.isArray(parsed.rems)
@@ -657,6 +780,9 @@ export function hydrateAddressIndexFromStorage(): boolean {
     if (parsed.version !== CACHE_SCHEMA_VERSION || (cachedZtRem && cachedZtRem.ztoeRemId !== '7')) {
       localStorage.removeItem(ADDRESS_INDEX_STORAGE_KEY);
       return false;
+    }
+    for (const [old, current] of Object.entries(parsed.settlementAliases ?? {})) {
+      if (current && !(old in settlementAliases)) settlementAliases[old] = current;
     }
 
     if (Array.isArray(parsed.rems) && parsed.rems.length > 0) {
@@ -750,6 +876,8 @@ export function persistAddressIndexToStorage(): void {
       streetsBySettlementId: { ...dynamicStreetsBySettlementId },
       housesByStreetId: boundedHousesByStreetId,
       recentHouseStreetIds: recentHouseStreetOrder.slice(0, 100),
+      settlementAliases: { ...settlementAliases },
+      legacyStreetNames: { ...legacyStreetNames },
     };
     localStorage.setItem(ADDRESS_INDEX_STORAGE_KEY, JSON.stringify(payload));
   } catch {
@@ -774,6 +902,9 @@ export function resetAddressIndexCache(clearDisk = false): void {
   inFlightSettlementPromises.clear();
   recentHouseStreetOrder = [];
   hasHydratedFromStorage = false;
+  for (const key of Object.keys(settlementAliases)) delete settlementAliases[key];
+  for (const key of Object.keys(legacyStreetNames)) delete legacyStreetNames[key];
+  liveStreetSettlements.clear();
   if (clearDisk && typeof localStorage !== 'undefined') {
     try {
       localStorage.removeItem(ADDRESS_INDEX_STORAGE_KEY);
@@ -798,8 +929,16 @@ export function seedAddressIndexForTests(index: {
   for (const [settlementId, list] of Object.entries(index.streetsBySettlementId ?? {})) {
     const merged = mergeStreets(list);
     dynamicStreetsBySettlementId[settlementId] = merged;
+    liveStreetSettlements.add(settlementId);
     healMergedHouses(merged);
   }
+}
+
+/** Reads the legacy street names of a stored index text (tests); true when its schema is the current one. */
+export function readLegacyStreetNamesForTests(text: string): boolean {
+  const parsed = JSON.parse(text) as Partial<PersistedAddressIndexCache>;
+  readLegacyStreetNames(parsed);
+  return parsed.version === CACHE_SCHEMA_VERSION;
 }
 
 export function getAddressIndexStats(): {
@@ -839,8 +978,9 @@ export function getRems(): ZtoeRemOption[] {
   return ZTOE_REM_OPTIONS;
 }
 
-export function findSettlementById(settlementId: string): ZtoeSettlementOption | undefined {
+export function findSettlementById(savedId: string): ZtoeSettlementOption | undefined {
   ensureHydrated();
+  const settlementId = canonicalSettlementId(savedId);
   for (const list of Object.values(dynamicSettlementsByRemId)) {
     const found = list.find((s) => s.id === settlementId);
     if (found) return found;
@@ -895,8 +1035,9 @@ export function getSettlementsForRem(remId: string): ZtoeSettlementOption[] {
   return ZTOE_SETTLEMENT_OPTIONS.filter((s) => s.remId === remId);
 }
 
-export function getStreetsForSettlement(settlementId: string): ZtoeStreetOption[] {
+export function getStreetsForSettlement(savedId: string): ZtoeStreetOption[] {
   ensureHydrated();
+  const settlementId = canonicalSettlementId(savedId);
   const dynamicList = dynamicStreetsBySettlementId[settlementId];
   if (dynamicList && dynamicList.length > 0) return dynamicList;
   return ZTOE_STREET_OPTIONS.filter((st) => st.settlementId === settlementId);
@@ -1414,7 +1555,7 @@ export async function fetchSettlementsForRem(
       }
       const parsed = parseZtoeSettlementOptionsHtml(remId, html);
       if (parsed.length > 0) {
-        dynamicSettlementsByRemId[remId] = parsed;
+        adoptSettlements(remId, parsed);
         persistAddressIndexToStorage();
         return parsed;
       }
@@ -1451,33 +1592,32 @@ export async function fetchStreetsForSettlement(
       const remObj =
         getRems().find((r) => r.id === remId) ||
         ZTOE_REM_OPTIONS.find((r) => r.id === remId);
-      const settlementObj = findSettlementById(settlementId);
-      if (remObj?.ztoeRemId && settlementObj?.ztoeNaspunktId) {
-        const html = await postZtoeLookupForm(
-          {
-            rem_id: remObj.ztoeRemId,
-            naspunkt_id: settlementObj.ztoeNaspunktId,
-            all: '1',
-          },
-          siteUrl
-        );
-        if (html) {
-          const parsedRems = parseZtoeRemOptionsHtml(html);
-          if (parsedRems.length > 0) {
-            dynamicRems = parsedRems;
-          }
-          const parsedSettlements = parseZtoeSettlementOptionsHtml(remId, html);
-          if (parsedSettlements.length > 0) {
-            dynamicSettlementsByRemId[remId] = parsedSettlements;
-          }
-          const parsedStreets = parseZtoeStreetOptionsHtml(settlementId, html);
-          if (parsedStreets.length > 0) {
-            dynamicStreetsBySettlementId[settlementId] = parsedStreets;
-            parseZtoeSettlementHousesTableHtml(settlementId, parsedStreets, html);
-            persistAddressIndexToStorage();
-            return parsedStreets;
-          }
+      let npId = findSettlementById(settlementId)?.ztoeNaspunktId;
+      // Two tries: when ztoe renumbered the settlement, the first answer has no streets but its settlement
+      // list gives the current id (spec/ADDRESS_KEY.md section 7).
+      for (let attempt = 0; attempt < 2 && remObj?.ztoeRemId && npId; attempt++) {
+        const html = await postZtoeLookupForm({ rem_id: remObj.ztoeRemId, naspunkt_id: npId, all: '1' }, siteUrl);
+        if (!html) break;
+        const parsedRems = parseZtoeRemOptionsHtml(html);
+        if (parsedRems.length > 0) {
+          dynamicRems = parsedRems;
         }
+        const parsedSettlements = parseZtoeSettlementOptionsHtml(remId, html);
+        if (parsedSettlements.length > 0) {
+          adoptSettlements(remId, parsedSettlements);
+        }
+        const sid = canonicalSettlementId(settlementId);
+        const parsedStreets = parseZtoeStreetOptionsHtml(sid, html);
+        if (parsedStreets.length > 0) {
+          dynamicStreetsBySettlementId[sid] = parsedStreets;
+          liveStreetSettlements.add(sid);
+          parseZtoeSettlementHousesTableHtml(sid, parsedStreets, html);
+          persistAddressIndexToStorage();
+          return parsedStreets;
+        }
+        const current = findSettlementById(settlementId)?.ztoeNaspunktId;
+        if (!current || current === npId) break;
+        npId = current;
       }
       return getStreetsForSettlement(settlementId);
     } finally {

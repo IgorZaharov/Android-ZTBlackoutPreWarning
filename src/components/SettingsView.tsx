@@ -246,6 +246,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 
   // Multi-address store (step 2): every change goes through the sync, which mirrors the primary back
   const sync = getSubscriptionSync();
+  // Saved addresses whose street ztoe no longer lists (spec/ADDRESS_KEY.md section 7)
+  const lostStreetIds = sync.lostStreetIds(settings);
   const store = useMemo(() => sync.store(settings), [sync, settings]);
   const alertsMaster = settings.alertsMaster ?? sync.master(settings);
   const noAddressAlerts = noAlertsCaption(alertsMaster, store);
@@ -461,6 +463,11 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               </div>
               <span className="text-base font-bold leading-[23px] text-white">{label}</span>
               {caption && <span className={`text-[13px] font-medium leading-[19px] ${TEXT_SECONDARY}`}>{caption}</span>}
+              {lostStreetIds.has(item.id) && (
+                <span data-testid={`subscription-street-lost-${item.id}`} className="text-[13px] font-medium leading-[19px] text-[#FBBF24]">
+                  {t.streetLost}
+                </span>
+              )}
               <SwitchRow
                 icon={<Bell className="h-5 w-5 text-white" />}
                 title={t.plannedShort}
@@ -1134,7 +1141,10 @@ const AddressLookupDialog: React.FC<AddressLookupDialogProps> = ({ settings, lan
   const currentSettlement = selectedSettlementId
     ? settlementsList.find((s) => s.id === selectedSettlementId) ?? findSettlementById(selectedSettlementId)
     : undefined;
-  const currentStreet = selectedStreetId ? streetsList.find((s) => s.id === selectedStreetId) ?? findStreetById(selectedStreetId) : undefined;
+  // A saved street ztoe no longer lists has no name: it counts as not chosen, so the user picks it again
+  // and no text like ", буд. N" is built (spec/ADDRESS_KEY.md section 7).
+  const streetCandidate = selectedStreetId ? streetsList.find((s) => s.id === selectedStreetId) ?? findStreetById(selectedStreetId) : undefined;
+  const currentStreet = streetCandidate?.nameUk?.trim() ? streetCandidate : undefined;
   const currentHouseRecord = housesList.find((h) => sameHouse(h.house, selectedHouse));
 
   // Queries the site when street and house are chosen. Nothing closes or applies until the user presses the button.

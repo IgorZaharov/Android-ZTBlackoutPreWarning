@@ -122,7 +122,8 @@ object ZtoeAddressLookup {
     /** Bumped to 2 when merged street ids were introduced; caches of other versions are discarded. */
     /** 3: drops street house lists that were cut to ztoe's first page of 10 records (per-street request without all=1). */
     /** 4: houses keep every queue variant (households / non-household), spec/ADDRESS_KEY.md section 6. */
-    internal const val CACHE_VERSION = 4
+    /** 5: ztoe renumbered its settlements and streets (2026-11); the old lists and the house rows read through old ids are dropped, only the street names are kept for the repair (spec/ADDRESS_KEY.md section 7). */
+    internal const val CACHE_VERSION = 5
     private const val PREFS_NAME = "zt_address_index_cache_v1"
     private const val KEY_INDEX_JSON = "address_index_json_v1"
     private const val MAX_PERSISTED_HOUSE_STREETS = 50
@@ -180,6 +181,12 @@ object ZtoeAddressLookup {
     private val bulkFetchedAtBySettlement = ConcurrentHashMap<String, Long>()
     private val inFlight = ConcurrentHashMap<String, CompletableFuture<Any?>>()
 
+    /** Old settlement id to its current id, learned when ztoe renumbered its settlements (spec/ADDRESS_KEY.md section 7). */
+    private val settlementAliases = ConcurrentHashMap<String, String>()
+
+    /** Street names of a discarded cache of the previous [CACHE_VERSION], by every street id; repair input only. */
+    private val legacyStreetNames = ConcurrentHashMap<String, String>()
+
     private val recentLock = Any()
     private val recentHouseStreets = ArrayList<String>()
 
@@ -229,7 +236,31 @@ object ZtoeAddressLookup {
         return cachedHousesByStreet[canonical] ?: emptyList()
     }
 
-    private fun canonicalSettlementId(id: String): String = ZtoeStaticDirectory.LEGACY_SETTLEMENT_IDS[id] ?: id
+    private fun canonicalSettlementId(id: String): String {
+        val legacy = ZtoeStaticDirectory.LEGACY_SETTLEMENT_IDS[id] ?: id
+        return settlementAliases[legacy] ?: legacy
+    }
+
+    /** The one settlement of [list] whose [cityKey] equals the key of [name]; null when none or several. */
+    internal fun matchSettlementByName(name: String, list: List<ZtoeSettlementOption>): ZtoeSettlementOption? {
+        val key = cityKey(name)
+        if (key.isEmpty()) return null
+        return list.filter { cityKey(it.nameUk) == key }.singleOrNull()
+    }
+
+    /**
+     * Publishes a live settlement list of [remId]. A settlement of the previous list whose id is gone
+     * (ztoe renumbered it) gets an alias to the live settlement with the same name (spec/ADDRESS_KEY.md section 7).
+     */
+    private fun adoptSettlements(remId: String, live: List<ZtoeSettlementOption>) {
+        val previous = cachedSettlementsByRem[remId].orEmpty()
+        cachedSettlementsByRem[remId] = live
+        val liveIds = live.mapTo(HashSet()) { it.id }
+        for (old in previous) {
+            if (old.id in liveIds || old.nameUk.isBlank()) continue
+            matchSettlementByName(old.nameUk, live)?.let { settlementAliases[old.id] = it.id }
+        }
+    }
 
     fun findSettlementById(settlementId: String): ZtoeSettlementOption? {
         val id = canonicalSettlementId(settlementId)
@@ -529,7 +560,34 @@ object ZtoeAddressLookup {
         val bulk = JSONObject()
         for ((sid, at) in bulkFetchedAtBySettlement) bulk.put(sid, at)
         root.put("bulkAt", bulk)
+
+        val aliases = JSONObject()
+        for ((old, current) in settlementAliases) aliases.put(old, current)
+        root.put("settlementAliases", aliases)
+
+        val legacy = JSONObject()
+        for ((id, name) in legacyStreetNames) legacy.put(id, name)
+        root.put("legacyStreetNames", legacy)
         return root.toString()
+    }
+
+    /**
+     * Keeps the street names of a cache before the renumbering (version 4) and the names already kept
+     * by a current cache, so a saved street id that ztoe no longer knows still has a name to search by.
+     */
+    private fun readLegacyStreetNames(root: JSONObject) {
+        root.optJSONObject("legacyStreetNames")?.let { o ->
+            for (id in o.keys()) o.optString(id, "").takeIf { it.isNotBlank() }?.let { legacyStreetNames.putIfAbsent(id, it) }
+        }
+        if (root.optInt("version", -1) != 4) return
+        val arr = root.optJSONArray("streets") ?: return
+        for (i in 0 until arr.length()) {
+            val o = arr.optJSONObject(i) ?: continue
+            val name = stripHtmlFast(o.optString("nameUk", ""))
+            if (name.isBlank()) continue
+            o.optString("id", "").takeIf { it.isNotEmpty() }?.let { legacyStreetNames.putIfAbsent(it, name) }
+            o.optJSONArray("allIds")?.let { ids -> for (j in 0 until ids.length()) ids.optString(j, "").takeIf { it.isNotEmpty() }?.let { legacyStreetNames.putIfAbsent(it, name) } }
+        }
     }
 
     /**
@@ -541,6 +599,7 @@ object ZtoeAddressLookup {
         if (jsonStr.isBlank()) return false
         return try {
             val root = JSONObject(jsonStr)
+            readLegacyStreetNames(root)
             if (root.optInt("version", -1) != CACHE_VERSION) return false
 
             root.optJSONArray("rems")?.let { arr ->
@@ -654,6 +713,13 @@ object ZtoeAddressLookup {
                     if (at > 0L) bulkFetchedAtBySettlement.putIfAbsent(sid, at)
                 }
             }
+
+            root.optJSONObject("settlementAliases")?.let { aliases ->
+                for (old in aliases.keys()) {
+                    val current = aliases.optString(old, "")
+                    if (current.isNotEmpty()) settlementAliases.putIfAbsent(old, current)
+                }
+            }
             diskCacheHydrated = true
             true
         } catch (_: Exception) {
@@ -707,6 +773,8 @@ object ZtoeAddressLookup {
         cachedHousesByStreet.clear()
         houseCacheUpdatedAtByStreet.clear()
         bulkFetchedAtBySettlement.clear()
+        settlementAliases.clear()
+        legacyStreetNames.clear()
         inFlight.clear()
         synchronized(recentLock) { recentHouseStreets.clear() }
     }
@@ -1148,7 +1216,7 @@ object ZtoeAddressLookup {
             }
             val liveList = parseZtoeSettlementOptionsHtml(remId, html)
             if (liveList.isNotEmpty()) {
-                cachedSettlementsByRem[remId] = liveList
+                adoptSettlements(remId, liveList)
                 persistToDiskCache()
                 return liveList
             }
@@ -1191,24 +1259,32 @@ object ZtoeAddressLookup {
             ?: return getStreetsForSettlement(settlementId)
         val settlement = findSettlementById(settlementId) ?: return getStreetsForSettlement(settlementId)
 
-        val html = postZtoeForm("rem_id=${rem.ztoeRemId}&naspunkt_id=${settlement.ztoeNaspunktId}&all=1", siteUrl)
-        if (!html.isNullOrBlank()) {
+        var npId = settlement.ztoeNaspunktId
+        // Two tries: when ztoe renumbered the settlement, the first answer has no streets but its settlement
+        // list gives the current id (spec/ADDRESS_KEY.md section 7).
+        repeat(2) {
+            val html = postZtoeForm("rem_id=${rem.ztoeRemId}&naspunkt_id=$npId&all=1", siteUrl)
+            if (html.isNullOrBlank()) return getStreetsForSettlement(settlementId)
             val liveRems = parseZtoeRemOptionsHtml(html)
             if (liveRems.isNotEmpty()) {
                 cachedRems = liveRems
             }
             val liveSettlements = parseZtoeSettlementOptionsHtml(remId, html)
             if (liveSettlements.isNotEmpty()) {
-                cachedSettlementsByRem[remId] = liveSettlements
+                adoptSettlements(remId, liveSettlements)
             }
-            val liveStreets = parseZtoeStreetOptionsHtml(settlementId, html)
+            val sid = canonicalSettlementId(settlementId)
+            val liveStreets = parseZtoeStreetOptionsHtml(sid, html)
             if (liveStreets.isNotEmpty()) {
-                registerStreets(settlementId, liveStreets)
-                parseZtoeSettlementHousesTableHtml(settlementId, liveStreets, html)
-                bulkFetchedAtBySettlement[settlementId] = System.currentTimeMillis()
+                registerStreets(sid, liveStreets)
+                parseZtoeSettlementHousesTableHtml(sid, liveStreets, html)
+                bulkFetchedAtBySettlement[sid] = System.currentTimeMillis()
                 persistToDiskCache()
                 return liveStreets
             }
+            val current = findSettlementById(settlementId)?.ztoeNaspunktId ?: return getStreetsForSettlement(settlementId)
+            if (current == npId || current <= 0) return getStreetsForSettlement(settlementId)
+            npId = current
         }
         return getStreetsForSettlement(settlementId)
     }
@@ -1241,8 +1317,11 @@ object ZtoeAddressLookup {
                 for (row in rows) putHouse(map, row)
                 continue
             }
+            // Only rows of this street: for an id ztoe no longer knows, the page lists other streets
+            // (spec/ADDRESS_KEY.md section 7), and without a street name nothing can be kept.
             val firstPage = postZtoeForm(form, siteUrl) ?: continue
-            for (row in parseZtoeAddressLookupTableHtml(firstPage)) putHouse(map, row)
+            val pageRows = parseZtoeSettlementHousesTableHtml(settlement.id, listOf(street), firstPage, cache = false).values.flatten()
+            for (row in pageRows) putHouse(map, row)
         }
         return if (anyResponse) sortHouses(map.values) else null
     }
@@ -1451,7 +1530,11 @@ object ZtoeAddressLookup {
             street = findStreetById(query.streetId) ?: street
         }
 
-        val canonical = street?.id ?: query.streetId
+        // A street without a name can not be told apart from the other streets of the page: no queue at all,
+        // so the saved queue stays (spec/ADDRESS_KEY.md section 7).
+        if (street == null || street.nameUk.isBlank()) return null
+
+        val canonical = street.id
         var resolved = cachedHousesByStreet[canonical]?.firstOrNull { HouseKey.of(it.house) == targetKey }
 
         if (rem != null && settlement != null && street != null) {
@@ -1464,11 +1547,83 @@ object ZtoeAddressLookup {
 
         val found = resolved ?: return null
         val base = HouseVariants.pick(found.choices, preferred?.queue, preferred?.consumers.orEmpty())?.let { found.withVariant(it) } ?: found
-        // Without the street name the label stays empty, so callers keep the stored address instead of
-        // replacing it with "РЕМ, місто,\nбуд. N" (the name is unknown when the street index lacks the id).
-        val streetName = street?.nameUk?.trim().orEmpty()
-        val head = listOf(rem?.nameUk, settlement?.nameUk).filter { !it.isNullOrBlank() }.joinToString(", ")
-        val label = if (streetName.isEmpty()) "" else (if (head.isNotEmpty()) "$head,\n" else "") + "$streetName, буд. " + query.house.trim()
+        val label = addressText(rem?.nameUk, settlement?.nameUk, street.nameUk, query.house)
         return base.copy(emergencyOutage = null, addressLabel = label)
+    }
+
+    /** `"РЕМ, місто,\nвулиця, буд. N"`, the stored address text; empty without a street name. */
+    fun addressText(remName: String?, settlementName: String?, streetName: String, house: String): String {
+        val street = streetName.trim()
+        if (street.isEmpty()) return ""
+        val head = listOf(remName, settlementName).filter { !it.isNullOrBlank() }.joinToString(", ")
+        return (if (head.isNotEmpty()) "$head,\n" else "") + "$street, буд. " + house.trim()
+    }
+
+    /** The settlement of a stored address text (`"РЕМ, місто,\n…"`); empty when the text has no such head line. */
+    fun settlementNameFromText(text: String): String {
+        val head = text.substringBefore('\n', "")
+        val parts = head.split(',').map { it.trim() }.filter { it.isNotEmpty() }
+        return if (parts.size >= 2) parts[1] else ""
+    }
+
+    /** What [checkSavedStreet] found for a saved address (spec/ADDRESS_KEY.md section 7). */
+    sealed class SavedStreet {
+        /** The ids are current. */
+        object Current : SavedStreet()
+        /** ztoe renumbered the address: these are its current ids. */
+        data class Moved(val settlementId: String, val settlementName: String, val streetId: String, val streetName: String) : SavedStreet()
+        /** The street list was read, and the street is not on it (no name, or no single street with that name). */
+        object Lost : SavedStreet()
+        /** The site could not be read or the settlement is not known: nothing can be said. */
+        object Unknown : SavedStreet()
+    }
+
+    /**
+     * Checks a saved address against ztoe's current ids (spec/ADDRESS_KEY.md section 7). Network only when
+     * the street id is missing from the cached street list and that list is due for a reload, so a current
+     * address costs nothing. [settlementNameHint] is the settlement from the stored text, used when ztoe
+     * renumbered the settlement and the device lost its old list; [streetName] is the name saved with the address.
+     */
+    fun checkSavedStreet(
+        remId: String,
+        settlementId: String,
+        settlementNameHint: String,
+        streetId: String,
+        streetName: String,
+        siteUrl: String = DEFAULT_SITE_URL
+    ): SavedStreet {
+        if (settlementId.isBlank() || streetId.isBlank()) return SavedStreet.Unknown
+        // A legacy id of an earlier app version is not a renumbering: it stays as saved.
+        val savedId = ZtoeStaticDirectory.LEGACY_SETTLEMENT_IDS[settlementId] ?: settlementId
+        var settlement = findSettlementById(settlementId)?.takeIf { it.nameUk.isNotBlank() }
+        if (settlement != null && settlement.id == savedId && onStreetList(savedId, streetId) != null) return SavedStreet.Current
+
+        if (settlement == null) {
+            fetchSettlementsForRem(remId, siteUrl, forceRefresh = true)
+            settlement = matchSettlementByName(settlementNameHint, getSettlementsForRem(remId)) ?: return SavedStreet.Unknown
+            if (settlement.id != savedId) settlementAliases[savedId] = settlement.id
+        }
+        fetchStreetsForSettlement(remId, settlement.id, siteUrl)
+        val current = findSettlementById(settlement.id) ?: settlement
+        if (bulkFetchedAtBySettlement[current.id] == null) return SavedStreet.Unknown
+        val newSettlementId = if (current.id == savedId) settlementId else current.id
+
+        onStreetList(current.id, streetId)?.let { street ->
+            return if (newSettlementId == settlementId) SavedStreet.Current
+            else SavedStreet.Moved(newSettlementId, current.nameUk, street.id, street.nameUk)
+        }
+        val name = streetName.ifBlank { findStreetById(streetId)?.nameUk.orEmpty() }.ifBlank { legacyStreetNames[streetId].orEmpty() }
+        val key = StreetKey.of(name)
+        if (key.isEmpty()) return SavedStreet.Lost
+        val match = getStreetsForSettlement(current.id).filter { StreetKey.of(it.nameUk) == key }.singleOrNull()
+            ?: return SavedStreet.Lost
+        return SavedStreet.Moved(newSettlementId, current.nameUk, match.id, match.nameUk)
+    }
+
+    /** The street of the cached list of [settlementId] that holds [streetId] (or its legacy id); null when none does. */
+    private fun onStreetList(settlementId: String, streetId: String): ZtoeStreetOption? {
+        val id = ZtoeStaticDirectory.LEGACY_STREET_IDS[streetId] ?: streetId
+        val list = cachedStreetsBySettlement[canonicalSettlementId(settlementId)] ?: return null
+        return list.firstOrNull { id in it.allIds || streetId in it.allIds }
     }
 }

@@ -417,23 +417,23 @@ function runUnitTestB() {
     'MainScreen.kt and ScheduleRepository.kt must recompose blackout hours on Today/Tomorrow tab switch and compute tomorrow 1st blackout'
   );
 
-  // 11. Verify Build Version 1.4.3, GitHub v1.3.2 KYIV_ZONE Fix & Developer Handover Documentation across project files
+  // 11. Verify Build Version 1.4.4, GitHub v1.3.2 KYIV_ZONE Fix & Developer Handover Documentation across project files
   const packageJson = JSON.parse(fs.readFileSync(path.join(ROOT_DIR, 'package.json'), 'utf-8'));
-  assert.equal(packageJson.version, '1.4.3', 'package.json version must be 1.4.3');
+  assert.equal(packageJson.version, '1.4.4', 'package.json version must be 1.4.4');
   const buildGradle = fs.readFileSync(path.join(ROOT_DIR, 'android/app/build.gradle.kts'), 'utf-8');
-  assert.ok(buildGradle.includes('"1.4.3"'), 'android/app/build.gradle.kts default versionName must be 1.4.3');
+  assert.ok(buildGradle.includes('"1.4.4"'), 'android/app/build.gradle.kts default versionName must be 1.4.4');
   const aboutScreenKt = fs.readFileSync(
     path.join(ROOT_DIR, 'android/app/src/main/java/ua/blackout/prewarning/ui/screens/AboutScreen.kt'),
     'utf-8'
   );
-  assert.ok(aboutScreenKt.includes('"1.4.3"'), 'AboutScreen.kt fallback version must be 1.4.3');
+  assert.ok(aboutScreenKt.includes('"1.4.4"'), 'AboutScreen.kt fallback version must be 1.4.4');
   const aboutViewTsx = fs.readFileSync(path.join(ROOT_DIR, 'src/components/AboutView.tsx'), 'utf-8');
-  assert.ok(aboutViewTsx.includes("'1.4.3'"), 'AboutView.tsx fallback version must be 1.4.3');
+  assert.ok(aboutViewTsx.includes("'1.4.4'"), 'AboutView.tsx fallback version must be 1.4.4');
   const readmeMd = fs.readFileSync(path.join(ROOT_DIR, 'README.md'), 'utf-8');
-  assert.ok(readmeMd.includes('(v1.4.3)'), 'README.md must reference v1.4.3');
+  assert.ok(readmeMd.includes('(v1.4.4)'), 'README.md must reference v1.4.4');
   assert.ok(
-    changelog.includes("## [1.4.3]") && changelog.includes("## [1.4.2]") && changelog.includes("## [1.4.1]") && changelog.includes("## [1.4.0]") && changelog.includes("## [1.3.5]") && changelog.includes("## [1.3.4]"),
-    'CHANGELOG.md must document v1.4.3, v1.4.2, v1.4.1, v1.4.0, v1.3.5, and v1.3.4'
+    changelog.includes("## [1.4.4]") && changelog.includes("## [1.4.3]") && changelog.includes("## [1.4.2]") && changelog.includes("## [1.4.1]") && changelog.includes("## [1.4.0]") && changelog.includes("## [1.3.5]") && changelog.includes("## [1.3.4]"),
+    'CHANGELOG.md must document v1.4.4, v1.4.3, v1.4.2, v1.4.1, v1.4.0, v1.3.5, and v1.3.4'
   );
 
   // Verify GitHub v1.3.2 fix (KyivZone.kt KYIV_ZONE fallback) is included across Android codebase

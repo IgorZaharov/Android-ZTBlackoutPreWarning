@@ -409,6 +409,7 @@ private struct MyAddressesCard: View {
                         let dragging = draggingId == id
                         SubscriptionBlock(
                             item: item,
+                            streetLost: model.lostStreetIds.contains(item.id),
                             master: master,
                             isPrimary: item.id == store.primaryId,
                             advanceMinutes: model.settings.advanceNoticeMinutes,
@@ -506,6 +507,8 @@ private struct BlockHeights: PreferenceKey {
 /// and emergency switches, and "Make primary".
 private struct SubscriptionBlock<G: Gesture>: View {
     let item: Subscription
+    /// The street ztoe no longer lists (spec/ADDRESS_KEY.md section 7): a notice under the address.
+    let streetLost: Bool
     let master: Bool
     let isPrimary: Bool
     let advanceMinutes: Int
@@ -559,6 +562,9 @@ private struct SubscriptionBlock<G: Gesture>: View {
             let caption: String? = item.address.map { $0.text.ktIsBlank ? nil : $0.text } ?? AppStrings.queueOnlyCaption(lang)
             if let caption {
                 Text(verbatim: caption).ztText(ZtType.caption).foregroundStyle(ZtColors.textSecondary)
+            }
+            if streetLost {
+                Text(verbatim: AppStrings.streetLost(lang)).ztText(ZtType.caption).foregroundStyle(ZtChipTone.amber.text)
             }
             SwitchRow(icon: "bell.fill", title: AppStrings.plannedShort(lang), hint: AppStrings.plannedDesc(lang, advanceMinutes),
                       isOn: master && item.plannedAlerts, enabled: master && item.queue != nil, onChange: onSetPlanned)
